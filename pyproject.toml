@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twin"
+version = "0.1.0"
+description = "Personal Cognitive Operating System — local-first memory, judgment and context layer exposed over MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn>=0.27"]
+mcp = ["mcp>=1.0"]
+llm = ["anthropic>=0.40"]
+dev = ["pytest>=8.0", "httpx>=0.27", "fastapi>=0.110", "uvicorn>=0.27", "mcp>=1.0"]
+
+[project.scripts]
+twin = "twin.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["twin*"]
+
+[tool.setuptools.package-data]
+twin = ["defaults/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,65 @@
+from twin import ids
+from twin.db import now_iso
+from twin.firewall import Firewall
+from twin.models import MemoryItem
+
+
+def _mem(**kw) -> MemoryItem:
+    base = dict(
+        id=ids.memory_id(), type="fact", title="t", summary="s",
+        domain="technical", sensitivity="internal", confidence=0.9,
+        status="confirmed", created_at=now_iso(), updated_at=now_iso(),
+    )
+    base.update(kw)
+    return MemoryItem(**base)
+
+
+def test_technical_memory_allowed_in_technical_context(cfg):
+    fw = Firewall(cfg.policies_path)
+    assert fw.evaluate(_mem(), "technical").allowed
+
+
+def test_relationship_blocked_in_work(cfg):
+    fw = Firewall(cfg.policies_path)
+    verdict = fw.evaluate(_mem(domain="relationship"), "work")
+    assert not verdict.allowed
+    assert verdict.rule == "relationship_not_allowed_outside_own_domain"
+
+
+def test_relationship_allowed_in_own_domain(cfg):
+    fw = Firewall(cfg.policies_path)
+    assert fw.evaluate(_mem(domain="relationship"), "relationship").allowed
+
+
+def test_restricted_requires_permission(cfg):
+    fw = Firewall(cfg.policies_path)
+    verdict = fw.evaluate(_mem(sensitivity="restricted"), "technical")
+    assert not verdict.allowed
+    assert verdict.requires_permission
+
+
+def test_work_blocked_in_family_context(cfg):
+    fw = Firewall(cfg.policies_path)
+    verdict = fw.evaluate(_mem(domain="work"), "family")
+    assert not verdict.allowed
+
+
+def test_rejected_memory_never_flows(cfg):
+    fw = Firewall(cfg.policies_path)
+    verdict = fw.evaluate(_mem(status="rejected"), "technical")
+    assert not verdict.allowed
+    assert verdict.rule == "status_gate"
+
+
+def test_expired_memory_blocked(cfg):
+    fw = Firewall(cfg.policies_path)
+    verdict = fw.evaluate(_mem(valid_until="2020-01-01"), "technical", as_of=now_iso())
+    assert not verdict.allowed
+    assert verdict.rule == "temporal_gate"
+
+
+def test_low_confidence_blocked(cfg):
+    fw = Firewall(cfg.policies_path)
+    verdict = fw.evaluate(_mem(confidence=0.1), "technical")
+    assert not verdict.allowed
+    assert verdict.rule == "confidence_gate"

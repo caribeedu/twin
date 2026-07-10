@@ -1,0 +1,24 @@
+# Judgment profile — edit freely; this is read (never written) by tools.
+# Memories say WHAT happened; this file says HOW the user thinks and decides.
+
+principles:
+  - "privacidade > conveniência em dados pessoais"
+  - "manutenção > arquitetura bonita em projeto pessoal"
+  - "não misturar contexto íntimo com trabalho"
+  - "preferir clareza direta a polidez vazia"
+
+technical_preferences:
+  - "evitar overengineering"
+  - "preferir stack simples para MVP"
+  - "avaliar lock-in antes de adotar ferramenta"
+  - "dados canônicos em formato aberto, exportável"
+
+decision_criteria:
+  - "comparar custo de manutenção antes de performance"
+  - "avaliar reversibilidade da decisão"
+  - "medir utilidade real antes de expandir escopo"
+
+communication_style:
+  language: "pt-BR by default"
+  tone: "direto, técnico, sem dicas básicas"
+  format: "respostas objetivas; código quando ajudar"
