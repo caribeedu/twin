@@ -1,0 +1,14 @@
+{
+  "title": "Atlas — kickoff do serviço de webhooks",
+  "date": "2026-07-01",
+  "participants": ["Edu", "Marina", "Rafael"],
+  "summary": "Kickoff do serviço de webhooks do Atlas: escopo, stack e responsabilidades.",
+  "sentences": [
+    { "speaker": "Marina", "text": "Objetivo de hoje: alinhar o escopo do serviço de webhooks do Atlas." },
+    { "speaker": "Edu", "text": "Proposta: começamos com o outbox pattern que descrevi na RFC, sem Kafka por enquanto." },
+    { "speaker": "Rafael", "text": "Concordo. Decidimos então: Postgres outbox mais worker dedicado, revisitamos Kafka se o volume passar de 50 mil eventos por dia." },
+    { "speaker": "Marina", "text": "Fechado. Action item: Rafael fica responsável pelo design do retry com backoff." },
+    { "speaker": "Edu", "text": "Eu prefiro manter o payload dos webhooks versionado desde o dia um, com um campo schema_version." },
+    { "speaker": "Rafael", "text": "Boa. TODO: documentar o contrato do payload no repo até a próxima sexta." }
+  ]
+}

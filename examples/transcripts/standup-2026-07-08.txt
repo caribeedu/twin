@@ -1,0 +1,7 @@
+Edu: Bom dia. Ontem fechei a migração do serviço de billing para o novo cluster.
+Marina: Ótimo. Sobre o Atlas, decidimos ontem com o time que vamos usar FastAPI no backend do serviço de webhooks, certo?
+Edu: Sim, ficou decidido. Menos boilerplate e integra bem com os workers que já temos.
+Marina: Perfeito. Action item: Edu vai fazer o setup do repositório do serviço de webhooks até sexta.
+Edu: Combinado. Ah, e prefiro que a gente documente as decisões de arquitetura em ADRs no próprio repo, não no Confluence.
+Marina: Anotado. Também precisa revisar o contrato da API com o time de pagamentos.
+Edu: Coloco na lista. Não podemos esquecer que o ambiente de staging não pode receber dados reais de clientes.

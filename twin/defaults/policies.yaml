@@ -1,0 +1,42 @@
+# Domain Firewall policies.
+# Evaluation: hard gates (status, temporal validity, min_confidence) first,
+# then rules top-to-bottom (first match wins), then a hard default-deny for
+# sensitive personal domains crossing into other domains, then default_action.
+
+default_action: allow
+min_confidence: 0.3
+allowed_statuses: [confirmed, candidate]
+
+rules:
+  # Life domains never leak into work/technical contexts.
+  - name: relationship_not_allowed_outside_own_domain
+    if:
+      memory_domain: [relationship, family, health, emotional]
+      target_domain: [work, technical, assistant_preferences, general]
+    action: block
+
+  - name: finance_requires_permission_outside_own_domain
+    if:
+      memory_domain: [finance, legal]
+      target_domain: [work, technical, general]
+    action: require_permission
+
+  # Restricted memories never flow automatically anywhere.
+  - name: restricted_never_auto_injected
+    if:
+      sensitivity_above: private
+    action: require_permission
+
+  # Private memories require explicit permission outside their own domain.
+  - name: private_requires_explicit_permission
+    if:
+      sensitivity_above: internal
+      target_domain: [general]
+    action: require_permission
+
+  # Work content should not flow into personal/family contexts either.
+  - name: work_not_allowed_in_personal_contexts
+    if:
+      memory_domain: [work]
+      target_domain: [family, relationship, health]
+    action: block
