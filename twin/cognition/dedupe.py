@@ -1,6 +1,6 @@
 """Deduplication and contradiction hints for candidate memories.
 
-MVP policy:
+Policy:
 - cosine >= 0.92 against an existing memory of the same type → duplicate:
   skip the new memory, attach its evidence to the existing one.
 - 0.80 <= cosine < 0.92 with the same type → possibly an update or a
@@ -13,8 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .db import Database
-from .embeddings import Embedder, cosine, from_blob
+from ..memory.embeddings import Embedder
+from ..memory.store.base import MemoryStore
 
 DUPLICATE_THRESHOLD = 0.92
 RELATED_THRESHOLD = 0.80
@@ -27,17 +27,16 @@ class DedupeVerdict:
     similarity: float = 0.0
 
 
-def check(db: Database, embedder: Embedder, mem_type: str, text: str) -> DedupeVerdict:
+def check(store: MemoryStore, embedder: Embedder, mem_type: str, text: str) -> DedupeVerdict:
     vector = embedder.embed(text)
     best_id: Optional[str] = None
     best_sim = 0.0
-    for ref_id, blob in db.iter_embeddings("memory"):
-        existing = db.get_memory(ref_id)
+    for ref_id, sim in store.similar(vector, "memory", embedder.name, min_sim=RELATED_THRESHOLD).items():
+        existing = store.get_memory(ref_id)
         if existing is None or existing.type.value != mem_type:
             continue
         if existing.status.value in ("rejected", "deprecated"):
             continue
-        sim = cosine(vector, from_blob(blob))
         if sim > best_sim:
             best_sim = sim
             best_id = ref_id

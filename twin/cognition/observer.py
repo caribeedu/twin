@@ -1,5 +1,7 @@
-"""Memory Observer — watches the user's current text (a message, a task, a
-draft) and suggests relevant memories without ever answering the user itself.
+"""Memory Observer — attention.
+
+Watches the user's current text (a message, a task, a draft) and suggests
+relevant memories without ever answering the user itself.
 
 Flow: infer probable domain → search candidates → firewall filter → rank →
 return a compact suggestion payload (suggested_context / blocked_context).
@@ -11,11 +13,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .config import Config
-from .db import Database
-from .embeddings import Embedder
-from .firewall import Firewall
-from .search import search
+from ..config import Config
+from ..judgment.firewall import Firewall
+from ..memory.embeddings import Embedder
+from ..memory.search import search
+from ..memory.store.base import MemoryStore
 
 _DOMAIN_HINTS: list[tuple[str, list[str]]] = [
     ("technical", [
@@ -52,7 +54,7 @@ def infer_domain(text: str) -> str:
 
 
 def observe(
-    db: Database,
+    store: MemoryStore,
     cfg: Config,
     embedder: Embedder,
     current_text: str,
@@ -62,9 +64,9 @@ def observe(
     firewall: Optional[Firewall] = None,
 ) -> ObserverSuggestion:
     domain = target_domain or infer_domain(current_text)
-    firewall = firewall or Firewall(cfg.policies_path, db)
+    firewall = firewall or Firewall(cfg.policies_path, store)
     result = search(
-        db, embedder, current_text,
+        store, embedder, current_text,
         target_domain=domain, firewall=firewall, limit=limit,
     )
     suggestion = ObserverSuggestion(inferred_domain=domain)

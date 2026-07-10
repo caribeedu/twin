@@ -1,4 +1,7 @@
-"""Core data model: Memory Items, Entities, Relations, Sources, Evidence."""
+"""Memory-layer data model: Memory Items, Entities, Relations, Evidence.
+
+(The Percept model — the input contract — lives in ``twin.sensory.percept``.)
+"""
 
 from __future__ import annotations
 
@@ -36,23 +39,10 @@ class MemoryStatus(str, Enum):
     contradicted = "contradicted"
 
 
-class Source(BaseModel):
-    id: str
-    source_type: str  # markdown | meeting_transcript | meeting_json | slack | text
-    path: Optional[str] = None
-    author: Optional[str] = None
-    participants: list[str] = Field(default_factory=list)
-    created_at: Optional[str] = None  # when the content was produced
-    ingested_at: str = ""
-    raw_text: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    content_hash: str = ""
-
-
 class Evidence(BaseModel):
     id: str
     memory_id: str
-    source_id: str
+    percept_id: str
     quote: str
 
 
@@ -91,5 +81,5 @@ class MemoryItem(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)  # type-specific fields
     needs_review: bool = False
     review_reason: Optional[str] = None
-    source_ids: list[str] = Field(default_factory=list)
-    entities: list[str] = Field(default_factory=list)  # entity names (resolved to ids in db)
+    percept_ids: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)  # entity names (resolved to ids in store)

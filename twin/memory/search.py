@@ -1,14 +1,16 @@
-"""Hybrid search: FTS5 (BM25) + vector cosine + graph boost + firewall filters."""
+"""Hybrid search: full-text + vector similarity + graph boost, filtered by
+the Judgment layer's Domain Firewall."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
 
-from .db import Database, now_iso
-from .embeddings import Embedder, cosine, from_blob
-from .firewall import Firewall
+from ..clock import now_iso
+from ..judgment.firewall import Firewall
+from .embeddings import Embedder
 from .models import MemoryItem
+from .store.base import MemoryStore
 
 FTS_WEIGHT = 0.55
 VECTOR_WEIGHT = 0.35
@@ -35,13 +37,13 @@ class SearchResult:
     blocked: list[BlockedHit]
 
 
-def _entity_boost(db: Database, query: str, memory: MemoryItem) -> float:
+def _entity_boost(query: str, memory: MemoryItem) -> float:
     q = query.lower()
     return 1.0 if any(e.lower() in q for e in memory.entities) else 0.0
 
 
 def search(
-    db: Database,
+    store: MemoryStore,
     embedder: Embedder,
     query: str,
     target_domain: str = "technical",
@@ -50,14 +52,9 @@ def search(
     limit: int = 10,
     include_candidates: bool = True,
 ) -> SearchResult:
-    fts_scores = db.fts_search(query, limit=100)
+    fts_scores = store.fts_search(query, limit=100)
     query_vec = embedder.embed(query)
-
-    vec_scores: dict[str, float] = {}
-    for ref_id, blob in db.iter_embeddings("memory"):
-        sim = cosine(query_vec, from_blob(blob))
-        if sim > 0.05:
-            vec_scores[ref_id] = sim
+    vec_scores = store.similar(query_vec, "memory", embedder.name)
 
     candidate_ids = set(fts_scores) | set(vec_scores)
     if not candidate_ids:
@@ -65,10 +62,10 @@ def search(
 
     # normalize FTS scores to 0..1
     if fts_scores:
-        max_fts = max(fts_scores.values()) or 1.0
+        max_fts = max(fts_scores.values())
         min_fts = min(fts_scores.values())
         span = (max_fts - min_fts) or 1.0
-        fts_norm = {k: (v - min_fts) / span if span else 1.0 for k, v in fts_scores.items()}
+        fts_norm = {k: (v - min_fts) / span for k, v in fts_scores.items()}
     else:
         fts_norm = {}
 
@@ -77,7 +74,7 @@ def search(
     as_of = now_iso()
 
     for mem_id in candidate_ids:
-        memory = db.get_memory(mem_id)
+        memory = store.get_memory(mem_id)
         if memory is None:
             continue
         if memory.status.value in ("rejected", "deprecated", "contradicted"):
@@ -96,14 +93,14 @@ def search(
         score = (
             FTS_WEIGHT * fts_norm.get(mem_id, 0.0)
             + VECTOR_WEIGHT * vec_scores.get(mem_id, 0.0)
-            + ENTITY_WEIGHT * _entity_boost(db, query, memory)
+            + ENTITY_WEIGHT * _entity_boost(query, memory)
         )
         why_parts = []
         if mem_id in fts_norm:
             why_parts.append("text match")
         if vec_scores.get(mem_id, 0) > 0.2:
             why_parts.append("semantic similarity")
-        if _entity_boost(db, query, memory):
+        if _entity_boost(query, memory):
             why_parts.append("entity match")
         hits.append(SearchHit(memory=memory, score=round(score, 4), why=", ".join(why_parts) or "weak match"))
 

@@ -1,183 +1,184 @@
-# twin — Personal Cognitive OS (MVP v0.1)
+# twin — Personal Cognitive OS (v0.2)
 
 Camada **local-first** de memória, julgamento, privacidade e contexto pessoal,
 consultável por qualquer LLM/ferramenta via **MCP**, API HTTP local e CLI.
 
-O MVP prova uma coisa: **reduzir drasticamente a reexplicação de contexto em
-trabalho técnico, sem vazar domínios**, usando memória estruturada (grafo
-temporal leve + vetores + FTS) e um Domain Firewall auditável.
-
 Não é um chatbot, nem um RAG genérico, nem um agente. É infraestrutura:
 suas ferramentas (Cursor, Claude Desktop, Claude Code, …) consultam o `twin`
 e passam a saber onde você está no projeto, o que já foi decidido e como você
-pensa — sem que você reexplique.
+pensa — sem que você reexplique. **Modelos locais (Ollama) para tudo por
+padrão; PostgreSQL + pgvector como armazenamento primário.**
+
+## Arquitetura em camadas
 
 ```
-fontes (docs, reuniões, Slack)
-        │  ingestão + normalização
-        ▼
-   filtro PII  ──────────────►  nada sensível sai para a nuvem sem máscara
-        │  extração (LLM Anthropic ou heurística local)
-        ▼
-memórias candidatas ──► dedupe ──► fila de revisão seletiva
-        │  aprovação humana (UI/CLI) quando necessário
-        ▼
- SQLite: memórias + entidades + relações + evidências + embeddings + FTS5
-        │
-        ▼
- busca híbrida ──► Domain Firewall ──► context pack compacto
-        │                                    ▲
-        ▼                                    │
-   MCP / API / CLI                 judgment profile (YAML)
+External World
+      │
+      ▼
+┌─ Sensory Layer ────────────── twin/sensory ──┐
+│  Sensors: document · meeting · slack          │  cada fonte é um "sentido";
+│  (futuros: email, calendar, browser, audio)   │  novos sensores não tocam
+│         → Normalized Percepts                 │  nada rio abaixo
+└───────────────────────┬───────────────────────┘
+                        ▼
+┌─ Cognitive Core ───────────── twin/cognition ─┐
+│  extraction (Ollama → Anthropic → heurística)  │
+│  dedupe · observer (atenção) · context pack    │
+└───────┬───────────────────────────┬────────────┘
+        ▼                           ▼
+┌─ Memory System ─ twin/memory ┐  ┌─ Judgment System ─ twin/judgment ┐
+│  stores: Postgres+pgvector    │  │  PII filter · Domain Firewall    │
+│  (primário) · SQLite (dev)    │  │  judgment profile (YAML)         │
+│  embeddings · hybrid search   │  │  log auditável de bloqueios      │
+└───────────────┬───────────────┘  └────────────────┬─────────────────┘
+                ▼                                   ▼
+┌─ Interfaces ─────────────── twin/interfaces ──────────────────────────┐
+│  MCP (Cursor/Claude Desktop/Claude Code) · API HTTP + review UI · CLI │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-## Instalação
+**Percept** é o contrato entre sensores e cognição — toda fonte, seja qual
+for, vira isto:
+
+```json
+{
+  "percept_type": "meeting_transcript",
+  "source_sensor": "meeting",
+  "occurred_at": "2026-07-01",
+  "actors": ["Edu", "Marina"],
+  "content": "…texto normalizado…",
+  "content_refs": [{"kind": "file", "path": "…"}],
+  "attachments": [],
+  "privacy_hints": {"domain_hint": "work"},
+  "integrity": {"content_hash": "…", "size_bytes": 1234}
+}
+```
+
+## Setup
 
 ```bash
-pip install -e ".[dev]"        # tudo (api + mcp + testes)
-# ou granular: pip install -e ".[api,mcp,llm]"
-twin init                      # cria ~/.twin (db, policies.yaml, judgment.yaml)
+# 1. Infra local: Postgres+pgvector e Ollama
+docker compose up -d
+docker compose exec ollama ollama pull qwen3:8b          # extração
+docker compose exec ollama ollama pull nomic-embed-text  # embeddings
+
+# 2. Instalação
+pip install -e ".[dev]"           # ou granular: .[api,mcp,postgres,anthropic]
+
+# 3. Config e init
+export TWIN_DB_URL=postgresql://twin:twin@localhost:5432/twin
+twin init
 ```
 
-Tudo vive em um único diretório (`~/.twin` ou `$TWIN_HOME`): um SQLite, um
-YAML de políticas e um YAML de julgamento. Backup = copiar a pasta.
-Exportação completa: `twin export` (JSON aberto, sem lock-in).
+Sem Docker/Postgres? Sem Ollama? Tudo degrada de forma explícita: SQLite
+como store (`TWIN_DB_URL` vazio), embedder hash local e extrator heurístico
+por regras. Nada quebra — mas o caminho primário é Postgres + Ollama.
 
 ## Fluxo básico
 
 ```bash
-# 1. Ingestão: markdown, transcrições .txt, reuniões .json (Fireflies/Meetily),
-#    exports do Slack .json — arquivos ou diretórios inteiros
-twin ingest ./docs ./transcripts ./meetings
-
-# 2. Extração de memórias (decisões, tarefas, preferências, fatos, crenças...)
-twin extract
-
-# 3. Revisão seletiva — só o que precisa de olho humano entra na fila
-twin review            # no terminal
-twin serve             # ou UI web em http://127.0.0.1:8765
-
-# 4. Consulta
+twin ingest ./docs ./transcripts ./meetings   # sensores → percepts
+twin extract                                  # percepts → memórias candidatas
+twin review                                   # revisão seletiva (ou: twin serve → UI web)
 twin search "qual stack usamos no serviço de webhooks"
 twin pack "escrever RFC de arquitetura do Atlas" --domain technical
 twin observe "estou revisando o retry dos webhooks"
+twin reindex                                  # após trocar de embedder
+twin export                                   # dump JSON completo, sem lock-in
 ```
 
-### Extração: LLM ou heurística
+## Modelos locais (Ollama)
 
-- Com credencial Anthropic (`ANTHROPIC_API_KEY` ou perfil `ant auth login`),
-  a extração usa `claude-opus-4-8` com structured outputs — **sempre sobre o
-  texto já mascarado de PII** (e-mails, telefones, CPF/CNPJ, cartões, chaves
-  de API, senhas ficam locais).
-- Sem credencial (ou `TWIN_EXTRACTOR=heuristic`), um extrator local por
-  regras (pt-BR + en) encontra decisões/tarefas/preferências/restrições com
-  confiança baixa — tudo cai na fila de revisão.
-- Falha de rede/API degrada automaticamente para a heurística.
+| papel | default | config |
+|---|---|---|
+| extração de memórias | `qwen3:8b` via `/api/chat` + structured outputs | `TWIN_OLLAMA_MODEL` |
+| embeddings | `nomic-embed-text` via `/api/embed` | `TWIN_OLLAMA_EMBED_MODEL` |
+| servidor | `http://127.0.0.1:11434` | `TWIN_OLLAMA_URL` |
 
-### Revisão seletiva
+Seleção do extrator (`TWIN_EXTRACTOR`): `auto` (default) tenta **Ollama →
+Anthropic (se houver credencial) → heurística**; ou force `ollama` /
+`anthropic` / `heuristic`. Qualquer texto que fosse sair da máquina passa
+antes pelo filtro de PII (e-mails, telefones, CPF/CNPJ, cartões, chaves,
+senhas) — com Ollama nada sai de qualquer forma, e o mascaramento roda mesmo
+assim como defesa em profundidade.
 
-Vai para a fila apenas o que a política manda: confiança < 0.75,
-sensibilidade `private`/`restricted`, tipos próximos de julgamento
-(`belief`, `procedure`), domínio fora do MVP, ou possível
-atualização/contradição de memória existente (similaridade 0.80–0.92).
-Duplicatas (≥ 0.92) não geram memória nova — viram evidência extra da
-existente. Toda memória carrega **evidência verbatim** da fonte.
+Embeddings (`TWIN_EMBEDDER`): `auto` usa Ollama se estiver de pé, senão o
+hash local determinístico. Cada embedding é gravado com o nome do modelo e
+buscas nunca misturam modelos diferentes; `twin reindex` regenera tudo após
+uma troca.
 
-## Domain Firewall
+## Armazenamento
 
-`~/.twin/policies.yaml` — regras declarativas, primeira que casa vence, com
-gates duros antes (status, validade temporal, confiança mínima) e
-default-deny para domínios sensíveis cruzando contexto. Todo bloqueio é
-logado (`firewall_log`). Exemplo de regra:
+`TWIN_DB_URL` decide o backend por trás da interface única `MemoryStore`:
 
-```yaml
-rules:
-  - name: relationship_not_allowed_outside_own_domain
-    if:
-      memory_domain: [relationship, family, health, emotional]
-      target_domain: [work, technical, assistant_preferences, general]
-    action: block
-```
+- **`postgresql://…`** (primário): pgvector para busca vetorial server-side
+  (operador `<=>`), full-text nativo (tsvector + GIN, config `simple` para
+  pt-BR + en), JSONB para payloads. Se a extensão pgvector não existir no
+  servidor, degrada para similaridade client-side sem quebrar.
+- **`sqlite:///…`** (dev/testes/fallback): FTS5 + cosine client-side,
+  zero configuração.
 
-Domínios do MVP: `work`, `technical`, `personal_preferences`,
-`assistant_preferences` (os futuros já são aceitos e ficam retidos para
-revisão).
+O grafo (entidades + relações tipadas com validade temporal), evidências
+verbatim, fila de revisão e log do firewall são idênticos nos dois backends.
+Export JSON completo em `twin export` — o dado canônico é aberto.
 
-## Judgment profile
+## Domain Firewall e julgamento
 
-`~/.twin/judgment.yaml` — princípios, critérios de decisão, preferências
-técnicas e estilo de comunicação. Editado por você, lido pelas ferramentas.
-Entra (com orçamento limitado) no topo de todo context pack, para que LLMs
-diferentes ajam com o **mesmo julgamento**, não só os mesmos fatos.
+- `~/.twin/policies.yaml`: regras declarativas (primeira que casa vence) com
+  gates duros antes (status, validade temporal, confiança mínima) e
+  default-deny para domínios sensíveis cruzando contexto. Todo bloqueio é
+  logado em `firewall_log`.
+- `~/.twin/judgment.yaml`: princípios, critérios de decisão e estilo — entra
+  no topo de todo context pack para que LLMs diferentes ajam com o mesmo
+  julgamento, não só os mesmos fatos.
 
 ## MCP
 
 ```bash
-twin mcp        # stdio
+twin mcp    # stdio
 ```
-
-Configuração no cliente (Claude Desktop / Cursor / Claude Code):
 
 ```json
 { "mcpServers": { "twin": { "command": "twin", "args": ["mcp"] } } }
 ```
 
-Tools expostas:
-
-| tool | função |
-|---|---|
-| `memory_safe_context_pack` | **principal** — pack compacto filtrado pelo firewall (judgment + memórias + fontes + bloqueios) |
-| `memory_search` | busca híbrida (FTS5 + vetores + grafo) com filtro de domínio |
-| `memory_get` | memória por id com evidências |
-| `memory_related` | vizinhança de uma entidade no grafo |
-| `memory_project_context` | tudo sobre um projeto |
-| `memory_recent_decisions` | decisões recentes (opcionalmente por projeto) |
-| `memory_user_preferences` | preferências estáveis, ranqueadas por contexto |
-| `memory_judgment_profile` | o perfil de julgamento |
-| `memory_observe` | Memory Observer: sugere memórias para o texto atual |
+Tools: `memory_safe_context_pack` (principal), `memory_search`, `memory_get`,
+`memory_related`, `memory_project_context`, `memory_recent_decisions`,
+`memory_user_preferences`, `memory_judgment_profile`, `memory_observe`.
 
 ## API local
 
 `twin serve` → `http://127.0.0.1:8765` (UI mínima de revisão) e API JSON em
-`/api/*`: `ingest`, `extract`, `memories`, `search`, `context_pack`,
-`observer`, `judgment`, `export`. Docs interativas em `/docs`.
+`/api/*`: `ingest`, `extract`, `percepts`, `memories`, `search`,
+`context_pack`, `observer`, `judgment`, `export`. Docs em `/docs`.
 
-## Configuração
+## Configuração (resumo)
 
 | variável | default | efeito |
 |---|---|---|
-| `TWIN_HOME` | `~/.twin` | diretório de dados |
-| `TWIN_EXTRACTOR` | `auto` | `auto` \| `llm` \| `heuristic` |
-| `TWIN_EXTRACTION_MODEL` | `claude-opus-4-8` | modelo de extração |
-| `TWIN_EMBEDDER` | `hash` | `hash` (local, zero deps) \| `sentence-transformers` |
-
-O embedder default é um hashed bag-of-words local (determinístico,
-regenerável). Trocar por `sentence-transformers` é uma mudança de config +
-reindex — embeddings nunca são o dado canônico.
-
-## Modelo de dados
-
-- **Memory Item**: `type` (event/fact/decision/preference/belief/task/
-  procedure/relationship/communication_act/constraint), `domain`, `persona`,
-  `sensitivity` (public→restricted), `confidence`, `status`
-  (candidate→confirmed/rejected/deprecated/contradicted), `valid_from`/
-  `valid_until` (temporalidade), payload por tipo, evidências obrigatórias.
-- **Grafo**: entidades (pessoas, projetos, sistemas) + relações tipadas
-  (`works_on`, `prefers`, `affects`, `produced`, `supersedes`, …) com
-  validade temporal, em SQLite (decisão de MVP; Graphiti/Neo4j é caminho de
-  evolução com os mesmos dados exportáveis).
-- **Índices**: FTS5 (BM25) + embeddings em blob; busca híbrida pondera
-  texto (0.55) + semântica (0.35) + entidades (0.10).
+| `TWIN_HOME` | `~/.twin` | diretório de config (policies/judgment) |
+| `TWIN_DB_URL` | `sqlite:///~/.twin/twin.db` | `postgresql://…` seleciona o backend primário |
+| `TWIN_OLLAMA_URL` | `http://127.0.0.1:11434` | servidor Ollama |
+| `TWIN_OLLAMA_MODEL` | `qwen3:8b` | modelo de extração |
+| `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text` | modelo de embeddings |
+| `TWIN_EXTRACTOR` | `auto` | `auto` \| `ollama` \| `anthropic` \| `heuristic` |
+| `TWIN_EMBEDDER` | `auto` | `auto` \| `ollama` \| `hash` |
 
 ## Testes
 
 ```bash
-python -m pytest    # 29 testes: pii, ingestão, extração, firewall, busca, pack, observer, API, MCP
+python -m pytest                                   # SQLite + mocks de Ollama
+TWIN_TEST_PG_URL=postgresql://twin:twin@localhost:5432/twin \
+python -m pytest                                   # + backend Postgres real
 ```
 
-## Escopo (o que este MVP não faz — de propósito)
+42 testes: percept contract, sensores, PII, extração, firewall, busca
+híbrida, context pack, observer, API HTTP, MCP, cliente Ollama (transport
+fake) e o store Postgres/pgvector de ponta a ponta.
+
+## Escopo (o que esta versão não faz — de propósito)
 
 Sem WhatsApp, redes sociais, saúde/família/relacionamento como fontes, sem
-voz contínua, sem automações que agem sozinhas, sem chat próprio. O caminho
-de versões (v0.2 MCP-first → v0.3 review system → v0.4 judgment → v0.5
-firewall avançado → …) está no documento-base do projeto.
+voz contínua, sem automações que agem sozinhas, sem chat próprio. Sensores
+futuros (email, calendar, browser, audio, screen) entram como novos módulos
+em `twin/sensory/sensors/` sem tocar as demais camadas.

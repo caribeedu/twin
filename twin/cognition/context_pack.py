@@ -1,4 +1,4 @@
-"""safe_context_pack — the flagship MCP tool.
+"""safe_context_pack — recall, packaged for external LLMs.
 
 Given a task description and a target domain, returns a compact, firewall-
 filtered context pack ready to prepend to an external LLM's prompt, with
@@ -10,12 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .config import Config
-from .db import Database
-from .embeddings import Embedder
-from .firewall import Firewall
-from .judgment import load_profile, render_profile
-from .search import search
+from ..config import Config
+from ..judgment.firewall import Firewall
+from ..judgment.profile import load_profile, render_profile
+from ..memory.embeddings import Embedder
+from ..memory.search import search
+from ..memory.store.base import MemoryStore
 
 CHARS_PER_TOKEN = 4  # rough heuristic; packs are small so precision is not critical
 
@@ -29,7 +29,7 @@ class ContextPack:
 
 
 def build_context_pack(
-    db: Database,
+    store: MemoryStore,
     cfg: Config,
     embedder: Embedder,
     query: str,
@@ -38,9 +38,9 @@ def build_context_pack(
     include_judgment: bool = True,
     firewall: Optional[Firewall] = None,
 ) -> ContextPack:
-    firewall = firewall or Firewall(cfg.policies_path, db)
+    firewall = firewall or Firewall(cfg.policies_path, store)
     result = search(
-        db, embedder, query,
+        store, embedder, query,
         target_domain=target_domain, firewall=firewall, limit=20,
     )
 
@@ -75,7 +75,7 @@ def build_context_pack(
             "title": mem.title,
             "confidence": mem.confidence,
             "status": mem.status.value,
-            "source_ids": mem.source_ids,
+            "percept_ids": mem.percept_ids,
             "why_relevant": hit.why,
         })
 

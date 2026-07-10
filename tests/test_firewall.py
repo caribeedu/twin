@@ -1,7 +1,7 @@
 from twin import ids
-from twin.db import now_iso
-from twin.firewall import Firewall
-from twin.models import MemoryItem
+from twin.clock import now_iso
+from twin.judgment.firewall import Firewall
+from twin.memory.models import MemoryItem
 
 
 def _mem(**kw) -> MemoryItem:
@@ -63,3 +63,11 @@ def test_low_confidence_blocked(cfg):
     verdict = fw.evaluate(_mem(confidence=0.1), "technical")
     assert not verdict.allowed
     assert verdict.rule == "confidence_gate"
+
+
+def test_blocks_are_logged_to_store(cfg, store):
+    fw = Firewall(cfg.policies_path, store)
+    fw.evaluate(_mem(domain="relationship"), "work")
+    rows = store.conn.execute("SELECT * FROM firewall_log").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["target_domain"] == "work"

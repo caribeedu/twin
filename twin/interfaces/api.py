@@ -10,22 +10,20 @@ export JSON. Everything else happens through the JSON API or MCP.
 from __future__ import annotations
 
 import html
-import json
 from typing import Any, Optional
 
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from .config import ALL_DOMAINS
-from .context_pack import build_context_pack
-from .extract import extract_pending
-from .ingest import ingest_paths
-from .judgment import load_profile
-from .models import MemoryStatus
-from .observer import observe
-from .search import search
-from .workspace import Workspace
+from ..cognition import extract_pending
+from ..cognition.context_pack import build_context_pack
+from ..cognition.observer import observe
+from ..config import ALL_DOMAINS
+from ..judgment.profile import load_profile
+from ..memory.models import MemoryStatus
+from ..memory.search import search
+from ..workspace import Workspace
 
 
 class IngestRequest(BaseModel):
@@ -60,21 +58,25 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/ingest")
     def api_ingest(req: IngestRequest):
-        new_ids, skipped = ingest_paths(ws.db, req.paths)
+        new_ids, skipped = ws.ingest(req.paths)
         return {"ingested": new_ids, "skipped": skipped}
 
     @app.post("/api/extract")
     def api_extract():
-        reports = extract_pending(ws.db, ws.cfg, ws.embedder)
+        reports = extract_pending(ws.store, ws.cfg, ws.embedder)
         return [
             {
-                "source_id": r.source_id, "extractor": r.extractor,
+                "percept_id": r.percept_id, "extractor": r.extractor,
                 "inserted": r.inserted, "duplicates": r.duplicates,
                 "flagged_for_review": r.flagged_for_review,
                 "pii_findings": r.pii_findings,
             }
             for r in reports
         ]
+
+    @app.get("/api/percepts")
+    def api_percepts():
+        return [p.model_dump() for p in ws.store.list_percepts()]
 
     @app.get("/api/memories")
     def api_memories(
@@ -83,40 +85,40 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         type: Optional[str] = None,
         needs_review: Optional[bool] = None,
     ):
-        memories = ws.db.list_memories(status=status, domain=domain, type_=type,
-                                       needs_review=needs_review)
+        memories = ws.store.list_memories(status=status, domain=domain, type_=type,
+                                          needs_review=needs_review)
         return [_mem_dict(m) for m in memories]
 
     @app.get("/api/memories/{memory_id}")
     def api_memory(memory_id: str):
-        mem = ws.db.get_memory(memory_id)
+        mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
-        evidence = [e.model_dump() for e in ws.db.get_evidence(memory_id)]
+        evidence = [e.model_dump() for e in ws.store.get_evidence(memory_id)]
         return {**_mem_dict(mem), "evidence": evidence}
 
     @app.post("/api/memories/{memory_id}/review")
     def api_review(memory_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
-        mem = ws.db.get_memory(memory_id)
+        mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if domain:
-            ws.db.update_memory(memory_id, domain=domain)
+            ws.store.update_memory(memory_id, domain=domain)
         if sensitivity:
-            ws.db.update_memory(memory_id, sensitivity=sensitivity)
+            ws.store.update_memory(memory_id, sensitivity=sensitivity)
         if action == "approve":
-            ws.db.set_status(memory_id, MemoryStatus.confirmed)
+            ws.store.set_status(memory_id, MemoryStatus.confirmed)
         elif action == "reject":
-            ws.db.set_status(memory_id, MemoryStatus.rejected)
+            ws.store.set_status(memory_id, MemoryStatus.rejected)
         elif action != "update":
             raise HTTPException(400, "action must be approve | reject | update")
-        return _mem_dict(ws.db.get_memory(memory_id))
+        return _mem_dict(ws.store.get_memory(memory_id))
 
     @app.get("/api/search")
     def api_search(q: str, domain: str = "technical", type: Optional[str] = None,
                    limit: int = 10):
-        result = search(ws.db, ws.embedder, q, target_domain=domain,
+        result = search(ws.store, ws.embedder, q, target_domain=domain,
                         firewall=ws.firewall, type_=type, limit=limit)
         return {
             "hits": [{**_mem_dict(h.memory), "score": h.score, "why": h.why} for h in result.hits],
@@ -125,7 +127,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/context_pack")
     def api_pack(req: PackRequest):
-        pack = build_context_pack(ws.db, ws.cfg, ws.embedder, req.query,
+        pack = build_context_pack(ws.store, ws.cfg, ws.embedder, req.query,
                                   target_domain=req.target_domain,
                                   max_tokens=req.max_tokens,
                                   include_judgment=req.include_judgment,
@@ -134,7 +136,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/observer")
     def api_observer(req: ObserveRequest):
-        s = observe(ws.db, ws.cfg, ws.embedder, req.current_text, req.target_domain)
+        s = observe(ws.store, ws.cfg, ws.embedder, req.current_text, req.target_domain)
         return {
             "inferred_domain": s.inferred_domain,
             "suggested_context": s.suggested_context,
@@ -148,13 +150,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.get("/api/export")
     def api_export():
         """Full JSON export (vendor-independence guarantee)."""
-        memories = ws.db.list_memories(limit=100000)
+        memories = ws.store.list_memories(limit=100000)
         return JSONResponse({
             "memories": [
-                {**_mem_dict(m), "evidence": [e.model_dump() for e in ws.db.get_evidence(m.id)]}
+                {**_mem_dict(m), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
                 for m in memories
             ],
-            "entities": [e.model_dump() for e in ws.db.list_entities()],
+            "entities": [e.model_dump() for e in ws.store.list_entities()],
             "judgment": load_profile(ws.cfg.judgment_path),
         })
 
@@ -218,19 +220,19 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def ui_review_queue():
         pending = [
-            m for m in ws.db.list_memories(status="candidate")
+            m for m in ws.store.list_memories(status="candidate")
             if m.needs_review
-        ] or ws.db.list_memories(status="candidate")
+        ] or ws.store.list_memories(status="candidate")
         body = "".join(
-            _render_memory(m, ws.db.get_evidence(m.id), review_mode=True) for m in pending
+            _render_memory(m, ws.store.get_evidence(m.id), review_mode=True) for m in pending
         ) or "<p>Nothing to review 🎉</p>"
         return _PAGE.format(body=f"<h2>{len(pending)} pending</h2>{body}")
 
     @app.get("/all", response_class=HTMLResponse)
     def ui_all():
-        memories = ws.db.list_memories(limit=500)
+        memories = ws.store.list_memories(limit=500)
         body = "".join(
-            _render_memory(m, ws.db.get_evidence(m.id), review_mode=False) for m in memories
+            _render_memory(m, ws.store.get_evidence(m.id), review_mode=False) for m in memories
         ) or "<p>No memories yet. Ingest and extract first.</p>"
         return _PAGE.format(body=body)
 
