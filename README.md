@@ -414,7 +414,7 @@ fontes (docs, reuniões, Slack)
         │  ingestão + normalização
         ▼
 filtro PII ──────────────► nada sensível sai para nuvem sem máscara
-        │  extração (LLM Anthropic ou heurística local)
+        │  extração (LLM local via Ollama ou heurística)
         ▼
 memórias candidatas ──► dedupe ──► fila de revisão seletiva
         │  aprovação humana quando necessário
@@ -592,7 +592,7 @@ normalização
         ↓
 filtro PII
         ↓
-extração LLM ou heurística
+extração LLM local (Ollama) ou heurística
         ↓
 normalização de schema
         ↓

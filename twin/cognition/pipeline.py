@@ -2,9 +2,8 @@
 dedupe → persist (memory + entities + relations + evidence + embedding).
 
 Extractor selection (``TWIN_EXTRACTOR``):
-    auto      → ollama (local, if reachable) → anthropic (if credential) → heuristic
+    auto      → ollama (local, if reachable) → heuristic
     ollama    → force local LLM (falls back to heuristic on failure)
-    anthropic → force cloud (PII-masked input; falls back to heuristic)
     heuristic → rule-based only, fully offline
 """
 
@@ -21,7 +20,6 @@ from ..memory.models import Evidence, MemoryItem, Relation
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
 from .dedupe import check as dedupe_check
-from .extractors import anthropic as anthropic_extractor
 from .extractors import heuristic as heuristic_extractor
 from .extractors import ollama as ollama_extractor
 from .schema import ExtractedMemory, ExtractionResult
@@ -38,13 +36,11 @@ class ExtractReport:
 
 
 def _choose_extractor(cfg: Config) -> str:
-    if cfg.extractor in ("ollama", "anthropic", "heuristic"):
+    if cfg.extractor in ("ollama", "heuristic"):
         return cfg.extractor
-    # auto: local first, cloud second, rules last
+    # auto: local LLM first, rules as offline fallback
     if ollama_extractor.available(cfg.ollama_url):
         return "ollama"
-    if anthropic_extractor.available():
-        return "anthropic"
     return "heuristic"
 
 
@@ -53,14 +49,12 @@ def _run_extractor(cfg: Config, percept: Percept) -> tuple[ExtractionResult, int
     which = _choose_extractor(cfg)
     try:
         if which == "ollama":
-            # local model → raw text is fine; mask anyway for defense in depth
+            # local model → nothing leaves the machine; mask anyway for
+            # defense in depth (extraction output should never carry PII)
             return ollama_extractor.extract(
                 percept, masked_text, base_url=cfg.ollama_url, model=cfg.ollama_model
             ), len(findings)
-        if which == "anthropic":
-            text = masked_text if cfg.mask_pii_before_cloud else percept.content
-            return anthropic_extractor.extract(percept, text, model=cfg.anthropic_model), len(findings)
-    except Exception as exc:  # server down / network / API error → degrade gracefully
+    except Exception as exc:  # server down / network error → degrade gracefully
         print(f"twin: {which} extraction failed ({exc!r}); falling back to heuristic",
               file=sys.stderr)
     return heuristic_extractor.extract(percept), len(findings)
