@@ -1,25 +1,35 @@
 """Extraction pipeline: PII mask → extractor → classification checks →
 dedupe → persist (memory + entities + relations + evidence + embedding).
+
+Extractor selection (``TWIN_EXTRACTOR``):
+    auto      → ollama (local, if reachable) → anthropic (if credential) → heuristic
+    ollama    → force local LLM (falls back to heuristic on failure)
+    anthropic → force cloud (PII-masked input; falls back to heuristic)
+    heuristic → rule-based only, fully offline
 """
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 
 from .. import ids
 from ..config import Config
-from ..db import Database
-from ..dedupe import check as dedupe_check
-from ..embeddings import Embedder, to_blob
-from ..models import Evidence, MemoryItem, Relation, Source
-from ..pii import mask
-from . import heuristic, llm
+from ..judgment.pii import mask
+from ..memory.embeddings import Embedder
+from ..memory.models import Evidence, MemoryItem, Relation
+from ..memory.store.base import MemoryStore
+from ..sensory.percept import Percept
+from .dedupe import check as dedupe_check
+from .extractors import anthropic as anthropic_extractor
+from .extractors import heuristic as heuristic_extractor
+from .extractors import ollama as ollama_extractor
 from .schema import ExtractedMemory, ExtractionResult
 
 
 @dataclass
 class ExtractReport:
-    source_id: str
+    percept_id: str
     extractor: str = ""
     inserted: list[str] = field(default_factory=list)
     duplicates: int = 0
@@ -28,26 +38,32 @@ class ExtractReport:
 
 
 def _choose_extractor(cfg: Config) -> str:
-    if cfg.extractor == "llm":
-        return "llm"
-    if cfg.extractor == "heuristic":
-        return "heuristic"
-    return "llm" if llm.available() else "heuristic"
+    if cfg.extractor in ("ollama", "anthropic", "heuristic"):
+        return cfg.extractor
+    # auto: local first, cloud second, rules last
+    if ollama_extractor.available(cfg.ollama_url):
+        return "ollama"
+    if anthropic_extractor.available():
+        return "anthropic"
+    return "heuristic"
 
 
-def _run_extractor(cfg: Config, source: Source) -> tuple[ExtractionResult, int]:
-    masked_text, findings = mask(source.raw_text)
+def _run_extractor(cfg: Config, percept: Percept) -> tuple[ExtractionResult, int]:
+    masked_text, findings = mask(percept.content)
     which = _choose_extractor(cfg)
-    if which == "llm":
-        try:
-            text = masked_text if cfg.mask_pii_before_cloud else source.raw_text
-            return llm.extract(source, text, model=cfg.extraction_model), len(findings)
-        except Exception as exc:  # credential/network/API error → degrade gracefully
-            import sys
-
-            print(f"twin: LLM extraction failed ({exc!r}); falling back to heuristic",
-                  file=sys.stderr)
-    return heuristic.extract(source), len(findings)
+    try:
+        if which == "ollama":
+            # local model → raw text is fine; mask anyway for defense in depth
+            return ollama_extractor.extract(
+                percept, masked_text, base_url=cfg.ollama_url, model=cfg.ollama_model
+            ), len(findings)
+        if which == "anthropic":
+            text = masked_text if cfg.mask_pii_before_cloud else percept.content
+            return anthropic_extractor.extract(percept, text, model=cfg.anthropic_model), len(findings)
+    except Exception as exc:  # server down / network / API error → degrade gracefully
+        print(f"twin: {which} extraction failed ({exc!r}); falling back to heuristic",
+              file=sys.stderr)
+    return heuristic_extractor.extract(percept), len(findings)
 
 
 def _needs_review(cfg: Config, mem: ExtractedMemory) -> str | None:
@@ -62,23 +78,24 @@ def _needs_review(cfg: Config, mem: ExtractedMemory) -> str | None:
     return None
 
 
-def extract_source(db: Database, cfg: Config, embedder: Embedder, source: Source) -> ExtractReport:
-    report = ExtractReport(source_id=source.id)
-    result, pii_count = _run_extractor(cfg, source)
+def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
+                    percept: Percept) -> ExtractReport:
+    report = ExtractReport(percept_id=percept.id)
+    result, pii_count = _run_extractor(cfg, percept)
     report.extractor = result.extractor
     report.pii_findings = pii_count
 
     for extracted in result.memories:
         extracted = extracted.normalized()
         dedupe_text = f"{extracted.title}\n{extracted.summary}"
-        verdict = dedupe_check(db, embedder, extracted.type, dedupe_text)
+        verdict = dedupe_check(store, embedder, extracted.type, dedupe_text)
 
         if verdict.action == "duplicate" and verdict.existing_id:
             # New evidence for an existing memory, not a new memory.
-            db.insert_evidence(Evidence(
+            store.insert_evidence(Evidence(
                 id=ids.evidence_id(),
                 memory_id=verdict.existing_id,
-                source_id=source.id,
+                percept_id=percept.id,
                 quote=extracted.evidence_quote or extracted.summary,
             ))
             report.duplicates += 1
@@ -98,32 +115,31 @@ def extract_source(db: Database, cfg: Config, embedder: Embedder, source: Source
             domain=extracted.domain,
             sensitivity=extracted.sensitivity,  # type: ignore[arg-type]
             confidence=extracted.confidence,
-            valid_from=extracted.valid_from or (source.created_at or None),
+            valid_from=extracted.valid_from or (percept.occurred_at or None),
             payload=extracted.payload,
             needs_review=review_reason is not None,
             review_reason=review_reason,
             entities=extracted.entities,
         )
-        db.insert_memory(mem)
-        db.insert_evidence(Evidence(
+        store.insert_memory(mem)
+        store.insert_evidence(Evidence(
             id=ids.evidence_id(),
             memory_id=mem.id,
-            source_id=source.id,
+            percept_id=percept.id,
             quote=extracted.evidence_quote or extracted.summary,
         ))
-        vector = embedder.embed(dedupe_text)
-        db.store_embedding(mem.id, "memory", embedder.name, to_blob(vector), embedder.dim)
+        store.store_embedding(mem.id, "memory", embedder.name, embedder.embed(dedupe_text))
 
         if verdict.action == "review" and verdict.existing_id:
-            db.insert_relation(Relation(
+            store.insert_relation(Relation(
                 id=ids.relation_id(),
                 subject_id=mem.id, predicate="related_to", object_id=verdict.existing_id,
                 memory_id=mem.id,
             ))
         for rel in extracted.relations:
-            subj = db.upsert_entity(rel.subject)
-            obj = db.upsert_entity(rel.object)
-            db.insert_relation(Relation(
+            subj = store.upsert_entity(rel.subject)
+            obj = store.upsert_entity(rel.object)
+            store.insert_relation(Relation(
                 id=ids.relation_id(),
                 subject_id=subj.id, predicate=rel.predicate, object_id=obj.id,
                 memory_id=mem.id, valid_from=mem.valid_from,
@@ -136,13 +152,9 @@ def extract_source(db: Database, cfg: Config, embedder: Embedder, source: Source
     return report
 
 
-def extract_pending(db: Database, cfg: Config, embedder: Embedder) -> list[ExtractReport]:
-    """Extract every source that has no evidence pointing at it yet."""
-    reports = []
-    for source in db.list_sources():
-        row = db.conn.execute(
-            "SELECT COUNT(*) AS n FROM evidence WHERE source_id = ?", (source.id,)
-        ).fetchone()
-        if row["n"] == 0:
-            reports.append(extract_source(db, cfg, embedder, source))
-    return reports
+def extract_pending(store: MemoryStore, cfg: Config, embedder: Embedder) -> list[ExtractReport]:
+    """Extract every percept no memory has been derived from yet."""
+    return [
+        extract_percept(store, cfg, embedder, percept)
+        for percept in store.unprocessed_percepts()
+    ]

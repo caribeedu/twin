@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-from ..models import Source
-from .schema import ExtractedMemory, ExtractionResult
+from ...sensory.percept import Percept
+from ..schema import ExtractedMemory, ExtractionResult
 
 _DECISION_MARKERS = [
     r"\bdecidimos\b", r"\bdecidiu\b", r"\bdecidido\b", r"\bficou decidido\b",
@@ -72,10 +72,14 @@ def _entities(sentence: str) -> list[str]:
     return out[:8]
 
 
-def extract(source: Source) -> ExtractionResult:
+def extract(percept: Percept) -> ExtractionResult:
     memories: list[ExtractedMemory] = []
     seen_titles: set[str] = set()
-    for raw_sentence in _SENTENCE_SPLIT.split(source.raw_text):
+    default_domain = percept.privacy_hints.get(
+        "domain_hint",
+        "technical" if percept.percept_type == "document" else "work",
+    )
+    for raw_sentence in _SENTENCE_SPLIT.split(percept.content):
         sentence = raw_sentence.strip()
         if not 15 <= len(sentence) <= 600:
             continue
@@ -91,7 +95,7 @@ def extract(source: Source) -> ExtractionResult:
                     type=mem_type,
                     title=title,
                     summary=sentence,
-                    domain="technical" if source.source_type == "markdown" else "work",
+                    domain=default_domain,
                     sensitivity="internal",
                     confidence=0.5,  # heuristic → always below review threshold
                     entities=_entities(sentence),

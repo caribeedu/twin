@@ -15,9 +15,13 @@ from typing import Optional
 
 import yaml
 
-from .config import SENSITIVITY_ORDER
-from .db import Database
-from .models import MemoryItem
+from typing import TYPE_CHECKING
+
+from ..config import SENSITIVITY_ORDER
+from ..memory.models import MemoryItem
+
+if TYPE_CHECKING:
+    from ..memory.store.base import MemoryStore
 
 SENSITIVE_DOMAINS = {"relationship", "family", "health", "finance", "emotional", "legal"}
 
@@ -52,8 +56,8 @@ class Rule:
 
 
 class Firewall:
-    def __init__(self, policies_path: Path | str, db: Optional[Database] = None):
-        self.db = db
+    def __init__(self, policies_path: Path | str, store: Optional["MemoryStore"] = None):
+        self.store = store
         data = yaml.safe_load(Path(policies_path).read_text(encoding="utf-8")) or {}
         self.default_action: str = data.get("default_action", "allow")
         self.min_confidence: float = float(data.get("min_confidence", 0.0))
@@ -100,6 +104,6 @@ class Firewall:
         return self._log(mem, target_domain, Verdict(False, "default", "default deny"))
 
     def _log(self, mem: MemoryItem, target_domain: str, verdict: Verdict) -> Verdict:
-        if self.db is not None and not verdict.allowed:
-            self.db.log_firewall(mem.id, target_domain, verdict.rule, "block")
+        if self.store is not None and not verdict.allowed:
+            self.store.log_firewall(mem.id, target_domain, verdict.rule, "block")
         return verdict

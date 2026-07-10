@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from twin.mcp_server import create_server
+from twin.interfaces.mcp_server import create_server
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -11,16 +11,16 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 @pytest.fixture()
 def server(tmp_path, monkeypatch):
     monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = tmp_path / "twin-home"
     srv = create_server(str(home))
     # populate through the same workspace path
-    from twin.extract import extract_pending
-    from twin.ingest import ingest_paths
+    from twin.cognition import extract_pending
     from twin.workspace import Workspace
 
     ws = Workspace(str(home))
-    ingest_paths(ws.db, [EXAMPLES])
-    extract_pending(ws.db, ws.cfg, ws.embedder)
+    ws.ingest([EXAMPLES])
+    extract_pending(ws.store, ws.cfg, ws.embedder)
     ws.close()
     return srv
 

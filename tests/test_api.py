@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from twin.api import create_app
+from twin.interfaces.api import create_app
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -11,15 +11,20 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     app = create_app(home=str(tmp_path / "twin-home"))
     return TestClient(app)
 
 
 def test_full_flow_over_api(client):
-    # ingest
+    # ingest (sensory layer)
     r = client.post("/api/ingest", json={"paths": [str(EXAMPLES)]})
     assert r.status_code == 200
     assert len(r.json()["ingested"]) == 3
+
+    # percepts are visible
+    percepts = client.get("/api/percepts").json()
+    assert {p["percept_type"] for p in percepts} == {"document", "meeting_transcript", "meeting"}
 
     # extract
     r = client.post("/api/extract")

@@ -1,7 +1,7 @@
 """MCP server (stdio) — exposes the memory layer to Cursor, Claude Desktop,
 Claude Code and any other MCP client.
 
-Run:  twin mcp          (or: python -m twin.mcp_server)
+Run:  twin mcp          (or: python -m twin.interfaces.mcp_server)
 
 Client config example (Claude Desktop / Cursor):
     {
@@ -16,11 +16,11 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from .context_pack import build_context_pack
-from .judgment import load_profile
-from .observer import observe
-from .search import search
-from .workspace import Workspace
+from ..cognition.context_pack import build_context_pack
+from ..cognition.observer import observe
+from ..judgment.profile import load_profile
+from ..memory.search import search
+from ..workspace import Workspace
 
 
 def _memory_to_dict(mem) -> dict[str, Any]:
@@ -30,7 +30,7 @@ def _memory_to_dict(mem) -> dict[str, Any]:
         "sensitivity": mem.sensitivity.value, "confidence": mem.confidence,
         "status": mem.status.value, "valid_from": mem.valid_from,
         "valid_until": mem.valid_until, "entities": mem.entities,
-        "source_ids": mem.source_ids, "payload": mem.payload,
+        "percept_ids": mem.percept_ids, "payload": mem.payload,
     }
 
 
@@ -60,7 +60,7 @@ def create_server(home: Optional[str] = None):
         personal_preferences, assistant_preferences) and controls privacy
         filtering. Optional `type` filters by memory type (decision, task,
         preference, belief, fact, event, procedure, constraint)."""
-        result = search(ws.db, ws.embedder, query, target_domain=domain,
+        result = search(ws.store, ws.embedder, query, target_domain=domain,
                         firewall=ws.firewall, type_=type, limit=limit)
         return json.dumps({
             "hits": [
@@ -72,22 +72,23 @@ def create_server(home: Optional[str] = None):
 
     @mcp.tool()
     def memory_get(memory_id: str) -> str:
-        """Fetch one memory by id, including its evidence quotes and sources."""
-        mem = ws.db.get_memory(memory_id)
+        """Fetch one memory by id, including its evidence quotes and percepts."""
+        mem = ws.store.get_memory(memory_id)
         if mem is None:
             return json.dumps({"error": "not found"})
-        evidence = [{"quote": e.quote, "source_id": e.source_id} for e in ws.db.get_evidence(memory_id)]
+        evidence = [{"quote": e.quote, "percept_id": e.percept_id}
+                    for e in ws.store.get_evidence(memory_id)]
         return json.dumps({**_memory_to_dict(mem), "evidence": evidence}, ensure_ascii=False)
 
     @mcp.tool()
     def memory_related(entity: str) -> str:
         """Entities and memories connected to a given entity name in the
         knowledge graph (projects, people, systems, tools)."""
-        ent = ws.db.get_entity_by_name(entity)
+        ent = ws.store.get_entity_by_name(entity)
         if ent is None:
             return json.dumps({"error": f"entity '{entity}' not found"})
-        memories = ws.db.memories_for_entity(ent.id)
-        relations = ws.db.relations_for(ent.id)
+        memories = ws.store.memories_for_entity(ent.id)
+        relations = ws.store.relations_for(ent.id)
         return json.dumps({
             "entity": {"id": ent.id, "name": ent.name, "type": ent.entity_type},
             "memories": [_memory_to_dict(m) for m in memories[:20]],
@@ -101,9 +102,9 @@ def create_server(home: Optional[str] = None):
     def memory_project_context(project_name: str) -> str:
         """Everything known about a project: memories linked to it plus the
         most recent decisions."""
-        ent = ws.db.get_entity_by_name(project_name)
-        memories = ws.db.memories_for_entity(ent.id) if ent else []
-        result = search(ws.db, ws.embedder, project_name, target_domain="technical",
+        ent = ws.store.get_entity_by_name(project_name)
+        memories = ws.store.memories_for_entity(ent.id) if ent else []
+        result = search(ws.store, ws.embedder, project_name, target_domain="technical",
                         firewall=ws.firewall, limit=10)
         by_id = {m.id: m for m in memories}
         for h in result.hits:
@@ -117,7 +118,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def memory_recent_decisions(project_name: Optional[str] = None, limit: int = 10) -> str:
         """Most recent technical/work decisions, optionally scoped to a project."""
-        decisions = ws.db.list_memories(type_="decision", limit=100)
+        decisions = ws.store.list_memories(type_="decision", limit=100)
         if project_name:
             needle = project_name.lower()
             decisions = [
@@ -133,12 +134,12 @@ def create_server(home: Optional[str] = None):
     def memory_user_preferences(context: str = "") -> str:
         """The user's stable preferences (technical + communication),
         optionally ranked by relevance to `context`."""
-        prefs = ws.db.list_memories(type_="preference", limit=100)
+        prefs = ws.store.list_memories(type_="preference", limit=100)
         if context:
-            ranked = search(ws.db, ws.embedder, context, target_domain="assistant_preferences",
+            ranked = search(ws.store, ws.embedder, context, target_domain="assistant_preferences",
                             firewall=ws.firewall, type_="preference", limit=20)
-            ids = [h.memory.id for h in ranked.hits]
-            prefs.sort(key=lambda p: ids.index(p.id) if p.id in ids else 999)
+            ids_ranked = [h.memory.id for h in ranked.hits]
+            prefs.sort(key=lambda p: ids_ranked.index(p.id) if p.id in ids_ranked else 999)
         return json.dumps([_memory_to_dict(p) for p in prefs[:20]], ensure_ascii=False)
 
     @mcp.tool()
@@ -160,7 +161,7 @@ def create_server(home: Optional[str] = None):
         to ground your work in the user's real context. `query` should
         describe the task you are about to do."""
         pack = build_context_pack(
-            ws.db, ws.cfg, ws.embedder, query,
+            ws.store, ws.cfg, ws.embedder, query,
             target_domain=target_domain, max_tokens=max_tokens,
             include_judgment=include_judgment, firewall=ws.firewall,
         )
@@ -176,7 +177,7 @@ def create_server(home: Optional[str] = None):
         """Memory Observer: pass the user's current message/task and receive
         memories that look relevant (suggested_context) plus what was withheld
         by the privacy firewall (blocked_context, ids only)."""
-        suggestion = observe(ws.db, ws.cfg, ws.embedder, current_text, target_domain)
+        suggestion = observe(ws.store, ws.cfg, ws.embedder, current_text, target_domain)
         return json.dumps({
             "inferred_domain": suggestion.inferred_domain,
             "suggested_context": suggestion.suggested_context,

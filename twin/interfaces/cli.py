@@ -1,12 +1,13 @@
 """twin CLI.
 
-    twin init                          create ~/.twin (db + default policies/judgment)
-    twin ingest <paths...>             ingest docs/transcripts/meetings/slack exports
-    twin extract                       extract memories from un-processed sources
+    twin init                          create ~/.twin (config + default policies/judgment)
+    twin ingest <paths...>             run sensors over docs/transcripts/meetings/slack exports
+    twin extract                       extract memories from un-processed percepts
     twin review                        interactive review of the candidate queue
     twin search "query" [--domain d]   hybrid search
     twin pack "task" [--domain d]      build a safe context pack
     twin observe "current text"        memory observer suggestion
+    twin reindex                       regenerate embeddings with the current embedder
     twin serve [--port 8765]           local API + review UI
     twin mcp                           MCP server over stdio
     twin export                        dump memories/entities/judgment as JSON
@@ -16,9 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 
-from .workspace import Workspace
+from ..workspace import Workspace
 
 
 def _print(data) -> None:
@@ -28,46 +28,45 @@ def _print(data) -> None:
 def cmd_init(args) -> None:
     ws = Workspace(args.home)
     print(f"initialized twin home at {ws.cfg.home}")
-    print(f"  db:        {ws.cfg.db_path}")
+    print(f"  db:        {ws.cfg.resolved_db_url}")
     print(f"  policies:  {ws.cfg.policies_path}")
     print(f"  judgment:  {ws.cfg.judgment_path}")
+    print(f"  embedder:  {ws.embedder.name}")
 
 
 def cmd_ingest(args) -> None:
-    from .ingest import ingest_paths
-
     ws = Workspace(args.home)
-    new_ids, skipped = ingest_paths(ws.db, args.paths)
-    print(f"ingested {len(new_ids)} source(s)")
+    new_ids, skipped = ws.ingest(args.paths)
+    print(f"ingested {len(new_ids)} percept(s)")
     for s in skipped:
         print(f"  skipped: {s}")
 
 
 def cmd_extract(args) -> None:
-    from .extract import extract_pending
+    from ..cognition import extract_pending
 
     ws = Workspace(args.home)
-    reports = extract_pending(ws.db, ws.cfg, ws.embedder)
+    reports = extract_pending(ws.store, ws.cfg, ws.embedder)
     if not reports:
-        print("nothing to extract (all sources already processed)")
+        print("nothing to extract (all percepts already processed)")
         return
     total = sum(len(r.inserted) for r in reports)
     review = sum(r.flagged_for_review for r in reports)
     dups = sum(r.duplicates for r in reports)
     for r in reports:
-        print(f"{r.source_id}: {len(r.inserted)} memories via {r.extractor}"
+        print(f"{r.percept_id}: {len(r.inserted)} memories via {r.extractor}"
               f" ({r.flagged_for_review} to review, {r.duplicates} duplicates,"
               f" {r.pii_findings} PII findings masked)")
     print(f"total: {total} new, {review} queued for review, {dups} duplicates")
 
 
 def cmd_review(args) -> None:
-    from .models import MemoryStatus
+    from ..memory.models import MemoryStatus
 
     ws = Workspace(args.home)
-    queue = [m for m in ws.db.list_memories(status="candidate") if m.needs_review]
+    queue = [m for m in ws.store.list_memories(status="candidate") if m.needs_review]
     if not queue:
-        queue = ws.db.list_memories(status="candidate")
+        queue = ws.store.list_memories(status="candidate")
     if not queue:
         print("review queue is empty")
         return
@@ -79,23 +78,23 @@ def cmd_review(args) -> None:
         print(f"  {mem.title}")
         if mem.summary != mem.title:
             print(f"  {mem.summary}")
-        for ev in ws.db.get_evidence(mem.id)[:1]:
+        for ev in ws.store.get_evidence(mem.id)[:1]:
             print(f'  evidence: "{ev.quote[:140]}"')
         choice = input("  [a/r/s/q] > ").strip().lower()
         if choice == "a":
-            ws.db.set_status(mem.id, MemoryStatus.confirmed)
+            ws.store.set_status(mem.id, MemoryStatus.confirmed)
         elif choice == "r":
-            ws.db.set_status(mem.id, MemoryStatus.rejected)
+            ws.store.set_status(mem.id, MemoryStatus.rejected)
         elif choice == "q":
             break
         print()
 
 
 def cmd_search(args) -> None:
-    from .search import search
+    from ..memory.search import search
 
     ws = Workspace(args.home)
-    result = search(ws.db, ws.embedder, args.query, target_domain=args.domain,
+    result = search(ws.store, ws.embedder, args.query, target_domain=args.domain,
                     firewall=ws.firewall, limit=args.limit)
     for h in result.hits:
         print(f"{h.score:.3f}  [{h.memory.type.value}] {h.memory.title}  ({h.why})")
@@ -106,10 +105,10 @@ def cmd_search(args) -> None:
 
 
 def cmd_pack(args) -> None:
-    from .context_pack import build_context_pack
+    from ..cognition.context_pack import build_context_pack
 
     ws = Workspace(args.home)
-    pack = build_context_pack(ws.db, ws.cfg, ws.embedder, args.query,
+    pack = build_context_pack(ws.store, ws.cfg, ws.embedder, args.query,
                               target_domain=args.domain, max_tokens=args.max_tokens,
                               firewall=ws.firewall)
     if args.json:
@@ -121,15 +120,21 @@ def cmd_pack(args) -> None:
 
 
 def cmd_observe(args) -> None:
-    from .observer import observe
+    from ..cognition.observer import observe
 
     ws = Workspace(args.home)
-    s = observe(ws.db, ws.cfg, ws.embedder, args.text, args.domain)
+    s = observe(ws.store, ws.cfg, ws.embedder, args.text, args.domain)
     _print({
         "inferred_domain": s.inferred_domain,
         "suggested_context": s.suggested_context,
         "blocked_context": s.blocked_context,
     })
+
+
+def cmd_reindex(args) -> None:
+    ws = Workspace(args.home)
+    count = ws.reindex()
+    print(f"re-embedded {count} memories with {ws.embedder.name}")
 
 
 def cmd_serve(args) -> None:
@@ -145,21 +150,21 @@ def cmd_mcp(args) -> None:
 
 
 def cmd_export(args) -> None:
-    from .judgment import load_profile
+    from ..judgment.profile import load_profile
 
     ws = Workspace(args.home)
-    memories = ws.db.list_memories(limit=100000)
+    memories = ws.store.list_memories(limit=100000)
     _print({
         "memories": [
             {
                 **m.model_dump(),
                 "type": m.type.value, "sensitivity": m.sensitivity.value,
                 "status": m.status.value,
-                "evidence": [e.model_dump() for e in ws.db.get_evidence(m.id)],
+                "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)],
             }
             for m in memories
         ],
-        "entities": [e.model_dump() for e in ws.db.list_entities()],
+        "entities": [e.model_dump() for e in ws.store.list_entities()],
         "judgment": load_profile(ws.cfg.judgment_path),
     })
 
@@ -171,11 +176,11 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("init", help="initialize the twin home").set_defaults(func=cmd_init)
 
-    p = sub.add_parser("ingest", help="ingest files or directories")
+    p = sub.add_parser("ingest", help="run sensors over files or directories")
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_ingest)
 
-    sub.add_parser("extract", help="extract memories from pending sources").set_defaults(func=cmd_extract)
+    sub.add_parser("extract", help="extract memories from pending percepts").set_defaults(func=cmd_extract)
     sub.add_parser("review", help="interactive review queue").set_defaults(func=cmd_review)
 
     p = sub.add_parser("search", help="hybrid search")
@@ -195,6 +200,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("text")
     p.add_argument("--domain", default=None)
     p.set_defaults(func=cmd_observe)
+
+    sub.add_parser("reindex", help="regenerate embeddings").set_defaults(func=cmd_reindex)
 
     p = sub.add_parser("serve", help="run local API + review UI")
     p.add_argument("--host", default="127.0.0.1")

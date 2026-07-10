@@ -1,29 +1,31 @@
-"""SQLite storage: sources, memories, entities, relations, evidence,
-embeddings and an FTS5 index. The graph is deliberately lightweight —
-entities + typed edges — per the MVP recommendation (SQLite + edge tables).
-"""
+"""SQLite backend — zero-config store for dev, tests and offline fallback."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from . import ids
-from .models import Entity, Evidence, MemoryItem, MemoryStatus, Relation, Source
+from ... import ids
+from ...sensory.percept import Percept
+from ..embeddings import to_blob
+from ..models import Entity, Evidence, MemoryItem, Relation
+from .base import MemoryStore, now_iso
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS sources (
+CREATE TABLE IF NOT EXISTS percepts (
     id TEXT PRIMARY KEY,
-    source_type TEXT NOT NULL,
-    path TEXT,
-    author TEXT,
-    participants TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT,
+    percept_type TEXT NOT NULL,
+    source_sensor TEXT NOT NULL,
+    occurred_at TEXT,
     ingested_at TEXT NOT NULL,
-    raw_text TEXT NOT NULL,
+    actors TEXT NOT NULL DEFAULT '[]',
+    content TEXT NOT NULL,
+    content_refs TEXT NOT NULL DEFAULT '[]',
+    attachments TEXT NOT NULL DEFAULT '[]',
+    privacy_hints TEXT NOT NULL DEFAULT '{}',
+    integrity TEXT NOT NULL DEFAULT '{}',
     metadata TEXT NOT NULL DEFAULT '{}',
     content_hash TEXT NOT NULL UNIQUE
 );
@@ -57,10 +59,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
 CREATE TABLE IF NOT EXISTS evidence (
     id TEXT PRIMARY KEY,
     memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-    source_id TEXT NOT NULL REFERENCES sources(id),
+    percept_id TEXT NOT NULL REFERENCES percepts(id),
     quote TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_memory ON evidence(memory_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_percept ON evidence(percept_id);
 
 CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
@@ -90,11 +93,12 @@ CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
 CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
 
 CREATE TABLE IF NOT EXISTS embeddings (
-    ref_id TEXT PRIMARY KEY,
+    ref_id TEXT NOT NULL,
     ref_type TEXT NOT NULL,
     model TEXT NOT NULL,
     dim INTEGER NOT NULL,
-    vector BLOB NOT NULL
+    vector BLOB NOT NULL,
+    PRIMARY KEY (ref_id, model)
 );
 
 CREATE TABLE IF NOT EXISTS firewall_log (
@@ -108,11 +112,7 @@ CREATE TABLE IF NOT EXISTS firewall_log (
 """
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-class Database:
+class SqliteStore(MemoryStore):
     def __init__(self, path: str | Path):
         self.path = Path(path)
         if str(path) != ":memory:":
@@ -129,49 +129,61 @@ class Database:
     def close(self) -> None:
         self.conn.close()
 
-    # -- sources ---------------------------------------------------------
+    # -- percepts ---------------------------------------------------------
 
-    def insert_source(self, src: Source) -> Optional[str]:
-        """Insert a source; returns its id, or None if the same content was
-        already ingested (dedup by content hash)."""
+    def insert_percept(self, percept: Percept) -> Optional[str]:
+        percept.seal()
         existing = self.conn.execute(
-            "SELECT id FROM sources WHERE content_hash = ?", (src.content_hash,)
+            "SELECT id FROM percepts WHERE content_hash = ?", (percept.content_hash,)
         ).fetchone()
         if existing:
             return None
         self.conn.execute(
-            "INSERT INTO sources (id, source_type, path, author, participants,"
-            " created_at, ingested_at, raw_text, metadata, content_hash)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO percepts (id, percept_type, source_sensor, occurred_at,"
+            " ingested_at, actors, content, content_refs, attachments,"
+            " privacy_hints, integrity, metadata, content_hash)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                src.id, src.source_type, src.path, src.author,
-                json.dumps(src.participants), src.created_at,
-                src.ingested_at or now_iso(), src.raw_text,
-                json.dumps(src.metadata), src.content_hash,
+                percept.id, percept.percept_type, percept.source_sensor,
+                percept.occurred_at, percept.ingested_at or now_iso(),
+                json.dumps(percept.actors), percept.content,
+                json.dumps(percept.content_refs), json.dumps(percept.attachments),
+                json.dumps(percept.privacy_hints), json.dumps(percept.integrity),
+                json.dumps(percept.metadata), percept.content_hash,
             ),
         )
         self.conn.commit()
-        return src.id
-
-    def get_source(self, source_id: str) -> Optional[Source]:
-        row = self.conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
-        return self._row_to_source(row) if row else None
-
-    def list_sources(self) -> list[Source]:
-        rows = self.conn.execute("SELECT * FROM sources ORDER BY ingested_at").fetchall()
-        return [self._row_to_source(r) for r in rows]
+        return percept.id
 
     @staticmethod
-    def _row_to_source(row: sqlite3.Row) -> Source:
-        return Source(
-            id=row["id"], source_type=row["source_type"], path=row["path"],
-            author=row["author"], participants=json.loads(row["participants"]),
-            created_at=row["created_at"], ingested_at=row["ingested_at"],
-            raw_text=row["raw_text"], metadata=json.loads(row["metadata"]),
-            content_hash=row["content_hash"],
+    def _row_to_percept(row: sqlite3.Row) -> Percept:
+        return Percept(
+            id=row["id"], percept_type=row["percept_type"],
+            source_sensor=row["source_sensor"], occurred_at=row["occurred_at"],
+            ingested_at=row["ingested_at"], actors=json.loads(row["actors"]),
+            content=row["content"], content_refs=json.loads(row["content_refs"]),
+            attachments=json.loads(row["attachments"]),
+            privacy_hints=json.loads(row["privacy_hints"]),
+            integrity=json.loads(row["integrity"]), metadata=json.loads(row["metadata"]),
         )
 
-    # -- memories --------------------------------------------------------
+    def get_percept(self, percept_id: str) -> Optional[Percept]:
+        row = self.conn.execute("SELECT * FROM percepts WHERE id = ?", (percept_id,)).fetchone()
+        return self._row_to_percept(row) if row else None
+
+    def list_percepts(self) -> list[Percept]:
+        rows = self.conn.execute("SELECT * FROM percepts ORDER BY ingested_at").fetchall()
+        return [self._row_to_percept(r) for r in rows]
+
+    def unprocessed_percepts(self) -> list[Percept]:
+        rows = self.conn.execute(
+            "SELECT p.* FROM percepts p"
+            " WHERE NOT EXISTS (SELECT 1 FROM evidence e WHERE e.percept_id = p.id)"
+            " ORDER BY p.ingested_at"
+        ).fetchall()
+        return [self._row_to_percept(r) for r in rows]
+
+    # -- memories ----------------------------------------------------------
 
     def insert_memory(self, mem: MemoryItem) -> str:
         ts = now_iso()
@@ -217,9 +229,9 @@ class Database:
                 " WHERE me.memory_id = ?", (row["id"],)
             ).fetchall()
         ]
-        source_ids = [
-            r["source_id"] for r in self.conn.execute(
-                "SELECT DISTINCT source_id FROM evidence WHERE memory_id = ?", (row["id"],)
+        percept_ids = [
+            r["percept_id"] for r in self.conn.execute(
+                "SELECT DISTINCT percept_id FROM evidence WHERE memory_id = ?", (row["id"],)
             ).fetchall()
         ]
         return MemoryItem(
@@ -229,7 +241,7 @@ class Database:
             valid_from=row["valid_from"], valid_until=row["valid_until"],
             created_at=row["created_at"], updated_at=row["updated_at"],
             payload=json.loads(row["payload"]), needs_review=bool(row["needs_review"]),
-            review_reason=row["review_reason"], entities=entities, source_ids=source_ids,
+            review_reason=row["review_reason"], entities=entities, percept_ids=percept_ids,
         )
 
     def list_memories(
@@ -285,19 +297,12 @@ class Database:
             )
         self.conn.commit()
 
-    def set_status(self, memory_id: str, status: MemoryStatus, clear_review: bool = True) -> None:
-        self.update_memory(
-            memory_id,
-            status=status.value,
-            **({"needs_review": False, "review_reason": None} if clear_review else {}),
-        )
-
-    # -- evidence --------------------------------------------------------
+    # -- evidence ----------------------------------------------------------
 
     def insert_evidence(self, ev: Evidence) -> str:
         self.conn.execute(
-            "INSERT INTO evidence (id, memory_id, source_id, quote) VALUES (?,?,?,?)",
-            (ev.id, ev.memory_id, ev.source_id, ev.quote),
+            "INSERT INTO evidence (id, memory_id, percept_id, quote) VALUES (?,?,?,?)",
+            (ev.id, ev.memory_id, ev.percept_id, ev.quote),
         )
         self.conn.commit()
         return ev.id
@@ -308,7 +313,7 @@ class Database:
         ).fetchall()
         return [Evidence(**dict(r)) for r in rows]
 
-    # -- entities & relations --------------------------------------------
+    # -- entities & relations ------------------------------------------------
 
     def upsert_entity(self, name: str, entity_type: str = "generic") -> Entity:
         name = name.strip()
@@ -363,29 +368,28 @@ class Database:
         ).fetchall()
         return [self._row_to_memory(r) for r in rows]
 
-    # -- embeddings --------------------------------------------------------
+    # -- embeddings ------------------------------------------------------------
 
-    def store_embedding(self, ref_id: str, ref_type: str, model: str, vector: bytes, dim: int) -> None:
+    def store_embedding(self, ref_id: str, ref_type: str, model: str,
+                        vector: list[float]) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO embeddings (ref_id, ref_type, model, dim, vector)"
             " VALUES (?,?,?,?,?)",
-            (ref_id, ref_type, model, dim, vector),
+            (ref_id, ref_type, model, len(vector), to_blob(vector)),
         )
         self.conn.commit()
 
-    def iter_embeddings(self, ref_type: str = "memory") -> Iterable[tuple[str, bytes]]:
+    def iter_embeddings(self, ref_type: str, model: str) -> Iterable[tuple[str, bytes]]:
         for row in self.conn.execute(
-            "SELECT ref_id, vector FROM embeddings WHERE ref_type = ?", (ref_type,)
+            "SELECT ref_id, vector FROM embeddings WHERE ref_type = ? AND model = ?",
+            (ref_type, model),
         ):
             yield row["ref_id"], row["vector"]
 
-    # -- fts ---------------------------------------------------------------
+    # -- fts ---------------------------------------------------------------------
 
     def fts_search(self, query: str, limit: int = 50) -> dict[str, float]:
-        """Returns memory_id -> bm25 score (lower = better in raw bm25; we
-        negate so that higher = better)."""
-        # FTS5 MATCH syntax is picky; build an OR query of sanitized terms.
-        terms = [t for t in "".join(c if c.isalnum() else " " for c in query).split() if len(t) > 1]
+        terms = self.sanitize_fts_terms(query)
         if not terms:
             return {}
         match = " OR ".join(terms)
@@ -399,7 +403,7 @@ class Database:
             return {}
         return {r["memory_id"]: -float(r["score"]) for r in rows}
 
-    # -- firewall log ------------------------------------------------------
+    # -- firewall log ----------------------------------------------------------------
 
     def log_firewall(self, memory_id: str, target_domain: str, rule: str, action: str) -> None:
         self.conn.execute(
