@@ -958,128 +958,340 @@ Deliberately does not include:
 
 Prove the system reduces re-explanation in technical work.
 
-Deliverables:
+Delivered:
 
-- local ingestion;
-- extraction;
+- local ingestion with normalized percepts;
+- local extraction through Ollama with an offline heuristic fallback;
+- selective review and confirmed-only context packs by default;
+- sectioned context packs with judgment, decisions, constraints, tasks, preferences, facts/events and evidence;
+- source qualification through trust, scope and confidentiality;
+- explicit promotion, supersedence and contradiction lifecycle operations;
+- memory quality metrics;
+- expanded PII detection and optional local encryption;
+- PostgreSQL + pgvector and zero-config SQLite backends;
+- MCP, API, CLI and per-client MCP documentation;
+- initial observer domain inference using keywords and graph signals;
+- initial judgment profile.
+
+### v0.2 — Operational Cognitive Workflow
+
+Goal: move `twin` from a demonstrable memory service into a tool that can be used continuously in real technical work. v0.2 closes the loop between retrieving existing context and capturing what changed during the task.
+
+The target workflow is:
+
+```text
+start a real task in an MCP client
+        ↓
+identify project, domain and task profile
+        ↓
+load a compact, task-aware context pack
+        ↓
+perform the work in the external LLM/IDE
+        ↓
+complete the cognitive session
+        ↓
+turn decisions, constraints and changes into candidate memories
+        ↓
+review and consolidate
+```
+
+#### Cognitive session lifecycle
+
+Introduce a first-class `CognitiveSession` that records:
+
+- client and project;
+- active domain and task profile;
+- initial task/query;
+- memories supplied to the client;
+- artifacts produced or changed;
+- candidate memories created at completion;
+- explicit usefulness feedback;
+- start, completion and abandonment states.
+
+Expose the lifecycle through MCP, API and CLI operations equivalent to:
+
+```text
+session_start
+session_observe
+session_complete
+session_feedback
+```
+
+The session boundary must close the current read-only flow:
+
+```text
+Twin → LLM
+```
+
+into a maintained cognitive loop:
+
+```text
+Twin → LLM → completed work → new percepts → candidate memories → Twin
+```
+
+#### Task-aware context packs
+
+Evolve the existing sectioned context pack into profiles tailored to the current work:
+
+- coding;
+- architecture;
+- debugging;
+- writing;
+- planning;
 - review;
-- search;
-- MCP;
-- basic firewall;
-- judgment profile.
+- meeting preparation.
 
-### v0.2 — MCP-first workflow
+Each profile should preserve the same firewall and evidence guarantees while changing ordering and token allocation. An architecture pack, for example, should prioritize prior decisions, rejected alternatives, constraints, judgment criteria, open questions and evidence; a coding pack should prioritize active project context, implementation constraints, conventions, known risks and relevant decisions.
 
-Goal: real integration with Cursor, Claude Desktop, Claude Code and MCP clients.
+#### Projects as first-class cognitive units
 
-Improvements:
+Promote projects from loosely inferred graph entities into explicit structures connected to:
 
-- better context packs;
-- documentation for clients;
-- usage examples;
-- better installation ergonomics.
+- repositories and aliases;
+- goals and milestones;
+- active and superseded decisions;
+- constraints;
+- open questions;
+- sessions;
+- percepts and artifacts;
+- people and systems;
+- project timeline.
 
-### v0.3 — Strong review system
+The current repository/directory should be usable as a strong signal for project inference in developer clients.
 
-Goal: memory quality.
+#### Product-level feedback and evaluation
 
-Improvements:
+Extend current pipeline metrics with explicit context-usefulness feedback:
 
-- batch review;
-- diff of similar memories;
-- merge/supersede/contradict;
-- source trust;
-- precision metrics.
+```text
+useful
+partially_useful
+irrelevant
+incorrect
+missing_context
+privacy_overblock
+privacy_underblock
+```
 
-### v0.4 — Judgment model
+Track product metrics such as:
 
-Goal: make different LLMs act with more consistent judgment.
+- context relevance rate;
+- false-memory rate;
+- missing-memory rate;
+- project/domain misclassification rate;
+- context-pack token efficiency;
+- memory usage rate;
+- session re-explanation rate.
 
-Improvements:
+The central product metric is: **how often did the user need to explain something that `twin` should already have known?**
 
-- suggested changes to the judgment profile;
-- decision criteria extraction;
-- separation between preference, belief and principle;
-- judgment versioning.
+#### Multi-stage retrieval and local reranking
 
-### v0.5 — Advanced Domain Firewall
+Make retrieval an explicit pipeline:
 
-Goal: prepare expansion into personal domains.
+```text
+project/domain/task detection
+        ↓
+lexical + vector candidate generation
+        ↓
+graph expansion and temporal filtering
+        ↓
+Domain Firewall and source-trust weighting
+        ↓
+local reranking
+        ↓
+task-aware context construction
+```
 
-Improvements:
+Keep deterministic hybrid search as the baseline and fallback. Add a local reranker only where it measurably improves relevance.
 
-- per-persona policies;
-- explicit permissions;
-- auditable logs;
-- contextual redaction;
-- more aggressive default-deny;
-- candidate memories blocked by default.
+#### Fast and deep observer modes
 
-### v0.6 — Professional connectors
+Split observation into two levels:
 
-Sources:
+- **fast observer:** deterministic keywords, entity matches, project/repository context and graph votes; cheap enough to run routinely;
+- **deep observer:** local LLM classification used only when domain, project, task or intent remains ambiguous.
 
-- Slack;
-- professional Gmail;
+Observer output should include confidence and uncertainty for domain, project and task profile, not only a single inferred domain.
+
+#### Real MCP workflow validation
+
+Treat MCP compatibility as a tested product surface rather than documentation alone. Validate complete workflows in:
+
+- Claude Code;
+- Cursor;
+- Claude Desktop;
+- the CLI reference client;
+- generic MCP clients where possible.
+
+The compatibility matrix should cover session start, context loading, observation, session completion and feedback, while accounting for capabilities each client may not expose automatically.
+
+#### Installation and operations ergonomics
+
+Add operational commands such as:
+
+```text
+twin doctor
+twin setup ollama
+twin setup postgres
+twin setup mcp <client>
+```
+
+`twin doctor` should verify models, stores, pgvector, migrations, encryption configuration, policies, judgment profile, embeddings and MCP client configuration.
+
+#### Incremental developer sensors
+
+Add continuous but controlled ingestion for technical work before broader external connectors:
+
+- filesystem/document watching;
+- Git commits, branches and repository metadata;
+- changed ADRs and technical documentation;
+- optional session-produced artifact summaries.
+
+Preserve the distinction:
+
+```text
+artifact != percept != memory
+```
+
+An artifact is the original file, commit, PR or transcript; a percept is the normalized observation emitted by a sensor; a memory is consolidated knowledge extracted from evidence.
+
+#### v0.2 completion criteria
+
+v0.2 is complete when the following scenario works end to end:
+
+1. open a repository in Cursor or Claude Code;
+2. begin a task without re-explaining the complete architecture;
+3. `twin` identifies the project, domain and task profile;
+4. it supplies relevant decisions, constraints, preferences and evidence;
+5. the external tool completes the task;
+6. the cognitive session is completed;
+7. changes become percepts and candidate memories;
+8. the user can review and consolidate them;
+9. usefulness feedback is recorded;
+10. equivalent context remains available from another MCP client.
+
+### v0.3 — Memory Quality and Review at Scale
+
+Goal: make memory curation reliable as the number of sources and sessions grows.
+
+The first lifecycle primitives, source trust and quality metrics already exist. v0.3 should deepen them through:
+
+- batch review and keyboard-efficient review workflows;
+- side-by-side diffs for similar, conflicting and superseding memories;
+- merge and split operations beyond the existing supersede/contradict actions;
+- source-specific extraction calibration and trust adjustment;
+- review prioritization by impact, uncertainty and sensitivity;
+- evaluation datasets and repeatable extraction/retrieval benchmarks;
+- richer provenance chains from memory to percept to original artifact;
+- retention, archival and deletion propagation policies.
+
+### v0.4 — Evolving Judgment Model
+
+Goal: make different LLMs apply a stable yet evolving model of how the user evaluates trade-offs.
+
+Promotion from confirmed memories into the judgment profile already exists. v0.4 should add:
+
+- proposed judgment changes derived from repeated confirmed evidence;
+- explicit separation of preference, belief, principle, value, heuristic and hard constraint;
+- versioned judgment with temporal validity and provenance;
+- conflict detection between principles and observed behavior;
+- confidence and scope for each judgment item;
+- domain-specific decision criteria;
+- simulations that explain how a judgment profile affected a recommendation;
+- mandatory human approval for durable judgment changes.
+
+### v0.5 — Persona-aware Privacy and Governance
+
+Goal: prepare the system for sensitive personal domains without relying on the main LLM to enforce boundaries.
+
+Candidate memories are already excluded from packs by default, firewall decisions are logged, PII detection is broad and encryption is available. v0.5 should add:
+
+- policies scoped by persona, purpose, audience, source ownership and target tool;
+- explicit, time-limited permission grants;
+- contextual redaction rather than only allow/block decisions;
+- field-level sensitivity and encrypted searchable metadata where practical;
+- stronger default-deny rules for cross-domain retrieval;
+- consent and third-party-data policies;
+- prompt-injection quarantine for ingested content;
+- deletion propagation through memories, evidence, embeddings and exports;
+- privacy regression tests and intentional leakage canaries.
+
+### v0.6 — Professional Connectors
+
+Goal: capture operational knowledge from work through authorized, incremental connectors rather than manual exports alone.
+
+Prioritize:
+
+- GitHub repositories, commits, pull requests, issues and review discussions;
+- Slack channels and threads;
+- professional Gmail and Outlook;
 - Calendar;
-- GitHub;
-- docs;
 - Fireflies;
-- Meetily.
+- Meetily;
+- shared technical documents.
 
-Goal: capture operational knowledge from work.
+Each connector must preserve authorization, source ownership, incremental checkpoints, provenance, confidentiality and deletion behavior. Employer data should remain physically and cryptographically separable from personal data when policy requires it.
 
-### v0.7 — Personal domains
+### v0.7 — Personal Domains
 
-Careful expansion into:
+Goal: expand carefully from technical memory into a compartmentalized representation of personal life.
+
+Potential domains:
 
 - finance;
 - home;
 - personal goals;
-- relationship;
+- relationships;
 - family;
-- health.
+- health;
+- social identity.
 
-With strong PII, mandatory review and a stricter firewall.
+This version requires the governance work from v0.5, stronger PII/entity handling, explicit consent, stricter review and preferably physically separate vaults. It should not assume that information about third parties is automatically authorized for unrestricted ingestion or use.
 
-### v0.8 — Parallel Memory Observer
+### v0.8 — Parallel Memory and Consolidation
 
-Goal: an experience closer to an extended brain.
+Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model.
 
-Improvements:
+Build on the fast/deep observer introduced in v0.2 with:
 
-- real-time observer;
-- contextual suggestions;
-- domain confidence;
-- spontaneous memory;
-- silent blocking of forbidden memories.
+- real-time observation of supported sessions;
+- proactive but non-intrusive memory suggestions;
+- confidence-aware spontaneous recall;
+- parallel extraction of what changed during conversation;
+- daily and weekly consolidation cycles;
+- temporal belief and goal updates;
+- salience, novelty and contradiction detection;
+- silent blocking of forbidden memories;
+- clear separation between suggestion, memory candidate and durable consolidation.
 
-### v0.9 — Voice companion
+### v0.9 — Voice Companion
 
-Goal: reduce input friction.
+Goal: reduce the distance between thought and the external cognitive layer.
 
 Possibilities:
 
-- voice notes;
-- daily reflection;
-- local capture;
-- low latency;
-- conversational interface without replacing existing tools.
+- local voice notes and transcription;
+- low-latency conversational capture;
+- daily reflection and memory review;
+- meeting and environmental capture with explicit controls;
+- hands-free memory queries;
+- a conversational interface that complements rather than replaces existing tools.
 
 ### v1.0 — Personal Cognitive OS
 
-A trustworthy version of the infrastructure:
+A trustworthy, daily-usable version of the infrastructure with:
 
-- memory;
-- judgment;
-- firewall;
-- MCP;
-- observer;
-- review;
-- export;
-- backup;
-- documentation;
-- real daily use.
+- closed cognitive sessions;
+- reliable memory extraction and consolidation;
+- evolving judgment with human control;
+- persona-aware privacy and auditability;
+- mature MCP interoperability;
+- professional and selected personal connectors;
+- parallel observation and controlled consolidation;
+- export, backup, deletion and recovery;
+- measurable reduction in context re-explanation;
+- enough operational reliability to act as the user's persistent cognitive substrate.
 
 ---
 
@@ -1087,31 +1299,34 @@ A trustworthy version of the infrastructure:
 
 ### v2 — Extended Brain
 
-Add:
+Deepen the cognitive model beyond the initial memory lifecycle:
 
-- robust episodic memory;
+- robust episodic memory and autobiographical timelines;
 - consolidated semantic memory;
-- procedural memory;
-- routines;
-- goals;
-- planning;
-- daily/weekly reflection;
-- active persona.
+- procedural memory and learned workflows;
+- goals, routines and hierarchical plans;
+- active personas with controlled shared context;
+- daily/weekly reflection and consolidation;
+- uncertainty-aware mental-model evolution;
+- attention and salience mechanisms;
+- counterfactual reasoning over prior decisions.
 
 ### v3 — Cognitive Automation
 
-Add:
+Transform memory and judgment into safe action selection:
 
 - smart reminders;
 - automatic drafts;
 - follow-ups;
 - commitment detection;
 - action suggestions;
-- execution only with approval.
+- reversible automations;
+- approval and policy gates;
+- outcome feedback that updates procedures and judgment.
 
 ### v4 — Multimodal Life Layer
 
-Add:
+Extend perception beyond text:
 
 - voice;
 - screen;
@@ -1119,18 +1334,21 @@ Add:
 - documents;
 - meetings;
 - environment;
-- wearable data.
+- wearable data;
+- spatial and embodied context.
 
 ### v5 — Embodied / Robot-ready Memory
 
-Prepare for physical agents:
+Prepare the cognitive substrate for physical agents:
 
 - personal robots;
-- home assistant;
+- home assistants;
 - spatial memory;
 - household preferences;
 - physical routines;
-- interface with embedded systems.
+- object and environment models;
+- interfaces with embedded systems;
+- strict embodiment-specific safety and action permissions.
 
 ---
 
