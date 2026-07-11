@@ -1,25 +1,25 @@
-# Integrando o `twin` com clientes MCP
+# Integrating `twin` with MCP clients
 
-O `twin` expõe a memória via MCP por stdio: o cliente sobe o processo
-`twin mcp` e conversa com ele localmente. Nada sai da máquina.
+`twin` exposes memory over MCP via stdio: the client starts the `twin mcp`
+process and talks to it locally. Nothing leaves the machine.
 
-Pré-requisito: `pip install -e ".[mcp]"` (ou `.[dev]`) num Python acessível
-ao cliente, e `twin init` executado. Se usa Postgres/Ollama, garanta que o
-`docker compose up -d` esteja rodando antes de abrir o cliente.
+Prerequisite: `pip install -e ".[mcp]"` (or `.[dev]`) in a Python the client
+can reach, and `twin init` already executed. If you use Postgres/Ollama, make
+sure `docker compose up -d` is running before opening the client.
 
-> Dica geral: variáveis de ambiente (`TWIN_DB_URL`, `TWIN_OLLAMA_URL`, …)
-> devem ir no bloco `env` da configuração do cliente — GUIs como o Claude
-> Desktop não herdam o ambiente do seu shell.
+> General tip: environment variables (`TWIN_DB_URL`, `TWIN_OLLAMA_URL`, …)
+> must go in the client configuration's `env` block — GUIs like Claude
+> Desktop do not inherit your shell environment.
 
 ## Claude Code
 
 ```bash
 claude mcp add twin -- twin mcp
-# escopo de projeto (compartilhável via .mcp.json):
+# project scope (shareable via .mcp.json):
 claude mcp add --scope project twin -- twin mcp
 ```
 
-Ou direto no `.mcp.json` do projeto:
+Or directly in the project's `.mcp.json`:
 
 ```json
 {
@@ -35,7 +35,7 @@ Ou direto no `.mcp.json` do projeto:
 
 ## Claude Desktop
 
-Edite o arquivo de configuração:
+Edit the configuration file:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -45,7 +45,7 @@ Edite o arquivo de configuração:
 {
   "mcpServers": {
     "twin": {
-      "command": "/caminho/absoluto/para/twin",
+      "command": "/absolute/path/to/twin",
       "args": ["mcp"],
       "env": { "TWIN_DB_URL": "postgresql://twin:twin@localhost:5432/twin" }
     }
@@ -53,12 +53,12 @@ Edite o arquivo de configuração:
 }
 ```
 
-Use o caminho absoluto do executável (`which twin`) — apps de desktop nem
-sempre têm o seu `PATH`. Reinicie o app após editar.
+Use the executable's absolute path (`which twin`) — desktop apps do not
+always have your `PATH`. Restart the app after editing.
 
 ## Cursor
 
-`~/.cursor/mcp.json` (global) ou `.cursor/mcp.json` na raiz do projeto:
+`~/.cursor/mcp.json` (global) or `.cursor/mcp.json` at the project root:
 
 ```json
 {
@@ -72,42 +72,43 @@ sempre têm o seu `PATH`. Reinicie o app após editar.
 }
 ```
 
-Ative o servidor em Settings → MCP.
+Enable the server in Settings → MCP.
 
-## Outros clientes stdio
+## Other stdio clients
 
-Qualquer cliente compatível com MCP stdio funciona com:
+Any MCP stdio-compatible client works with:
 
 ```json
 { "command": "twin", "args": ["mcp"] }
 ```
 
-## Como um cliente deve usar as tools
+## How a client should use the tools
 
-1. **Comece tarefas técnicas com `memory_safe_context_pack`**, passando uma
-   descrição da tarefa em `query` e o `target_domain` correto (`technical`,
-   `work`, `personal_preferences`, `assistant_preferences`). O pack vem em
-   seções (judgment, decisions, constraints, tasks, preferences, facts,
-   evidence) já filtradas pelo Domain Firewall.
-2. Por padrão o pack só contém memórias **confirmadas** por humano. Só peça
-   `include_candidates=true` quando estiver explorando, e nunca trate um
-   `[candidate]` como fato estabelecido.
-3. **Respeite `blocked`**: são memórias retidas pelo firewall de privacidade.
-   Não tente contornar pedindo o conteúdo por outro caminho.
-4. Use `memory_search`/`memory_get` para aprofundar, `memory_related` e
-   `memory_project_context` para navegar o grafo, `memory_recent_decisions`
-   antes de propor mudanças de arquitetura.
-5. Cite `memory_id` quando usar conteúdo específico — todas as memórias têm
-   evidência verbatim rastreável.
-6. `memory_observe` serve para sugerir contexto durante uma conversa em
-   andamento; ele nunca responde ao usuário, apenas lembra.
+1. **Start technical tasks with `memory_safe_context_pack`**, passing a
+   description of the task in `query` and the correct `target_domain`
+   (`technical`, `work`, `personal_preferences`, `assistant_preferences`).
+   The pack comes in sections (judgment, decisions, constraints, tasks,
+   preferences, facts, evidence) already filtered by the Domain Firewall.
+2. By default the pack only contains memories **confirmed** by a human. Only
+   request `include_candidates=true` when exploring, and never treat a
+   `[candidate]` as established fact.
+3. **Respect `blocked`**: those are memories withheld by the privacy
+   firewall. Do not try to work around it by asking for the content some
+   other way.
+4. Use `memory_search`/`memory_get` to dig deeper, `memory_related` and
+   `memory_project_context` to navigate the graph, `memory_recent_decisions`
+   before proposing architecture changes.
+5. Cite the `memory_id` when using specific content — every memory has
+   traceable verbatim evidence.
+6. `memory_observe` is for suggesting context during an ongoing
+   conversation; it never answers the user, it only remembers.
 
 ## Troubleshooting
 
-| sintoma | causa provável |
+| symptom | likely cause |
 |---|---|
-| servidor não aparece no cliente | caminho não absoluto / `twin` fora do PATH do app |
-| `Unsupported TWIN_DB_URL` | `env` ausente na config do cliente |
-| packs vazios | nada confirmado ainda — rode `twin review` ou passe `include_candidates=true` |
-| busca semântica fraca | Ollama fora do ar (caiu para hash embedder) — suba o Ollama e rode `twin reindex` |
-| erro de conexão Postgres | `docker compose up -d` não está rodando |
+| server does not show up in the client | non-absolute path / `twin` outside the app's PATH |
+| `Unsupported TWIN_DB_URL` | missing `env` in the client config |
+| empty packs | nothing confirmed yet — run `twin review` or pass `include_candidates=true` |
+| weak semantic search | Ollama is down (fell back to the hash embedder) — bring Ollama up and run `twin reindex` |
+| Postgres connection error | `docker compose up -d` is not running |

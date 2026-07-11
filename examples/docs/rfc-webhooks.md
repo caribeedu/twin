@@ -3,28 +3,28 @@ author: Edu
 date: 2026-06-20
 ---
 
-# RFC: Arquitetura de webhooks do projeto Atlas
+# RFC: Webhooks architecture for the Atlas project
 
-## Contexto
+## Context
 
-O projeto Atlas precisa notificar sistemas externos quando pedidos mudam de
-estado. Hoje isso é feito por polling, o que gera carga desnecessária no
-banco.
+The Atlas project needs to notify external systems when orders change state.
+Today this is done by polling, which puts unnecessary load on the database.
 
-## Decisão
+## Decision
 
-Decidimos usar um outbox pattern com uma tabela `webhook_outbox` no Postgres e
-um worker dedicado que publica os eventos. Optamos por não usar Kafka neste
-momento: o volume atual (~2k eventos/dia) não justifica a complexidade
-operacional.
+We decided to use an outbox pattern with a `webhook_outbox` table in Postgres
+and a dedicated worker that publishes the events. We chose not to use Kafka at
+this point: the current volume (~2k events/day) does not justify the
+operational complexity.
 
-Alternativas rejeitadas:
-- Kafka: overhead operacional alto para o volume atual.
-- Trigger + pg_notify: frágil em caso de reconexão do consumer.
+Rejected alternatives:
 
-## Consequências
+- Kafka: high operational overhead for the current volume.
+- Trigger + pg_notify: fragile when the consumer reconnects.
 
-- O worker de webhooks fica responsável por retry com backoff exponencial.
-- TODO: Edu precisa revisar o esquema da tabela outbox até o fim do mês.
-- Restrição: não podemos entregar payloads com dados de cartão — compliance
-  PCI proíbe.
+## Consequences
+
+- The webhooks worker is responsible for retry with exponential backoff.
+- TODO: Edu needs to review the outbox table schema by the end of the month.
+- Constraint: we must not deliver payloads containing card data — PCI
+  compliance forbids it.
