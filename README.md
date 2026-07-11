@@ -430,9 +430,135 @@ MCP / API / CLI                    judgment profile (YAML)
 
 ---
 
-## 8. Stack and technical decisions
 
-### 8.1 Local-first
+## 8. Architecture Principles
+
+These principles are the constitution of `twin`. Roadmaps can change, backends can change and interfaces can change, but new features should remain compatible with these rules. When an implementation choice is ambiguous, the preferred option is the one that preserves safety, evidence, portability and cognitive continuity.
+
+### 8.1 Artifact ≠ Percept ≠ Memory ≠ Judgment
+
+An artifact is a source object: a transcript, document, email, note, issue, code file or message. A percept is what the system notices from that artifact. A memory is a durable structured claim extracted from one or more percepts. A judgment is a decision rule, preference, value or trade-off that influences future reasoning.
+
+Keeping these categories separate prevents the system from treating raw text as truth or treating a temporary interpretation as a stable belief. A meeting transcript may contain noise, jokes, contradictions and tentative ideas; a memory should preserve only what can be represented with evidence, confidence, time and domain. Judgment is even more sensitive: it changes how future tools act on behalf of the user and therefore requires a higher bar.
+
+This separation also gives implementers a practical test. If a feature stores everything it sees as memory, it is probably wrong. If it lets an LLM infer a durable judgment from one casual sentence without review, it is unsafe. If it can explain which artifact produced which percept, which percept became which memory and which memory influenced which judgment, it is aligned with the architecture.
+
+### 8.2 Canonical memory > embeddings
+
+The canonical memory of `twin` is structured, temporal, evidenced and exportable. It is made of memory items, entities, relations, evidence, domains, validity windows, confidence and status. Embeddings can help retrieve this memory, but they are not the memory itself.
+
+This matters because embeddings are opaque and model-dependent. They cannot reliably answer why a memory exists, when it was true, which source supports it or whether it is allowed in a given domain. A vector can make something searchable; it cannot be the authoritative representation of the user's life, projects or judgment.
+
+When there is a conflict between preserving clean canonical memory and improving vector search convenience, canonical memory wins. The system should be able to delete every embedding, regenerate indexes and still preserve the user's actual cognitive substrate.
+
+### 8.3 Embeddings are disposable indexes
+
+Embeddings are an implementation detail for retrieval. They are useful, powerful and often necessary, but they should be treated like cache files, search indexes or compiled artifacts: valuable for performance, not authoritative for truth.
+
+This principle protects the project from vendor lock-in and from accidental ontology drift. If a future embedding model is better, cheaper, more private or more local, `twin` should be able to re-embed everything without rewriting its memory model. If an embedding is corrupted, stale or produced by a deprecated model, the system should degrade search quality, not lose memory.
+
+Every embedding should therefore be reproducible from canonical content and metadata. Implementations should record enough information to know how an index was produced, but they should never require that index to be permanent.
+
+### 8.4 Firewall before the LLM
+
+Privacy and domain separation must happen before the main LLM sees context. The system must not retrieve everything and ask the model to be careful. The model should receive only the memories that are allowed for the current target domain, persona, sensitivity level and task.
+
+This is one of the project's hard safety boundaries. Once sensitive context enters a model prompt, the leak has already happened. Even if the model behaves well, the system has lost the ability to prove that forbidden content was not considered. A firewall is therefore not a formatting layer; it is an access-control layer.
+
+Features that bypass the firewall for convenience are architectural regressions. The right flow is retrieval, classification, filtering, logging and then context packing. The LLM reasons over the safe pack, not over the raw memory universe.
+
+### 8.5 Memory and judgment evolve independently
+
+Memory describes what happened, what was decided, what exists and what evidence supports it. Judgment describes how the user tends to decide, prioritize, reject, approve or communicate. They are related, but they should not be collapsed into the same mechanism.
+
+A new memory can be added without changing judgment. For example, a project may adopt PostgreSQL without changing the user's general preference for simple infrastructure. Conversely, judgment can evolve after many memories accumulate: repeated operational pain may change the user's preference away from distributed systems. The evolution paths are different.
+
+This independence makes the system safer and more explainable. Durable judgment changes should usually require stronger evidence, aggregation across sessions or explicit human approval. Memory can be frequent; judgment should be conservative.
+
+### 8.6 Sessions are the unit of cognitive change
+
+A session is where context, intention, evidence and interpretation meet. It may be a conversation, work block, meeting, debugging run or planning episode. `twin` should treat sessions as the primary unit for observing cognitive change.
+
+This prevents the system from overreacting to isolated sentences. A single utterance may be exploratory, emotional or provisional. A session gives the system enough surrounding context to understand whether something was a decision, a rejected option, a preference, a temporary constraint or just brainstorming.
+
+Session-based change also improves auditability. Instead of asking "why does the system believe this?", the user can inspect which session produced the candidate memory or judgment update, what evidence was present and whether the conclusion still holds.
+
+### 8.7 Evidence is mandatory
+
+Every durable memory must point back to evidence. Evidence can be a source document, transcript segment, commit, issue, note, calendar event, message or explicit user confirmation. Without evidence, the system may hold a hypothesis, but it should not promote it to confirmed memory.
+
+Evidence is what makes the system inspectable. It lets the user correct bad extraction, distinguish fact from interpretation and understand why a future LLM received a particular context pack. It also gives implementers a defense against silent hallucinated memory.
+
+This principle does not mean all evidence must be public or exposed to every tool. Evidence has its own sensitivity and domain. But the link must exist inside the local system so the user can audit, export, revise or delete it.
+
+### 8.8 Every memory has temporal validity
+
+Memories are not timeless strings. Preferences change, projects end, relationships evolve, architectures are replaced and old decisions become invalid under new constraints. A useful cognitive system must know not only what was true, but when it was true and when it may need review.
+
+Temporal validity can be explicit, such as `valid_from` and `valid_until`, or conditional, such as "revisit Kafka if volume exceeds 50k events/day". It can also be represented through supersedence: a newer memory may replace or narrow an older one without deleting history.
+
+This is essential for avoiding stale personalization. The system should not keep telling future tools that the user prefers something merely because it was true years ago. It should preserve history while making current context clear.
+
+### 8.9 Project-first cognition
+
+Much of the user's practical cognition is organized around projects. A project carries goals, constraints, decisions, rejected alternatives, people, artifacts, timelines, risks and conventions. `twin` should therefore make project context a first-class retrieval and organization unit.
+
+Project-first cognition avoids generic personalization. The same user may prefer different trade-offs in different projects: speed in a prototype, maintainability in a long-lived system, privacy in a personal tool, compliance in professional work. The project is often the missing boundary that tells the system which memories are relevant.
+
+Implementations should make it easy to ask: what does `twin` know about this project, what decisions are still valid, what alternatives were rejected and what context must not cross into other projects?
+
+### 8.10 MCP is the primary interface
+
+`twin` should be useful from many tools, not trapped inside a custom UI. MCP is the primary interface because it lets IDEs, desktop assistants, coding agents and future tools safely request memory, context and judgment through explicit capabilities.
+
+This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces. The goal is to make them better by giving them a portable, filtered and auditable cognitive substrate.
+
+A feature that only works in one UI is less valuable than a capability exposed through MCP, API and CLI. Interfaces may differ, but the same memory and firewall semantics should be available everywhere.
+
+### 8.11 Local-first by default
+
+The default assumption is that personal memory, judgment, evidence and indexes live locally under user control. Cloud services may be useful for specific extraction, backup or collaboration flows, but they should not become mandatory for the core system to function.
+
+Local-first is not nostalgia; it is a safety and agency requirement. The data in `twin` can contain private life context, third-party information, work constraints, health hints, relationship details and decision patterns. The user must be able to inspect it, back it up, delete it, move it and run the core system without asking a vendor for permission.
+
+This principle also improves longevity. A personal cognitive OS should outlive model providers, SaaS pricing changes and product shutdowns. Local data plus open export paths are what make that possible.
+
+### 8.12 Exportability over lock-in
+
+The user must be able to leave. Exportability is not a nice-to-have; it is a moral and architectural requirement for a system that stores personal cognition. Memories, evidence, entities, relations, policies, judgment profiles and indexes metadata should be representable in formats that can be inspected and migrated.
+
+This protects the user from the project itself. If `twin` succeeds, it may become deeply integrated into the user's thinking and work. That makes lock-in especially dangerous. The more important the system becomes, the easier it must be to audit and exit.
+
+Implementers should prefer boring, documented and portable representations over clever storage tricks that only one runtime understands. Performance optimizations are welcome when they do not compromise export.
+
+### 8.13 Human approval for durable judgment changes
+
+Judgment changes affect future behavior. They can change what the system recommends, blocks, prioritizes, summarizes or exposes. For that reason, durable changes to judgment should require explicit human approval or a conservative review workflow.
+
+The system may propose judgment updates. It may notice repeated patterns, contradictions or stable preferences. But proposing is different from deciding. A user saying "this project is messy" during a frustrating session should not automatically become a durable belief that the user hates complexity everywhere.
+
+This principle preserves agency. `twin` can learn with the user, but it should not silently rewrite the user's values, boundaries or decision model.
+
+### 8.14 Deterministic pipeline first; LLM where it adds measurable value
+
+The default architecture should be deterministic where correctness, safety and auditability matter: schema validation, domain filtering, policy enforcement, evidence links, status transitions, exports and logging. LLMs should be used where they add measurable value: extraction, summarization, classification assistance, semantic interpretation and candidate generation.
+
+This avoids building a system whose core behavior is impossible to reproduce or debug. If a memory was blocked, accepted, exported or marked as sensitive, the user should be able to understand the rule path. LLM output may inform the pipeline, but it should not replace the pipeline.
+
+A good implementation asks: what part must be reliable and testable, and what part benefits from language understanding? The answer should shape the boundary between code and model.
+
+### 8.15 Progressive sophistication (MVP before brain)
+
+`twin` is inspired by ambitious ideas: exocortex, cognitive architectures, memory systems and human-machine integration. But the implementation must progress through small, useful, testable stages. The project should earn complexity only after the simpler layer works.
+
+This protects the project from premature "brain-building". A reliable importer, memory schema, firewall, context pack and MCP tool are more valuable than an impressive but unsafe agent loop. The system should first remember accurately, filter safely and explain itself clearly.
+
+Progressive sophistication does not reduce the vision; it makes the vision survivable. Each version should create practical value while preserving the path toward deeper cognition.
+
+
+## 9. Stack and technical decisions
+
+### 9.1 Local-first
 
 Everything lives in `~/.twin` or `$TWIN_HOME`:
 
@@ -446,7 +572,7 @@ Backup = copy the folder.
 
 Full export = `twin export`.
 
-### 8.2 SQLite as a light graph
+### 9.2 SQLite as a light graph
 
 The MVP uses SQLite with tables for:
 
@@ -467,7 +593,7 @@ JSONB) and SQLite remains the zero-config backend for dev/tests.
 Neo4j, FalkorDB or Graphiti may come later, but the canonical memory must
 remain exportable.
 
-### 8.3 Vectors as index, not as memory
+### 9.3 Vectors as index, not as memory
 
 Embeddings are useful for semantic search, but they are not the true memory.
 
@@ -482,7 +608,7 @@ MCP = interface
 
 This avoids lock-in and allows reindexing in the future.
 
-### 8.4 Hybrid search
+### 9.4 Hybrid search
 
 Search combines:
 
@@ -493,7 +619,7 @@ Search combines:
 
 Search must answer not only "what looks semantically similar?", but "what is relevant, allowed and trustworthy for this context?".
 
-### 8.5 MCP-first
+### 9.5 MCP-first
 
 The project must not depend on its own UI. MCP lets external tools query `twin`.
 
@@ -513,9 +639,9 @@ Exposed tools:
 
 ---
 
-## 9. Data model
+## 10. Data model
 
-### 9.1 Memory Item
+### 10.1 Memory Item
 
 A memory item must contain:
 
@@ -540,7 +666,7 @@ A memory item must contain:
 }
 ```
 
-### 9.2 Memory types
+### 10.2 Memory types
 
 | Type | Meaning |
 |---|---|
@@ -555,7 +681,7 @@ A memory item must contain:
 | `communication_act` | communicative act: request, promise, refusal, apology, decision |
 | `constraint` | rule, limit or prohibition |
 
-### 9.3 Mandatory evidence
+### 10.3 Mandatory evidence
 
 Every memory must carry evidence, preferably a verbatim excerpt from the source.
 
@@ -563,7 +689,7 @@ Without evidence, a memory is suspect.
 
 This reduces memory hallucination and enables human review.
 
-### 9.4 Temporality
+### 10.4 Temporality
 
 Memories must have temporal validity.
 
@@ -586,7 +712,7 @@ Desired future:
 
 ---
 
-## 10. Ingestion and extraction pipeline
+## 11. Ingestion and extraction pipeline
 
 Flow:
 
@@ -630,7 +756,7 @@ Future sources:
 
 ---
 
-## 11. PII and privacy
+## 12. PII and privacy
 
 The project assumes that leaking personal data can cause real harm.
 
@@ -667,7 +793,7 @@ Rule: sensitive data must be blocked, masked, hashed or kept local.
 
 ---
 
-## 12. Selective review
+## 13. Selective review
 
 The user must not review everything manually. Review should happen by exception.
 
@@ -695,7 +821,7 @@ confirmed → superseded (future)
 
 ---
 
-## 13. Judgment profile
+## 14. Judgment profile
 
 Memories say **what happened**.
 
@@ -730,7 +856,7 @@ Important next step: allow the system to propose changes to the judgment profile
 
 ---
 
-## 14. Memory Observer
+## 15. Memory Observer
 
 The Memory Observer is a parallel AI/module that follows the current text and suggests related memories.
 
@@ -779,7 +905,7 @@ Desired format:
 
 ---
 
-## 15. Installation
+## 16. Installation
 
 ```bash
 pip install -e ".[dev]"        # everything (api + mcp + postgres + crypto + tests)
@@ -791,7 +917,7 @@ twin init                      # creates ~/.twin (policies.yaml, judgment.yaml)
 
 ---
 
-## 16. Basic flow
+## 17. Basic flow
 
 ```bash
 # 1. Ingestion: markdown, .txt transcripts, .json meetings, Slack .json exports
@@ -819,7 +945,7 @@ twin reindex                   # after switching embedders
 
 ---
 
-## 17. MCP
+## 18. MCP
 
 ```bash
 twin mcp
@@ -852,7 +978,7 @@ troubleshooting): [docs/mcp-clients.md](docs/mcp-clients.md).
 
 ---
 
-## 18. Local API
+## 19. Local API
 
 `twin serve` starts:
 
@@ -881,7 +1007,7 @@ Main endpoints:
 
 ---
 
-## 19. Configuration
+## 20. Configuration
 
 | variable | default | effect |
 |---|---|---|
@@ -900,7 +1026,7 @@ mix across different models.
 
 ---
 
-## 20. Tests
+## 21. Tests
 
 ```bash
 python -m pytest
@@ -921,7 +1047,7 @@ Expected coverage:
 
 ---
 
-## 21. MVP scope
+## 22. MVP scope
 
 Includes:
 
@@ -952,7 +1078,7 @@ Deliberately does not include:
 
 ---
 
-## 22. Roadmap
+## 23. Roadmap
 
 ### v0.1 — Local Technical Memory
 
@@ -1295,7 +1421,7 @@ A trustworthy, daily-usable version of the infrastructure with:
 
 ---
 
-## 23. Future major versions
+## 24. Future major versions
 
 ### v2 — Extended Brain
 
@@ -1352,7 +1478,7 @@ Prepare the cognitive substrate for physical agents:
 
 ---
 
-## 24. Related projects
+## 25. Related projects
 
 ### Graphiti / Zep
 
@@ -1386,7 +1512,7 @@ Inspiration for continuous local capture of screen/audio/context. Not an MVP pri
 
 ---
 
-## 25. Success metrics
+## 26. Success metrics
 
 ### MVP
 
@@ -1414,9 +1540,9 @@ The MVP is successful if it:
 
 ---
 
-## 26. Risks
+## 27. Risks
 
-### 26.1 Privacy
+### 27.1 Privacy
 
 Maximum risk. The system may contain intimate and professional information. Mitigations:
 
@@ -1429,7 +1555,7 @@ Maximum risk. The system may contain intimate and professional information. Miti
 - export/delete;
 - future encryption.
 
-### 26.2 Memory hallucination
+### 27.2 Memory hallucination
 
 LLMs can extract false memories. Mitigations:
 
@@ -1440,7 +1566,7 @@ LLMs can extract false memories. Mitigations:
 - blocking candidates in critical contexts;
 - internal citations.
 
-### 26.3 Domain mixing
+### 27.3 Domain mixing
 
 The most dangerous operational risk. Mitigations:
 
@@ -1450,7 +1576,7 @@ The most dangerous operational risk. Mitigations:
 - explicit target_domain;
 - tested policies.
 
-### 26.4 Overengineering
+### 27.4 Overengineering
 
 The risk of trying to build the whole brain before the MVP. Mitigation:
 
@@ -1460,7 +1586,7 @@ The risk of trying to build the whole brain before the MVP. Mitigation:
 - use MCP;
 - measure real usefulness.
 
-### 26.5 Vendor dependency
+### 27.5 Vendor dependency
 
 Mitigation:
 
@@ -1472,7 +1598,7 @@ Mitigation:
 
 ---
 
-## 27. Practical philosophy of the project
+## 28. Practical philosophy of the project
 
 `twin` must follow these principles:
 
@@ -1491,7 +1617,7 @@ exportability > lock-in
 
 ---
 
-## 28. Final definition
+## 29. Final definition
 
 `twin` is a personal, local-first, interoperable and temporal layer of memory, judgment, privacy and context.
 
