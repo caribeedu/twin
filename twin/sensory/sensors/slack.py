@@ -45,4 +45,8 @@ class SlackSensor(Sensor):
             content="\n".join(lines),
             content_refs=[{"kind": "file", "path": str(path)}],
             privacy_hints={"domain_hint": "work"},
+            # informal chat: lower trust, may contain third-party content
+            source_trust=0.6,
+            source_scope="work",
+            source_confidentiality="private",
         ).seal()

@@ -28,6 +28,15 @@ class Percept(BaseModel):
     privacy_hints: dict[str, Any] = Field(default_factory=dict)  # {domain_hint, sensitivity_hint}
     integrity: dict[str, Any] = Field(default_factory=dict)      # {content_hash, size_bytes}
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # -- source qualification (README §27.3) -------------------------------
+    # how much extracted memories from this source can be trusted (0..1);
+    # scales the confidence of everything derived from the percept
+    source_trust: float = 0.8
+    # which life scope the source belongs to (work | technical | personal | ...)
+    source_scope: str = "work"
+    # confidentiality floor: memories derived from this percept can never be
+    # LESS sensitive than this (public | internal | private | restricted)
+    source_confidentiality: str = "internal"
 
     def seal(self) -> "Percept":
         """Fill integrity fields from content (idempotent)."""

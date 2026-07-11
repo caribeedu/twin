@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass, field
 
 from .. import ids
-from ..config import Config
+from ..config import SENSITIVITY_ORDER, Config
 from ..judgment.pii import mask
 from ..memory.embeddings import Embedder
 from ..memory.models import Evidence, MemoryItem, Relation
@@ -60,9 +60,21 @@ def _run_extractor(cfg: Config, percept: Percept) -> tuple[ExtractionResult, int
     return heuristic_extractor.extract(percept), len(findings)
 
 
-def _needs_review(cfg: Config, mem: ExtractedMemory) -> str | None:
+def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept) -> ExtractedMemory:
+    """Source metadata shapes the derived memory (README §27.3):
+    trust scales confidence; confidentiality is a sensitivity floor."""
+    extracted.confidence = round(extracted.confidence * percept.source_trust, 3)
+    order = SENSITIVITY_ORDER
+    if order.index(extracted.sensitivity) < order.index(percept.source_confidentiality):
+        extracted.sensitivity = percept.source_confidentiality
+    return extracted
+
+
+def _needs_review(cfg: Config, mem: ExtractedMemory, percept: Percept) -> str | None:
     if mem.confidence < cfg.review_confidence_threshold:
         return f"low confidence ({mem.confidence:.2f})"
+    if percept.source_trust < cfg.low_trust_threshold:
+        return f"low-trust source ({percept.source_trust:.2f})"
     if mem.sensitivity in ("private", "restricted"):
         return f"sensitivity {mem.sensitivity}"
     if mem.type in ("belief", "procedure"):
@@ -80,7 +92,7 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     report.pii_findings = pii_count
 
     for extracted in result.memories:
-        extracted = extracted.normalized()
+        extracted = _apply_source_qualification(extracted.normalized(), percept)
         dedupe_text = f"{extracted.title}\n{extracted.summary}"
         verdict = dedupe_check(store, embedder, extracted.type, dedupe_text)
 
@@ -95,7 +107,7 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             report.duplicates += 1
             continue
 
-        review_reason = _needs_review(cfg, extracted)
+        review_reason = _needs_review(cfg, extracted, percept)
         if verdict.action == "review" and verdict.existing_id:
             review_reason = review_reason or (
                 f"similar to {verdict.existing_id} (cos={verdict.similarity:.2f}) — update or contradiction?"

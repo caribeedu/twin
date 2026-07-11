@@ -49,8 +49,10 @@ def test_search_blocks_cross_domain(store, cfg, embedder):
 
 def test_context_pack_respects_budget_and_includes_judgment(store, cfg, embedder):
     _populate(store, cfg, embedder)
+    # heuristic extraction yields candidates only → opt in explicitly (§27.1)
     pack = build_context_pack(store, cfg, embedder, "escrever RFC sobre webhooks do Atlas",
-                              target_domain="technical", max_tokens=400)
+                              target_domain="technical", max_tokens=400,
+                              include_candidates=True)
     assert pack.context_pack
     assert len(pack.context_pack) <= 400 * 4 + 200  # small tolerance
     assert "Judgment profile" in pack.context_pack

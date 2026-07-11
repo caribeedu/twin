@@ -8,6 +8,7 @@ from typing import Optional
 
 from .config import Config, load_config
 from .judgment.firewall import Firewall
+from .memory.crypto import build_codec
 from .memory.embeddings import Embedder, get_embedder
 from .memory.store import MemoryStore, create_store
 
@@ -16,7 +17,8 @@ class Workspace:
     def __init__(self, home: Optional[str | Path] = None):
         self.cfg: Config = load_config(home)
         self.cfg.ensure_home()
-        self.store: MemoryStore = create_store(self.cfg.resolved_db_url)
+        codec = build_codec(self.cfg.encryption_key, self.cfg.home)
+        self.store: MemoryStore = create_store(self.cfg.resolved_db_url, codec=codec)
         self.embedder: Embedder = get_embedder(
             self.cfg.embedder, self.cfg.embedding_dim,
             ollama_url=self.cfg.ollama_url, ollama_model=self.cfg.ollama_embed_model,

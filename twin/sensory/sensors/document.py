@@ -44,5 +44,9 @@ class DocumentSensor(Sensor):
             content_refs=[{"kind": "file", "path": str(path)}],
             privacy_hints={"domain_hint": "technical"},
             metadata=meta,
+            # authored technical docs: high trust, technical scope
+            source_trust=0.9,
+            source_scope="technical",
+            source_confidentiality="internal",
         )
         yield percept.seal()

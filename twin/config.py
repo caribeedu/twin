@@ -59,6 +59,13 @@ class Config:
     embedder: str = os.environ.get("TWIN_EMBEDDER", "auto")
     embedding_dim: int = int(os.environ.get("TWIN_EMBEDDING_DIM", "512"))
 
+    # -- privacy -------------------------------------------------------------
+    # when set, percept content + evidence quotes are encrypted at rest
+    # (requires: pip install "twin[crypto]")
+    encryption_key: str = os.environ.get("TWIN_ENCRYPTION_KEY", "")
+    # sources with trust below this always send their memories to review
+    low_trust_threshold: float = 0.65
+
     @property
     def resolved_db_url(self) -> str:
         return self.db_url or f"sqlite:///{self.home / 'twin.db'}"

@@ -40,6 +40,7 @@ class PackRequest(BaseModel):
     target_domain: str = "technical"
     max_tokens: int = 1200
     include_judgment: bool = True
+    include_candidates: bool = False  # confirmed-only by default (§27.1)
 
 
 def _mem_dict(mem) -> dict[str, Any]:
@@ -131,8 +132,49 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   target_domain=req.target_domain,
                                   max_tokens=req.max_tokens,
                                   include_judgment=req.include_judgment,
+                                  include_candidates=req.include_candidates,
                                   firewall=ws.firewall)
         return pack.__dict__
+
+    @app.post("/api/memories/{memory_id}/promote")
+    def api_promote(memory_id: str):
+        from ..judgment.profile import promote_memory
+
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        try:
+            section = promote_memory(ws.cfg.judgment_path, mem)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        ws.store.update_memory(memory_id, payload={**mem.payload, "promoted_to_judgment": True})
+        return {"memory_id": memory_id, "promoted_to": section}
+
+    @app.post("/api/memories/{memory_id}/supersede/{old_id}")
+    def api_supersede(memory_id: str, old_id: str):
+        from ..memory.lifecycle import supersede
+
+        try:
+            result = supersede(ws.store, memory_id, old_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return result.__dict__
+
+    @app.post("/api/memories/{memory_id}/contradict/{other_id}")
+    def api_contradict(memory_id: str, other_id: str):
+        from ..memory.lifecycle import contradict
+
+        try:
+            result = contradict(ws.store, memory_id, other_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return result.__dict__
+
+    @app.get("/api/metrics")
+    def api_metrics():
+        from ..memory.metrics import compute_metrics
+
+        return compute_metrics(ws.store)
 
     @app.post("/api/observer")
     def api_observer(req: ObserveRequest):

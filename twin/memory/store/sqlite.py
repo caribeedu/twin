@@ -9,6 +9,7 @@ from typing import Any, Iterable, Optional
 
 from ... import ids
 from ...sensory.percept import Percept
+from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import Entity, Evidence, MemoryItem, Relation
 from .base import MemoryStore, now_iso
@@ -27,6 +28,9 @@ CREATE TABLE IF NOT EXISTS percepts (
     privacy_hints TEXT NOT NULL DEFAULT '{}',
     integrity TEXT NOT NULL DEFAULT '{}',
     metadata TEXT NOT NULL DEFAULT '{}',
+    source_trust REAL NOT NULL DEFAULT 0.8,
+    source_scope TEXT NOT NULL DEFAULT 'work',
+    source_confidentiality TEXT NOT NULL DEFAULT 'internal',
     content_hash TEXT NOT NULL UNIQUE
 );
 
@@ -113,7 +117,8 @@ CREATE TABLE IF NOT EXISTS firewall_log (
 
 
 class SqliteStore(MemoryStore):
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, codec: ContentCodec | None = None):
+        self.codec = codec or NullCodec()
         self.path = Path(path)
         if str(path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +130,19 @@ class SqliteStore(MemoryStore):
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive column migrations for databases created by older versions."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(percepts)")}
+        for name, ddl in (
+            ("source_trust", "REAL NOT NULL DEFAULT 0.8"),
+            ("source_scope", "TEXT NOT NULL DEFAULT 'work'"),
+            ("source_confidentiality", "TEXT NOT NULL DEFAULT 'internal'"),
+        ):
+            if name not in cols:
+                self.conn.execute(f"ALTER TABLE percepts ADD COLUMN {name} {ddl}")
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -141,30 +159,35 @@ class SqliteStore(MemoryStore):
         self.conn.execute(
             "INSERT INTO percepts (id, percept_type, source_sensor, occurred_at,"
             " ingested_at, actors, content, content_refs, attachments,"
-            " privacy_hints, integrity, metadata, content_hash)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " privacy_hints, integrity, metadata, source_trust, source_scope,"
+            " source_confidentiality, content_hash)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 percept.id, percept.percept_type, percept.source_sensor,
                 percept.occurred_at, percept.ingested_at or now_iso(),
-                json.dumps(percept.actors), percept.content,
+                json.dumps(percept.actors), self.codec.encrypt(percept.content),
                 json.dumps(percept.content_refs), json.dumps(percept.attachments),
                 json.dumps(percept.privacy_hints), json.dumps(percept.integrity),
-                json.dumps(percept.metadata), percept.content_hash,
+                json.dumps(percept.metadata), percept.source_trust,
+                percept.source_scope, percept.source_confidentiality,
+                percept.content_hash,
             ),
         )
         self.conn.commit()
         return percept.id
 
-    @staticmethod
-    def _row_to_percept(row: sqlite3.Row) -> Percept:
+    def _row_to_percept(self, row: sqlite3.Row) -> Percept:
         return Percept(
             id=row["id"], percept_type=row["percept_type"],
             source_sensor=row["source_sensor"], occurred_at=row["occurred_at"],
             ingested_at=row["ingested_at"], actors=json.loads(row["actors"]),
-            content=row["content"], content_refs=json.loads(row["content_refs"]),
+            content=self.codec.decrypt(row["content"]),
+            content_refs=json.loads(row["content_refs"]),
             attachments=json.loads(row["attachments"]),
             privacy_hints=json.loads(row["privacy_hints"]),
             integrity=json.loads(row["integrity"]), metadata=json.loads(row["metadata"]),
+            source_trust=row["source_trust"], source_scope=row["source_scope"],
+            source_confidentiality=row["source_confidentiality"],
         )
 
     def get_percept(self, percept_id: str) -> Optional[Percept]:
@@ -302,7 +325,7 @@ class SqliteStore(MemoryStore):
     def insert_evidence(self, ev: Evidence) -> str:
         self.conn.execute(
             "INSERT INTO evidence (id, memory_id, percept_id, quote) VALUES (?,?,?,?)",
-            (ev.id, ev.memory_id, ev.percept_id, ev.quote),
+            (ev.id, ev.memory_id, ev.percept_id, self.codec.encrypt(ev.quote)),
         )
         self.conn.commit()
         return ev.id
@@ -311,7 +334,10 @@ class SqliteStore(MemoryStore):
         rows = self.conn.execute(
             "SELECT * FROM evidence WHERE memory_id = ?", (memory_id,)
         ).fetchall()
-        return [Evidence(**dict(r)) for r in rows]
+        return [
+            Evidence(**{**dict(r), "quote": self.codec.decrypt(r["quote"])})
+            for r in rows
+        ]
 
     # -- entities & relations ------------------------------------------------
 
@@ -402,6 +428,16 @@ class SqliteStore(MemoryStore):
         except sqlite3.OperationalError:
             return {}
         return {r["memory_id"]: -float(r["score"]) for r in rows}
+
+    # -- metrics -----------------------------------------------------------------
+
+    def count_evidence(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
+
+    def count_firewall_blocks(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM firewall_log WHERE action = 'block'"
+        ).fetchone()[0]
 
     # -- firewall log ----------------------------------------------------------------
 

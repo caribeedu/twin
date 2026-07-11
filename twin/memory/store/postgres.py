@@ -16,6 +16,7 @@ from typing import Any, Iterable, Optional
 
 from ... import ids
 from ...sensory.percept import Percept
+from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import Entity, Evidence, MemoryItem, Relation
 from .base import MemoryStore, now_iso
@@ -34,8 +35,14 @@ CREATE TABLE IF NOT EXISTS percepts (
     privacy_hints JSONB NOT NULL DEFAULT '{}',
     integrity JSONB NOT NULL DEFAULT '{}',
     metadata JSONB NOT NULL DEFAULT '{}',
+    source_trust REAL NOT NULL DEFAULT 0.8,
+    source_scope TEXT NOT NULL DEFAULT 'work',
+    source_confidentiality TEXT NOT NULL DEFAULT 'internal',
     content_hash TEXT NOT NULL UNIQUE
 );
+ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_trust REAL NOT NULL DEFAULT 0.8;
+ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_scope TEXT NOT NULL DEFAULT 'work';
+ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_confidentiality TEXT NOT NULL DEFAULT 'internal';
 
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
@@ -135,10 +142,11 @@ def _vec_literal(vector: list[float]) -> str:
 
 
 class PostgresStore(MemoryStore):
-    def __init__(self, url: str):
+    def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
         from psycopg.rows import dict_row
 
+        self.codec = codec or NullCodec()
         self.conn = psycopg.connect(url, row_factory=dict_row, autocommit=True)
         # psycopg connections are not thread-safe; FastAPI sync endpoints run
         # in a thread pool, so serialize access.
@@ -171,28 +179,32 @@ class PostgresStore(MemoryStore):
         self._exec(
             "INSERT INTO percepts (id, percept_type, source_sensor, occurred_at,"
             " ingested_at, actors, content, content_refs, attachments,"
-            " privacy_hints, integrity, metadata, content_hash)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " privacy_hints, integrity, metadata, source_trust, source_scope,"
+            " source_confidentiality, content_hash)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 percept.id, percept.percept_type, percept.source_sensor,
                 percept.occurred_at, percept.ingested_at or now_iso(),
-                json.dumps(percept.actors), percept.content,
+                json.dumps(percept.actors), self.codec.encrypt(percept.content),
                 json.dumps(percept.content_refs), json.dumps(percept.attachments),
                 json.dumps(percept.privacy_hints), json.dumps(percept.integrity),
-                json.dumps(percept.metadata), percept.content_hash,
+                json.dumps(percept.metadata), percept.source_trust,
+                percept.source_scope, percept.source_confidentiality,
+                percept.content_hash,
             ),
         )
         return percept.id
 
-    @staticmethod
-    def _row_to_percept(row: dict) -> Percept:
+    def _row_to_percept(self, row: dict) -> Percept:
         return Percept(
             id=row["id"], percept_type=row["percept_type"],
             source_sensor=row["source_sensor"], occurred_at=row["occurred_at"],
             ingested_at=row["ingested_at"], actors=row["actors"],
-            content=row["content"], content_refs=row["content_refs"],
+            content=self.codec.decrypt(row["content"]), content_refs=row["content_refs"],
             attachments=row["attachments"], privacy_hints=row["privacy_hints"],
             integrity=row["integrity"], metadata=row["metadata"],
+            source_trust=row["source_trust"], source_scope=row["source_scope"],
+            source_confidentiality=row["source_confidentiality"],
         )
 
     def get_percept(self, percept_id: str) -> Optional[Percept]:
@@ -312,14 +324,14 @@ class PostgresStore(MemoryStore):
     def insert_evidence(self, ev: Evidence) -> str:
         self._exec(
             "INSERT INTO evidence (id, memory_id, percept_id, quote) VALUES (%s,%s,%s,%s)",
-            (ev.id, ev.memory_id, ev.percept_id, ev.quote),
+            (ev.id, ev.memory_id, ev.percept_id, self.codec.encrypt(ev.quote)),
         )
         return ev.id
 
     def get_evidence(self, memory_id: str) -> list[Evidence]:
         rows = self._exec("SELECT id, memory_id, percept_id, quote FROM evidence"
                           " WHERE memory_id = %s", (memory_id,))
-        return [Evidence(**r) for r in rows]
+        return [Evidence(**{**r, "quote": self.codec.decrypt(r["quote"])}) for r in rows]
 
     # -- entities & relations ------------------------------------------------
 
@@ -431,6 +443,16 @@ class PostgresStore(MemoryStore):
             (tsquery, limit),
         )
         return {r["id"]: float(r["score"]) for r in rows}
+
+    # -- metrics -----------------------------------------------------------------
+
+    def count_evidence(self) -> int:
+        return int(self._exec("SELECT COUNT(*) AS n FROM evidence")[0]["n"])
+
+    def count_firewall_blocks(self) -> int:
+        return int(self._exec(
+            "SELECT COUNT(*) AS n FROM firewall_log WHERE action = 'block'"
+        )[0]["n"])
 
     # -- firewall log ----------------------------------------------------------------
 

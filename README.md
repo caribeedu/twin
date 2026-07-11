@@ -419,7 +419,7 @@ filtro PII ──────────────► nada sensível sai para
 memórias candidatas ──► dedupe ──► fila de revisão seletiva
         │  aprovação humana quando necessário
         ▼
-SQLite: memórias + entidades + relações + evidências + embeddings + FTS5
+store (Postgres+pgvector primário | SQLite dev): memórias + entidades + relações + evidências + embeddings + FTS
         │
         ▼
 busca híbrida ──► Domain Firewall ──► context pack compacto
@@ -460,7 +460,12 @@ O MVP usa SQLite com tabelas de:
 - firewall_log;
 - FTS5.
 
-Essa escolha evita infraestrutura pesada cedo demais. Neo4j, FalkorDB ou Graphiti podem entrar depois, mas a memória canônica deve continuar exportável.
+Essa escolha evita infraestrutura pesada cedo demais. Hoje o storage vive
+atrás de uma interface única (`MemoryStore`): **PostgreSQL + pgvector é o
+backend primário** (busca vetorial server-side, tsvector/GIN para full-text,
+JSONB) e o SQLite permanece como backend zero-config para dev/testes.
+Neo4j, FalkorDB ou Graphiti podem entrar depois, mas a memória canônica deve
+continuar exportável.
 
 ### 8.3 Vetores como índice, não como memória
 
@@ -631,16 +636,17 @@ O projeto assume que vazamento de dados pessoais pode causar dano real.
 
 Antes de qualquer LLM cloud, o texto deve passar por máscara de PII.
 
-Classes iniciais:
+Classes cobertas hoje:
 
 - e-mails;
 - telefones;
-- CPF;
-- CNPJ;
-- cartões;
-- API keys;
-- tokens;
-- senhas;
+- CPF / CNPJ / RG / CEP;
+- endereços (Rua/Av./…);
+- cartões, IBAN, chaves PIX;
+- IPs;
+- API keys (OpenAI-style, GitHub/GitLab PATs, Slack, AWS, Google);
+- JWTs e bearer tokens;
+- senhas e atribuições de segredo;
 - private keys.
 
 Antes de fontes pessoais reais, expandir para:
@@ -776,11 +782,11 @@ Formato desejado:
 ## 15. Instalação
 
 ```bash
-pip install -e ".[dev]"        # tudo (api + mcp + testes)
+pip install -e ".[dev]"        # tudo (api + mcp + postgres + crypto + testes)
 # ou granular:
-pip install -e ".[api,mcp,llm]"
+pip install -e ".[api,mcp,postgres,crypto]"
 
-twin init                      # cria ~/.twin (db, policies.yaml, judgment.yaml)
+twin init                      # cria ~/.twin (policies.yaml, judgment.yaml)
 ```
 
 ---
@@ -802,6 +808,13 @@ twin serve             # UI web em http://127.0.0.1:8765
 twin search "qual stack usamos no serviço de webhooks"
 twin pack "escrever RFC de arquitetura do Atlas" --domain technical
 twin observe "estou revisando o retry dos webhooks"
+
+# 5. Curadoria e ciclo de vida
+twin promote mem_xxx           # memória vira parte do judgment profile
+twin supersede mem_novo mem_antigo
+twin contradict mem_a mem_b
+twin stats                     # métricas de qualidade da memória
+twin reindex                   # após trocar de embedder
 ```
 
 ---
@@ -832,7 +845,10 @@ Uso recomendado para clientes:
 3. respeitar `blocked`;
 4. não pedir memórias sensíveis sem autorização explícita;
 5. citar fontes/memórias quando usar conteúdo específico;
-6. não tratar `candidate` como fato definitivo.
+6. não tratar `candidate` como fato definitivo (por padrão, packs já vêm só com memórias confirmadas).
+
+Guia de integração por cliente (Claude Code, Claude Desktop, Cursor,
+troubleshooting): [docs/mcp-clients.md](docs/mcp-clients.md).
 
 ---
 
@@ -849,11 +865,17 @@ Endpoints principais:
 ```text
 /api/ingest
 /api/extract
+/api/percepts
 /api/memories
+/api/memories/{id}/review
+/api/memories/{id}/promote
+/api/memories/{id}/supersede/{old_id}
+/api/memories/{id}/contradict/{other_id}
 /api/search
 /api/context_pack
 /api/observer
 /api/judgment
+/api/metrics
 /api/export
 ```
 
@@ -863,12 +885,18 @@ Endpoints principais:
 
 | variável | default | efeito |
 |---|---|---|
-| `TWIN_HOME` | `~/.twin` | diretório de dados |
-| `TWIN_EXTRACTOR` | `auto` | `auto` / `llm` / `heuristic` |
-| `TWIN_EXTRACTION_MODEL` | `claude-opus-4-8` | modelo de extração |
-| `TWIN_EMBEDDER` | `hash` | `hash` / `sentence-transformers` |
+| `TWIN_HOME` | `~/.twin` | diretório de config (policies/judgment) |
+| `TWIN_DB_URL` | `sqlite:///~/.twin/twin.db` | `postgresql://…` seleciona o backend primário (pgvector) |
+| `TWIN_OLLAMA_URL` | `http://127.0.0.1:11434` | servidor Ollama local |
+| `TWIN_OLLAMA_MODEL` | `qwen3:8b` | modelo local de extração |
+| `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text` | modelo local de embeddings |
+| `TWIN_EXTRACTOR` | `auto` | `auto` / `ollama` / `heuristic` |
+| `TWIN_EMBEDDER` | `auto` | `auto` / `ollama` / `hash` |
+| `TWIN_ENCRYPTION_KEY` | — | quando setada, criptografa conteúdo bruto e evidências em repouso |
 
-O embedder default é local, determinístico e regenerável. Embeddings não são fonte da verdade.
+Tudo roda com modelos locais; não existe opção de LLM em nuvem. Embeddings
+não são fonte da verdade: são regeneráveis (`twin reindex`) e nunca se
+misturam entre modelos diferentes.
 
 ---
 
@@ -1228,16 +1256,18 @@ Mitigação:
 
 ## 27. Próximas melhorias imediatas recomendadas
 
-1. Bloquear `candidate` por padrão nos context packs.
-2. Separar o context pack em seções: judgment, decisions, constraints, tasks, preferences, evidence.
-3. Adicionar `source_trust`, `source_scope` e `source_confidentiality`.
-4. Criar fluxo de “promover memória para judgment”.
-5. Melhorar inferência de domínio do observer.
-6. Expandir PII antes de fontes pessoais reais.
-7. Adicionar criptografia local opcional.
-8. Adicionar métricas de qualidade de memória.
-9. Adicionar suporte a supersedência/contradição explícita.
-10. Melhorar documentação de integração MCP com clientes reais.
+Status v0.1: **todas implementadas.**
+
+1. ✅ Bloquear `candidate` por padrão nos context packs — packs só trazem memórias confirmadas; `include_candidates` é opt-in explícito (CLI/API/MCP).
+2. ✅ Separar o context pack em seções — judgment, decisions, constraints, open tasks, preferences, facts & events e evidence (citações verbatim dos top hits).
+3. ✅ Adicionar `source_trust`, `source_scope` e `source_confidentiality` — campos do Percept, definidos por sensor; trust escala a confiança das memórias derivadas, confidencialidade é piso de sensibilidade, fonte de baixa confiança força revisão.
+4. ✅ Criar fluxo de “promover memória para judgment” — `twin promote` / `POST /api/memories/{id}/promote` move preferências/crenças/procedimentos confirmados para o judgment.yaml (seções `promoted_*`).
+5. ✅ Melhorar inferência de domínio do observer — keywords + votos do grafo (domínios das memórias ligadas às entidades citadas no texto).
+6. ✅ Expandir PII — além de e-mail/CPF/CNPJ/cartão/telefone/chaves: RG, CEP, endereços, IPs, IBAN, chaves PIX, JWTs, bearer tokens, GitHub/GitLab PATs.
+7. ✅ Adicionar criptografia local opcional — `TWIN_ENCRYPTION_KEY` criptografa conteúdo bruto de percepts e evidências em repouso (Fernet + PBKDF2, `pip install "twin[crypto]"`); títulos/sumários ficam em claro para busca.
+8. ✅ Adicionar métricas de qualidade de memória — `twin stats` / `GET /api/metrics`: taxa de aprovação (proxy de precisão de extração), taxa de duplicatas, backlog de revisão, distribuição de confiança, bloqueios do firewall.
+9. ✅ Adicionar supersedência/contradição explícita — `twin supersede`/`twin contradict` fecham validade temporal, criam arestas `supersedes`/`contradicts` e tiram memórias velhas de circulação.
+10. ✅ Melhorar documentação de integração MCP — [docs/mcp-clients.md](docs/mcp-clients.md) com configs reais (Claude Code, Claude Desktop, Cursor) e troubleshooting.
 
 ---
 
