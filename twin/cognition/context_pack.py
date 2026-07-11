@@ -4,10 +4,10 @@ Given a task description and a target domain, returns a compact, firewall-
 filtered context pack ready to prepend to an external LLM's prompt, with
 sources and the list of blocked memories (ids + rule only, never content).
 
-README §27.1: only *confirmed* memories enter a pack by default — candidates
-must be explicitly requested (``include_candidates=True``) and are tagged.
-README §27.2: the pack is organized in sections — judgment, decisions,
-constraints, tasks, preferences, facts & events, evidence.
+Only *confirmed* memories enter a pack by default — candidates must be
+explicitly requested (``include_candidates=True``) and are tagged. The pack
+is organized in sections: judgment, decisions, constraints, tasks,
+preferences, facts & events, evidence.
 """
 
 from __future__ import annotations

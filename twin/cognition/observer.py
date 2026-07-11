@@ -48,8 +48,8 @@ _CANDIDATE_ENTITY_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]{2,}(?:\s+[A-Z][a-zA-Z0-9]
 
 def _graph_domain_votes(store: MemoryStore, text: str) -> dict[str, int]:
     """Entities mentioned in the text vote with the domains of the memories
-    they are attached to (README §27.5: inference informed by the graph,
-    not just keywords)."""
+    they are attached to — inference informed by the graph, not just
+    keywords."""
     votes: dict[str, int] = {}
     seen: set[str] = set()
     for match in _CANDIDATE_ENTITY_RE.finditer(text):

@@ -61,7 +61,7 @@ def _run_extractor(cfg: Config, percept: Percept) -> tuple[ExtractionResult, int
 
 
 def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept) -> ExtractedMemory:
-    """Source metadata shapes the derived memory (README §27.3):
+    """Source metadata shapes the derived memory:
     trust scales confidence; confidentiality is a sensitivity floor."""
     extracted.confidence = round(extracted.confidence * percept.source_trust, 3)
     order = SENSITIVITY_ORDER

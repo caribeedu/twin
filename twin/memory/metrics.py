@@ -1,4 +1,4 @@
-"""Memory quality metrics (README §27.8).
+"""Memory quality metrics.
 
 Answers "is the memory layer actually good?" with numbers the README's
 success-metrics section asks for: extraction precision proxy, duplicate

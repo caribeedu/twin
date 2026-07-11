@@ -1,4 +1,4 @@
-"""Explicit memory lifecycle transitions (README §27.9).
+"""Explicit memory lifecycle transitions.
 
 Opinions change and decisions get replaced — the graph must say so
 explicitly instead of letting stale memories compete with current ones.

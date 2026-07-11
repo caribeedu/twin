@@ -1254,24 +1254,7 @@ Mitigação:
 
 ---
 
-## 27. Próximas melhorias imediatas recomendadas
-
-Status v0.1: **todas implementadas.**
-
-1. ✅ Bloquear `candidate` por padrão nos context packs — packs só trazem memórias confirmadas; `include_candidates` é opt-in explícito (CLI/API/MCP).
-2. ✅ Separar o context pack em seções — judgment, decisions, constraints, open tasks, preferences, facts & events e evidence (citações verbatim dos top hits).
-3. ✅ Adicionar `source_trust`, `source_scope` e `source_confidentiality` — campos do Percept, definidos por sensor; trust escala a confiança das memórias derivadas, confidencialidade é piso de sensibilidade, fonte de baixa confiança força revisão.
-4. ✅ Criar fluxo de “promover memória para judgment” — `twin promote` / `POST /api/memories/{id}/promote` move preferências/crenças/procedimentos confirmados para o judgment.yaml (seções `promoted_*`).
-5. ✅ Melhorar inferência de domínio do observer — keywords + votos do grafo (domínios das memórias ligadas às entidades citadas no texto).
-6. ✅ Expandir PII — além de e-mail/CPF/CNPJ/cartão/telefone/chaves: RG, CEP, endereços, IPs, IBAN, chaves PIX, JWTs, bearer tokens, GitHub/GitLab PATs.
-7. ✅ Adicionar criptografia local opcional — `TWIN_ENCRYPTION_KEY` criptografa conteúdo bruto de percepts e evidências em repouso (Fernet + PBKDF2, `pip install "twin[crypto]"`); títulos/sumários ficam em claro para busca.
-8. ✅ Adicionar métricas de qualidade de memória — `twin stats` / `GET /api/metrics`: taxa de aprovação (proxy de precisão de extração), taxa de duplicatas, backlog de revisão, distribuição de confiança, bloqueios do firewall.
-9. ✅ Adicionar supersedência/contradição explícita — `twin supersede`/`twin contradict` fecham validade temporal, criam arestas `supersedes`/`contradicts` e tiram memórias velhas de circulação.
-10. ✅ Melhorar documentação de integração MCP — [docs/mcp-clients.md](docs/mcp-clients.md) com configs reais (Claude Code, Claude Desktop, Cursor) e troubleshooting.
-
----
-
-## 28. Filosofia prática do projeto
+## 27. Filosofia prática do projeto
 
 `twin` deve seguir estes princípios:
 
@@ -1290,7 +1273,7 @@ exportabilidade > lock-in
 
 ---
 
-## 29. Definição final
+## 28. Definição final
 
 `twin` é uma camada pessoal, local-first, interoperável e temporal de memória, julgamento, privacidade e contexto.
 

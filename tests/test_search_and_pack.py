@@ -49,7 +49,7 @@ def test_search_blocks_cross_domain(store, cfg, embedder):
 
 def test_context_pack_respects_budget_and_includes_judgment(store, cfg, embedder):
     _populate(store, cfg, embedder)
-    # heuristic extraction yields candidates only → opt in explicitly (§27.1)
+    # heuristic extraction yields candidates only → opt in explicitly
     pack = build_context_pack(store, cfg, embedder, "escrever RFC sobre webhooks do Atlas",
                               target_domain="technical", max_tokens=400,
                               include_candidates=True)
@@ -70,3 +70,67 @@ def test_observer_suggests_and_infers_domain(store, cfg, embedder):
     for item in suggestion.suggested_context:
         assert item["allowed"] is True
         assert item["memory_id"].startswith("mem_")
+
+
+def _confirmed_mem(store, embedder, **kw):
+    from twin import ids
+    from twin.memory.models import MemoryItem
+
+    base = dict(id=ids.memory_id(), type="fact", title="t", summary="s",
+                domain="technical", confidence=0.9, status="confirmed")
+    base.update(kw)
+    mem = MemoryItem(**base)
+    store.insert_memory(mem)
+    store.store_embedding(mem.id, "memory", embedder.name,
+                          embedder.embed(f"{mem.title}\n{mem.summary}"))
+    return mem
+
+
+def test_pack_excludes_candidates_by_default(store, cfg, embedder):
+    _populate(store, cfg, embedder)  # heuristic output → all candidates
+    pack = build_context_pack(store, cfg, embedder, "FastAPI webhooks Atlas")
+    assert pack.sources == []  # nothing confirmed yet
+
+    pack_loose = build_context_pack(store, cfg, embedder, "FastAPI webhooks Atlas",
+                                    include_candidates=True)
+    assert pack_loose.sources
+    assert "[candidate]" in pack_loose.context_pack
+
+
+def test_pack_includes_confirmed(store, cfg, embedder):
+    _confirmed_mem(store, embedder, type="decision",
+                   title="Usar FastAPI nos webhooks",
+                   summary="Decisão: FastAPI no backend de webhooks.")
+    pack = build_context_pack(store, cfg, embedder, "FastAPI webhooks")
+    assert len(pack.sources) == 1
+    assert pack.sources[0]["status"] == "confirmed"
+
+
+def test_pack_is_sectioned_with_evidence(store, cfg, embedder):
+    from twin.cognition import extract_percept
+    from twin.memory.models import MemoryStatus
+
+    percepts, _ = sense_paths([EXAMPLES / "transcripts"])
+    percept = percepts[0]
+    store.insert_percept(percept)
+    report = extract_percept(store, cfg, embedder, percept)
+    for mid in report.inserted:
+        store.set_status(mid, MemoryStatus.confirmed)
+    pack = build_context_pack(store, cfg, embedder,
+                              "FastAPI webhooks Atlas decisões tarefas", max_tokens=2000)
+    assert "## Judgment profile" in pack.context_pack
+    assert "## Decisions" in pack.context_pack
+    assert "## Open tasks" in pack.context_pack
+    assert "## Evidence" in pack.context_pack
+    # evidence quotes reference memory ids
+    assert "[mem_" in pack.context_pack
+
+
+def test_infer_domain_uses_graph_entities(store, embedder):
+    _confirmed_mem(store, embedder, type="preference", domain="assistant_preferences",
+                   title="Respostas diretas", summary="Prefere respostas diretas.",
+                   entities=["Falstaff"])
+    # no keywords at all — only the entity connects to a domain
+    assert infer_domain("o que você sabe sobre Falstaff?", store) == "assistant_preferences"
+    # keywords still win without a store
+    assert infer_domain("o que você sabe sobre Falstaff?") == "technical"

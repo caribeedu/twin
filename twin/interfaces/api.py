@@ -40,7 +40,7 @@ class PackRequest(BaseModel):
     target_domain: str = "technical"
     max_tokens: int = 1200
     include_judgment: bool = True
-    include_candidates: bool = False  # confirmed-only by default (§27.1)
+    include_candidates: bool = False  # packs are confirmed-only by default
 
 
 def _mem_dict(mem) -> dict[str, Any]:

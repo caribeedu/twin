@@ -1,4 +1,4 @@
-"""Optional local encryption at rest (README §27.7).
+"""Optional local encryption at rest.
 
 When ``TWIN_ENCRYPTION_KEY`` is set (and the ``cryptography`` package is
 installed), the raw text the system holds — percept content and verbatim

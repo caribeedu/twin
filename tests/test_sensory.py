@@ -73,3 +73,14 @@ def test_store_dedupes_percepts_by_content(store):
     assert store.insert_percept(percepts[0]) is not None
     again, _ = sense_paths([EXAMPLES / "docs"])
     assert store.insert_percept(again[0]) is None
+
+
+def test_source_qualification_fields_roundtrip(store):
+    percepts, _ = sense_paths([EXAMPLES / "transcripts"])
+    percept = percepts[0]
+    assert percept.source_trust == 0.7  # meeting transcript sensor default
+    store.insert_percept(percept)
+    loaded = store.get_percept(percept.id)
+    assert loaded.source_trust == 0.7
+    assert loaded.source_scope == "work"
+    assert loaded.source_confidentiality == "internal"

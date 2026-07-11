@@ -2,7 +2,7 @@
 different LLMs act consistently. Stored as YAML the user edits directly;
 exposed read-only through the API/MCP.
 
-Memories can be *promoted* into the profile (README §27.4): a confirmed
+Memories can be *promoted* into the profile: a confirmed
 preference/belief/procedure that proved stable graduates from "something
 that happened" to "how the user thinks" and starts riding along in every
 context pack.
@@ -37,7 +37,7 @@ _PROMOTION_SECTIONS = {
 
 
 def promote_memory(path: Path | str, mem: "MemoryItem") -> str:
-    """Append a memory to the judgment profile (README §27.4).
+    """Append a memory to the judgment profile.
 
     Returns the profile section it was added to. Idempotent per memory id.
     Raises ValueError for memory types that don't belong in judgment.
