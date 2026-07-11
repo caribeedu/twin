@@ -125,6 +125,14 @@ class MemoryStore(ABC):
     @abstractmethod
     def log_firewall(self, memory_id: str, target_domain: str, rule: str, action: str) -> None: ...
 
+    # -- metrics ------------------------------------------------------------------
+
+    @abstractmethod
+    def count_evidence(self) -> int: ...
+
+    @abstractmethod
+    def count_firewall_blocks(self) -> int: ...
+
     @abstractmethod
     def close(self) -> None: ...
 

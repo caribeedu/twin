@@ -155,15 +155,20 @@ def create_server(home: Optional[str] = None):
         target_domain: str = "technical",
         max_tokens: int = 1200,
         include_judgment: bool = True,
+        include_candidates: bool = False,
     ) -> str:
         """MAIN TOOL — call this at the start of a task. Returns a compact,
-        privacy-filtered context pack (judgment profile + relevant memories)
-        to ground your work in the user's real context. `query` should
-        describe the task you are about to do."""
+        privacy-filtered context pack (judgment profile + relevant memories,
+        organized in sections: decisions, constraints, tasks, preferences,
+        facts, evidence) to ground your work in the user's real context.
+        Only human-confirmed memories are included unless you explicitly set
+        include_candidates=true — never treat candidates as established fact.
+        `query` should describe the task you are about to do."""
         pack = build_context_pack(
             ws.store, ws.cfg, ws.embedder, query,
             target_domain=target_domain, max_tokens=max_tokens,
-            include_judgment=include_judgment, firewall=ws.firewall,
+            include_judgment=include_judgment,
+            include_candidates=include_candidates, firewall=ws.firewall,
         )
         return json.dumps({
             "context_pack": pack.context_pack,

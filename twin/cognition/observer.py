@@ -43,14 +43,49 @@ class ObserverSuggestion:
     inferred_domain: str = "technical"
 
 
-def infer_domain(text: str) -> str:
+_CANDIDATE_ENTITY_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]{2,}(?:\s+[A-Z][a-zA-Z0-9]+)*\b")
+
+
+def _graph_domain_votes(store: MemoryStore, text: str) -> dict[str, int]:
+    """Entities mentioned in the text vote with the domains of the memories
+    they are attached to — inference informed by the graph, not just
+    keywords."""
+    votes: dict[str, int] = {}
+    seen: set[str] = set()
+    for match in _CANDIDATE_ENTITY_RE.finditer(text):
+        name = match.group(0)
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        entity = store.get_entity_by_name(name)
+        if entity is None:
+            continue
+        for mem in store.memories_for_entity(entity.id)[:20]:
+            if mem.status.value in ("rejected", "deprecated", "contradicted"):
+                continue
+            votes[mem.domain] = votes.get(mem.domain, 0) + 1
+    return votes
+
+
+def infer_domain(text: str, store: Optional[MemoryStore] = None) -> str:
+    """Keyword hints + (when a store is given) domain votes from the graph."""
     lowered = text.lower()
-    best_domain, best_hits = "technical", 0
+    scores: dict[str, float] = {}
     for domain, keywords in _DOMAIN_HINTS:
         hits = sum(1 for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", lowered))
-        if hits > best_hits:
-            best_domain, best_hits = domain, hits
-    return best_domain
+        if hits:
+            scores[domain] = scores.get(domain, 0.0) + float(hits)
+    if store is not None:
+        graph_votes = _graph_domain_votes(store, text)
+        total = sum(graph_votes.values())
+        if total:
+            # graph signal is capped at the weight of ~2 keyword hits so a
+            # heavily-populated domain can't drown explicit wording
+            for domain, count in graph_votes.items():
+                scores[domain] = scores.get(domain, 0.0) + 2.0 * (count / total)
+    if not scores:
+        return "technical"
+    return max(scores, key=scores.get)  # ties resolve by insertion (keywords first)
 
 
 def observe(
@@ -63,7 +98,7 @@ def observe(
     min_score: float = 0.15,
     firewall: Optional[Firewall] = None,
 ) -> ObserverSuggestion:
-    domain = target_domain or infer_domain(current_text)
+    domain = target_domain or infer_domain(current_text, store)
     firewall = firewall or Firewall(cfg.policies_path, store)
     result = search(
         store, embedder, current_text,

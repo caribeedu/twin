@@ -1,304 +1,304 @@
 # twin — Personal Cognitive OS
 
-`twin` é uma camada **local-first** de memória, julgamento, privacidade e contexto pessoal, consultável por qualquer LLM/ferramenta via **MCP**, API HTTP local e CLI.
+`twin` is a **local-first** layer of personal memory, judgment, privacy and context, queryable by any LLM/tool via **MCP**, a local HTTP API and a CLI.
 
-O projeto nasce de uma pergunta prática: **como reduzir a fricção de ter que reexplicar minha vida, meus projetos, minhas decisões, meu estilo e meu contexto toda vez que abro uma nova LLM?**
+The project is born from a practical question: **how do I reduce the friction of having to re-explain my life, my projects, my decisions, my style and my context every time I open a new LLM?**
 
-A resposta proposta não é “criar mais um chatbot”. Também não é simplesmente “fazer um RAG”. O objetivo é construir uma infraestrutura pessoal, portátil e evolutiva: uma representação computacional da memória, do contexto e do julgamento do usuário, capaz de ser consumida por ferramentas diferentes — Cursor, Claude Desktop, Claude Code, ChatGPT, modelos locais, agentes futuros, interfaces de voz e, eventualmente, sistemas físicos.
+The proposed answer is not "build yet another chatbot". Nor is it simply "do RAG". The goal is to build a personal, portable and evolving infrastructure: a computational representation of the user's memory, context and judgment, consumable by different tools — Cursor, Claude Desktop, Claude Code, ChatGPT, local models, future agents, voice interfaces and, eventually, physical systems.
 
-Em uma frase:
+In one sentence:
 
-> Não construir uma IA que lembra de mim; construir uma infraestrutura cognitiva pessoal que qualquer IA possa consultar com segurança.
-
----
-
-## 1. Visão
-
-A visão de longo prazo do `twin` é funcionar como um **exocórtex pessoal**: uma extensão externa da cognição do usuário, capaz de manter continuidade entre ferramentas, sessões, modelos e contextos.
-
-O sistema deve preservar:
-
-- fatos importantes;
-- decisões tomadas;
-- alternativas rejeitadas;
-- tarefas e compromissos;
-- preferências técnicas;
-- preferências de comunicação;
-- padrões de julgamento;
-- crenças e opiniões que mudam com o tempo;
-- relações entre pessoas, projetos, sistemas e eventos;
-- evidências de onde cada memória veio;
-- limites rígidos entre domínios da vida;
-- privacidade, PII e controle humano.
-
-A ambição final é se aproximar de uma experiência de **integração homem-máquina**: não uma IA distante, mas uma camada que parece cognitivamente acoplada ao usuário. A inspiração estética e emocional vem de ficção científica, ciborgues, Matrix, Half-Life, Dexter, robótica e interfaces homem-máquina, mas a implementação deve ser sóbria, local-first, auditável e incremental.
+> Not building an AI that remembers me; building a personal cognitive infrastructure that any AI can safely consult.
 
 ---
 
-## 2. O problema
+## 1. Vision
 
-LLMs modernas são extremamente úteis, mas normalmente operam com contexto incompleto. Mesmo com janelas longas e memória de produto, o usuário ainda precisa repetir:
+The long-term vision for `twin` is to work as a **personal exocortex**: an external extension of the user's cognition, capable of maintaining continuity across tools, sessions, models and contexts.
 
-- quem ele é;
-- como prefere respostas;
-- o que já foi decidido;
-- o que está tentando construir;
-- quais restrições existem;
-- quais trade-offs já foram avaliados;
-- quais ferramentas usa;
-- quais decisões antigas ainda valem;
-- quais domínios não devem se misturar.
+The system must preserve:
 
-Para um usuário avançado de IA, RAG, MCP, vetorização, PII, pipelines e agentes, o problema não é “como carregar arquivos no contexto”. O problema é mais profundo:
+- important facts;
+- decisions made;
+- rejected alternatives;
+- tasks and commitments;
+- technical preferences;
+- communication preferences;
+- judgment patterns;
+- beliefs and opinions that change over time;
+- relationships between people, projects, systems and events;
+- evidence of where each memory came from;
+- hard boundaries between life domains;
+- privacy, PII and human control.
 
-> Como criar uma representação persistente, segura, linkável, temporal e interoperável da minha mente/contexto, para que diferentes LLMs consigam operar com menos explicação e mais entendimento?
-
-O ponto central é que **integração não significa apenas baixa latência**. Latência ajuda, mas o que realmente falta é **compreensão operacional**: a IA precisa entender o que determinada memória significa, quando ela vale, em qual domínio ela pode ser usada e como ela deve afetar uma decisão.
+The ultimate ambition is to approach an experience of **human-machine integration**: not a distant AI, but a layer that feels cognitively coupled to the user. The aesthetic and emotional inspiration comes from science fiction, cyborgs, Matrix, Half-Life, Dexter, robotics and human-machine interfaces, but the implementation must be sober, local-first, auditable and incremental.
 
 ---
 
-## 3. O que o projeto não é
+## 2. The problem
 
-`twin` não deve ser entendido como:
+Modern LLMs are extremely useful, but they usually operate with incomplete context. Even with long windows and product memory, the user still needs to repeat:
 
-- um chatbot;
-- um app de notas;
-- um RAG genérico;
-- um agente autônomo;
-- um banco vetorial com markdowns;
-- um clone de Jarvis;
-- uma UI própria para substituir ChatGPT, Claude ou Cursor.
+- who they are;
+- how they prefer answers;
+- what has already been decided;
+- what they are trying to build;
+- which constraints exist;
+- which trade-offs have already been evaluated;
+- which tools they use;
+- which old decisions still hold;
+- which domains must not mix.
 
-O projeto é uma camada de infraestrutura:
+For an advanced user of AI, RAG, MCP, vectorization, PII, pipelines and agents, the problem is not "how to load files into context". The problem is deeper:
+
+> How do I create a persistent, safe, linkable, temporal and interoperable representation of my mind/context, so that different LLMs can operate with less explanation and more understanding?
+
+The central point is that **integration does not just mean low latency**. Latency helps, but what is really missing is **operational understanding**: the AI needs to understand what a given memory means, when it holds, in which domain it may be used and how it should affect a decision.
+
+---
+
+## 3. What the project is not
+
+`twin` must not be understood as:
+
+- a chatbot;
+- a note-taking app;
+- generic RAG;
+- an autonomous agent;
+- a vector database full of markdown;
+- a Jarvis clone;
+- its own UI to replace ChatGPT, Claude or Cursor.
+
+The project is an infrastructure layer:
 
 ```text
-fontes pessoais/profissionais
+personal/professional sources
         ↓
-ingestão + normalização
+ingestion + normalization
         ↓
-filtro PII + classificação de domínio
+PII filter + domain classification
         ↓
-extração de memórias estruturadas
+structured memory extraction
         ↓
-grafo temporal + evidências + índices
+temporal graph + evidence + indexes
         ↓
-firewall de privacidade + julgamento
+privacy firewall + judgment
         ↓
-context packs seguros
+safe context packs
         ↓
-MCP / API / CLI / LLMs / IDEs / agentes
+MCP / API / CLI / LLMs / IDEs / agents
 ```
 
-A UI principal continua podendo ser externa. O usuário não deve perder a conveniência de ferramentas existentes. Por isso o MCP é parte central da arquitetura.
+The main UI can remain external. The user must not lose the convenience of existing tools. That is why MCP is a central part of the architecture.
 
 ---
 
-## 4. Fundamentos acadêmicos e conceituais
+## 4. Academic and conceptual foundations
 
-O projeto é inspirado por várias áreas: filosofia da mente, ciência cognitiva, neurociência, psicologia, IA simbólica, knowledge graphs, interação humano-computador e arquiteturas cognitivas.
+The project draws on several areas: philosophy of mind, cognitive science, neuroscience, psychology, symbolic AI, knowledge graphs, human-computer interaction and cognitive architectures.
 
-### 4.1 Extended Mind — Andy Clark e David Chalmers
+### 4.1 Extended Mind — Andy Clark and David Chalmers
 
-A hipótese da **mente estendida**, proposta por Andy Clark e David Chalmers em “The Extended Mind” (1998), defende que ferramentas externas podem se tornar parte do processo cognitivo quando são confiáveis, disponíveis e integradas ao comportamento.
+The **extended mind** hypothesis, proposed by Andy Clark and David Chalmers in "The Extended Mind" (1998), argues that external tools can become part of the cognitive process when they are reliable, available and integrated into behavior.
 
-O exemplo clássico é Otto, uma pessoa com Alzheimer que usa um caderno como memória externa. Se uma pessoa neurotípica consulta a memória biológica e Otto consulta o caderno de modo igualmente confiável, Clark e Chalmers perguntam: funcionalmente, por que o caderno não faria parte do sistema cognitivo?
+The classic example is Otto, a person with Alzheimer's who uses a notebook as external memory. If a neurotypical person consults biological memory and Otto consults the notebook in an equally reliable way, Clark and Chalmers ask: functionally, why wouldn't the notebook be part of the cognitive system?
 
-`twin` aplica essa intuição ao mundo de LLMs:
+`twin` applies that intuition to the world of LLMs:
 
 ```text
-usuário pensa / fala / escreve
+user thinks / speaks / writes
         ↓
-twin recupera contexto, julgamento e memórias relevantes
+twin retrieves relevant context, judgment and memories
         ↓
-LLM principal raciocina com esse substrato
+main LLM reasons over that substrate
         ↓
-usuário continua pensando com a máquina
+user keeps thinking with the machine
 ```
 
-A meta não é apenas “armazenar dados”, mas criar um sistema acoplado à cognição do usuário.
+The goal is not just "storing data", but creating a system coupled to the user's cognition.
 
 ### 4.2 4E Cognition
 
-A corrente da **4E cognition** entende a cognição como:
+The **4E cognition** school understands cognition as:
 
-- embodied — incorporada ao corpo;
-- embedded — situada em ambiente;
-- extended — estendida por ferramentas;
-- enactive — produzida na interação ativa com o mundo.
+- embodied — incorporated in the body;
+- embedded — situated in an environment;
+- extended — extended through tools;
+- enactive — produced in active interaction with the world.
 
-Essa linha é relevante porque o projeto não trata pensamento como algo isolado dentro do cérebro. O usuário pensa com ferramentas, IDEs, documentos, reuniões, Slack, e-mail, calendário, voz, notas e LLMs. O `twin` tenta transformar esse conjunto disperso em uma camada computacional coerente.
+This line matters because the project does not treat thinking as something isolated inside the brain. The user thinks with tools, IDEs, documents, meetings, Slack, email, calendar, voice, notes and LLMs. `twin` tries to turn that scattered set into a coherent computational layer.
 
-### 4.3 Sistemas de memória
+### 4.3 Memory systems
 
-A psicologia cognitiva e a neurociência distinguem múltiplos sistemas de memória. Isso inspira a separação interna do projeto.
+Cognitive psychology and neuroscience distinguish multiple memory systems. This inspires the project's internal separation.
 
-| Sistema cognitivo | Função | Abstração no `twin` |
+| Cognitive system | Function | Abstraction in `twin` |
 |---|---|---|
-| Memória episódica | eventos, reuniões, conversas, contexto temporal | `event`, `source`, `evidence`, timeline |
-| Memória semântica | fatos, conceitos, relações consolidadas | `fact`, entidades, relações, grafo |
-| Memória procedural | modos de fazer, hábitos, workflows | `procedure`, playbooks, scripts |
-| Working memory | foco atual da tarefa | query atual, observer, context pack |
-| Controle executivo | seleção, inibição, julgamento | Domain Firewall, policies, judgment profile |
+| Episodic memory | events, meetings, conversations, temporal context | `event`, `source`, `evidence`, timeline |
+| Semantic memory | facts, concepts, consolidated relationships | `fact`, entities, relations, graph |
+| Procedural memory | ways of doing, habits, workflows | `procedure`, playbooks, scripts |
+| Working memory | current task focus | current query, observer, context pack |
+| Executive control | selection, inhibition, judgment | Domain Firewall, policies, judgment profile |
 
-O hipocampo inspira a camada de captura episódica e consolidação temporal. O córtex associativo inspira a memória semântica. O córtex pré-frontal inspira a camada de julgamento, inibição e seleção de contexto.
+The hippocampus inspires the episodic capture and temporal consolidation layer. The associative cortex inspires semantic memory. The prefrontal cortex inspires the judgment, inhibition and context selection layer.
 
-### 4.4 Hipocampo, consolidação e temporalidade
+### 4.4 Hippocampus, consolidation and temporality
 
-O hipocampo é associado à memória episódica, navegação contextual, ligação entre eventos e consolidação. Computacionalmente, isso sugere que o sistema não deve guardar apenas documentos brutos, mas eventos com:
+The hippocampus is associated with episodic memory, contextual navigation, linking between events and consolidation. Computationally, this suggests the system should not store only raw documents, but events with:
 
-- data;
-- fonte;
-- participantes;
-- evidência;
-- domínio;
-- validade;
-- relação com memórias anteriores.
+- date;
+- source;
+- participants;
+- evidence;
+- domain;
+- validity;
+- relationship to previous memories.
 
-Exemplo:
+Example:
 
 ```text
 2026-07-01
-Reunião Atlas kickoff
-Participantes: Edu, Marina, Rafael
-Decisão: usar Postgres outbox + worker dedicado
-Alternativa rejeitada: Kafka
-Condição futura: revisitar Kafka se volume > 50k eventos/dia
+Atlas kickoff meeting
+Participants: Edu, Marina, Rafael
+Decision: use Postgres outbox + dedicated worker
+Rejected alternative: Kafka
+Future condition: revisit Kafka if volume > 50k events/day
 ```
 
-Isso é mais útil que uma transcrição inteira jogada no contexto.
+This is more useful than an entire transcript dumped into context.
 
-### 4.5 Córtex pré-frontal, julgamento e inibição
+### 4.5 Prefrontal cortex, judgment and inhibition
 
-O córtex pré-frontal está associado a planejamento, controle executivo, inibição, seleção de ações, metas e tomada de decisão. A inspiração computacional é clara: memória sozinha não basta.
+The prefrontal cortex is associated with planning, executive control, inhibition, action selection, goals and decision making. The computational inspiration is clear: memory alone is not enough.
 
-Sem julgamento, cada LLM interpreta o usuário de um jeito. Com julgamento explícito, diferentes modelos podem operar com princípios mais consistentes.
+Without judgment, each LLM interprets the user in its own way. With explicit judgment, different models can operate with more consistent principles.
 
-Exemplo:
+Example:
 
 ```yaml
 principles:
-  - privacidade > conveniência em dados pessoais
-  - manutenção > arquitetura bonita em projeto pessoal
-  - não misturar contexto íntimo com trabalho
-  - preferir clareza direta a polidez vazia
+  - privacy > convenience for personal data
+  - maintainability > beautiful architecture in personal projects
+  - never mix intimate context with work
+  - prefer direct clarity over empty politeness
 ```
 
-Isso é diferente de uma memória factual. É um modelo de decisão.
+This is different from a factual memory. It is a decision model.
 
-### 4.6 Amígdala, saliência e risco
+### 4.6 Amygdala, salience and risk
 
-A amígdala e circuitos límbicos estão associados a saliência emocional, medo, risco, recompensa e relevância afetiva. Em uma versão futura, o `twin` deve representar algo análogo a **saliência**:
+The amygdala and limbic circuits are associated with emotional salience, fear, risk, reward and affective relevance. In a future version, `twin` should represent something analogous to **salience**:
 
-- isso é urgente?
-- isso é emocionalmente sensível?
-- isso pode causar dano se vazar?
-- isso é importante para decisões futuras?
-- isso deve virar memória ou ser descartado?
+- is this urgent?
+- is this emotionally sensitive?
+- can this cause harm if leaked?
+- is this important for future decisions?
+- should this become a memory or be discarded?
 
-No MVP, essa função aparece parcialmente como `sensitivity`, `confidence`, `needs_review` e `review_reason`.
+In the MVP, this function partially shows up as `sensitivity`, `confidence`, `needs_review` and `review_reason`.
 
-### 4.7 Gânglios da base e seleção de ação
+### 4.7 Basal ganglia and action selection
 
-Gânglios da base são frequentemente associados a seleção de ação, hábitos e loops de decisão. Para o projeto, isso inspira versões futuras com automações seguras:
+The basal ganglia are frequently associated with action selection, habits and decision loops. For the project, this inspires future versions with safe automations:
 
 ```text
-memória + contexto + julgamento
+memory + context + judgment
         ↓
-seleção de ação possível
+selection of a possible action
         ↓
-rascunho / lembrete / sugestão / automação com aprovação
+draft / reminder / suggestion / automation with approval
 ```
 
-O MVP não executa ações autônomas de propósito. Antes de agir, o sistema precisa aprender a lembrar, filtrar e julgar.
+The MVP deliberately does not execute autonomous actions. Before acting, the system needs to learn to remember, filter and judge.
 
 ### 4.8 Global Workspace Theory — Bernard Baars, Stanislas Dehaene
 
-A **Global Workspace Theory** propõe que vários módulos especializados operam em paralelo, mas apenas algumas informações se tornam globalmente disponíveis para atenção, linguagem, memória de trabalho e ação.
+**Global Workspace Theory** proposes that several specialized modules operate in parallel, but only some information becomes globally available for attention, language, working memory and action.
 
-Isso inspira diretamente o **Memory Observer**:
+This directly inspires the **Memory Observer**:
 
 ```text
-LLM principal conversa com o usuário
+main LLM talks with the user
         ↓
-um observador paralelo lê a tarefa/conversa
+a parallel observer reads the task/conversation
         ↓
-busca memórias possivelmente relacionadas
+searches possibly related memories
         ↓
-filtra por domínio, confiança e privacidade
+filters by domain, confidence and privacy
         ↓
-sugere contexto à IA principal
+suggests context to the main AI
 ```
 
-A experiência desejada é parecida com “lembrar” algo: o usuário não quer consultar manualmente uma base. O sistema deve sugerir aquilo que parece relevante, sem vazar conteúdo proibido.
+The desired experience resembles "remembering" something: the user does not want to manually query a database. The system should suggest what looks relevant, without leaking forbidden content.
 
 ### 4.9 ACT-R — John R. Anderson
 
-ACT-R é uma arquitetura cognitiva que separa componentes declarativos e procedurais, com mecanismos de ativação, recuperação e produção. O projeto se inspira nessa separação:
+ACT-R is a cognitive architecture that separates declarative and procedural components, with activation, retrieval and production mechanisms. The project draws on that separation:
 
-- memória declarativa: fatos, eventos, decisões;
-- memória procedural: como o usuário costuma fazer algo;
-- produção/ação: regras e critérios de decisão;
-- ativação: relevância da memória para o contexto atual.
+- declarative memory: facts, events, decisions;
+- procedural memory: how the user usually does something;
+- production/action: rules and decision criteria;
+- activation: memory relevance for the current context.
 
-`twin` não implementa ACT-R, mas adota a ideia de que memória e procedimento são categorias distintas.
+`twin` does not implement ACT-R, but adopts the idea that memory and procedure are distinct categories.
 
-### 4.10 Predictive Processing e Active Inference — Karl Friston
+### 4.10 Predictive Processing and Active Inference — Karl Friston
 
-Modelos de predictive processing e active inference tratam o cérebro como um sistema que mantém modelos internos, prevê o mundo e atualiza crenças ao receber erro de previsão.
+Predictive processing and active inference models treat the brain as a system that maintains internal models, predicts the world and updates beliefs upon receiving prediction error.
 
-Para `twin`, isso implica que o sistema não deve guardar apenas frases soltas como “Edu prefere X”. Ele deve acompanhar a evolução de modelos mentais:
+For `twin`, this implies the system should not store only loose sentences like "Edu prefers X". It should track the evolution of mental models:
 
 ```text
-2023: Edu achava microservices preferíveis para quase tudo.
-2026: Edu passou a preferir modular monolith quando manutenção e simplicidade importam mais.
-Motivo: experiência prática com complexidade operacional.
+2023: Edu considered microservices preferable for almost everything.
+2026: Edu came to prefer a modular monolith when maintainability and simplicity matter more.
+Reason: hands-on experience with operational complexity.
 ```
 
-Isso pede temporalidade, contradição, supersedência e histórico de crenças.
+This calls for temporality, contradiction, supersedence and belief history.
 
-### 4.11 Self-complexity e papéis sociais
+### 4.11 Self-complexity and social roles
 
-A psicologia discute que uma pessoa não opera com um único “eu” homogêneo. Existem papéis sociais e contextuais:
+Psychology discusses that a person does not operate with a single homogeneous "self". There are social and contextual roles:
 
-- eu desenvolvedor;
-- eu namorado;
-- eu filho;
-- eu amigo;
-- eu gestor;
-- eu paciente;
-- eu investidor;
-- eu indivíduo privado.
+- the developer self;
+- the boyfriend self;
+- the son self;
+- the friend self;
+- the manager self;
+- the patient self;
+- the investor self;
+- the private-individual self.
 
-Esses papéis compartilham algumas memórias, mas não todas. Esse ponto é crucial para privacidade.
+These roles share some memories, but not all. This point is crucial for privacy.
 
-O `twin` não deve modelar apenas `Edu -> tudo`. Deve modelar:
+`twin` must not model only `Edu -> everything`. It must model:
 
 ```text
 Edu
  ├── persona: developer
- │    └── domínio: work/technical
+ │    └── domain: work/technical
  ├── persona: partner
- │    └── domínio: relationship
+ │    └── domain: relationship
  ├── persona: son
- │    └── domínio: family
+ │    └── domain: family
  ├── persona: individual
- │    └── domínio: personal/health/finance
+ │    └── domain: personal/health/finance
  └── persona: assistant-user
-      └── domínio: assistant_preferences
+      └── domain: assistant_preferences
 ```
 
-### 4.12 IA simbólica: semantic networks, frames e scripts
+### 4.12 Symbolic AI: semantic networks, frames and scripts
 
-Antes de LLMs, IA simbólica já representava conhecimento com semantic networks, frames e scripts.
+Before LLMs, symbolic AI already represented knowledge with semantic networks, frames and scripts.
 
-`twin` reaproveita essas ideias:
+`twin` reuses those ideas:
 
 - triples/edges: `Edu -> prefers -> pt-BR answers`;
-- frames: decisão técnica com slots de contexto, alternativas, riscos e consequência;
-- scripts: sequência recorrente de como o usuário decide ou trabalha;
-- policies: regras explícitas de privacidade e julgamento.
+- frames: a technical decision with slots for context, alternatives, risks and consequence;
+- scripts: recurring sequences of how the user decides or works;
+- policies: explicit privacy and judgment rules.
 
-Exemplo de frame:
+Frame example:
 
 ```json
 {
@@ -313,65 +313,65 @@ Exemplo de frame:
 
 ---
 
-## 5. Conceito central: memória não basta
+## 5. Central concept: memory is not enough
 
-Um banco de memórias pode ajudar uma LLM a recuperar fatos. Mas isso não garante que ela aja como uma extensão do usuário.
+A memory store can help an LLM retrieve facts. But that does not guarantee it acts as an extension of the user.
 
-O projeto precisa de três camadas:
+The project needs three layers:
 
 ```text
-memória → julgamento → ação
+memory → judgment → action
 ```
 
-### 5.1 Memória
+### 5.1 Memory
 
-Memória responde:
+Memory answers:
 
-- o que aconteceu?
-- o que foi decidido?
-- quem participou?
-- qual fonte prova isso?
-- quando isso era verdadeiro?
+- what happened?
+- what was decided?
+- who participated?
+- which source proves it?
+- when was it true?
 
-### 5.2 Julgamento
+### 5.2 Judgment
 
-Julgamento responde:
+Judgment answers:
 
-- como o usuário pensa?
-- quais trade-offs ele valoriza?
-- o que ele jamais quer misturar?
-- que tom ele prefere?
-- quando privacidade vence conveniência?
-- quando simplicidade vence arquitetura elegante?
+- how does the user think?
+- which trade-offs do they value?
+- what do they never want mixed?
+- which tone do they prefer?
+- when does privacy beat convenience?
+- when does simplicity beat elegant architecture?
 
-### 5.3 Ação
+### 5.3 Action
 
-Ação responde:
+Action answers:
 
-- devo sugerir algo?
-- devo gerar um rascunho?
-- devo lembrar o usuário?
-- devo ficar em silêncio?
-- devo bloquear uma memória?
-- devo pedir confirmação explícita?
+- should I suggest something?
+- should I produce a draft?
+- should I remind the user?
+- should I stay silent?
+- should I block a memory?
+- should I ask for explicit confirmation?
 
-O MVP foca principalmente em memória + firewall + julgamento inicial. Ação autônoma fica para versões futuras.
+The MVP focuses mainly on memory + firewall + initial judgment. Autonomous action is left for future versions.
 
 ---
 
-## 6. Separação de domínios
+## 6. Domain separation
 
-Um requisito central do projeto é impedir mistura indevida entre contextos.
+A core requirement of the project is preventing improper mixing between contexts.
 
-Exemplos de falha grave:
+Examples of serious failure:
 
-- gerar documento de trabalho mencionando problema de relacionamento;
-- usar contexto de saúde em uma tarefa técnica;
-- misturar problemas profissionais com conversa familiar;
-- expor dados de terceiros em LLM cloud;
-- transformar uma memória candidata falsa em fato confirmado.
+- generating a work document that mentions a relationship problem;
+- using health context in a technical task;
+- mixing professional problems into a family conversation;
+- exposing third-party data to a cloud LLM;
+- turning a false candidate memory into a confirmed fact.
 
-Por isso, cada memória possui:
+That is why every memory carries:
 
 ```text
 type
@@ -384,9 +384,9 @@ type
 + evidence
 ```
 
-O Domain Firewall decide se uma memória pode entrar em determinado contexto.
+The Domain Firewall decides whether a memory may enter a given context.
 
-Exemplo:
+Example:
 
 ```yaml
 rules:
@@ -397,32 +397,32 @@ rules:
     action: block
 ```
 
-A regra não deve ser “recuperar tudo e confiar na LLM”. O correto é bloquear antes da LLM principal receber o conteúdo.
+The rule must not be "retrieve everything and trust the LLM". The correct approach is to block before the main LLM ever receives the content.
 
 ---
 
-## 7. Arquitetura do MVP
+## 7. MVP architecture
 
-O MVP atual prova uma coisa:
+The current MVP proves one thing:
 
-> É possível reduzir drasticamente a reexplicação de contexto em trabalho técnico, sem vazar domínios, usando memória estruturada, grafo temporal leve, vetores, FTS e MCP.
+> It is possible to drastically reduce context re-explanation in technical work, without leaking domains, using structured memory, a light temporal graph, vectors, FTS and MCP.
 
-Arquitetura:
+Architecture:
 
 ```text
-fontes (docs, reuniões, Slack)
-        │  ingestão + normalização
+sources (docs, meetings, Slack)
+        │  ingestion + normalization
         ▼
-filtro PII ──────────────► nada sensível sai para nuvem sem máscara
-        │  extração (LLM Anthropic ou heurística local)
+PII filter ──────────────► nothing sensitive leaves for the cloud unmasked
+        │  extraction (local LLM via Ollama or heuristic)
         ▼
-memórias candidatas ──► dedupe ──► fila de revisão seletiva
-        │  aprovação humana quando necessário
+candidate memories ──► dedupe ──► selective review queue
+        │  human approval when needed
         ▼
-SQLite: memórias + entidades + relações + evidências + embeddings + FTS5
+store (Postgres+pgvector primary | SQLite dev): memories + entities + relations + evidence + embeddings + FTS
         │
         ▼
-busca híbrida ──► Domain Firewall ──► context pack compacto
+hybrid search ──► Domain Firewall ──► compact context pack
         │                                    ▲
         ▼                                    │
 MCP / API / CLI                    judgment profile (YAML)
@@ -430,25 +430,25 @@ MCP / API / CLI                    judgment profile (YAML)
 
 ---
 
-## 8. Stack e decisões técnicas
+## 8. Stack and technical decisions
 
 ### 8.1 Local-first
 
-Tudo vive em `~/.twin` ou `$TWIN_HOME`:
+Everything lives in `~/.twin` or `$TWIN_HOME`:
 
 - SQLite;
 - policies YAML;
 - judgment YAML;
-- dados exportáveis;
-- backups simples.
+- exportable data;
+- simple backups.
 
-Backup = copiar a pasta.
+Backup = copy the folder.
 
-Exportação completa = `twin export`.
+Full export = `twin export`.
 
-### 8.2 SQLite como grafo leve
+### 8.2 SQLite as a light graph
 
-O MVP usa SQLite com tabelas de:
+The MVP uses SQLite with tables for:
 
 - sources;
 - memories;
@@ -460,59 +460,64 @@ O MVP usa SQLite com tabelas de:
 - firewall_log;
 - FTS5.
 
-Essa escolha evita infraestrutura pesada cedo demais. Neo4j, FalkorDB ou Graphiti podem entrar depois, mas a memória canônica deve continuar exportável.
+That choice avoids heavy infrastructure too early. Today the storage lives
+behind a single interface (`MemoryStore`): **PostgreSQL + pgvector is the
+primary backend** (server-side vector search, tsvector/GIN for full-text,
+JSONB) and SQLite remains the zero-config backend for dev/tests.
+Neo4j, FalkorDB or Graphiti may come later, but the canonical memory must
+remain exportable.
 
-### 8.3 Vetores como índice, não como memória
+### 8.3 Vectors as index, not as memory
 
-Embeddings são úteis para busca semântica, mas não são a memória verdadeira.
+Embeddings are useful for semantic search, but they are not the true memory.
 
-Regra do projeto:
+Project rule:
 
 ```text
-grafo + eventos + evidências = memória canônica
-vetores = índice regenerável
-LLM = extrator/intérprete
+graph + events + evidence = canonical memory
+vectors = regenerable index
+LLM = extractor/interpreter
 MCP = interface
 ```
 
-Isso evita lock-in e permite reindexar no futuro.
+This avoids lock-in and allows reindexing in the future.
 
-### 8.4 Busca híbrida
+### 8.4 Hybrid search
 
-A busca combina:
+Search combines:
 
 - FTS5/BM25;
 - embeddings;
-- boost por entidades;
-- filtro por firewall.
+- entity boost;
+- firewall filtering.
 
-A busca deve responder não apenas “o que parece semanticamente parecido?”, mas “o que é relevante, permitido e confiável para este contexto?”.
+Search must answer not only "what looks semantically similar?", but "what is relevant, allowed and trustworthy for this context?".
 
 ### 8.5 MCP-first
 
-O projeto não deve depender de uma UI própria. O MCP permite que ferramentas externas consultem o `twin`.
+The project must not depend on its own UI. MCP lets external tools query `twin`.
 
-Tools expostas:
+Exposed tools:
 
-| tool | função |
+| tool | function |
 |---|---|
-| `memory_safe_context_pack` | principal: pack compacto filtrado por firewall |
-| `memory_search` | busca híbrida com filtro de domínio |
-| `memory_get` | memória por id com evidências |
-| `memory_related` | vizinhança de entidade no grafo |
-| `memory_project_context` | contexto sobre um projeto |
-| `memory_recent_decisions` | decisões recentes |
-| `memory_user_preferences` | preferências estáveis |
-| `memory_judgment_profile` | perfil de julgamento |
-| `memory_observe` | observador de memória para texto/tarefa atual |
+| `memory_safe_context_pack` | main: compact pack filtered by the firewall |
+| `memory_search` | hybrid search with domain filtering |
+| `memory_get` | memory by id with evidence |
+| `memory_related` | entity neighborhood in the graph |
+| `memory_project_context` | context about a project |
+| `memory_recent_decisions` | recent decisions |
+| `memory_user_preferences` | stable preferences |
+| `memory_judgment_profile` | judgment profile |
+| `memory_observe` | memory observer for the current text/task |
 
 ---
 
-## 9. Modelo de dados
+## 9. Data model
 
 ### 9.1 Memory Item
 
-Um item de memória deve conter:
+A memory item must contain:
 
 ```json
 {
@@ -535,220 +540,221 @@ Um item de memória deve conter:
 }
 ```
 
-### 9.2 Tipos de memória
+### 9.2 Memory types
 
-| Tipo | Significado |
+| Type | Meaning |
 |---|---|
-| `event` | algo que aconteceu |
-| `fact` | fato relativamente objetivo |
-| `decision` | decisão tomada, com motivo e consequência |
-| `preference` | preferência estável ou semiestável |
-| `belief` | crença/opinião que pode mudar |
-| `task` | tarefa, compromisso ou promessa |
-| `procedure` | modo de fazer algo |
-| `relationship` | relação entre pessoas/contextos |
-| `communication_act` | ato comunicativo: pedido, promessa, recusa, desculpa, decisão |
-| `constraint` | regra, limite ou proibição |
+| `event` | something that happened |
+| `fact` | relatively objective fact |
+| `decision` | decision made, with rationale and consequence |
+| `preference` | stable or semi-stable preference |
+| `belief` | belief/opinion that may change |
+| `task` | task, commitment or promise |
+| `procedure` | way of doing something |
+| `relationship` | relationship between people/contexts |
+| `communication_act` | communicative act: request, promise, refusal, apology, decision |
+| `constraint` | rule, limit or prohibition |
 
-### 9.3 Evidência obrigatória
+### 9.3 Mandatory evidence
 
-Toda memória deve carregar evidência, preferencialmente trecho verbatim da fonte.
+Every memory must carry evidence, preferably a verbatim excerpt from the source.
 
-Sem evidência, a memória é suspeita.
+Without evidence, a memory is suspect.
 
-Isso reduz alucinação de memória e permite revisão humana.
+This reduces memory hallucination and enables human review.
 
-### 9.4 Temporalidade
+### 9.4 Temporality
 
-Memórias devem ter validade temporal.
+Memories must have temporal validity.
 
-Exemplo:
+Example:
 
 ```text
-2025: trabalha na Ambev
-2026: trabalha na Shippo
+2025: works at Ambev
+2026: works at Shippo
 ```
 
-Ambos podem ser verdadeiros, mas não simultaneamente.
+Both can be true, but not simultaneously.
 
-Futuro desejado:
+Desired future:
 
 - `supersedes`;
 - `contradicts`;
 - `deprecated_by`;
-- `valid_until` automático;
-- timeline de crenças.
+- automatic `valid_until`;
+- belief timeline.
 
 ---
 
-## 10. Pipeline de ingestão e extração
+## 10. Ingestion and extraction pipeline
 
-Fluxo:
+Flow:
 
 ```text
-source bruto
+raw source
         ↓
-normalização
+normalization
         ↓
-filtro PII
+PII filter
         ↓
-extração LLM ou heurística
+local LLM extraction (Ollama) or heuristic
         ↓
-normalização de schema
+schema normalization
         ↓
 dedupe
         ↓
-classificação de revisão
+review classification
         ↓
-grafo + evidência + embedding
+graph + evidence + embedding
 ```
 
-Fontes do MVP:
+MVP sources:
 
 - markdown;
-- transcrições `.txt`;
-- reuniões `.json` estilo Fireflies/Meetily;
-- exports Slack `.json`;
-- documentos técnicos.
+- `.txt` transcripts;
+- Fireflies/Meetily-style `.json` meetings;
+- Slack `.json` exports;
+- technical documents.
 
-Fontes futuras:
+Future sources:
 
 - Gmail;
 - Outlook;
 - WhatsApp;
-- calendário;
-- redes sociais;
-- notas pessoais;
-- tela/voz local;
+- calendar;
+- social networks;
+- personal notes;
+- local screen/voice;
 - wearables;
-- robótica/domótica.
+- robotics/home automation.
 
 ---
 
-## 11. PII e privacidade
+## 11. PII and privacy
 
-O projeto assume que vazamento de dados pessoais pode causar dano real.
+The project assumes that leaking personal data can cause real harm.
 
-Antes de qualquer LLM cloud, o texto deve passar por máscara de PII.
+Before any cloud LLM, text must go through PII masking.
 
-Classes iniciais:
+Classes covered today:
 
-- e-mails;
-- telefones;
-- CPF;
-- CNPJ;
-- cartões;
-- API keys;
-- tokens;
-- senhas;
+- emails;
+- phone numbers;
+- CPF / CNPJ / RG / CEP;
+- street addresses (Rua/Av./…);
+- cards, IBAN, PIX keys;
+- IPs;
+- API keys (OpenAI-style, GitHub/GitLab PATs, Slack, AWS, Google);
+- JWTs and bearer tokens;
+- passwords and secret assignments;
 - private keys.
 
-Antes de fontes pessoais reais, expandir para:
+Before real personal sources, expand to:
 
-- nomes próprios sensíveis;
-- nomes de familiares;
-- nomes de parceiros;
-- endereços;
-- dados bancários;
-- dados médicos;
-- URLs privadas;
-- identificadores internos de empresa;
-- links de Jira/GitHub privados;
-- nomes de clientes;
-- dados de terceiros.
+- sensitive proper names;
+- family member names;
+- partner names;
+- addresses;
+- banking data;
+- medical data;
+- private URLs;
+- internal company identifiers;
+- private Jira/GitHub links;
+- customer names;
+- third-party data.
 
-Regra: dados sensíveis devem ser bloqueados, mascarados, hashados ou mantidos localmente.
+Rule: sensitive data must be blocked, masked, hashed or kept local.
 
 ---
 
-## 12. Revisão seletiva
+## 12. Selective review
 
-O usuário não deve revisar tudo manualmente. Revisão deve ocorrer por exceção.
+The user must not review everything manually. Review should happen by exception.
 
-Vai para revisão quando:
+A memory goes to review when:
 
-- confiança < limiar;
-- sensibilidade `private` ou `restricted`;
-- domínio fora do MVP;
-- tipo próximo de julgamento (`belief`, `procedure`);
-- memória parece atualizar/contradizer outra;
-- há duplicidade parcial;
-- a memória tem alto impacto;
-- a fonte tem baixa confiabilidade;
-- a memória pode afetar comportamento futuro.
+- confidence < threshold;
+- sensitivity is `private` or `restricted`;
+- domain is outside the MVP;
+- type is judgment-adjacent (`belief`, `procedure`);
+- the memory seems to update/contradict another;
+- there is partial duplication;
+- the memory has high impact;
+- the source has low trustworthiness;
+- the memory may affect future behavior.
 
-Estados:
+States:
 
 ```text
 candidate → confirmed
 candidate → rejected
 confirmed → deprecated
 confirmed → contradicted
-confirmed → superseded (futuro)
+confirmed → superseded (future)
 ```
 
 ---
 
 ## 13. Judgment profile
 
-Memórias dizem **o que aconteceu**.
+Memories say **what happened**.
 
-Judgment diz **como o usuário pensa**.
+Judgment says **how the user thinks**.
 
-Exemplo:
+Example:
 
 ```yaml
 principles:
-  - privacidade > conveniência em dados pessoais
-  - manutenção > arquitetura bonita em projeto pessoal
-  - não misturar contexto íntimo com trabalho
-  - preferir clareza direta a polidez vazia
+  - privacy > convenience for personal data
+  - maintainability > beautiful architecture in personal projects
+  - never mix intimate context with work
+  - prefer direct clarity over empty politeness
 
 technical_preferences:
-  - evitar overengineering
-  - preferir stack simples para MVP
-  - avaliar lock-in antes de adotar ferramenta
-  - dados canônicos em formato aberto, exportável
+  - avoid overengineering
+  - prefer a simple stack for an MVP
+  - evaluate lock-in before adopting a tool
+  - canonical data in an open, exportable format
 
 decision_criteria:
-  - comparar custo de manutenção antes de performance
-  - avaliar reversibilidade da decisão
-  - medir utilidade real antes de expandir escopo
+  - compare maintenance cost before performance
+  - evaluate decision reversibility
+  - measure real usefulness before expanding scope
 
 communication_style:
   language: pt-BR by default
-  tone: direto, técnico, sem dicas básicas
+  tone: direct, technical, no basic tips
 ```
 
-Próximo passo importante: permitir que o sistema proponha alterações no judgment profile a partir de memórias confirmadas, mas **nunca escreva automaticamente sem aprovação humana**.
+Important next step: allow the system to propose changes to the judgment profile from confirmed memories, but **never write automatically without human approval**.
 
 ---
 
 ## 14. Memory Observer
 
-O Memory Observer é uma IA/módulo paralelo que acompanha o texto atual e sugere memórias relacionadas.
+The Memory Observer is a parallel AI/module that follows the current text and suggests related memories.
 
-Ele não responde pelo usuário. Ele não deve agir. Ele apenas lembra.
+It does not answer for the user. It must not act. It only remembers.
 
-Fluxo:
+Flow:
 
 ```text
-texto atual / tarefa / draft
+current text / task / draft
         ↓
-inferência de domínio
+domain inference
         ↓
-busca de memórias candidatas
+candidate memory search
         ↓
 firewall
         ↓
 ranking
         ↓
-sugestão compacta para IA principal
+compact suggestion for the main AI
 ```
 
-Isso é inspirado na Global Workspace Theory: muitos módulos operam em paralelo, mas apenas algumas informações entram no workspace global.
+This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
 
-Formato desejado:
+Desired format:
 
 ```json
 {
@@ -773,35 +779,42 @@ Formato desejado:
 
 ---
 
-## 15. Instalação
+## 15. Installation
 
 ```bash
-pip install -e ".[dev]"        # tudo (api + mcp + testes)
-# ou granular:
-pip install -e ".[api,mcp,llm]"
+pip install -e ".[dev]"        # everything (api + mcp + postgres + crypto + tests)
+# or granular:
+pip install -e ".[api,mcp,postgres,crypto]"
 
-twin init                      # cria ~/.twin (db, policies.yaml, judgment.yaml)
+twin init                      # creates ~/.twin (policies.yaml, judgment.yaml)
 ```
 
 ---
 
-## 16. Fluxo básico
+## 16. Basic flow
 
 ```bash
-# 1. Ingestão: markdown, transcrições .txt, reuniões .json, Slack exports .json
+# 1. Ingestion: markdown, .txt transcripts, .json meetings, Slack .json exports
 twin ingest ./docs ./transcripts ./meetings
 
-# 2. Extração de memórias
+# 2. Memory extraction
 twin extract
 
-# 3. Revisão seletiva
+# 3. Selective review
 twin review            # terminal
-twin serve             # UI web em http://127.0.0.1:8765
+twin serve             # web UI at http://127.0.0.1:8765
 
-# 4. Consulta
-twin search "qual stack usamos no serviço de webhooks"
-twin pack "escrever RFC de arquitetura do Atlas" --domain technical
-twin observe "estou revisando o retry dos webhooks"
+# 4. Query
+twin search "which stack do we use in the webhooks service"
+twin pack "write the Atlas architecture RFC" --domain technical
+twin observe "I'm reviewing the webhooks retry"
+
+# 5. Curation and lifecycle
+twin promote mem_xxx           # memory becomes part of the judgment profile
+twin supersede mem_new mem_old
+twin contradict mem_a mem_b
+twin stats                     # memory quality metrics
+twin reindex                   # after switching embedders
 ```
 
 ---
@@ -812,7 +825,7 @@ twin observe "estou revisando o retry dos webhooks"
 twin mcp
 ```
 
-Configuração em clientes compatíveis:
+Configuration in compatible clients:
 
 ```json
 {
@@ -825,67 +838,82 @@ Configuração em clientes compatíveis:
 }
 ```
 
-Uso recomendado para clientes:
+Recommended usage for clients:
 
-1. no começo de tarefas técnicas, chamar `memory_safe_context_pack`;
-2. usar `target_domain` correto;
-3. respeitar `blocked`;
-4. não pedir memórias sensíveis sem autorização explícita;
-5. citar fontes/memórias quando usar conteúdo específico;
-6. não tratar `candidate` como fato definitivo.
+1. at the start of technical tasks, call `memory_safe_context_pack`;
+2. use the correct `target_domain`;
+3. respect `blocked`;
+4. do not request sensitive memories without explicit authorization;
+5. cite sources/memories when using specific content;
+6. do not treat `candidate` as established fact (by default, packs already contain only confirmed memories).
+
+Per-client integration guide (Claude Code, Claude Desktop, Cursor,
+troubleshooting): [docs/mcp-clients.md](docs/mcp-clients.md).
 
 ---
 
-## 18. API local
+## 18. Local API
 
-`twin serve` sobe:
+`twin serve` starts:
 
-- UI mínima de revisão;
-- API JSON;
-- docs interativas.
+- a minimal review UI;
+- a JSON API;
+- interactive docs.
 
-Endpoints principais:
+Main endpoints:
 
 ```text
 /api/ingest
 /api/extract
+/api/percepts
 /api/memories
+/api/memories/{id}/review
+/api/memories/{id}/promote
+/api/memories/{id}/supersede/{old_id}
+/api/memories/{id}/contradict/{other_id}
 /api/search
 /api/context_pack
 /api/observer
 /api/judgment
+/api/metrics
 /api/export
 ```
 
 ---
 
-## 19. Configuração
+## 19. Configuration
 
-| variável | default | efeito |
+| variable | default | effect |
 |---|---|---|
-| `TWIN_HOME` | `~/.twin` | diretório de dados |
-| `TWIN_EXTRACTOR` | `auto` | `auto` / `llm` / `heuristic` |
-| `TWIN_EXTRACTION_MODEL` | `claude-opus-4-8` | modelo de extração |
-| `TWIN_EMBEDDER` | `hash` | `hash` / `sentence-transformers` |
+| `TWIN_HOME` | `~/.twin` | config directory (policies/judgment) |
+| `TWIN_DB_URL` | `sqlite:///~/.twin/twin.db` | `postgresql://…` selects the primary backend (pgvector) |
+| `TWIN_OLLAMA_URL` | `http://127.0.0.1:11434` | local Ollama server |
+| `TWIN_OLLAMA_MODEL` | `qwen3:8b` | local extraction model |
+| `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text` | local embedding model |
+| `TWIN_EXTRACTOR` | `auto` | `auto` / `ollama` / `heuristic` |
+| `TWIN_EMBEDDER` | `auto` | `auto` / `ollama` / `hash` |
+| `TWIN_ENCRYPTION_KEY` | — | when set, encrypts raw content and evidence at rest |
 
-O embedder default é local, determinístico e regenerável. Embeddings não são fonte da verdade.
+Everything runs on local models; there is no cloud LLM option. Embeddings
+are not the source of truth: they are regenerable (`twin reindex`) and never
+mix across different models.
 
 ---
 
-## 20. Testes
+## 20. Tests
 
 ```bash
 python -m pytest
 ```
 
-Cobertura esperada:
+Expected coverage:
 
 - PII;
-- ingestão;
-- extração;
+- ingestion;
+- extraction;
 - dedupe;
 - firewall;
-- busca;
+- search;
 - context pack;
 - observer;
 - API;
@@ -893,34 +921,34 @@ Cobertura esperada:
 
 ---
 
-## 21. Escopo do MVP
+## 21. MVP scope
 
-Inclui:
+Includes:
 
-- memória técnica/profissional;
-- docs técnicos;
-- reuniões;
-- Slack técnico;
-- decisões;
-- tarefas;
-- preferências;
-- grafo leve;
-- busca híbrida;
+- technical/professional memory;
+- technical docs;
+- meetings;
+- technical Slack;
+- decisions;
+- tasks;
+- preferences;
+- light graph;
+- hybrid search;
 - MCP;
-- revisão seletiva;
-- julgamento inicial.
+- selective review;
+- initial judgment.
 
-Não inclui, de propósito:
+Deliberately does not include:
 
-- WhatsApp pessoal;
-- redes sociais;
-- saúde/família/relacionamento como fontes;
-- voz contínua;
-- automações autônomas;
-- robótica;
-- chat próprio;
-- execução de ações sem confirmação;
-- imitação completa da personalidade do usuário.
+- personal WhatsApp;
+- social networks;
+- health/family/relationship as sources;
+- continuous voice;
+- autonomous automations;
+- robotics;
+- its own chat;
+- executing actions without confirmation;
+- fully imitating the user's personality.
 
 ---
 
@@ -928,348 +956,333 @@ Não inclui, de propósito:
 
 ### v0.1 — Local Technical Memory
 
-Provar que o sistema reduz reexplicação em trabalho técnico.
+Prove the system reduces re-explanation in technical work.
 
-Entregas:
+Deliverables:
 
-- ingestão local;
-- extração;
-- revisão;
-- busca;
+- local ingestion;
+- extraction;
+- review;
+- search;
 - MCP;
-- firewall básico;
+- basic firewall;
 - judgment profile.
 
 ### v0.2 — MCP-first workflow
 
-Objetivo: integração real com Cursor, Claude Desktop, Claude Code e clientes MCP.
+Goal: real integration with Cursor, Claude Desktop, Claude Code and MCP clients.
 
-Melhorias:
+Improvements:
 
-- context packs melhores;
-- documentação para clientes;
-- exemplos de uso;
-- melhor ergonomia de instalação.
+- better context packs;
+- documentation for clients;
+- usage examples;
+- better installation ergonomics.
 
-### v0.3 — Review system forte
+### v0.3 — Strong review system
 
-Objetivo: qualidade de memória.
+Goal: memory quality.
 
-Melhorias:
+Improvements:
 
-- revisão por lotes;
-- diff de memórias semelhantes;
+- batch review;
+- diff of similar memories;
 - merge/supersede/contradict;
 - source trust;
-- métricas de precisão.
+- precision metrics.
 
 ### v0.4 — Judgment model
 
-Objetivo: fazer LLMs diferentes agirem com julgamento mais consistente.
+Goal: make different LLMs act with more consistent judgment.
 
-Melhorias:
+Improvements:
 
-- sugestões de alteração no judgment profile;
-- extração de critérios de decisão;
-- separação entre preferência, crença e princípio;
-- versionamento de julgamento.
+- suggested changes to the judgment profile;
+- decision criteria extraction;
+- separation between preference, belief and principle;
+- judgment versioning.
 
-### v0.5 — Domain Firewall avançado
+### v0.5 — Advanced Domain Firewall
 
-Objetivo: preparar expansão para domínios pessoais.
+Goal: prepare expansion into personal domains.
 
-Melhorias:
+Improvements:
 
-- policies por persona;
-- permissões explícitas;
-- logs auditáveis;
-- redaction contextual;
-- default-deny mais agressivo;
-- candidate memories bloqueadas por padrão.
+- per-persona policies;
+- explicit permissions;
+- auditable logs;
+- contextual redaction;
+- more aggressive default-deny;
+- candidate memories blocked by default.
 
-### v0.6 — Connectors profissionais
+### v0.6 — Professional connectors
 
-Fontes:
+Sources:
 
 - Slack;
-- Gmail profissional;
+- professional Gmail;
 - Calendar;
 - GitHub;
 - docs;
 - Fireflies;
 - Meetily.
 
-Objetivo: capturar conhecimento operacional do trabalho.
+Goal: capture operational knowledge from work.
 
 ### v0.7 — Personal domains
 
-Expansão cuidadosa para:
+Careful expansion into:
 
-- finanças;
-- casa;
-- objetivos pessoais;
-- relacionamento;
-- família;
-- saúde.
+- finance;
+- home;
+- personal goals;
+- relationship;
+- family;
+- health.
 
-Com PII forte, revisão obrigatória e firewall mais rígido.
+With strong PII, mandatory review and a stricter firewall.
 
 ### v0.8 — Parallel Memory Observer
 
-Objetivo: experiência mais próxima de cérebro estendido.
+Goal: an experience closer to an extended brain.
 
-Melhorias:
+Improvements:
 
-- observer em tempo real;
-- sugestões contextuais;
-- confidence de domínio;
-- memória espontânea;
-- bloqueio silencioso de memórias proibidas.
+- real-time observer;
+- contextual suggestions;
+- domain confidence;
+- spontaneous memory;
+- silent blocking of forbidden memories.
 
 ### v0.9 — Voice companion
 
-Objetivo: reduzir fricção de entrada.
+Goal: reduce input friction.
 
-Possibilidades:
+Possibilities:
 
-- notas por voz;
-- reflexão diária;
-- captura local;
-- baixa latência;
-- interface conversacional sem substituir ferramentas existentes.
+- voice notes;
+- daily reflection;
+- local capture;
+- low latency;
+- conversational interface without replacing existing tools.
 
 ### v1.0 — Personal Cognitive OS
 
-Uma versão confiável da infraestrutura:
+A trustworthy version of the infrastructure:
 
-- memória;
-- julgamento;
+- memory;
+- judgment;
 - firewall;
 - MCP;
 - observer;
-- revisão;
-- exportação;
+- review;
+- export;
 - backup;
-- documentação;
-- uso real diário.
+- documentation;
+- real daily use.
 
 ---
 
-## 23. Major versions futuras
+## 23. Future major versions
 
 ### v2 — Extended Brain
 
-Adicionar:
+Add:
 
-- memória episódica robusta;
-- memória semântica consolidada;
-- memória procedural;
-- rotinas;
-- objetivos;
-- planejamento;
-- reflexão diária/semanal;
+- robust episodic memory;
+- consolidated semantic memory;
+- procedural memory;
+- routines;
+- goals;
+- planning;
+- daily/weekly reflection;
 - active persona.
 
 ### v3 — Cognitive Automation
 
-Adicionar:
+Add:
 
-- lembretes inteligentes;
-- rascunhos automáticos;
+- smart reminders;
+- automatic drafts;
 - follow-ups;
-- detecção de compromissos;
-- sugestões de ação;
-- execução apenas com aprovação.
+- commitment detection;
+- action suggestions;
+- execution only with approval.
 
 ### v4 — Multimodal Life Layer
 
-Adicionar:
+Add:
 
-- voz;
-- tela;
-- imagens;
-- documentos;
-- reuniões;
-- ambiente;
+- voice;
+- screen;
+- images;
+- documents;
+- meetings;
+- environment;
 - wearable data.
 
 ### v5 — Embodied / Robot-ready Memory
 
-Preparar para agentes físicos:
+Prepare for physical agents:
 
-- robôs pessoais;
+- personal robots;
 - home assistant;
-- memória espacial;
-- preferências domésticas;
-- rotinas físicas;
-- interface com sistemas embarcados.
+- spatial memory;
+- household preferences;
+- physical routines;
+- interface with embedded systems.
 
 ---
 
-## 24. Projetos relacionados
+## 24. Related projects
 
 ### Graphiti / Zep
 
-Relevantes para grafos temporais, memória de agentes, invalidação de fatos antigos e busca combinando grafo, texto e vetores.
+Relevant for temporal graphs, agent memory, invalidation of old facts and search combining graph, text and vectors.
 
-Possível evolução do backend de grafo.
+A possible evolution of the graph backend.
 
 ### Mem0
 
-Relevante para consolidação de memória e decisão de “isso merece virar memória?”. Inspira lifecycle, extração e recuperação multi-sessão.
+Relevant for memory consolidation and the "does this deserve to become a memory?" decision. Inspires lifecycle, extraction and multi-session retrieval.
 
 ### Letta / MemGPT
 
-Relevante para agentes stateful, memória de trabalho vs longo prazo e arquiteturas onde o agente gerencia sua própria memória.
+Relevant for stateful agents, working vs long-term memory and architectures where the agent manages its own memory.
 
 ### Meetily
 
-Relevante para captura local de reuniões, transcrição e privacidade. Pode alimentar a camada episódica.
+Relevant for local meeting capture, transcription and privacy. Can feed the episodic layer.
 
 ### Fireflies
 
-Fonte útil de transcrições já existentes. Boa para ingestão retrospectiva, desde que filtrada por PII e confidencialidade.
+Useful source of already-existing transcripts. Good for retrospective ingestion, as long as it is filtered for PII and confidentiality.
 
-### Slack MCP / conectores Slack
+### Slack MCP / Slack connectors
 
-Fonte de decisões, blockers, contexto de equipe e compromissos. Alto valor, alto risco de vazamento. Deve entrar com domínio e políticas rigorosas.
+Source of decisions, blockers, team context and commitments. High value, high leakage risk. Must come in with strict domain and policies.
 
 ### Screenpipe
 
-Inspiração para captura local contínua de tela/áudio/contexto. Não é prioridade do MVP, mas relevante para versão multimodal.
+Inspiration for continuous local capture of screen/audio/context. Not an MVP priority, but relevant for the multimodal version.
 
 ---
 
-## 25. Métricas de sucesso
+## 25. Success metrics
 
 ### MVP
 
-O MVP é bem-sucedido se:
+The MVP is successful if it:
 
-- extrai decisões reais de docs/reuniões;
-- gera evidência para cada memória;
-- recupera contexto útil via MCP;
-- não vaza domínios sensíveis;
-- reduz reexplicação em tarefas técnicas;
-- permite revisão humana prática;
-- mantém dados exportáveis.
+- extracts real decisions from docs/meetings;
+- produces evidence for every memory;
+- retrieves useful context via MCP;
+- does not leak sensitive domains;
+- reduces re-explanation in technical tasks;
+- enables practical human review;
+- keeps data exportable.
 
-### Métricas possíveis
+### Possible metrics
 
-- precisão de extração;
-- taxa de duplicatas;
-- taxa de memórias inúteis;
-- taxa de bloqueio correto;
-- tamanho médio de context pack;
-- tempo de resposta;
-- número de revisões manuais por semana;
-- número de vezes que o usuário precisou reexplicar contexto;
-- satisfação subjetiva: “parece que a IA entendeu onde estou?”.
+- extraction precision;
+- duplicate rate;
+- useless-memory rate;
+- correct-block rate;
+- average context pack size;
+- response time;
+- number of manual reviews per week;
+- number of times the user had to re-explain context;
+- subjective satisfaction: "does it feel like the AI understood where I am?".
 
 ---
 
-## 26. Riscos
+## 26. Risks
 
-### 26.1 Privacidade
+### 26.1 Privacy
 
-Risco máximo. O sistema pode conter informações íntimas e profissionais. Mitigações:
+Maximum risk. The system may contain intimate and professional information. Mitigations:
 
 - local-first;
 - PII masking;
 - firewall;
 - logs;
-- revisão;
-- default-deny em domínios sensíveis;
+- review;
+- default-deny in sensitive domains;
 - export/delete;
-- criptografia futura.
+- future encryption.
 
-### 26.2 Alucinação de memória
+### 26.2 Memory hallucination
 
-LLMs podem extrair memórias falsas. Mitigações:
+LLMs can extract false memories. Mitigations:
 
-- evidência obrigatória;
+- mandatory evidence;
 - confidence;
 - candidate status;
-- revisão seletiva;
-- bloqueio de candidate em contextos críticos;
-- citações internas.
+- selective review;
+- blocking candidates in critical contexts;
+- internal citations.
 
-### 26.3 Mistura de domínios
+### 26.3 Domain mixing
 
-Risco operacional mais perigoso. Mitigações:
+The most dangerous operational risk. Mitigations:
 
-- domain/persona/sensitivity obrigatórios;
-- firewall antes da LLM;
-- logs de bloqueio;
-- target_domain explícito;
-- políticas testadas.
+- mandatory domain/persona/sensitivity;
+- firewall before the LLM;
+- block logs;
+- explicit target_domain;
+- tested policies.
 
 ### 26.4 Overengineering
 
-Risco de tentar construir o cérebro inteiro antes do MVP. Mitigação:
+The risk of trying to build the whole brain before the MVP. Mitigation:
 
-- começar por trabalho técnico;
-- evitar WhatsApp/vida íntima no início;
-- não criar chat próprio;
-- usar MCP;
-- medir utilidade real.
+- start with technical work;
+- avoid WhatsApp/intimate life at the beginning;
+- do not build a chat of its own;
+- use MCP;
+- measure real usefulness.
 
-### 26.5 Dependência de fornecedor
+### 26.5 Vendor dependency
 
-Mitigação:
+Mitigation:
 
-- dados canônicos em formato aberto;
-- embeddings regeneráveis;
-- LLM substituível;
-- SQLite/export JSON;
-- MCP como interface.
-
----
-
-## 27. Próximas melhorias imediatas recomendadas
-
-1. Bloquear `candidate` por padrão nos context packs.
-2. Separar o context pack em seções: judgment, decisions, constraints, tasks, preferences, evidence.
-3. Adicionar `source_trust`, `source_scope` e `source_confidentiality`.
-4. Criar fluxo de “promover memória para judgment”.
-5. Melhorar inferência de domínio do observer.
-6. Expandir PII antes de fontes pessoais reais.
-7. Adicionar criptografia local opcional.
-8. Adicionar métricas de qualidade de memória.
-9. Adicionar suporte a supersedência/contradição explícita.
-10. Melhorar documentação de integração MCP com clientes reais.
+- canonical data in an open format;
+- regenerable embeddings;
+- replaceable LLM;
+- SQLite/JSON export;
+- MCP as the interface.
 
 ---
 
-## 28. Filosofia prática do projeto
+## 27. Practical philosophy of the project
 
-`twin` deve seguir estes princípios:
+`twin` must follow these principles:
 
 ```text
 local-first > cloud-first
-memória estruturada > texto bruto
-julgamento explícito > imitação implícita
-grafo temporal > markdown infinito
-vetores como índice > vetores como verdade
-MCP > UI própria obrigatória
-firewall antes da LLM > confiança na LLM
-revisão seletiva > curadoria manual total
-evidência obrigatória > memória sem fonte
-exportabilidade > lock-in
+structured memory > raw text
+explicit judgment > implicit imitation
+temporal graph > infinite markdown
+vectors as index > vectors as truth
+MCP > mandatory own UI
+firewall before the LLM > trusting the LLM
+selective review > total manual curation
+mandatory evidence > sourceless memory
+exportability > lock-in
 ```
 
 ---
 
-## 29. Definição final
+## 28. Final definition
 
-`twin` é uma camada pessoal, local-first, interoperável e temporal de memória, julgamento, privacidade e contexto.
+`twin` is a personal, local-first, interoperable and temporal layer of memory, judgment, privacy and context.
 
-Ele existe para permitir que diferentes LLMs e ferramentas operem sobre uma representação consistente do usuário, sem exigir que o usuário reexplique sua vida, seus projetos e seu modo de pensar a cada nova sessão.
+It exists to allow different LLMs and tools to operate over a consistent representation of the user, without requiring the user to re-explain their life, their projects and their way of thinking in every new session.
 
-A frase-guia:
+The guiding sentence:
 
-> Não quero apenas usar uma IA. Quero me sentir integrado à máquina, como se parte da minha cognição pudesse existir fora do meu cérebro, com segurança, continuidade e controle.
+> I don't want to just use an AI. I want to feel integrated with the machine, as if part of my cognition could exist outside my brain, with safety, continuity and control.
 
-O MVP começa pequeno: memória técnica confiável via MCP.
+The MVP starts small: reliable technical memory via MCP.
 
-O destino é maior: um cérebro estendido pessoal, portátil, privado e evolutivo.
+The destination is bigger: a personal, portable, private and evolving extended brain.

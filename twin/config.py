@@ -49,18 +49,22 @@ class Config:
     ollama_embed_model: str = os.environ.get("TWIN_OLLAMA_EMBED_MODEL", "nomic-embed-text")
 
     # -- cognition ---------------------------------------------------------
-    # auto → ollama (if reachable) → anthropic (if credential) → heuristic
+    # auto → ollama (local, if reachable) → heuristic (rule-based, offline)
     extractor: str = os.environ.get("TWIN_EXTRACTOR", "auto")
-    anthropic_model: str = os.environ.get("TWIN_ANTHROPIC_MODEL", "claude-opus-4-8")
     # Memories with confidence below this are always queued for review.
     review_confidence_threshold: float = 0.75
-    # Any extractor that leaves the machine only ever sees PII-masked text.
-    mask_pii_before_cloud: bool = True
 
     # -- embeddings ---------------------------------------------------------
     # auto → ollama (if reachable) → hash; or force: hash | ollama
     embedder: str = os.environ.get("TWIN_EMBEDDER", "auto")
     embedding_dim: int = int(os.environ.get("TWIN_EMBEDDING_DIM", "512"))
+
+    # -- privacy -------------------------------------------------------------
+    # when set, percept content + evidence quotes are encrypted at rest
+    # (requires: pip install "twin[crypto]")
+    encryption_key: str = os.environ.get("TWIN_ENCRYPTION_KEY", "")
+    # sources with trust below this always send their memories to review
+    low_trust_threshold: float = 0.65
 
     @property
     def resolved_db_url(self) -> str:

@@ -53,3 +53,20 @@ def test_duplicate_memory_becomes_evidence(store, cfg, embedder):
     r2 = extract_percept(store, cfg, embedder, clone)
     assert r2.inserted == []
     assert r2.duplicates == len(r1.inserted)
+
+
+def test_source_trust_scales_confidence_and_floors_sensitivity(store, cfg, embedder):
+    import pytest
+
+    from twin.sensory.percept import Percept
+
+    percept = Percept(percept_type="slack_thread", source_sensor="slack",
+                      content="Marina: decidimos usar FastAPI no backend.",
+                      source_trust=0.5, source_scope="work",
+                      source_confidentiality="private").seal()
+    store.insert_percept(percept)
+    report = extract_percept(store, cfg, embedder, percept)
+    mem = store.get_memory(report.inserted[0])
+    assert mem.confidence == pytest.approx(0.5 * 0.5)  # heuristic 0.5 × trust 0.5
+    assert mem.sensitivity.value == "private"           # floor from source
+    assert mem.needs_review

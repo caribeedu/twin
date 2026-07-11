@@ -48,6 +48,10 @@ class MeetingSensor(Sensor):
             content=raw,
             content_refs=[{"kind": "file", "path": str(path)}],
             privacy_hints={"domain_hint": "work"},
+            # spoken word, possibly ASR-transcribed: medium trust
+            source_trust=0.7,
+            source_scope="work",
+            source_confidentiality="internal",
         ).seal()
 
     def _sense_json(self, path: Path) -> Percept:
@@ -77,4 +81,7 @@ class MeetingSensor(Sensor):
             content_refs=[{"kind": "file", "path": str(path)}],
             privacy_hints={"domain_hint": "work"},
             metadata={"title": title},
+            source_trust=0.75,
+            source_scope="work",
+            source_confidentiality="internal",
         ).seal()
