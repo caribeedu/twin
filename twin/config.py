@@ -52,8 +52,8 @@ class Config:
 
     # -- local models (Ollama) ---------------------------------------------
     ollama_url: str = os.environ.get("TWIN_OLLAMA_URL", "http://127.0.0.1:11434")
-    ollama_model: str = os.environ.get("TWIN_OLLAMA_MODEL", "qwen3:8b")
-    ollama_embed_model: str = os.environ.get("TWIN_OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    ollama_model: str = os.environ.get("TWIN_OLLAMA_MODEL", "qwen3.6:latest")
+    ollama_embed_model: str = os.environ.get("TWIN_OLLAMA_EMBED_MODEL", "nomic-embed-text-v2-moe")
 
     # -- cognition ---------------------------------------------------------
     # auto → ollama (local, if reachable) → heuristic (rule-based, offline)
@@ -85,6 +85,10 @@ class Config:
     def judgment_path(self) -> Path:
         return self.home / "judgment.yaml"
 
+    @property
+    def calibration_path(self) -> Path:
+        return self.home / "source_calibration.yaml"
+
     def ensure_home(self) -> None:
         self.home.mkdir(parents=True, exist_ok=True)
         pkg_defaults = Path(__file__).parent / "defaults"
@@ -96,6 +100,11 @@ class Config:
         if not self.judgment_path.exists():
             self.judgment_path.write_text(
                 (pkg_defaults / "judgment.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        if not self.calibration_path.exists():
+            self.calibration_path.write_text(
+                (pkg_defaults / "source_calibration.yaml").read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
 

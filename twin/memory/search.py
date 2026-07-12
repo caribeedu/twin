@@ -9,7 +9,7 @@ from typing import Optional
 from ..clock import now_iso
 from ..judgment.firewall import Firewall
 from .embeddings import Embedder
-from .models import MemoryItem
+from .models import INACTIVE_STATUSES, MemoryItem
 from .store.base import MemoryStore
 
 FTS_WEIGHT = 0.55
@@ -77,7 +77,7 @@ def search(
         memory = store.get_memory(mem_id)
         if memory is None:
             continue
-        if memory.status.value in ("rejected", "deprecated", "contradicted"):
+        if memory.status.value in INACTIVE_STATUSES:
             continue
         if not include_candidates and memory.status.value != "confirmed":
             continue

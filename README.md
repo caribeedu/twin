@@ -750,6 +750,13 @@ Exposed tools:
 | `memory_user_preferences` | stable preferences |
 | `memory_judgment_profile` | judgment profile |
 | `memory_observe` | memory observer for the current text/task |
+| `memory_quality` | quality analysis + review priority |
+| `memory_neighbors` | neighborhood for side-by-side review |
+| `memory_provenance` | memory → evidence → percept → artifact |
+| `review_queue` | priority-ordered review queue |
+| `review_suggest_action` | suggest curation without mutating |
+| `memory_confirm` / `memory_reject` / `memory_archive` / `memory_merge` / `memory_split` | gated mutations (`confirm=true`) |
+| `session_start` / `session_observe` / `session_complete` / `session_feedback` | cognitive session lifecycle |
 
 ---
 
@@ -926,12 +933,14 @@ A memory goes to review when:
 States:
 
 ```text
-candidate → confirmed
-candidate → rejected
-confirmed → deprecated
-confirmed → contradicted
-confirmed → superseded (future)
+candidate → confirmed | rejected | merged | split | archived
+confirmed → deprecated | contradicted | superseded | stale | unsupported | archived
 ```
+
+Review answers richer questions than binary approve/reject: is it new, a
+paraphrase, more specific, more current, contradictory, mergeable, splittable?
+Suggested actions include confirm, reject, edit, merge, split, supersede,
+contradict, defer, archive and request_more_evidence.
 
 ---
 
@@ -1041,8 +1050,10 @@ twin ingest ./docs ./transcripts ./meetings
 twin extract
 
 # 3. Selective review
-twin review            # terminal
-twin serve             # web UI at http://127.0.0.1:8765
+twin review --analyze        # quality findings + priority scores
+twin review --priority high  # keyboard/terminal review
+twin review --conflicts
+twin serve                   # Review Workbench at http://127.0.0.1:8765
 
 # 4. Query
 twin search "which stack do we use in the webhooks service"
@@ -1053,7 +1064,15 @@ twin observe "I'm reviewing the webhooks retry"
 twin promote mem_xxx           # memory becomes part of the judgment profile
 twin supersede mem_new mem_old
 twin contradict mem_a mem_b
+twin memory merge mem_a mem_b
+twin memory split mem_x "part one" "part two"
+twin memory provenance mem_x
+twin memory archive mem_x
+twin undo op_xxx
 twin stats                     # memory quality metrics
+twin eval extraction
+twin eval retrieval
+twin retention --dry-run
 twin reindex                   # after switching embedders
 ```
 
@@ -1111,6 +1130,17 @@ Main endpoints:
 /api/memories/{id}/promote
 /api/memories/{id}/supersede/{old_id}
 /api/memories/{id}/contradict/{other_id}
+/api/memories/{id}/neighbors
+/api/memories/{id}/quality
+/api/memories/{id}/provenance
+/api/memories/{id}/split
+/api/memories/{id}/archive
+/api/memories/merge
+/api/review/queue
+/api/review/batches
+/api/artifacts/{id}
+/api/evals/extraction
+/api/evals/retrieval
 /api/search
 /api/context_pack
 /api/observer
@@ -1411,20 +1441,64 @@ v0.2 is complete when the following scenario works end to end:
 9. usefulness feedback is recorded;
 10. equivalent context remains available from another MCP client.
 
-### v0.3 — Memory Quality and Review at Scale
+### v0.3 — Memory Quality, Consolidation and Review at Scale
 
-Goal: make memory curation reliable as the number of sources and sessions grows.
+Goal: keep memory quality, coherence, auditability and governability as the
+system moves from tens of memories to thousands or millions — without
+requiring full-time manual curation.
 
-The first lifecycle primitives, source trust and quality metrics already exist. v0.3 should deepen them through:
+v0.2 closed the operational loop (context → session → work → percepts →
+candidates → review → consolidation). v0.3 turns that loop into a
+**discipline of consolidation**: individual memories are no longer reviewed
+in isolation; the graph is continuously reconciled.
 
-- batch review and keyboard-efficient review workflows;
-- side-by-side diffs for similar, conflicting and superseding memories;
-- merge and split operations beyond the existing supersede/contradict actions;
-- source-specific extraction calibration and trust adjustment;
-- review prioritization by impact, uncertainty and sensitivity;
-- evaluation datasets and repeatable extraction/retrieval benchmarks;
-- richer provenance chains from memory to percept to original artifact;
-- retention, archival and deletion propagation policies.
+Delivered:
+
+- **Memory Quality Analyzer** (`twin.cognition.quality`) — neighborhood
+  discovery, duplicate/near-duplicate/conflict/supersedence/merge/split
+  findings, specificity and evidence checks, recomputable
+  `review_priority` / `quality_score` / `quality_flags`;
+- **Review Workbench** — priority queue, side-by-side candidate vs neighbor,
+  keyboard shortcuts (A/R/E/M/S/C/D/N/P), batch create/preview/apply with
+  sensitive/conflict gates;
+- **Merge and split** — new memory IDs, `merged` / `split` statuses,
+  `merged_into` / `split_into` relations, evidence aggregation, embedding
+  cleanup, undo via `memory_operations`;
+- **Artifact provenance** — persisted `Artifact` entity; navigable chain
+  memory → evidence → percept → artifact → source system; corroboration
+  with capped confidence growth and independence groups;
+- **Source calibration** — declarative source×type trust matrix
+  (`source_calibration.yaml`) and soft confidence calibration at extract;
+- **Safe automation** — exact-duplicate reject, expired-task archive,
+  corroborating-evidence attach under policy; beliefs/conflicts/sensitive
+  merges never auto-applied;
+- **Retention / deletion propagation** — artifact tombstones cascade to
+  percepts, evidence and unsupported memories; dry-run delete by source;
+- **Evaluation framework** — `evals/extraction`, `evals/retrieval` (+
+  firewall/consolidation placeholders), runners, compare helpers, CLI/API;
+- **Surfaces** — API (`/api/review/*`, merge/split/archive/provenance/
+  artifacts/evals), CLI (`twin review`, `memory merge|split|…`, `eval`,
+  `source`, `retention`, `undo`), MCP read tools + confirm-gated mutations.
+
+Completion criteria covered:
+
+1. candidates enter from sessions/sensors;
+2. duplicates, conflicts and supersedences are grouped as findings;
+3. queue ordered by risk × impact;
+4. side-by-side workbench review;
+5. exact duplicates batchable under policy;
+6. merge/split preserve provenance;
+7. structural ops audited and undoable;
+8. source removal propagates;
+9. extraction/retrieval benchmarks exist;
+10. extractor version recorded on memories;
+11. retrieval excludes merged/split/archived/unsupported/stale by default;
+12. backlog remains priority-controlled rather than FIFO-only.
+
+Not in v0.3 (deferred): autonomous judgment evolution, personal domains,
+full Gmail/Slack connectors, continuous global observer, voice,
+Graphiti/Neo4j-by-default, autonomous curation agents, automatic resolution
+of complex conflicts.
 
 ### v0.4 — Evolving Judgment Model
 

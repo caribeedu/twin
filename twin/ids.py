@@ -47,3 +47,23 @@ def project_id() -> str:
 
 def session_id() -> str:
     return new_id("ses")
+
+
+def artifact_id() -> str:
+    return new_id("art")
+
+
+def finding_id() -> str:
+    return new_id("rf")
+
+
+def review_batch_id() -> str:
+    return new_id("rb")
+
+
+def operation_id() -> str:
+    return new_id("op")
+
+
+def eval_run_id() -> str:
+    return new_id("eval")

@@ -81,6 +81,30 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
             # proxy for duplicate rate (README: "taxa de memórias duplicadas")
             "duplicate_evidence_ratio": round((evidence_total - total) / total, 3) if total else 0.0,
             "review_backlog_ratio": round(needs_review / total, 3) if total else 0.0,
+            # v0.3 consolidation metrics
+            "duplicate_rate": round(
+                sum(1 for m in memories if "exact_duplicate" in m.quality_flags
+                    or "near_duplicate" in m.quality_flags) / total, 3
+            ) if total else 0.0,
+            "conflict_rate": round(
+                sum(1 for m in memories if "possible_conflict" in m.quality_flags) / total, 3
+            ) if total else 0.0,
+            "unsupported_memory_rate": round(
+                by_status.get("unsupported", 0) / total, 3
+            ) if total else 0.0,
+            "stale_memory_rate": round(
+                by_status.get("stale", 0) / total, 3
+            ) if total else 0.0,
+            "merged_rate": round(by_status.get("merged", 0) / total, 3) if total else 0.0,
+            "split_rate": round(by_status.get("split", 0) / total, 3) if total else 0.0,
+            "avg_evidence_count": round(evidence_total / total, 3) if total else 0.0,
+            "evidence_coverage": round(
+                sum(1 for m in memories if m.percept_ids) / total, 3
+            ) if total else 0.0,
+            "avg_review_priority": round(
+                sum(m.review_priority for m in memories if m.needs_review)
+                / max(needs_review, 1), 3
+            ) if needs_review else 0.0,
         },
         "firewall": {
             "blocks_logged": store.count_firewall_blocks(),

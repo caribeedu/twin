@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..memory.embeddings import Embedder
+from ..memory.models import INACTIVE_STATUSES
 from ..memory.store.base import MemoryStore
 
 DUPLICATE_THRESHOLD = 0.92
@@ -35,7 +36,7 @@ def check(store: MemoryStore, embedder: Embedder, mem_type: str, text: str) -> D
         existing = store.get_memory(ref_id)
         if existing is None or existing.type.value != mem_type:
             continue
-        if existing.status.value in ("rejected", "deprecated"):
+        if existing.status.value in INACTIVE_STATUSES:
             continue
         if sim > best_sim:
             best_sim = sim

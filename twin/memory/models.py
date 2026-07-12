@@ -37,6 +37,35 @@ class MemoryStatus(str, Enum):
     rejected = "rejected"
     deprecated = "deprecated"
     contradicted = "contradicted"
+    # v0.3 consolidation statuses
+    merged = "merged"
+    split = "split"
+    archived = "archived"
+    unsupported = "unsupported"
+    stale = "stale"
+    deleted = "deleted"
+
+
+# Statuses that must not appear in default retrieval / packs.
+INACTIVE_STATUSES = frozenset({
+    MemoryStatus.rejected.value,
+    MemoryStatus.deprecated.value,
+    MemoryStatus.contradicted.value,
+    MemoryStatus.merged.value,
+    MemoryStatus.split.value,
+    MemoryStatus.archived.value,
+    MemoryStatus.unsupported.value,
+    MemoryStatus.stale.value,
+    MemoryStatus.deleted.value,
+})
+
+
+class EvidenceType(str, Enum):
+    verbatim = "verbatim"
+    derived = "derived"
+    metadata = "metadata"
+    inferred = "inferred"
+    contradictory = "contradictory"
 
 
 class Evidence(BaseModel):
@@ -44,6 +73,14 @@ class Evidence(BaseModel):
     memory_id: str
     percept_id: str
     quote: str
+    evidence_type: EvidenceType = EvidenceType.verbatim
+    directness: float = 1.0
+    source_trust: float = 0.8
+    independence_group: Optional[str] = None
+    supports: bool = True
+    span_start: Optional[int] = None
+    span_end: Optional[int] = None
+    artifact_id: Optional[str] = None
 
 
 class Entity(BaseModel):
@@ -51,16 +88,35 @@ class Entity(BaseModel):
     name: str
     entity_type: str = "generic"  # person | project | system | tool | team | generic
     created_at: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    canonical_id: Optional[str] = None  # points to canonical entity when this is an alias
 
 
 class Relation(BaseModel):
     id: str
     subject_id: str  # entity id or memory id
-    predicate: str  # works_on | prefers | affects | produced | supersedes | contradicts | ...
+    predicate: str  # works_on | prefers | affects | produced | supersedes | contradicts | merged_into | split_into | ...
     object_id: str  # entity id or memory id
     memory_id: Optional[str] = None  # memory that asserted this relation
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
+    created_at: str = ""
+
+
+class CanonicalClaim(BaseModel):
+    """Propositional core of a memory — separate from human/LLM wording."""
+
+    subject: str = ""
+    predicate: str = ""
+    object: str = ""
+    qualifiers: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtractorVersion(BaseModel):
+    extractor: str = ""
+    model: str = ""
+    prompt_version: str = ""
+    schema_version: str = "2"
     created_at: str = ""
 
 
@@ -84,6 +140,124 @@ class MemoryItem(BaseModel):
     project_id: Optional[str] = None
     percept_ids: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)  # entity names (resolved to ids in store)
+    # v0.3 quality / review fields (recomputable analysis lives partly here)
+    review_priority: float = 0.0
+    quality_score: float = 0.0
+    quality_flags: list[str] = Field(default_factory=list)
+    impact: str = "medium"  # low | medium | high
+    reviewed_at: Optional[str] = None
+    review_batch_id: Optional[str] = None
+    canonical_claim: Optional[CanonicalClaim] = None
+    extractor_version: Optional[ExtractorVersion] = None
+    last_reconciled_at: Optional[str] = None
+    retrieval_count: int = 0
+    last_retrieved_at: Optional[str] = None
+    deleted_at: Optional[str] = None
+    deletion_reason: Optional[str] = None
+
+
+class FindingType(str, Enum):
+    possible_duplicate = "possible_duplicate"
+    near_duplicate = "near_duplicate"
+    exact_duplicate = "exact_duplicate"
+    possible_conflict = "possible_conflict"
+    possible_supersedence = "possible_supersedence"
+    possible_merge = "possible_merge"
+    possible_split = "possible_split"
+    low_specificity = "low_specificity"
+    weak_evidence = "weak_evidence"
+    high_future_reuse = "high_future_reuse"
+    source_risk = "source_risk"
+    temporal_succession = "temporal_succession"
+    scope_difference = "scope_difference"
+    unsupported = "unsupported"
+    stale = "stale"
+
+
+class SuggestedAction(str, Enum):
+    confirm = "confirm"
+    reject = "reject"
+    edit = "edit"
+    merge = "merge"
+    split = "split"
+    supersede = "supersede"
+    contradict = "contradict"
+    defer = "defer"
+    archive = "archive"
+    request_more_evidence = "request_more_evidence"
+    attach_evidence = "attach_evidence"
+    none = "none"
+
+
+class ReviewFinding(BaseModel):
+    id: str
+    memory_id: str
+    type: FindingType
+    related_memory_id: Optional[str] = None
+    confidence: float = 0.5
+    reason: str = ""
+    suggested_action: SuggestedAction = SuggestedAction.none
+    requires_human_review: bool = True
+    resolved: bool = False
+    created_at: str = ""
+    resolved_at: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class QualityReport(BaseModel):
+    memory_id: str
+    quality_score: float
+    review_priority: float
+    impact: str = "medium"
+    issues: list[ReviewFinding] = Field(default_factory=list)
+    suggested_action: SuggestedAction = SuggestedAction.none
+    requires_human_review: bool = False
+    quality_flags: list[str] = Field(default_factory=list)
+    neighbors: list[str] = Field(default_factory=list)
+
+
+class Artifact(BaseModel):
+    """Persisted source object — file, commit, PR, transcript, message, …"""
+
+    id: str
+    kind: str  # git_commit | document | meeting | slack_message | email | ...
+    external_id: Optional[str] = None
+    source_system: str = "local"
+    uri: Optional[str] = None
+    content_hash: Optional[str] = None
+    occurred_at: Optional[str] = None
+    created_at: str = ""
+    deleted_at: Optional[str] = None
+    deletion_reason: Optional[str] = None
+    content_destroyed: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReviewBatch(BaseModel):
+    id: str
+    name: str
+    query: dict[str, Any] = Field(default_factory=dict)
+    memory_ids: list[str] = Field(default_factory=list)
+    created_at: str = ""
+    completed_at: Optional[str] = None
+    progress_total: int = 0
+    progress_reviewed: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryOperation(BaseModel):
+    """Auditable, optionally reversible curation mutation."""
+
+    id: str
+    operation: str
+    actor: str = "user"
+    at: str = ""
+    inputs: list[str] = Field(default_factory=list)
+    output: Optional[str] = None
+    before: dict[str, Any] = Field(default_factory=dict)
+    after: dict[str, Any] = Field(default_factory=dict)
+    undoable: bool = True
+    undone_at: Optional[str] = None
 
 
 class TaskProfile(str, Enum):

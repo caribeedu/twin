@@ -361,6 +361,118 @@ def create_server(home: Optional[str] = None):
             "blocked_context": suggestion.blocked_context,
         }, ensure_ascii=False)
 
+    # -- v0.3 quality / review (read tools + gated mutations) -----------------
+
+    @mcp.tool()
+    def memory_quality(memory_id: str) -> str:
+        """Analyze a memory for duplicates, conflicts, merge/split suggestions
+        and review priority."""
+        from ..cognition.quality import analyze_memory
+        report = analyze_memory(ws.store, ws.embedder, memory_id)
+        return json.dumps(report.model_dump(mode="json"), ensure_ascii=False)
+
+    @mcp.tool()
+    def memory_neighbors(memory_id: str) -> str:
+        """Find semantically/entity-related neighbor memories for side-by-side review."""
+        from ..cognition.quality import discover_neighbors
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            return json.dumps({"error": "not found"})
+        neighbors = discover_neighbors(ws.store, ws.embedder, mem)
+        return json.dumps([
+            {"memory": _memory_to_dict(n), "similarity": sim, "reason": reason}
+            for n, sim, reason in neighbors
+        ], ensure_ascii=False)
+
+    @mcp.tool()
+    def memory_provenance(memory_id: str) -> str:
+        """Navigable lineage: memory → evidence → percept → artifact."""
+        from ..memory.provenance import memory_provenance as prov
+        return json.dumps(prov(ws.store, memory_id), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def review_queue(limit: int = 20, conflicts_only: bool = False) -> str:
+        """Priority-ordered review queue (risk × impact, not FIFO)."""
+        from ..cognition.quality import review_queue as rq
+        queue = rq(ws.store, conflicts_only=conflicts_only, limit=limit)
+        return json.dumps([_memory_to_dict(m) for m in queue], ensure_ascii=False)
+
+    @mcp.tool()
+    def review_batch_get(batch_id: str) -> str:
+        """Get a review batch and its progress."""
+        from ..memory.batches import get_batch
+        batch = get_batch(ws.store, batch_id)
+        if batch is None:
+            return json.dumps({"error": "not found"})
+        return json.dumps(batch.model_dump(), ensure_ascii=False)
+
+    @mcp.tool()
+    def review_suggest_action(memory_id: str) -> str:
+        """Suggest a curation action without applying it (safe for external clients)."""
+        from ..cognition.quality import analyze_memory
+        report = analyze_memory(ws.store, ws.embedder, memory_id, persist=False)
+        return json.dumps({
+            "memory_id": memory_id,
+            "suggested_action": report.suggested_action.value,
+            "requires_human_review": report.requires_human_review,
+            "quality_flags": report.quality_flags,
+            "review_priority": report.review_priority,
+            "issues": [i.model_dump(mode="json") for i in report.issues],
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def memory_confirm(memory_id: str, confirm: bool = False) -> str:
+        """Confirm a candidate memory. Requires confirm=true."""
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply"})
+        from ..memory.models import MemoryStatus
+        ws.store.set_status(memory_id, MemoryStatus.confirmed)
+        return json.dumps(_memory_to_dict(ws.store.get_memory(memory_id)), ensure_ascii=False)
+
+    @mcp.tool()
+    def memory_reject(memory_id: str, confirm: bool = False) -> str:
+        """Reject a candidate memory. Requires confirm=true."""
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply"})
+        from ..memory.models import MemoryStatus
+        ws.store.set_status(memory_id, MemoryStatus.rejected)
+        return json.dumps(_memory_to_dict(ws.store.get_memory(memory_id)), ensure_ascii=False)
+
+    @mcp.tool()
+    def memory_archive(memory_id: str, confirm: bool = False) -> str:
+        """Archive a memory (removed from default retrieval). Requires confirm=true."""
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply"})
+        from ..memory.lifecycle import archive_memory
+        result = archive_memory(ws.store, memory_id)
+        return json.dumps({"action": result.action, "operation_id": result.operation_id})
+
+    @mcp.tool()
+    def memory_merge(memory_ids: list[str], confirm: bool = False,
+                     title: Optional[str] = None, summary: Optional[str] = None) -> str:
+        """Merge memories into one. Requires confirm=true."""
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply", "preview": memory_ids})
+        from ..memory.lifecycle import merge_memories
+        result = merge_memories(ws.store, memory_ids, title=title, summary=summary,
+                               embedder=ws.embedder)
+        return json.dumps({"merged_id": result.extras.get("merged_id"),
+                           "operation_id": result.operation_id})
+
+    @mcp.tool()
+    def memory_split(memory_id: str, parts: list[str], confirm: bool = False) -> str:
+        """Split a compound memory. parts are titles/summaries. Requires confirm=true."""
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply", "parts": parts})
+        from ..memory.lifecycle import split_memory
+        result = split_memory(
+            ws.store, memory_id,
+            [{"title": p, "summary": p} for p in parts],
+            embedder=ws.embedder,
+        )
+        return json.dumps({"children": result.extras.get("children"),
+                           "operation_id": result.operation_id})
+
     return mcp
 
 

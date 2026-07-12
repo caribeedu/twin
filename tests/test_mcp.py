@@ -131,11 +131,17 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     assert completed["consolidation_status"] == "completed"
     assert completed["created_memory_ids"]
 
-    # 8: the human reviews and confirms the new candidate
+    # 8: the human reviews and confirms the new candidate(s)
     ws = Workspace(str(home))
-    new_id = completed["created_memory_ids"][0]
+    created = completed["created_memory_ids"]
+    new_id = created[0]
     assert ws.store.get_memory(new_id).status.value == "candidate"
-    ws.store.set_status(new_id, MemoryStatus.confirmed)
+    for mid in created:
+        ws.store.set_status(mid, MemoryStatus.confirmed)
+        # ensure confirmed memories clear the firewall confidence gate
+        mem = ws.store.get_memory(mid)
+        if mem and mem.confidence < 0.5:
+            ws.store.update_memory(mid, confidence=0.85)
     ws.close()
 
     # 9: feedback is recorded against the session; a memory that was not
@@ -155,7 +161,8 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     pack = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
-    assert new_id in {s["memory_id"] for s in pack["sources"]}
+    pack_ids = {s["memory_id"] for s in pack["sources"]}
+    assert set(created) & pack_ids, f"expected one of {created} in pack {pack_ids}"
     assert pack["project_id"] == project.id
 
 

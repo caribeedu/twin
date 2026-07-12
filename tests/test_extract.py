@@ -58,6 +58,7 @@ def test_duplicate_memory_becomes_evidence(store, cfg, embedder):
 def test_source_trust_scales_confidence_and_floors_sensitivity(store, cfg, embedder):
     import pytest
 
+    from twin.memory.calibration import calibrated_confidence
     from twin.sensory.percept import Percept
 
     percept = Percept(percept_type="slack_thread", source_sensor="slack",
@@ -67,6 +68,12 @@ def test_source_trust_scales_confidence_and_floors_sensitivity(store, cfg, embed
     store.insert_percept(percept)
     report = extract_percept(store, cfg, embedder, percept)
     mem = store.get_memory(report.inserted[0])
-    assert mem.confidence == pytest.approx(0.5 * 0.5)  # heuristic 0.5 × trust 0.5
+    # v0.3 soft calibration still reduces confidence under low source trust
+    assert mem.confidence < 0.5
+    assert mem.confidence == pytest.approx(
+        calibrated_confidence("slack", mem.type.value, 0.5, source_trust=0.5,
+                              extractor_reliability=0.95),
+        abs=0.02,
+    )
     assert mem.sensitivity.value == "private"           # floor from source
     assert mem.needs_review

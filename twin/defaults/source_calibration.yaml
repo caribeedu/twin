@@ -1,0 +1,55 @@
+# Source calibration — trust by source × memory type (v0.3).
+# Override in $TWIN_HOME/source_calibration.yaml
+
+sources:
+  git:
+    base_trust: 0.90
+    type_modifiers:
+      fact: 1.0
+      decision: 0.75
+      preference: 0.35
+      belief: 0.30
+      task: 0.40
+      constraint: 0.70
+      event: 0.85
+  document:
+    base_trust: 0.85
+    type_modifiers:
+      fact: 0.95
+      decision: 0.90
+      preference: 0.70
+      constraint: 0.90
+  meeting:
+    base_trust: 0.82
+    type_modifiers:
+      decision: 1.0
+      task: 0.95
+      preference: 0.70
+      belief: 0.65
+      fact: 0.70
+  slack:
+    base_trust: 0.70
+    type_modifiers:
+      task: 0.85
+      decision: 0.75
+      preference: 0.60
+      fact: 0.65
+  session:
+    base_trust: 0.88
+    type_modifiers:
+      fact: 1.0
+      decision: 1.0
+      preference: 1.0
+      task: 1.0
+      belief: 0.85
+
+quality_automation:
+  exact_duplicate:
+    action: reject
+    max_sensitivity: internal
+  corroborating_evidence:
+    action: attach
+  possible_conflict:
+    action: review
+  expired_task:
+    action: archive
