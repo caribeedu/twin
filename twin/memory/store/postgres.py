@@ -23,6 +23,7 @@ from ..models import (
     Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
+from .judgment_mixin import JudgmentStoreMixin
 
 _SCHEMA_BASE = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -146,6 +147,7 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_activity_at TEXT NOT NULL DEF
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_status TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_error TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS summary_percept_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS judgment_snapshot_id TEXT;
 
 -- append-only: concurrent observers never rewrite each other's rows
 CREATE TABLE IF NOT EXISTS session_artifacts (
@@ -264,6 +266,135 @@ CREATE TABLE IF NOT EXISTS memory_operations (
     undoable BOOLEAN NOT NULL DEFAULT TRUE,
     undone_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS judgment_items (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    scope JSONB NOT NULL DEFAULT '{}',
+    strength DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    stability TEXT NOT NULL DEFAULT 'evolving',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    valid_from TEXT,
+    valid_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by TEXT,
+    provenance JSONB NOT NULL DEFAULT '{}',
+    exceptions JSONB NOT NULL DEFAULT '[]',
+    conflicts_with JSONB NOT NULL DEFAULT '[]',
+    supersedes TEXT,
+    tradeoff TEXT,
+    lean DOUBLE PRECISION,
+    current_revision_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_judgment_status ON judgment_items(status);
+CREATE INDEX IF NOT EXISTS idx_judgment_kind ON judgment_items(kind);
+CREATE INDEX IF NOT EXISTS idx_judgment_domain ON judgment_items(domain);
+
+CREATE TABLE IF NOT EXISTS judgment_revisions (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'user',
+    reason TEXT NOT NULL DEFAULT '',
+    UNIQUE(judgment_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_jrev_judgment ON judgment_revisions(judgment_id);
+
+CREATE TABLE IF NOT EXISTS judgment_proposals (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    target_judgment_id TEXT,
+    expected_revision_id TEXT,
+    proposed_item JSONB NOT NULL DEFAULT '{}',
+    reason TEXT NOT NULL DEFAULT '',
+    supporting_memory_ids JSONB NOT NULL DEFAULT '[]',
+    contradicting_memory_ids JSONB NOT NULL DEFAULT '[]',
+    support_count INTEGER NOT NULL DEFAULT 0,
+    contradiction_count INTEGER NOT NULL DEFAULT 0,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    scope JSONB NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    preview_token TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jprop_status ON judgment_proposals(status);
+
+CREATE TABLE IF NOT EXISTS judgment_versions (
+    id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    parent_version_id TEXT,
+    active INTEGER NOT NULL DEFAULT 0,
+    revision_ids JSONB NOT NULL DEFAULT '[]',
+    item_ids JSONB NOT NULL DEFAULT '[]',
+    actor TEXT NOT NULL DEFAULT 'user',
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jver_active ON judgment_versions(active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jver_one_active ON judgment_versions ((active)) WHERE active != 0;
+
+CREATE TABLE IF NOT EXISTS judgment_snapshots (
+    id TEXT PRIMARY KEY,
+    judgment_version_id TEXT NOT NULL,
+    item_ids JSONB NOT NULL DEFAULT '[]',
+    applied_revisions JSONB NOT NULL DEFAULT '[]',
+    target_domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    task_profile TEXT NOT NULL DEFAULT 'general',
+    project_id TEXT,
+    audience TEXT,
+    client TEXT,
+    project_stage TEXT,
+    application_engine TEXT NOT NULL DEFAULT 'judgment-app-v2',
+    created_at TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS judgment_conflicts (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    memory_ids JSONB NOT NULL DEFAULT '[]',
+    other_judgment_id TEXT,
+    type TEXT NOT NULL,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'open',
+    suggested_resolution TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution_operation_id TEXT,
+    proposal_id TEXT,
+    analyzer_version TEXT NOT NULL DEFAULT 'conflict-v1',
+    evidence_fingerprint TEXT NOT NULL DEFAULT '',
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jconf_status ON judgment_conflicts(status);
+
+CREATE TABLE IF NOT EXISTS judgment_traces (
+    id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    applied_items JSONB NOT NULL DEFAULT '[]',
+    blocked_options JSONB NOT NULL DEFAULT '[]',
+    exceptions_used JSONB NOT NULL DEFAULT '[]',
+    result JSONB NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
 """
 
 _EMBEDDINGS_PGVECTOR = """
@@ -293,7 +424,7 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
 
 
-class PostgresStore(MemoryStore):
+class PostgresStore(JudgmentStoreMixin, MemoryStore):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
         from psycopg.rows import dict_row
@@ -719,8 +850,9 @@ class PostgresStore(MemoryStore):
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
             " initial_query, status, started_at, ended_at, last_activity_at,"
             " supplied_memory_ids, pack_chars, created_memory_ids,"
-            " consolidation_status, consolidation_error, summary_percept_id)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " consolidation_status, consolidation_error, summary_percept_id,"
+            " judgment_snapshot_id)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 session.id, session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
@@ -730,6 +862,7 @@ class PostgresStore(MemoryStore):
                 json.dumps(session.created_memory_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
+                session.judgment_snapshot_id,
             ),
         )
         return session.id
@@ -740,7 +873,8 @@ class PostgresStore(MemoryStore):
             " task_profile = %s, initial_query = %s, status = %s, ended_at = %s,"
             " last_activity_at = %s, supplied_memory_ids = %s, pack_chars = %s,"
             " created_memory_ids = %s, consolidation_status = %s,"
-            " consolidation_error = %s, summary_percept_id = %s WHERE id = %s",
+            " consolidation_error = %s, summary_percept_id = %s,"
+            " judgment_snapshot_id = %s WHERE id = %s",
             (
                 session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
@@ -750,6 +884,7 @@ class PostgresStore(MemoryStore):
                 json.dumps(session.created_memory_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
+                session.judgment_snapshot_id,
                 session.id,
             ),
         )
@@ -837,6 +972,7 @@ class PostgresStore(MemoryStore):
             consolidation_status=row["consolidation_status"],
             consolidation_error=row["consolidation_error"],
             summary_percept_id=row["summary_percept_id"],
+            judgment_snapshot_id=row.get("judgment_snapshot_id"),
         )
 
     def get_session(self, session_id: str) -> Optional[CognitiveSession]:
@@ -1067,3 +1203,21 @@ class PostgresStore(MemoryStore):
             " last_retrieved_at = %s WHERE id = %s",
             (now_iso(), memory_id),
         )
+
+    # -- judgment mixin hooks -----------------------------------------------
+
+    def _j_sql(self, sql: str) -> str:
+        return sql.replace("?", "%s")
+
+    def _j_exec(self, sql: str, params: tuple) -> None:
+        self._exec(self._j_sql(sql), params)
+
+    def _j_fetchone(self, sql: str, params: tuple):
+        rows = self._exec(self._j_sql(sql), params)
+        return rows[0] if rows else None
+
+    def _j_fetchall(self, sql: str, params: tuple) -> list:
+        return self._exec(self._j_sql(sql), params)
+
+    def _j_commit(self) -> None:
+        self._maybe_commit()

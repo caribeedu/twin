@@ -47,6 +47,7 @@ class ContextPack:
     blocked: list[dict] = field(default_factory=list)
     task_profile: str = "general"
     project_id: Optional[str] = None
+    judgment_snapshot_id: Optional[str] = None
     # the evidence guarantee is explicit, never implied: callers see whether
     # quotes made it in and, if not, that the budget was the reason
     evidence_included: bool = False
@@ -109,9 +110,28 @@ def build_context_pack(
         return True
 
     if include_judgment:
-        judgment_text = render_profile(load_profile(cfg.judgment_path))
+        judgment_text = ""
+        judgment_snapshot_id: Optional[str] = None
+        if hasattr(store, "list_judgment_items"):
+            from ..judgment.application import applicable_pack, render_applicable
+            active = store.list_judgment_items(status="active", limit=1)
+            if active:
+                pack_j = applicable_pack(
+                    store,
+                    domain=target_domain or "technical",
+                    task_profile=task_profile or "general",
+                    project_id=project_id,
+                    query=query,
+                    persist_snapshot=True,
+                )
+                judgment_text = render_applicable(pack_j)
+                judgment_snapshot_id = pack_j.get("snapshot_id")
+        if not judgment_text:
+            judgment_text = render_profile(load_profile(cfg.judgment_path))
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
+    else:
+        judgment_snapshot_id = None
 
     # reserve evidence space BEFORE packing memories: the strongest hits will
     # be packed first, so reserving for the top-N of all hits is a safe upper
@@ -207,6 +227,7 @@ def build_context_pack(
         blocked=[{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
         task_profile=profile.name,
         project_id=project_id,
+        judgment_snapshot_id=judgment_snapshot_id,
         evidence_included=evidence_included,
         evidence_omitted_due_to_budget=evidence_omitted,
     )

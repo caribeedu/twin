@@ -343,7 +343,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         if mem is None:
             raise HTTPException(404, "memory not found")
         try:
-            section = promote_memory(ws.cfg.judgment_path, mem)
+            section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         ws.store.update_memory(memory_id, payload={**mem.payload, "promoted_to_judgment": True})
@@ -591,19 +591,145 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/judgment")
     def api_judgment():
-        return load_profile(ws.cfg.judgment_path)
+        """YAML bootstrap fields plus active DB items when present."""
+        payload = dict(load_profile(ws.cfg.judgment_path))
+        if hasattr(ws.store, "list_judgment_items"):
+            payload["items"] = [
+                i.model_dump(mode="json")
+                for i in ws.store.list_judgment_items(status="active")
+            ]
+            v = ws.store.get_active_judgment_version()
+            payload["active_version"] = v.model_dump(mode="json") if v else None
+        return payload
+
+    class JudgmentImportRequest(BaseModel):
+        apply: bool = False
+
+    class ProposalApproveRequest(BaseModel):
+        preview_token: str
+        edits: Optional[dict[str, Any]] = None
+        confirm_constitutional: bool = False
+
+    class ProposalPreviewRequest(BaseModel):
+        edits: Optional[dict[str, Any]] = None
+
+    class JudgmentSimulateRequest(BaseModel):
+        query: str
+        domain: str = "technical"
+        task_profile: str = "architecture"
+        project_id: Optional[str] = None
+        options: Optional[list[str]] = None
+
+    class JudgmentApplicableRequest(BaseModel):
+        domain: str = "technical"
+        persona: str = "individual"
+        task_profile: str = "general"
+        project_id: Optional[str] = None
+        audience: Optional[str] = None
+        client: Optional[str] = None
+        project_stage: Optional[str] = None
+        query: str = ""
+
+    @app.get("/api/judgment/items")
+    def api_judgment_items(status: str = "active", kind: Optional[str] = None):
+        return [i.model_dump(mode="json") for i in ws.store.list_judgment_items(
+            status=status, kind=kind,
+        )]
+
+    @app.get("/api/judgment/items/{judgment_id}")
+    def api_judgment_item(judgment_id: str):
+        item = ws.store.get_judgment_item(judgment_id)
+        if item is None:
+            raise HTTPException(404, "not found")
+        return item.model_dump(mode="json")
+
+    @app.get("/api/judgment/versions")
+    def api_judgment_versions():
+        return [v.model_dump(mode="json") for v in ws.store.list_judgment_versions()]
+
+    @app.get("/api/judgment/proposals")
+    def api_judgment_proposals(status: str = "pending"):
+        return [p.model_dump(mode="json") for p in ws.store.list_judgment_proposals(status=status)]
+
+    @app.post("/api/judgment/proposals/generate")
+    def api_generate_proposals(domain: str = "technical"):
+        from ..judgment.proposals import propose_from_pattern
+        return [p.model_dump(mode="json") for p in propose_from_pattern(ws.store, domain=domain)]
+
+    @app.post("/api/judgment/proposals/{proposal_id}/preview")
+    def api_preview_proposal(proposal_id: str, req: ProposalPreviewRequest = ProposalPreviewRequest()):
+        from ..judgment.proposals import preview_proposal
+        try:
+            return preview_proposal(ws.store, proposal_id, edits=req.edits)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/judgment/proposals/{proposal_id}/approve")
+    def api_approve_proposal(proposal_id: str, req: ProposalApproveRequest):
+        from ..judgment.proposals import approve_proposal
+        try:
+            return approve_proposal(
+                ws.store, proposal_id, preview_token=req.preview_token,
+                edits=req.edits, confirm_constitutional=req.confirm_constitutional,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/judgment/proposals/{proposal_id}/reject")
+    def api_reject_proposal(proposal_id: str, reason: str = ""):
+        from ..judgment.proposals import reject_proposal
+        try:
+            return reject_proposal(ws.store, proposal_id, reason=reason).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/judgment/import")
+    def api_judgment_import(req: JudgmentImportRequest):
+        from ..judgment.yaml_io import apply_yaml_import, preview_yaml_import
+        preview = preview_yaml_import(ws.cfg.judgment_path)
+        if not req.apply:
+            return {"preview": preview, "count": len(preview)}
+        return apply_yaml_import(ws.store, ws.cfg.judgment_path, classifications=preview)
+
+    @app.post("/api/judgment/applicable")
+    def api_judgment_applicable(req: JudgmentApplicableRequest):
+        from ..judgment.application import applicable_pack
+        return applicable_pack(
+            ws.store, domain=req.domain, persona=req.persona,
+            task_profile=req.task_profile, project_id=req.project_id,
+            audience=req.audience, client=req.client,
+            project_stage=req.project_stage, query=req.query,
+        )
+
+    @app.post("/api/judgment/simulate")
+    def api_judgment_simulate(req: JudgmentSimulateRequest):
+        from ..judgment.simulate import simulate
+        return simulate(
+            ws.store, req.query, domain=req.domain, task_profile=req.task_profile,
+            project_id=req.project_id, options=req.options,
+        )
+
+    @app.get("/api/judgment/conflicts")
+    def api_judgment_conflicts(status: str = "open"):
+        return [c.model_dump(mode="json") for c in ws.store.list_judgment_conflicts(status=status)]
 
     @app.get("/api/export")
     def api_export():
         """Full JSON export (vendor-independence guarantee)."""
         memories = ws.store.list_memories(limit=100000)
+        judgment_export = load_profile(ws.cfg.judgment_path)
+        if hasattr(ws.store, "list_judgment_items"):
+            judgment_export = {
+                "yaml": judgment_export,
+                "items": [i.model_dump(mode="json") for i in ws.store.list_judgment_items(status="active")],
+            }
         return JSONResponse({
             "memories": [
                 {**_mem_dict(m), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
                 for m in memories
             ],
             "entities": [e.model_dump() for e in ws.store.list_entities()],
-            "judgment": load_profile(ws.cfg.judgment_path),
+            "judgment": judgment_export,
         })
 
     # -- Review Workbench UI (v0.3) ----------------------------------------

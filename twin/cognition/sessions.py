@@ -128,6 +128,7 @@ def start_session(
     )
     session.supplied_memory_ids = [s["memory_id"] for s in pack.sources]
     session.pack_chars = len(pack.context_pack)
+    session.judgment_snapshot_id = pack.judgment_snapshot_id
     store.insert_session(session)
     return SessionStart(
         session=session, pack=pack,
@@ -260,6 +261,16 @@ def _consolidate(store: MemoryStore, cfg: Config, embedder: Embedder,
         if session.project_id:
             for mid in new_ids:
                 store.update_memory(mid, project_id=session.project_id)
+        if session.judgment_snapshot_id:
+            for mid in new_ids:
+                mem = store.get_memory(mid)
+                if mem is None:
+                    continue
+                payload = dict(mem.payload or {})
+                payload["judgment_influenced"] = True
+                payload["decision_origin"] = "twin_assisted"
+                payload["judgment_snapshot_id"] = session.judgment_snapshot_id
+                store.update_memory(mid, payload=payload)
         session.consolidation_status = ConsolidationStatus.completed
     except Exception as exc:
         # never silent: the session stays diagnosable and retryable

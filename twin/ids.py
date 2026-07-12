@@ -67,3 +67,39 @@ def operation_id() -> str:
 
 def eval_run_id() -> str:
     return new_id("eval")
+
+
+def judgment_id() -> str:
+    return new_id("jud")
+
+
+def judgment_proposal_id() -> str:
+    return new_id("jprop")
+
+
+def judgment_version_id() -> str:
+    return new_id("jver")
+
+
+def judgment_snapshot_id() -> str:
+    return new_id("jsnap")
+
+
+def judgment_conflict_id() -> str:
+    return new_id("jconf")
+
+
+def judgment_trace_id() -> str:
+    return new_id("jtrace")
+
+
+def judgment_exception_id() -> str:
+    return new_id("jexc")
+
+
+def judgment_revision_id() -> str:
+    return new_id("jrev")
+
+
+def tradeoff_id() -> str:
+    return new_id("toff")

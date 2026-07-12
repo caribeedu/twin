@@ -283,9 +283,106 @@ def cmd_promote(args) -> None:
     mem = ws.store.get_memory(args.memory_id)
     if mem is None:
         raise SystemExit(f"memory {args.memory_id} not found")
-    section = promote_memory(ws.cfg.judgment_path, mem)
+    section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
     ws.store.update_memory(mem.id, payload={**mem.payload, "promoted_to_judgment": True})
-    print(f"promoted {mem.id} into judgment profile section '{section}'")
+    print(f"promoted {mem.id} → {section} (pending human approval if proposal)")
+
+
+def cmd_judgment(args) -> None:
+    from ..judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
+    from ..judgment.proposals import (
+        approve_proposal, defer_proposal, preview_proposal, propose_from_memory,
+        propose_from_pattern, reject_proposal,
+    )
+    from ..judgment.simulate import counterfactual, simulate
+    from ..judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
+    from ..judgment.versions import active_items
+
+    ws = Workspace(args.home)
+    cmd = args.judgment_command
+    if cmd == "list":
+        for item in active_items(ws.store):
+            print(f"{item.id}  {item.kind.value:12}  {item.statement[:80]}")
+    elif cmd == "show":
+        item = ws.store.get_judgment_item(args.judgment_id)
+        if item is None:
+            raise SystemExit("not found")
+        print(item.model_dump_json(indent=2))
+    elif cmd == "history":
+        item = ws.store.get_judgment_item(args.judgment_id)
+        if item is None:
+            raise SystemExit("not found")
+        print(f"supersedes: {item.supersedes}")
+        for v in ws.store.list_judgment_versions():
+            if args.judgment_id in v.item_ids:
+                print(f"  v{v.version}  {v.id}  {v.reason}")
+    elif cmd == "versions":
+        for v in ws.store.list_judgment_versions():
+            flag = "*" if v.active else " "
+            print(f"{flag} v{v.version}  {v.id}  items={len(v.item_ids)}  {v.reason}")
+    elif cmd == "import-preview":
+        for c in preview_yaml_import(ws.cfg.judgment_path):
+            print(f"{c['kind']:12} [{c['stability']:14}] {c['statement'][:70]}")
+    elif cmd == "import":
+        result = apply_yaml_import(ws.store, ws.cfg.judgment_path)
+        print(f"imported {result['count']} items as version {result['version']}")
+    elif cmd == "export":
+        print(export_judgment_yaml(ws.store))
+    elif cmd == "proposals":
+        for p in ws.store.list_judgment_proposals(status=args.status or None):
+            print(f"{p.id}  {p.status.value:10}  conf={p.confidence:.2f}  {p.reason[:60]}")
+    elif cmd == "propose":
+        if args.from_memory:
+            p = propose_from_memory(ws.store, args.from_memory)
+        else:
+            props = propose_from_pattern(ws.store, domain=args.domain or "technical")
+            if not props:
+                raise SystemExit("no pattern proposals generated")
+            p = props[0]
+        print(p.id, p.reason)
+    elif cmd == "preview":
+        print(preview_proposal(ws.store, args.proposal_id))
+    elif cmd == "approve":
+        result = approve_proposal(
+            ws.store, args.proposal_id, preview_token=args.token,
+            confirm_constitutional=args.constitutional,
+        )
+        print(result)
+    elif cmd == "reject":
+        reject_proposal(ws.store, args.proposal_id, reason=args.reason or "")
+        print("rejected")
+    elif cmd == "defer":
+        defer_proposal(ws.store, args.proposal_id)
+        print("deferred")
+    elif cmd == "simulate":
+        result = simulate(
+            ws.store, args.query, domain=args.domain or "technical",
+            project_id=args.project, task_profile=args.profile or "architecture",
+        )
+        print(result["markdown"])
+    elif cmd == "explain":
+        tr = ws.store.get_judgment_trace(args.trace_id)
+        if tr is None:
+            raise SystemExit("trace not found")
+        print(tr.model_dump_json(indent=2))
+    elif cmd == "counterfactual":
+        print(counterfactual(ws.store, args.query, args.judgment_id,
+                             domain=args.domain or "technical"))
+    elif cmd == "conflicts":
+        if args.refresh:
+            detect_judgment_conflicts(ws.store)
+            detect_behavior_conflicts(ws.store)
+        for c in ws.store.list_judgment_conflicts(status=args.status or "open"):
+            print(f"{c.id}  {c.type.value:20}  {c.reason[:70]}")
+    elif cmd == "resolve-conflict":
+        resolve_conflict(
+            ws.store, args.conflict_id,
+            resolution=args.resolution or "dismiss",
+            dismiss=True,
+        )
+        print("resolved")
+    else:
+        raise SystemExit(f"unknown judgment command: {cmd}")
 
 
 def cmd_supersede(args) -> None:
@@ -594,9 +691,44 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("reindex", help="regenerate embeddings").set_defaults(func=cmd_reindex)
 
-    p = sub.add_parser("promote", help="promote a memory into the judgment profile")
+    p = sub.add_parser("promote", help="propose promoting a memory into judgment")
     p.add_argument("memory_id")
     p.set_defaults(func=cmd_promote)
+
+    p = sub.add_parser("judgment", help="evolving judgment model")
+    js = p.add_subparsers(dest="judgment_command", required=True)
+    js.add_parser("list").set_defaults(func=cmd_judgment)
+    pshow = js.add_parser("show"); pshow.add_argument("judgment_id"); pshow.set_defaults(func=cmd_judgment)
+    phist = js.add_parser("history"); phist.add_argument("judgment_id"); phist.set_defaults(func=cmd_judgment)
+    js.add_parser("versions").set_defaults(func=cmd_judgment)
+    js.add_parser("import-preview").set_defaults(func=cmd_judgment)
+    js.add_parser("import").set_defaults(func=cmd_judgment)
+    js.add_parser("export").set_defaults(func=cmd_judgment)
+    pprop = js.add_parser("proposals"); pprop.add_argument("--status"); pprop.set_defaults(func=cmd_judgment)
+    ppr = js.add_parser("propose")
+    ppr.add_argument("--from-memory"); ppr.add_argument("--domain", default="technical")
+    ppr.set_defaults(func=cmd_judgment)
+    ppv = js.add_parser("preview"); ppv.add_argument("proposal_id"); ppv.set_defaults(func=cmd_judgment)
+    pap = js.add_parser("approve")
+    pap.add_argument("proposal_id"); pap.add_argument("--token", required=True)
+    pap.add_argument("--constitutional", action="store_true")
+    pap.set_defaults(func=cmd_judgment)
+    prej = js.add_parser("reject"); prej.add_argument("proposal_id"); prej.add_argument("--reason")
+    prej.set_defaults(func=cmd_judgment)
+    pdf = js.add_parser("defer"); pdf.add_argument("proposal_id"); pdf.set_defaults(func=cmd_judgment)
+    psim = js.add_parser("simulate")
+    psim.add_argument("query"); psim.add_argument("--domain", default="technical")
+    psim.add_argument("--project"); psim.add_argument("--profile", default="architecture")
+    psim.set_defaults(func=cmd_judgment)
+    pex = js.add_parser("explain"); pex.add_argument("trace_id"); pex.set_defaults(func=cmd_judgment)
+    pcf = js.add_parser("counterfactual")
+    pcf.add_argument("query"); pcf.add_argument("judgment_id"); pcf.add_argument("--domain", default="technical")
+    pcf.set_defaults(func=cmd_judgment)
+    pco = js.add_parser("conflicts"); pco.add_argument("--status"); pco.add_argument("--refresh", action="store_true")
+    pco.set_defaults(func=cmd_judgment)
+    prc = js.add_parser("resolve-conflict")
+    prc.add_argument("conflict_id"); prc.add_argument("--resolution")
+    prc.set_defaults(func=cmd_judgment)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")

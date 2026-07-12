@@ -16,6 +16,7 @@ from ..models import (
     Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
+from .judgment_mixin import JudgmentStoreMixin
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -165,7 +166,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_memory_ids TEXT NOT NULL DEFAULT '[]',
     consolidation_status TEXT NOT NULL DEFAULT 'none',
     consolidation_error TEXT,
-    summary_percept_id TEXT
+    summary_percept_id TEXT,
+    judgment_snapshot_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
@@ -269,10 +271,142 @@ CREATE TABLE IF NOT EXISTS memory_operations (
     undoable INTEGER NOT NULL DEFAULT 1,
     undone_at TEXT
 );
+
+-- v0.4: evolving judgment model (immutable revisions)
+CREATE TABLE IF NOT EXISTS judgment_items (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    scope TEXT NOT NULL DEFAULT '{}',
+    strength REAL NOT NULL DEFAULT 0.5,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    stability TEXT NOT NULL DEFAULT 'evolving',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    valid_from TEXT,
+    valid_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by TEXT,
+    provenance TEXT NOT NULL DEFAULT '{}',
+    exceptions TEXT NOT NULL DEFAULT '[]',
+    conflicts_with TEXT NOT NULL DEFAULT '[]',
+    supersedes TEXT,
+    tradeoff TEXT,
+    lean REAL,
+    current_revision_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_judgment_status ON judgment_items(status);
+CREATE INDEX IF NOT EXISTS idx_judgment_kind ON judgment_items(kind);
+CREATE INDEX IF NOT EXISTS idx_judgment_domain ON judgment_items(domain);
+
+CREATE TABLE IF NOT EXISTS judgment_revisions (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'user',
+    reason TEXT NOT NULL DEFAULT '',
+    UNIQUE(judgment_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_jrev_judgment ON judgment_revisions(judgment_id);
+
+CREATE TABLE IF NOT EXISTS judgment_proposals (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    target_judgment_id TEXT,
+    expected_revision_id TEXT,
+    proposed_item TEXT NOT NULL DEFAULT '{}',
+    reason TEXT NOT NULL DEFAULT '',
+    supporting_memory_ids TEXT NOT NULL DEFAULT '[]',
+    contradicting_memory_ids TEXT NOT NULL DEFAULT '[]',
+    support_count INTEGER NOT NULL DEFAULT 0,
+    contradiction_count INTEGER NOT NULL DEFAULT 0,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    scope TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    preview_token TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jprop_status ON judgment_proposals(status);
+
+CREATE TABLE IF NOT EXISTS judgment_versions (
+    id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    parent_version_id TEXT,
+    active INTEGER NOT NULL DEFAULT 0,
+    revision_ids TEXT NOT NULL DEFAULT '[]',
+    item_ids TEXT NOT NULL DEFAULT '[]',
+    actor TEXT NOT NULL DEFAULT 'user',
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jver_active ON judgment_versions(active);
+
+CREATE TABLE IF NOT EXISTS judgment_snapshots (
+    id TEXT PRIMARY KEY,
+    judgment_version_id TEXT NOT NULL,
+    item_ids TEXT NOT NULL DEFAULT '[]',
+    applied_revisions TEXT NOT NULL DEFAULT '[]',
+    target_domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    task_profile TEXT NOT NULL DEFAULT 'general',
+    project_id TEXT,
+    audience TEXT,
+    client TEXT,
+    project_stage TEXT,
+    application_engine TEXT NOT NULL DEFAULT 'judgment-app-v2',
+    created_at TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS judgment_conflicts (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    memory_ids TEXT NOT NULL DEFAULT '[]',
+    other_judgment_id TEXT,
+    type TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'open',
+    suggested_resolution TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution_operation_id TEXT,
+    proposal_id TEXT,
+    analyzer_version TEXT NOT NULL DEFAULT 'conflict-v1',
+    evidence_fingerprint TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jconf_status ON judgment_conflicts(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jconf_open_pair
+    ON judgment_conflicts(judgment_id, other_judgment_id, type, analyzer_version)
+    WHERE status = 'open' AND other_judgment_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS judgment_traces (
+    id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    applied_items TEXT NOT NULL DEFAULT '[]',
+    blocked_options TEXT NOT NULL DEFAULT '[]',
+    exceptions_used TEXT NOT NULL DEFAULT '[]',
+    result TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
 """
 
 
-class SqliteStore(MemoryStore):
+class SqliteStore(JudgmentStoreMixin, MemoryStore):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()
         self.path = Path(path)
@@ -361,6 +495,7 @@ class SqliteStore(MemoryStore):
             ("consolidation_status", "TEXT NOT NULL DEFAULT 'none'"),
             ("consolidation_error", "TEXT"),
             ("summary_percept_id", "TEXT"),
+            ("judgment_snapshot_id", "TEXT"),
         ):
             if name not in ses_cols:
                 self.conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {ddl}")
@@ -377,6 +512,53 @@ class SqliteStore(MemoryStore):
             " artifact_id TEXT NOT NULL, percept_id TEXT NOT NULL,"
             " PRIMARY KEY (artifact_id, percept_id))"
         )
+        # v0.4 judgment additive columns / tables
+        self.conn.executescript(
+            "CREATE TABLE IF NOT EXISTS judgment_revisions ("
+            " id TEXT PRIMARY KEY, judgment_id TEXT NOT NULL, revision INTEGER NOT NULL,"
+            " payload TEXT NOT NULL, created_at TEXT NOT NULL,"
+            " actor TEXT NOT NULL DEFAULT 'user', reason TEXT NOT NULL DEFAULT '',"
+            " UNIQUE(judgment_id, revision))"
+        )
+        j_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(judgment_items)")}
+        if j_cols:
+            for name, ddl in (
+                ("current_revision_id", "TEXT"),
+                ("revision", "INTEGER NOT NULL DEFAULT 1"),
+            ):
+                if name not in j_cols:
+                    self.conn.execute(f"ALTER TABLE judgment_items ADD COLUMN {name} {ddl}")
+        jp_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(judgment_proposals)")}
+        if jp_cols and "expected_revision_id" not in jp_cols:
+            self.conn.execute(
+                "ALTER TABLE judgment_proposals ADD COLUMN expected_revision_id TEXT"
+            )
+        jv_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(judgment_versions)")}
+        if jv_cols and "revision_ids" not in jv_cols:
+            self.conn.execute(
+                "ALTER TABLE judgment_versions ADD COLUMN revision_ids TEXT NOT NULL DEFAULT '[]'"
+            )
+        js_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(judgment_snapshots)")}
+        if js_cols:
+            for name, ddl in (
+                ("applied_revisions", "TEXT NOT NULL DEFAULT '[]'"),
+                ("audience", "TEXT"),
+                ("client", "TEXT"),
+                ("project_stage", "TEXT"),
+                ("application_engine", "TEXT NOT NULL DEFAULT 'judgment-app-v2'"),
+            ):
+                if name not in js_cols:
+                    self.conn.execute(f"ALTER TABLE judgment_snapshots ADD COLUMN {name} {ddl}")
+        jc_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(judgment_conflicts)")}
+        if jc_cols:
+            for name, ddl in (
+                ("resolution_operation_id", "TEXT"),
+                ("proposal_id", "TEXT"),
+                ("analyzer_version", "TEXT NOT NULL DEFAULT 'conflict-v1'"),
+                ("evidence_fingerprint", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if name not in jc_cols:
+                    self.conn.execute(f"ALTER TABLE judgment_conflicts ADD COLUMN {name} {ddl}")
         self._maybe_commit()
 
     def close(self) -> None:
@@ -807,8 +989,9 @@ class SqliteStore(MemoryStore):
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
             " initial_query, status, started_at, ended_at, last_activity_at,"
             " supplied_memory_ids, pack_chars, created_memory_ids,"
-            " consolidation_status, consolidation_error, summary_percept_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " consolidation_status, consolidation_error, summary_percept_id,"
+            " judgment_snapshot_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 session.id, session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
@@ -818,6 +1001,7 @@ class SqliteStore(MemoryStore):
                 json.dumps(session.created_memory_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
+                session.judgment_snapshot_id,
             ),
         )
         self._maybe_commit()
@@ -829,7 +1013,8 @@ class SqliteStore(MemoryStore):
             " task_profile = ?, initial_query = ?, status = ?, ended_at = ?,"
             " last_activity_at = ?, supplied_memory_ids = ?, pack_chars = ?,"
             " created_memory_ids = ?, consolidation_status = ?,"
-            " consolidation_error = ?, summary_percept_id = ? WHERE id = ?",
+            " consolidation_error = ?, summary_percept_id = ?,"
+            " judgment_snapshot_id = ? WHERE id = ?",
             (
                 session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
@@ -839,6 +1024,7 @@ class SqliteStore(MemoryStore):
                 json.dumps(session.created_memory_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
+                session.judgment_snapshot_id,
                 session.id,
             ),
         )
@@ -928,6 +1114,8 @@ class SqliteStore(MemoryStore):
             consolidation_status=row["consolidation_status"],
             consolidation_error=row["consolidation_error"],
             summary_percept_id=row["summary_percept_id"],
+            judgment_snapshot_id=row["judgment_snapshot_id"]
+            if "judgment_snapshot_id" in row.keys() else None,
         )
 
     def get_session(self, session_id: str) -> Optional[CognitiveSession]:
@@ -1331,3 +1519,17 @@ class SqliteStore(MemoryStore):
             self._maybe_commit()
         except sqlite3.OperationalError:
             pass
+
+    # -- judgment mixin hooks -----------------------------------------------
+
+    def _j_exec(self, sql: str, params: tuple) -> None:
+        self.conn.execute(sql, params)
+
+    def _j_fetchone(self, sql: str, params: tuple):
+        return self.conn.execute(sql, params).fetchone()
+
+    def _j_fetchall(self, sql: str, params: tuple) -> list:
+        return list(self.conn.execute(sql, params).fetchall())
+
+    def _j_commit(self) -> None:
+        self._maybe_commit()

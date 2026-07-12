@@ -1,17 +1,14 @@
-"""Judgment profile — principles, decision criteria and style that make
-different LLMs act consistently. Stored as YAML the user edits directly;
-exposed read-only through the API/MCP.
+"""Judgment profile — YAML bootstrap + promotion into proposals.
 
-Memories can be *promoted* into the profile: a confirmed
-preference/belief/procedure that proved stable graduates from "something
-that happened" to "how the user thinks" and starts riding along in every
-context pack.
+Durable judgment lives in the database (canonical). ``judgment.yaml`` remains
+a human-readable bootstrap/export. Tools must not silently rewrite identity:
+``promote_memory`` creates a *proposal*, never an active judgment item.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 
@@ -19,6 +16,7 @@ from ..clock import now_iso
 
 if TYPE_CHECKING:
     from ..memory.models import MemoryItem
+    from ..memory.store.base import MemoryStore
 
 
 def load_profile(path: Path | str) -> dict[str, Any]:
@@ -28,7 +26,7 @@ def load_profile(path: Path | str) -> dict[str, Any]:
     return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
 
-# memory type → profile section a promoted memory lands in
+# memory type → legacy YAML section (kept for export compatibility)
 _PROMOTION_SECTIONS = {
     "preference": "promoted_preferences",
     "belief": "promoted_beliefs",
@@ -36,11 +34,13 @@ _PROMOTION_SECTIONS = {
 }
 
 
-def promote_memory(path: Path | str, mem: "MemoryItem") -> str:
-    """Append a memory to the judgment profile.
+def promote_memory(path: Path | str, mem: "MemoryItem",
+                   store: Optional["MemoryStore"] = None) -> str:
+    """Promote a memory into judgment.
 
-    Returns the profile section it was added to. Idempotent per memory id.
-    Raises ValueError for memory types that don't belong in judgment.
+    When a store is provided (v0.4+), creates a pending JudgmentProposal and
+    does **not** auto-activate judgment. Falls back to appending the legacy
+    YAML section only when no store is available (tests / recovery).
     """
     section = _PROMOTION_SECTIONS.get(mem.type.value)
     if section is None:
@@ -48,11 +48,18 @@ def promote_memory(path: Path | str, mem: "MemoryItem") -> str:
             f"memory type '{mem.type.value}' cannot be promoted to judgment "
             f"(only: {', '.join(_PROMOTION_SECTIONS)})"
         )
+
+    if store is not None and hasattr(store, "insert_judgment_proposal"):
+        from .proposals import propose_from_memory
+        proposal = propose_from_memory(store, mem.id)
+        return f"proposal:{proposal.id}"
+
+    # Legacy YAML append (bootstrap / no DB)
     p = Path(path)
     profile = load_profile(p)
     entries: list[dict[str, Any]] = profile.setdefault(section, [])
     if any(isinstance(e, dict) and e.get("memory_id") == mem.id for e in entries):
-        return section  # already promoted
+        return section
     entries.append({
         "memory_id": mem.id,
         "text": mem.summary,
@@ -65,7 +72,7 @@ def promote_memory(path: Path | str, mem: "MemoryItem") -> str:
 
 
 def render_profile(profile: dict[str, Any]) -> str:
-    """Compact plain-text rendering for inclusion in a context pack."""
+    """Compact plain-text rendering for inclusion in a context pack (legacy YAML)."""
     if not profile:
         return ""
     lines: list[str] = ["## Judgment profile"]

@@ -150,10 +150,15 @@ def create_server(home: Optional[str] = None):
 
     @mcp.tool()
     def memory_judgment_profile() -> str:
-        """The user's judgment profile: principles, decision criteria and
-        communication style. Use this to act consistently with how the user
-        thinks, not just what they know."""
-        return json.dumps(load_profile(ws.cfg.judgment_path), ensure_ascii=False)
+        """Active judgment items (DB) plus YAML bootstrap. Prefer judgment_applicable
+        for scoped injection into a task."""
+        payload = dict(load_profile(ws.cfg.judgment_path))
+        if hasattr(ws.store, "list_judgment_items"):
+            payload["items"] = [
+                i.model_dump(mode="json")
+                for i in ws.store.list_judgment_items(status="active")
+            ]
+        return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_project_id(project: Optional[str]) -> Optional[str]:
         if not project:
@@ -491,6 +496,87 @@ def create_server(home: Optional[str] = None):
         )
         return json.dumps({"children": result.extras.get("children"),
                            "operation_id": result.operation_id})
+
+    # -- v0.4 judgment (read tools + gated mutations) ----------------------
+
+    @mcp.tool()
+    def judgment_applicable(domain: str = "technical", task_profile: str = "general",
+                            project: Optional[str] = None, query: str = "") -> str:
+        """Return only judgment items applicable to this domain/task — not the full profile."""
+        from ..judgment.application import applicable_pack
+        pack = applicable_pack(
+            ws.store, domain=domain, task_profile=task_profile,
+            project_id=_resolve_project_id(project), query=query,
+        )
+        return json.dumps(pack, ensure_ascii=False)
+
+    @mcp.tool()
+    def judgment_simulate(query: str, domain: str = "technical",
+                          task_profile: str = "architecture",
+                          project: Optional[str] = None) -> str:
+        """Explain how active judgment would influence a recommendation (no side effects)."""
+        from ..judgment.simulate import simulate
+        return json.dumps(simulate(
+            ws.store, query, domain=domain, task_profile=task_profile,
+            project_id=_resolve_project_id(project),
+        ), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def judgment_proposals(status: str = "pending") -> str:
+        """List judgment proposals awaiting human review."""
+        return json.dumps(
+            [p.model_dump(mode="json") for p in ws.store.list_judgment_proposals(status=status)],
+            ensure_ascii=False,
+        )
+
+    @mcp.tool()
+    def judgment_proposal_preview(proposal_id: str) -> str:
+        """Preview a proposal and obtain a state-aware preview_token for approval."""
+        from ..judgment.proposals import preview_proposal
+        try:
+            return json.dumps(preview_proposal(ws.store, proposal_id), ensure_ascii=False)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool()
+    def judgment_proposal_approve(proposal_id: str, preview_token: str,
+                                  confirm: bool = False,
+                                  confirm_constitutional: bool = False) -> str:
+        """Approve a judgment proposal (creates a new version). Requires confirm=true."""
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply"})
+        from ..judgment.proposals import approve_proposal
+        try:
+            return json.dumps(approve_proposal(
+                ws.store, proposal_id, preview_token=preview_token,
+                confirm_constitutional=confirm_constitutional,
+            ), ensure_ascii=False)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool()
+    def judgment_proposal_reject(proposal_id: str, confirm: bool = False,
+                                 reason: str = "") -> str:
+        if not confirm:
+            return json.dumps({"error": "pass confirm=true to apply"})
+        from ..judgment.proposals import reject_proposal
+        try:
+            p = reject_proposal(ws.store, proposal_id, reason=reason)
+            return json.dumps(p.model_dump(mode="json"), ensure_ascii=False)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool()
+    def judgment_conflicts(status: str = "open") -> str:
+        return json.dumps(
+            [c.model_dump(mode="json") for c in ws.store.list_judgment_conflicts(status=status)],
+            ensure_ascii=False,
+        )
+
+    @mcp.tool()
+    def judgment_version() -> str:
+        v = ws.store.get_active_judgment_version()
+        return json.dumps(v.model_dump(mode="json") if v else None, ensure_ascii=False)
 
     return mcp
 

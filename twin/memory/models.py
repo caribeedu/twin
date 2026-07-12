@@ -371,3 +371,4 @@ class CognitiveSession(BaseModel):
     consolidation_status: ConsolidationStatus = ConsolidationStatus.none
     consolidation_error: Optional[str] = None   # error type/summary, never content
     summary_percept_id: Optional[str] = None    # deterministic idempotency anchor
+    judgment_snapshot_id: Optional[str] = None  # pack snapshot that influenced this session
