@@ -111,6 +111,9 @@ DEFAULT_CALIBRATION: dict[str, Any] = {
         },
         "expired_task": {
             "action": "archive",
+            "min_age_days": 30,
+            "require_valid_until": True,
+            "allowed_terminal_states": ["completed", "cancelled"],
         },
     },
 }

@@ -1264,14 +1264,14 @@ Keep memory quality, coherence and auditability as ingestion scales beyond manua
 
 Delivered:
 
-- quality analyzer with neighborhood discovery, findings and recomputable review priority;
+- quality analyzer with neighborhood discovery, claim-aware findings and recomputable review priority (with conflict/privacy floors);
 - Review Workbench with priority queue, side-by-side diffs, keyboard shortcuts and batch preview/apply;
-- merge and split with provenance, embedding cleanup and undoable memory operations;
-- artifact provenance chain (memory → evidence → percept → artifact → source);
+- transactional merge and split with compatibility gates, evidence mapping on split, provenance and full undo;
+- artifact provenance chain via explicit artifact↔percept links (no content-hash cascade);
 - source×type calibration and soft confidence adjustment at extraction;
-- safe low-risk automation (exact duplicates, corroboration, expired tasks) under policy;
-- retention, archival and deletion propagation with tombstones;
-- extraction/retrieval eval harness and datasets;
+- safe duplicate-group automation (single canonical survivor) and policy-gated task archival;
+- retention and deletion propagation with tombstones and dry-run;
+- isolated extraction/retrieval eval harness (firewall/consolidation evals scaffolded, not delivered);
 - API, CLI and MCP surfaces for review, consolidation, provenance and evals;
 - retrieval that excludes merged, split, archived, unsupported and stale memories by default.
 

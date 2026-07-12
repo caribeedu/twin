@@ -303,6 +303,7 @@ class PostgresStore(MemoryStore):
         # psycopg connections are not thread-safe; FastAPI sync endpoints run
         # in a thread pool, so serialize access.
         self._lock = threading.RLock()
+        self._tx_depth = 0
         with self._lock, self.conn.cursor() as cur:
             try:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -311,6 +312,26 @@ class PostgresStore(MemoryStore):
                 self.has_pgvector = False
             cur.execute(_SCHEMA_BASE)
             cur.execute(_EMBEDDINGS_PGVECTOR if self.has_pgvector else _EMBEDDINGS_FALLBACK)
+
+    def _begin_transaction(self) -> None:
+        with self._lock:
+            self.conn.autocommit = False
+
+    def _commit_transaction(self) -> None:
+        with self._lock:
+            self.conn.commit()
+            self.conn.autocommit = True
+
+    def _rollback_transaction(self) -> None:
+        with self._lock:
+            self.conn.rollback()
+            self.conn.autocommit = True
+
+    def _maybe_commit(self) -> None:
+        # Postgres runs with autocommit=True outside explicit transactions.
+        if getattr(self, "_tx_depth", 0) > 0:
+            return
+        # no-op when autocommit
 
     def close(self) -> None:
         self.conn.close()

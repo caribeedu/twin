@@ -232,9 +232,18 @@ CREATE TABLE IF NOT EXISTS review_findings (
     resolved INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     resolved_at TEXT,
-    metadata TEXT NOT NULL DEFAULT '{}'
+    metadata TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open',
+    analyzer_version TEXT NOT NULL DEFAULT 'quality-v1',
+    resolution_operation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(memory_id);
+
+CREATE TABLE IF NOT EXISTS artifact_percepts (
+    artifact_id TEXT NOT NULL,
+    percept_id TEXT NOT NULL,
+    PRIMARY KEY (artifact_id, percept_id)
+);
 
 CREATE TABLE IF NOT EXISTS review_batches (
     id TEXT PRIMARY KEY,
@@ -276,8 +285,22 @@ class SqliteStore(MemoryStore):
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self._tx_depth = 0
         self.conn.executescript(SCHEMA)
         self._migrate()
+
+    def _begin_transaction(self) -> None:
+        self.conn.execute("BEGIN IMMEDIATE")
+
+    def _commit_transaction(self) -> None:
+        self.conn.commit()
+
+    def _rollback_transaction(self) -> None:
+        self.conn.rollback()
+
+    def _maybe_commit(self) -> None:
+        if getattr(self, "_tx_depth", 0) == 0:
+            self.conn.commit()
 
     def _migrate(self) -> None:
         """Additive column migrations for databases created by older versions."""
@@ -341,7 +364,20 @@ class SqliteStore(MemoryStore):
         ):
             if name not in ses_cols:
                 self.conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {ddl}")
-        self.conn.commit()
+        find_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(review_findings)")}
+        for name, ddl in (
+            ("status", "TEXT NOT NULL DEFAULT 'open'"),
+            ("analyzer_version", "TEXT NOT NULL DEFAULT 'quality-v1'"),
+            ("resolution_operation_id", "TEXT"),
+        ):
+            if find_cols and name not in find_cols:
+                self.conn.execute(f"ALTER TABLE review_findings ADD COLUMN {name} {ddl}")
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS artifact_percepts ("
+            " artifact_id TEXT NOT NULL, percept_id TEXT NOT NULL,"
+            " PRIMARY KEY (artifact_id, percept_id))"
+        )
+        self._maybe_commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -372,7 +408,7 @@ class SqliteStore(MemoryStore):
                 percept.project_id, percept.content_hash,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return percept.id
 
     def _row_to_percept(self, row: sqlite3.Row) -> Percept:
@@ -446,7 +482,7 @@ class SqliteStore(MemoryStore):
                 "INSERT OR IGNORE INTO memory_entities (memory_id, entity_id) VALUES (?,?)",
                 (mem.id, ent.id),
             )
-        self.conn.commit()
+        self._maybe_commit()
         return mem.id
 
     def get_memory(self, memory_id: str) -> Optional[MemoryItem]:
@@ -568,7 +604,7 @@ class SqliteStore(MemoryStore):
                 "INSERT INTO memories_fts (memory_id, title, summary) VALUES (?,?,?)",
                 (memory_id, row["title"], row["summary"]),
             )
-        self.conn.commit()
+        self._maybe_commit()
 
     # -- evidence ----------------------------------------------------------
 
@@ -584,7 +620,7 @@ class SqliteStore(MemoryStore):
                 int(ev.supports), ev.span_start, ev.span_end, ev.artifact_id,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return ev.id
 
     def get_evidence(self, memory_id: str) -> list[Evidence]:
@@ -617,7 +653,7 @@ class SqliteStore(MemoryStore):
             "INSERT INTO entities (id, name, entity_type, created_at, aliases) VALUES (?,?,?,?,?)",
             (ent.id, ent.name, ent.entity_type, ent.created_at, json.dumps(ent.aliases)),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return ent
 
     def get_entity_by_name(self, name: str) -> Optional[Entity]:
@@ -649,7 +685,7 @@ class SqliteStore(MemoryStore):
                 rel.memory_id, rel.valid_from, rel.valid_until, rel.created_at,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return rel.id
 
     def relations_for(self, node_id: str) -> list[Relation]:
@@ -676,7 +712,7 @@ class SqliteStore(MemoryStore):
             " VALUES (?,?,?,?,?)",
             (ref_id, ref_type, model, len(vector), to_blob(vector)),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def iter_embeddings(self, ref_type: str, model: str) -> Iterable[tuple[str, bytes]]:
         for row in self.conn.execute(
@@ -720,7 +756,7 @@ class SqliteStore(MemoryStore):
                 json.dumps(project.metadata),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return project.id
 
     def update_project(self, project: Project) -> None:
@@ -736,7 +772,7 @@ class SqliteStore(MemoryStore):
                 project.updated_at, json.dumps(project.metadata), project.id,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     @staticmethod
     def _row_to_project(row: sqlite3.Row) -> Project:
@@ -784,7 +820,7 @@ class SqliteStore(MemoryStore):
                 session.consolidation_error, session.summary_percept_id,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return session.id
 
     def update_session(self, session: CognitiveSession) -> None:
@@ -806,7 +842,7 @@ class SqliteStore(MemoryStore):
                 session.id,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def append_session_artifact(self, session_id: str, artifact: dict) -> None:
         with self.conn:  # one transaction: the active-guard and the append
@@ -852,7 +888,7 @@ class SqliteStore(MemoryStore):
             " last_activity_at = ? WHERE id = ? AND status = ?",
             (to_status, ended_at, now_iso(), session_id, from_status),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return cur.rowcount > 0
 
     def _session_artifacts(self, session_id: str) -> list[dict]:
@@ -931,13 +967,13 @@ class SqliteStore(MemoryStore):
             " VALUES (?,?,?,?,?)",
             (memory_id, target_domain, rule, action, now_iso()),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     # -- v0.3 artifacts / findings / batches / operations -------------------------
 
     def delete_embedding(self, ref_id: str) -> None:
         self.conn.execute("DELETE FROM embeddings WHERE ref_id = ?", (ref_id,))
-        self.conn.commit()
+        self._maybe_commit()
 
     def insert_artifact(self, art: Artifact) -> str:
         art.created_at = art.created_at or now_iso()
@@ -951,7 +987,7 @@ class SqliteStore(MemoryStore):
                 art.deletion_reason, int(art.content_destroyed), json.dumps(art.metadata),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return art.id
 
     def get_artifact(self, artifact_id: str) -> Optional[Artifact]:
@@ -988,7 +1024,7 @@ class SqliteStore(MemoryStore):
             " content_destroyed = ? WHERE id = ?",
             (now_iso(), reason, int(destroy_content), artifact_id),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def tombstone_percept(self, percept_id: str, *, reason: str,
                           destroy_content: bool = True) -> None:
@@ -1011,14 +1047,14 @@ class SqliteStore(MemoryStore):
                 "UPDATE percepts SET metadata = ? WHERE id = ?",
                 (json.dumps(meta), percept_id),
             )
-        self.conn.commit()
+        self._maybe_commit()
 
     def tombstone_evidence(self, evidence_id: str, *, reason: str) -> None:
         self.conn.execute(
             "UPDATE evidence SET deleted_at = ?, quote = ? WHERE id = ?",
             (now_iso(), f"[tombstoned:{reason}]", evidence_id),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def list_evidence_for_artifact(self, artifact_id: str) -> list[Evidence]:
         rows = self.conn.execute(
@@ -1034,44 +1070,63 @@ class SqliteStore(MemoryStore):
         return out
 
     def replace_findings(self, memory_id: str, findings: list[ReviewFinding]) -> None:
-        self.conn.execute("DELETE FROM review_findings WHERE memory_id = ?", (memory_id,))
+        # Preserve human dismissals; mark prior open findings obsolete then insert fresh.
+        self.conn.execute(
+            "UPDATE review_findings SET status = 'obsolete', resolved = 1,"
+            " resolved_at = ? WHERE memory_id = ? AND status = 'open'",
+            (now_iso(), memory_id),
+        )
         for f in findings:
             self.insert_finding(f, commit=False)
-        self.conn.commit()
+        self._maybe_commit()
 
     def insert_finding(self, finding: ReviewFinding, commit: bool = True) -> str:
         finding.created_at = finding.created_at or now_iso()
+        status = getattr(finding.status, "value", finding.status) or "open"
+        resolved = int(finding.resolved or status != "open")
         self.conn.execute(
             "INSERT INTO review_findings (id, memory_id, type, related_memory_id,"
             " confidence, reason, suggested_action, requires_human_review, resolved,"
-            " created_at, resolved_at, metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " created_at, resolved_at, metadata, status, analyzer_version,"
+            " resolution_operation_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 finding.id, finding.memory_id, finding.type.value, finding.related_memory_id,
                 finding.confidence, finding.reason, finding.suggested_action.value,
-                int(finding.requires_human_review), int(finding.resolved),
+                int(finding.requires_human_review), resolved,
                 finding.created_at, finding.resolved_at, json.dumps(finding.metadata),
+                status, finding.analyzer_version, finding.resolution_operation_id,
             ),
         )
         if commit:
-            self.conn.commit()
+            self._maybe_commit()
         return finding.id
 
     def get_findings(self, memory_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
         q = "SELECT * FROM review_findings WHERE memory_id = ?"
         if unresolved_only:
-            q += " AND resolved = 0"
+            q += " AND (status = 'open' OR (status IS NULL AND resolved = 0))"
         rows = self.conn.execute(q, (memory_id,)).fetchall()
         return [self._row_to_finding(r) for r in rows]
 
     @staticmethod
     def _row_to_finding(row: sqlite3.Row) -> ReviewFinding:
+        keys = set(row.keys())
+        status = row["status"] if "status" in keys and row["status"] else (
+            "resolved" if row["resolved"] else "open"
+        )
         return ReviewFinding(
             id=row["id"], memory_id=row["memory_id"], type=row["type"],
             related_memory_id=row["related_memory_id"], confidence=row["confidence"],
             reason=row["reason"], suggested_action=row["suggested_action"],
             requires_human_review=bool(row["requires_human_review"]),
+            status=status,
             resolved=bool(row["resolved"]), created_at=row["created_at"],
-            resolved_at=row["resolved_at"], metadata=json.loads(row["metadata"]),
+            resolved_at=row["resolved_at"],
+            analyzer_version=(row["analyzer_version"] if "analyzer_version" in keys
+                              else "quality-v1"),
+            resolution_operation_id=(row["resolution_operation_id"]
+                                     if "resolution_operation_id" in keys else None),
+            metadata=json.loads(row["metadata"]),
         )
 
     def insert_review_batch(self, batch: ReviewBatch) -> str:
@@ -1085,7 +1140,7 @@ class SqliteStore(MemoryStore):
                 batch.progress_total, batch.progress_reviewed, json.dumps(batch.metadata),
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return batch.id
 
     def get_review_batch(self, batch_id: str) -> Optional[ReviewBatch]:
@@ -1116,7 +1171,7 @@ class SqliteStore(MemoryStore):
             f"UPDATE review_batches SET {sets} WHERE id = ?",
             list(updates.values()) + [batch_id],
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def list_review_batches(self) -> list[ReviewBatch]:
         rows = self.conn.execute(
@@ -1134,7 +1189,7 @@ class SqliteStore(MemoryStore):
                 json.dumps(op.before), json.dumps(op.after), int(op.undoable), op.undone_at,
             ),
         )
-        self.conn.commit()
+        self._maybe_commit()
         return op.id
 
     def get_operation(self, operation_id: str) -> Optional[MemoryOperation]:
@@ -1155,7 +1210,7 @@ class SqliteStore(MemoryStore):
             "UPDATE memory_operations SET undone_at = ?, undoable = 0 WHERE id = ?",
             (now_iso(), operation_id),
         )
-        self.conn.commit()
+        self._maybe_commit()
 
     def bump_retrieval(self, memory_id: str) -> None:
         self.conn.execute(
@@ -1163,4 +1218,116 @@ class SqliteStore(MemoryStore):
             " last_retrieved_at = ? WHERE id = ?",
             (now_iso(), memory_id),
         )
-        self.conn.commit()
+        self._maybe_commit()
+
+    def delete_relation(self, relation_id: str) -> None:
+        self.conn.execute("DELETE FROM relations WHERE id = ?", (relation_id,))
+        self._maybe_commit()
+
+    def delete_evidence_row(self, evidence_id: str) -> None:
+        self.conn.execute("DELETE FROM evidence WHERE id = ?", (evidence_id,))
+        self._maybe_commit()
+
+    def hard_delete_memory(self, memory_id: str) -> None:
+        self.conn.execute("DELETE FROM memories_fts WHERE memory_id = ?", (memory_id,))
+        self.conn.execute("DELETE FROM memory_entities WHERE memory_id = ?", (memory_id,))
+        self.conn.execute("DELETE FROM evidence WHERE memory_id = ?", (memory_id,))
+        self.conn.execute("DELETE FROM embeddings WHERE ref_id = ?", (memory_id,))
+        self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        self._maybe_commit()
+
+    def get_embedding_blob(self, ref_id: str, model: Optional[str] = None) -> Optional[tuple[str, bytes]]:
+        if model:
+            row = self.conn.execute(
+                "SELECT model, vector FROM embeddings WHERE ref_id = ? AND model = ?",
+                (ref_id, model),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT model, vector FROM embeddings WHERE ref_id = ? LIMIT 1",
+                (ref_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return row["model"], row["vector"]
+
+    def restore_embedding_blob(self, ref_id: str, ref_type: str, model: str, blob: bytes) -> None:
+        import struct
+        # dim from blob: float32 array
+        dim = len(blob) // 4
+        self.conn.execute(
+            "INSERT OR REPLACE INTO embeddings (ref_id, ref_type, model, dim, vector)"
+            " VALUES (?,?,?,?,?)",
+            (ref_id, ref_type, model, dim, blob),
+        )
+        self._maybe_commit()
+
+    def list_evidence_by_percept_ids(self, percept_ids: list[str]) -> list[Evidence]:
+        if not percept_ids:
+            return []
+        placeholders = ",".join("?" * len(percept_ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM evidence WHERE percept_id IN ({placeholders})"
+            " AND (deleted_at IS NULL OR deleted_at = '')",
+            percept_ids,
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["quote"] = self.codec.decrypt(d["quote"])
+            d["supports"] = bool(d.get("supports", 1))
+            d.pop("deleted_at", None)
+            out.append(Evidence(**{k: v for k, v in d.items() if k in Evidence.model_fields}))
+        return out
+
+    def list_percept_ids_for_artifact(self, artifact_id: str) -> list[str]:
+        """Explicit lineage only — never content-hash ownership."""
+        ids_set: set[str] = set()
+        art = self.get_artifact(artifact_id)
+        if art and art.metadata.get("percept_id"):
+            ids_set.add(art.metadata["percept_id"])
+        for ev in self.list_evidence_for_artifact(artifact_id):
+            ids_set.add(ev.percept_id)
+        # explicit link table if present
+        try:
+            rows = self.conn.execute(
+                "SELECT percept_id FROM artifact_percepts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchall()
+            for r in rows:
+                ids_set.add(r["percept_id"])
+        except sqlite3.OperationalError:
+            pass
+        return list(ids_set)
+
+    def link_artifact_percept(self, artifact_id: str, percept_id: str) -> None:
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS artifact_percepts ("
+            " artifact_id TEXT NOT NULL, percept_id TEXT NOT NULL,"
+            " PRIMARY KEY (artifact_id, percept_id))"
+        )
+        self.conn.execute(
+            "INSERT OR IGNORE INTO artifact_percepts (artifact_id, percept_id) VALUES (?,?)",
+            (artifact_id, percept_id),
+        )
+        self._maybe_commit()
+
+    def count_artifact_links_for_percept(self, percept_id: str) -> int:
+        try:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS n FROM artifact_percepts WHERE percept_id = ?",
+                (percept_id,),
+            ).fetchone()
+            return int(row["n"]) if row else 0
+        except sqlite3.OperationalError:
+            return 0
+
+    def unlink_artifact_percept(self, artifact_id: str, percept_id: str) -> None:
+        try:
+            self.conn.execute(
+                "DELETE FROM artifact_percepts WHERE artifact_id = ? AND percept_id = ?",
+                (artifact_id, percept_id),
+            )
+            self._maybe_commit()
+        except sqlite3.OperationalError:
+            pass

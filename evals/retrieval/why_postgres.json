@@ -2,8 +2,32 @@
   "id": "why_postgres",
   "query": "Why did we choose PostgreSQL?",
   "domain": "technical",
-  "expected_memory_ids": [],
-  "forbidden_memory_ids": [],
-  "expected_sections": ["Decisions", "Evidence"],
-  "notes": "IDs filled at runtime in tests; fixture documents expected shape."
+  "project_id": null,
+  "seed_memories": [
+    {
+      "id": "mem_fixture_pg",
+      "type": "decision",
+      "title": "PostgreSQL as primary store",
+      "summary": "We chose PostgreSQL as the primary production database for Twin.",
+      "domain": "technical",
+      "confidence": 0.92,
+      "status": "confirmed",
+      "entities": ["Twin", "PostgreSQL"],
+      "evidence": ["Decision: use PostgreSQL as the primary production store."]
+    },
+    {
+      "id": "mem_fixture_private",
+      "type": "belief",
+      "title": "private note",
+      "summary": "Unrelated private preference.",
+      "domain": "personal",
+      "confidence": 0.9,
+      "status": "confirmed",
+      "evidence": ["private"]
+    }
+  ],
+  "expected_memory_ids": ["mem_fixture_pg"],
+  "forbidden_memory_ids": ["mem_fixture_private"],
+  "expected_sections": ["Decisions"],
+  "require_evidence": true
 }

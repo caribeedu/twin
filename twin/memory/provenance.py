@@ -30,9 +30,13 @@ def ensure_artifact_from_percept(store: MemoryStore, percept: Percept) -> Option
     }.get(percept.source_sensor, percept.percept_type or "artifact")
 
     content_hash = percept.content_hash
+    # Reuse only within the same source_system — identical bytes from different
+    # systems remain distinct artifacts (hash is not ownership).
     if hasattr(store, "find_artifact_by_hash") and content_hash:
         existing = store.find_artifact_by_hash(content_hash)  # type: ignore[attr-defined]
-        if existing:
+        if existing and existing.source_system == (percept.source_sensor or "local"):
+            if hasattr(store, "link_artifact_percept"):
+                store.link_artifact_percept(existing.id, percept.id)  # type: ignore[attr-defined]
             return existing.id
 
     art = Artifact(
@@ -51,6 +55,8 @@ def ensure_artifact_from_percept(store: MemoryStore, percept: Percept) -> Option
         },
     )
     store.insert_artifact(art)  # type: ignore[attr-defined]
+    if hasattr(store, "link_artifact_percept"):
+        store.link_artifact_percept(art.id, percept.id)  # type: ignore[attr-defined]
     return art.id
 
 

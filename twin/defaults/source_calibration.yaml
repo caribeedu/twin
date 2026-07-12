@@ -53,3 +53,8 @@ quality_automation:
     action: review
   expired_task:
     action: archive
+    min_age_days: 30
+    require_valid_until: true
+    allowed_terminal_states:
+      - completed
+      - cancelled

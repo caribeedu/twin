@@ -164,6 +164,7 @@ class FindingType(str, Enum):
     possible_supersedence = "possible_supersedence"
     possible_merge = "possible_merge"
     possible_split = "possible_split"
+    possibly_related = "possibly_related"
     low_specificity = "low_specificity"
     weak_evidence = "weak_evidence"
     high_future_reuse = "high_future_reuse"
@@ -172,6 +173,15 @@ class FindingType(str, Enum):
     scope_difference = "scope_difference"
     unsupported = "unsupported"
     stale = "stale"
+    evidence_mapping_required = "evidence_mapping_required"
+
+
+class DuplicateGroup(BaseModel):
+    id: str
+    memory_ids: list[str] = Field(default_factory=list)
+    canonical_memory_id: str = ""
+    reason: str = ""
+    created_at: str = ""
 
 
 class SuggestedAction(str, Enum):
@@ -189,6 +199,13 @@ class SuggestedAction(str, Enum):
     none = "none"
 
 
+class FindingStatus(str, Enum):
+    open = "open"
+    resolved = "resolved"
+    dismissed = "dismissed"
+    obsolete = "obsolete"
+
+
 class ReviewFinding(BaseModel):
     id: str
     memory_id: str
@@ -198,9 +215,12 @@ class ReviewFinding(BaseModel):
     reason: str = ""
     suggested_action: SuggestedAction = SuggestedAction.none
     requires_human_review: bool = True
-    resolved: bool = False
+    status: FindingStatus = FindingStatus.open
+    resolved: bool = False  # legacy mirror of status != open
     created_at: str = ""
     resolved_at: Optional[str] = None
+    resolution_operation_id: Optional[str] = None
+    analyzer_version: str = "quality-v1"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

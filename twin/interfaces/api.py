@@ -419,6 +419,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         memory_ids: list[str] = Field(min_length=2)
         title: Optional[str] = None
         summary: Optional[str] = None
+        confirm_cross_scope_merge: bool = False
+        human_confirmed_synthesis: bool = False
 
     class SplitRequest(BaseModel):
         parts: list[dict[str, Any]] = Field(min_length=2)
@@ -486,6 +488,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             result = merge_memories(
                 ws.store, req.memory_ids, title=req.title, summary=req.summary,
                 embedder=ws.embedder,
+                confirm_cross_scope_merge=req.confirm_cross_scope_merge,
+                human_confirmed_synthesis=req.human_confirmed_synthesis,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
