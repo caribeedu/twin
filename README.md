@@ -1245,260 +1245,35 @@ Delivered:
 
 ### v0.2 — Operational Cognitive Workflow
 
-Goal: move `twin` from a demonstrable memory service into a tool that can be used continuously in real technical work. v0.2 closes the loop between retrieving existing context and capturing what changed during the task.
-
-The target workflow is:
-
-```text
-start a real task in an MCP client
-        ↓
-identify project, domain and task profile
-        ↓
-load a compact, task-aware context pack
-        ↓
-perform the work in the external LLM/IDE
-        ↓
-complete the cognitive session
-        ↓
-turn decisions, constraints and changes into candidate memories
-        ↓
-review and consolidate
-```
-
-#### Cognitive session lifecycle
-
-Introduce a first-class `CognitiveSession` that records:
-
-- client and project;
-- active domain and task profile;
-- initial task/query;
-- memories supplied to the client;
-- artifacts produced or changed;
-- candidate memories created at completion;
-- explicit usefulness feedback;
-- start, completion and abandonment states.
-
-Expose the lifecycle through MCP, API and CLI operations equivalent to:
-
-```text
-session_start
-session_observe
-session_complete
-session_feedback
-```
-
-The session boundary must close the current read-only flow:
-
-```text
-Twin → LLM
-```
-
-into a maintained cognitive loop:
-
-```text
-Twin → LLM → completed work → new percepts → candidate memories → Twin
-```
-
-#### Task-aware context packs
-
-Evolve the existing sectioned context pack into profiles tailored to the current work:
-
-- coding;
-- architecture;
-- debugging;
-- writing;
-- planning;
-- review;
-- meeting preparation.
-
-Each profile should preserve the same firewall and evidence guarantees while changing ordering and token allocation. An architecture pack, for example, should prioritize prior decisions, rejected alternatives, constraints, judgment criteria, open questions and evidence; a coding pack should prioritize active project context, implementation constraints, conventions, known risks and relevant decisions.
-
-#### Projects as first-class cognitive units
-
-Promote projects from loosely inferred graph entities into explicit structures connected to:
-
-- repositories and aliases;
-- goals and milestones;
-- active and superseded decisions;
-- constraints;
-- open questions;
-- sessions;
-- percepts and artifacts;
-- people and systems;
-- project timeline.
-
-The current repository/directory should be usable as a strong signal for project inference in developer clients.
-
-#### Product-level feedback and evaluation
-
-Extend current pipeline metrics with explicit context-usefulness feedback:
-
-```text
-useful
-partially_useful
-irrelevant
-incorrect
-missing_context
-privacy_overblock
-privacy_underblock
-```
-
-Track product metrics such as:
-
-- context relevance rate;
-- false-memory rate;
-- missing-memory rate;
-- project/domain misclassification rate;
-- context-pack token efficiency;
-- memory usage rate;
-- session re-explanation rate.
-
-The central product metric is: **how often did the user need to explain something that `twin` should already have known?**
-
-#### Multi-stage retrieval and local reranking
-
-Make retrieval an explicit pipeline:
-
-```text
-project/domain/task detection
-        ↓
-lexical + vector candidate generation
-        ↓
-graph expansion and temporal filtering
-        ↓
-Domain Firewall and source-trust weighting
-        ↓
-local reranking
-        ↓
-task-aware context construction
-```
-
-Keep deterministic hybrid search as the baseline and fallback. Add a local reranker only where it measurably improves relevance.
-
-#### Fast and deep observer modes
-
-Split observation into two levels:
-
-- **fast observer:** deterministic keywords, entity matches, project/repository context and graph votes; cheap enough to run routinely;
-- **deep observer:** local LLM classification used only when domain, project, task or intent remains ambiguous.
-
-Observer output should include confidence and uncertainty for domain, project and task profile, not only a single inferred domain.
-
-#### Real MCP workflow validation
-
-Treat MCP compatibility as a tested product surface rather than documentation alone. Validate complete workflows in:
-
-- Claude Code;
-- Cursor;
-- Claude Desktop;
-- the CLI reference client;
-- generic MCP clients where possible.
-
-The compatibility matrix should cover session start, context loading, observation, session completion and feedback, while accounting for capabilities each client may not expose automatically.
-
-#### Installation and operations ergonomics
-
-Add operational commands such as:
-
-```text
-twin doctor
-twin setup ollama
-twin setup postgres
-twin setup mcp <client>
-```
-
-`twin doctor` should verify models, stores, pgvector, migrations, encryption configuration, policies, judgment profile, embeddings and MCP client configuration.
-
-#### Incremental developer sensors
-
-Add continuous but controlled ingestion for technical work before broader external connectors:
-
-- filesystem/document watching;
-- Git commits, branches and repository metadata;
-- changed ADRs and technical documentation;
-- optional session-produced artifact summaries.
-
-Preserve the distinction:
-
-```text
-artifact != percept != memory
-```
-
-An artifact is the original file, commit, PR or transcript; a percept is the normalized observation emitted by a sensor; a memory is consolidated knowledge extracted from evidence.
-
-#### v0.2 completion criteria
-
-v0.2 is complete when the following scenario works end to end:
-
-1. open a repository in Cursor or Claude Code;
-2. begin a task without re-explaining the complete architecture;
-3. `twin` identifies the project, domain and task profile;
-4. it supplies relevant decisions, constraints, preferences and evidence;
-5. the external tool completes the task;
-6. the cognitive session is completed;
-7. changes become percepts and candidate memories;
-8. the user can review and consolidate them;
-9. usefulness feedback is recorded;
-10. equivalent context remains available from another MCP client.
-
-### v0.3 — Memory Quality, Consolidation and Review at Scale
-
-Goal: keep memory quality, coherence, auditability and governability as the
-system moves from tens of memories to thousands or millions — without
-requiring full-time manual curation.
-
-v0.2 closed the operational loop (context → session → work → percepts →
-candidates → review → consolidation). v0.3 turns that loop into a
-**discipline of consolidation**: individual memories are no longer reviewed
-in isolation; the graph is continuously reconciled.
+Close the loop between retrieving context and capturing what changed during real technical work.
 
 Delivered:
 
-- **Memory Quality Analyzer** (`twin.cognition.quality`) — neighborhood
-  discovery, duplicate/near-duplicate/conflict/supersedence/merge/split
-  findings, specificity and evidence checks, recomputable
-  `review_priority` / `quality_score` / `quality_flags`;
-- **Review Workbench** — priority queue, side-by-side candidate vs neighbor,
-  keyboard shortcuts (A/R/E/M/S/C/D/N/P), batch create/preview/apply with
-  sensitive/conflict gates;
-- **Merge and split** — new memory IDs, `merged` / `split` statuses,
-  `merged_into` / `split_into` relations, evidence aggregation, embedding
-  cleanup, undo via `memory_operations`;
-- **Artifact provenance** — persisted `Artifact` entity; navigable chain
-  memory → evidence → percept → artifact → source system; corroboration
-  with capped confidence growth and independence groups;
-- **Source calibration** — declarative source×type trust matrix
-  (`source_calibration.yaml`) and soft confidence calibration at extract;
-- **Safe automation** — exact-duplicate reject, expired-task archive,
-  corroborating-evidence attach under policy; beliefs/conflicts/sensitive
-  merges never auto-applied;
-- **Retention / deletion propagation** — artifact tombstones cascade to
-  percepts, evidence and unsupported memories; dry-run delete by source;
-- **Evaluation framework** — `evals/extraction`, `evals/retrieval` (+
-  firewall/consolidation placeholders), runners, compare helpers, CLI/API;
-- **Surfaces** — API (`/api/review/*`, merge/split/archive/provenance/
-  artifacts/evals), CLI (`twin review`, `memory merge|split|…`, `eval`,
-  `source`, `retention`, `undo`), MCP read tools + confirm-gated mutations.
+- cognitive sessions with start, observe, complete and feedback over MCP, API and CLI;
+- task-aware context packs (coding, architecture, debugging, writing, planning, review, meeting prep);
+- first-class projects with repos, aliases, goals and session/percept linkage;
+- product usefulness feedback and session/product metrics;
+- multi-stage retrieval with graph expansion, firewall and source-trust weighting;
+- fast and deep observer modes with domain/project/task uncertainty;
+- `twin doctor` and `twin setup` for ollama, postgres and MCP clients;
+- incremental developer sensors (Git, watch) preserving artifact ≠ percept ≠ memory.
 
-Completion criteria covered:
+### v0.3 — Memory Quality, Consolidation and Review at Scale
 
-1. candidates enter from sessions/sensors;
-2. duplicates, conflicts and supersedences are grouped as findings;
-3. queue ordered by risk × impact;
-4. side-by-side workbench review;
-5. exact duplicates batchable under policy;
-6. merge/split preserve provenance;
-7. structural ops audited and undoable;
-8. source removal propagates;
-9. extraction/retrieval benchmarks exist;
-10. extractor version recorded on memories;
-11. retrieval excludes merged/split/archived/unsupported/stale by default;
-12. backlog remains priority-controlled rather than FIFO-only.
+Keep memory quality, coherence and auditability as ingestion scales beyond manual curation.
 
-Not in v0.3 (deferred): autonomous judgment evolution, personal domains,
-full Gmail/Slack connectors, continuous global observer, voice,
-Graphiti/Neo4j-by-default, autonomous curation agents, automatic resolution
-of complex conflicts.
+Delivered:
+
+- quality analyzer with neighborhood discovery, findings and recomputable review priority;
+- Review Workbench with priority queue, side-by-side diffs, keyboard shortcuts and batch preview/apply;
+- merge and split with provenance, embedding cleanup and undoable memory operations;
+- artifact provenance chain (memory → evidence → percept → artifact → source);
+- source×type calibration and soft confidence adjustment at extraction;
+- safe low-risk automation (exact duplicates, corroboration, expired tasks) under policy;
+- retention, archival and deletion propagation with tombstones;
+- extraction/retrieval eval harness and datasets;
+- API, CLI and MCP surfaces for review, consolidation, provenance and evals;
+- retrieval that excludes merged, split, archived, unsupported and stale memories by default.
 
 ### v0.4 — Evolving Judgment Model
 
