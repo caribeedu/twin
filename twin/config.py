@@ -31,6 +31,13 @@ ALL_DOMAINS = MVP_DOMAINS + [
     "finance", "social", "legal", "emotional", "general",
 ]
 
+# Target pseudo-domain used when observation cannot classify the current
+# context with enough confidence. It is deliberately NOT a memory domain:
+# the firewall treats it as default-deny, so an ambiguous task never
+# receives context it was not entitled to. The safe default is the most
+# restrictive one, not the most frequent one.
+UNCLASSIFIED_DOMAIN = "unclassified"
+
 SENSITIVITY_ORDER = ["public", "internal", "private", "restricted"]
 
 

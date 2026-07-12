@@ -71,3 +71,23 @@ def test_blocks_are_logged_to_store(cfg, store):
     rows = store.conn.execute("SELECT * FROM firewall_log").fetchall()
     assert len(rows) == 1
     assert rows[0]["target_domain"] == "work"
+
+
+def test_unclassified_target_is_default_deny(cfg):
+    """An unclassified target context is restricted mode: NOTHING crosses —
+    not even public technical memories — until the domain is confirmed."""
+    fw = Firewall(cfg.policies_path)
+    for domain in ("technical", "work", "assistant_preferences", "relationship"):
+        for sensitivity in ("public", "internal"):
+            verdict = fw.evaluate(_mem(domain=domain, sensitivity=sensitivity),
+                                  "unclassified")
+            assert not verdict.allowed
+            assert verdict.rule == "unclassified_target_default_deny"
+
+
+def test_unclassified_blocks_are_audited(cfg, store):
+    fw = Firewall(cfg.policies_path, store)
+    fw.evaluate(_mem(), "unclassified")
+    rows = store.conn.execute("SELECT * FROM firewall_log").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["target_domain"] == "unclassified"

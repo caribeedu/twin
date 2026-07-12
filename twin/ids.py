@@ -39,3 +39,11 @@ def evidence_id() -> str:
 
 def relation_id() -> str:
     return new_id("rel")
+
+
+def project_id() -> str:
+    return new_id("proj")
+
+
+def session_id() -> str:
+    return new_id("ses")

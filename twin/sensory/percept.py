@@ -37,6 +37,8 @@ class Percept(BaseModel):
     # confidentiality floor: memories derived from this percept can never be
     # LESS sensitive than this (public | internal | private | restricted)
     source_confidentiality: str = "internal"
+    # explicit project link (resolved by sensors/sessions when known)
+    project_id: Optional[str] = None
 
     def seal(self) -> "Percept":
         """Fill integrity fields from content (idempotent)."""

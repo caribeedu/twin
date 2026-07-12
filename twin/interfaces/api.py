@@ -10,37 +10,113 @@ export JSON. Everything else happens through the JSON API or MCP.
 from __future__ import annotations
 
 import html
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from ..cognition import extract_pending
 from ..cognition.context_pack import build_context_pack
 from ..cognition.observer import observe
-from ..config import ALL_DOMAINS
+from ..cognition.sessions import (
+    complete_session,
+    ensure_project,
+    observe_session,
+    record_feedback,
+    start_session,
+)
+from ..config import ALL_DOMAINS, UNCLASSIFIED_DOMAIN
 from ..judgment.profile import load_profile
-from ..memory.models import MemoryStatus
+from ..memory.models import FeedbackVerdict, MemoryStatus, TaskProfile
 from ..memory.search import search
 from ..workspace import Workspace
 
+# domains accepted at the API edge; unclassified is a valid *target* (it
+# means "operate default-deny"), never a memory domain
+_TARGET_DOMAINS = set(ALL_DOMAINS) | {UNCLASSIFIED_DOMAIN}
+
+
+def _validate_domain(value: Optional[str]) -> Optional[str]:
+    if value is not None and value not in _TARGET_DOMAINS:
+        raise ValueError(f"unknown domain {value!r}; expected one of "
+                         f"{sorted(_TARGET_DOMAINS)}")
+    return value
+
 
 class IngestRequest(BaseModel):
-    paths: list[str]
+    paths: list[str] = Field(min_length=1)
 
 
 class ObserveRequest(BaseModel):
-    current_text: str
+    current_text: str = Field(min_length=1, max_length=20_000)
     target_domain: Optional[str] = None
+
+    _domain = field_validator("target_domain")(_validate_domain)
 
 
 class PackRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=20_000)
     target_domain: str = "technical"
-    max_tokens: int = 1200
+    max_tokens: int = Field(default=1200, ge=100, le=16_000)
     include_judgment: bool = True
     include_candidates: bool = False  # packs are confirmed-only by default
+    task_profile: TaskProfile = TaskProfile.general
+    project: Optional[str] = None  # project name, alias or id
+
+    _domain = field_validator("target_domain")(_validate_domain)
+
+
+class SessionStartRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=20_000)
+    client: str = Field(default="api", min_length=1, max_length=100)
+    cwd: Optional[str] = None
+    domain: Optional[str] = None
+    project: Optional[str] = None
+    task_profile: Optional[TaskProfile] = None
+    max_tokens: int = Field(default=1200, ge=100, le=16_000)
+    include_candidates: bool = False
+
+    _domain = field_validator("domain")(_validate_domain)
+
+
+class SessionObserveRequest(BaseModel):
+    kind: str = Field(min_length=1, max_length=50)
+    ref: Optional[str] = Field(default=None, max_length=2_000)
+    note: Optional[str] = Field(default=None, max_length=10_000)
+    percept_id: Optional[str] = None  # artifact already ingested by a sensor
+
+
+class SessionCompleteRequest(BaseModel):
+    summary: str = Field(default="", max_length=50_000)
+    abandoned: bool = False
+    summary_origin: Literal["user", "assistant", "client", "derived"] = "client"
+    user_confirmed: bool = False
+
+
+class SessionFeedbackRequest(BaseModel):
+    verdict: FeedbackVerdict
+    memory_id: Optional[str] = None
+    note: str = Field(default="", max_length=10_000)
+    scope: Optional[Literal["session", "pack", "memory"]] = None
+
+
+class ProjectRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    repos: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+
+
+class ProjectUpdateRequest(BaseModel):
+    """Partial update — omitted fields keep their current value."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    aliases: Optional[list[str]] = None
+    repos: Optional[list[str]] = None
+    goals: Optional[list[str]] = None
+    milestones: Optional[list[dict[str, Any]]] = None
+    open_questions: Optional[list[str]] = None
+    status: Optional[Literal["active", "paused", "done"]] = None
+    metadata: Optional[dict[str, Any]] = None
 
 
 def _mem_dict(mem) -> dict[str, Any]:
@@ -126,6 +202,14 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "blocked": [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
         }
 
+    def _resolve_project_id(project: Optional[str]) -> Optional[str]:
+        if not project:
+            return None
+        found = ws.store.get_project(project) or ws.store.find_project(project)
+        if found is None:
+            raise HTTPException(404, f"project '{project}' not found")
+        return found.id
+
     @app.post("/api/context_pack")
     def api_pack(req: PackRequest):
         pack = build_context_pack(ws.store, ws.cfg, ws.embedder, req.query,
@@ -133,8 +217,123 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   max_tokens=req.max_tokens,
                                   include_judgment=req.include_judgment,
                                   include_candidates=req.include_candidates,
+                                  task_profile=req.task_profile.value,
+                                  project_id=_resolve_project_id(req.project),
                                   firewall=ws.firewall)
         return pack.__dict__
+
+    # -- Cognitive sessions ------------------------------------------------
+
+    def _session_dict(session) -> dict[str, Any]:
+        data = session.model_dump()
+        data["status"] = session.status.value
+        data["consolidation_status"] = session.consolidation_status.value
+        return data
+
+    @app.post("/api/sessions")
+    def api_session_start(req: SessionStartRequest):
+        try:
+            started = start_session(
+                ws.store, ws.cfg, ws.embedder, req.query,
+                client=req.client, cwd=req.cwd, domain=req.domain,
+                project=req.project,
+                task_profile=req.task_profile.value if req.task_profile else None,
+                max_tokens=req.max_tokens, include_candidates=req.include_candidates,
+            )
+        except ValueError as exc:
+            # an explicit-but-unknown project must fail, never be inferred over
+            raise HTTPException(404 if "not found" in str(exc) else 400, str(exc))
+        return {
+            "session": _session_dict(started.session),
+            "context_pack": started.pack.__dict__,
+            "reading_confidences": started.reading_confidences,
+            "observer_mode": started.observer_mode,
+            "needs_domain_confirmation": started.needs_domain_confirmation,
+            "observer_fallback": started.observer_fallback,
+        }
+
+    @app.get("/api/sessions")
+    def api_sessions(status: Optional[str] = None, project_id: Optional[str] = None):
+        sessions = ws.store.list_sessions(status=status, project_id=project_id)
+        return [_session_dict(s) for s in sessions]
+
+    @app.get("/api/sessions/{session_id}")
+    def api_session(session_id: str):
+        session = ws.store.get_session(session_id)
+        if session is None:
+            raise HTTPException(404, "session not found")
+        return _session_dict(session)
+
+    @app.post("/api/sessions/{session_id}/observe")
+    def api_session_observe(session_id: str, req: SessionObserveRequest):
+        artifact: dict[str, Any] = {"kind": req.kind}
+        if req.ref:
+            artifact["ref"] = req.ref
+        if req.note:
+            artifact["note"] = req.note
+        if req.percept_id:
+            artifact["percept_id"] = req.percept_id
+        try:
+            session = observe_session(ws.store, session_id, artifact)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _session_dict(session)
+
+    @app.post("/api/sessions/{session_id}/complete")
+    def api_session_complete(session_id: str, req: SessionCompleteRequest):
+        try:
+            session = complete_session(ws.store, ws.cfg, ws.embedder, session_id,
+                                       summary=req.summary, abandoned=req.abandoned,
+                                       summary_origin=req.summary_origin,
+                                       user_confirmed=req.user_confirmed)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _session_dict(session)
+
+    @app.post("/api/sessions/{session_id}/feedback")
+    def api_session_feedback(session_id: str, req: SessionFeedbackRequest):
+        try:
+            session = record_feedback(ws.store, session_id, req.verdict.value,
+                                      memory_id=req.memory_id, note=req.note,
+                                      scope=req.scope)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _session_dict(session)
+
+    @app.post("/api/sessions/cleanup")
+    def api_sessions_cleanup(max_idle_hours: float = 24.0):
+        from ..cognition.sessions import abandon_stale_sessions
+
+        return {"abandoned": abandon_stale_sessions(ws.store, max_idle_hours)}
+
+    # -- Projects ----------------------------------------------------------
+
+    @app.post("/api/projects")
+    def api_project_add(req: ProjectRequest):
+        project = ensure_project(ws.store, req.name, repos=req.repos,
+                                 aliases=req.aliases)
+        return project.model_dump()
+
+    @app.get("/api/projects")
+    def api_projects(status: Optional[str] = None):
+        return [p.model_dump() for p in ws.store.list_projects(status=status)]
+
+    @app.get("/api/projects/{project_id}")
+    def api_project(project_id: str):
+        project = ws.store.get_project(project_id) or ws.store.find_project(project_id)
+        if project is None:
+            raise HTTPException(404, "project not found")
+        return project.model_dump()
+
+    @app.patch("/api/projects/{project_id}")
+    def api_project_update(project_id: str, req: ProjectUpdateRequest):
+        project = ws.store.get_project(project_id) or ws.store.find_project(project_id)
+        if project is None:
+            raise HTTPException(404, "project not found")
+        for field_name, value in req.model_dump(exclude_none=True).items():
+            setattr(project, field_name, value)
+        ws.store.update_project(project)
+        return ws.store.get_project(project.id).model_dump()
 
     @app.post("/api/memories/{memory_id}/promote")
     def api_promote(memory_id: str):

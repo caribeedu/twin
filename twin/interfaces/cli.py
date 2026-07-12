@@ -11,8 +11,16 @@
     twin promote <memory_id>           promote a memory into the judgment profile
     twin supersede <new_id> <old_id>   new memory replaces the old one
     twin contradict <id_a> <id_b>      flag two memories as contradictory
-    twin stats                         memory quality metrics
+    twin stats                         memory + product quality metrics
     twin reindex                       regenerate embeddings with the current embedder
+    twin session start "task"          open a cognitive session (context pack + tracking)
+    twin session observe <id> ...      record artifacts produced during the work
+    twin session complete <id>         close the loop: work → percepts → candidates
+    twin session feedback <id> <v>     usefulness feedback (useful, irrelevant, ...)
+    twin project add|list              first-class projects (repos, aliases, goals)
+    twin watch <paths...>              continuous incremental ingestion
+    twin doctor                        verify models, stores, configs, MCP clients
+    twin setup ollama|postgres|mcp     bootstrap local infrastructure
     twin serve [--port 8765]           local API + review UI
     twin mcp                           MCP server over stdio
     twin export                        dump memories/entities/judgment as JSON
@@ -212,6 +220,153 @@ def cmd_export(args) -> None:
     })
 
 
+def cmd_session_start(args) -> None:
+    from ..cognition.sessions import start_session
+
+    ws = Workspace(args.home)
+    started = start_session(
+        ws.store, ws.cfg, ws.embedder, args.query,
+        client=args.client, cwd=args.cwd, domain=args.domain,
+        project=args.project, task_profile=args.profile,
+        max_tokens=args.max_tokens,
+    )
+    ses = started.session
+    print(f"session {ses.id} started")
+    print(f"  domain: {ses.domain} · profile: {ses.task_profile}"
+          f" · project: {ses.project_id or '—'}"
+          f" · observer: {started.observer_mode} {started.reading_confidences}")
+    if started.needs_domain_confirmation:
+        print("  ⚠ domain unclassified — no context supplied (default-deny)."
+              " Re-run with --domain work|technical|personal_preferences|"
+              "assistant_preferences")
+    print(f"  supplied {len(ses.supplied_memory_ids)} memories"
+          f" ({ses.pack_chars // 4} tokens approx)\n")
+    print(started.pack.context_pack or "(empty pack)")
+
+
+def cmd_session_observe(args) -> None:
+    from ..cognition.sessions import observe_session
+
+    ws = Workspace(args.home)
+    artifact = {"kind": args.kind}
+    if args.ref:
+        artifact["ref"] = args.ref
+    if args.note:
+        artifact["note"] = args.note
+    ses = observe_session(ws.store, args.session_id, artifact)
+    print(f"session {ses.id}: {len(ses.artifacts)} artifact(s) recorded")
+
+
+def cmd_session_complete(args) -> None:
+    from ..cognition.sessions import complete_session
+
+    ws = Workspace(args.home)
+    # a summary typed at the CLI comes from the human: origin "user"
+    ses = complete_session(ws.store, ws.cfg, ws.embedder, args.session_id,
+                           summary=args.summary or "", abandoned=args.abandon,
+                           summary_origin="user", user_confirmed=bool(args.summary))
+    print(f"session {ses.id} {ses.status.value}"
+          f" (consolidation: {ses.consolidation_status.value})")
+    if ses.consolidation_error:
+        print(f"  ⚠ consolidation failed: {ses.consolidation_error}")
+        print("  retry with: twin session complete " + ses.id)
+    if ses.created_memory_ids:
+        print(f"  {len(ses.created_memory_ids)} candidate memories created"
+              f" — review with: twin review")
+
+
+def cmd_session_feedback(args) -> None:
+    from ..cognition.sessions import record_feedback
+
+    ws = Workspace(args.home)
+    ses = record_feedback(ws.store, args.session_id, args.verdict,
+                          memory_id=args.memory, note=args.note or "",
+                          scope=args.scope)
+    print(f"session {ses.id}: feedback '{args.verdict}' recorded")
+
+
+def cmd_session_cleanup(args) -> None:
+    from ..cognition.sessions import abandon_stale_sessions
+
+    ws = Workspace(args.home)
+    abandoned = abandon_stale_sessions(ws.store, args.max_idle_hours)
+    if abandoned:
+        print(f"abandoned {len(abandoned)} stale session(s): {', '.join(abandoned)}")
+    else:
+        print("no stale sessions")
+
+
+def cmd_project(args) -> None:
+    ws = Workspace(args.home)
+    if args.project_command == "add":
+        from ..cognition.sessions import ensure_project
+
+        # idempotent: repos/aliases merge into an existing project
+        project = ensure_project(ws.store, args.name,
+                                 repos=args.repo or [], aliases=args.alias or [])
+        if args.goal:
+            project.goals = sorted(set(project.goals) | set(args.goal))
+            ws.store.update_project(project)
+        print(f"{project.id}: {project.name} (repos: {', '.join(project.repos) or '—'})")
+    else:
+        for p in ws.store.list_projects():
+            sessions = len(ws.store.list_sessions(project_id=p.id))
+            memories = len(ws.store.list_memories(project_id=p.id, limit=100000))
+            print(f"{p.id}  {p.name} [{p.status}]"
+                  f" — {memories} memories, {sessions} sessions,"
+                  f" repos: {', '.join(p.repos) or '—'}")
+
+
+def cmd_watch(args) -> None:
+    import time
+
+    from ..cognition import extract_pending
+
+    ws = Workspace(args.home)
+    print(f"watching {', '.join(args.paths)} every {args.interval}s (Ctrl+C to stop)")
+    try:
+        while True:
+            new_ids, _ = ws.ingest(args.paths)
+            if new_ids:
+                reports = extract_pending(ws.store, ws.cfg, ws.embedder)
+                total = sum(len(r.inserted) for r in reports)
+                print(f"[{__import__('twin.clock', fromlist=['now_iso']).now_iso()}]"
+                      f" {len(new_ids)} new percepts → {total} candidate memories")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("stopped")
+
+
+def cmd_doctor(args) -> None:
+    from .ops import doctor
+
+    ws = Workspace(args.home)
+    checks = doctor(ws.cfg)
+    icons = {"ok": "✓", "warn": "!", "fail": "✗"}
+    worst = "ok"
+    for c in checks:
+        print(f" {icons[c.status]} {c.name:24} {c.detail}")
+        if c.status == "fail" or (c.status == "warn" and worst == "ok"):
+            worst = c.status
+    if worst == "fail":
+        raise SystemExit(1)
+
+
+def cmd_setup(args) -> None:
+    from .ops import setup_mcp, setup_ollama, setup_postgres
+
+    ws = Workspace(args.home)
+    if args.target == "ollama":
+        lines = setup_ollama(ws.cfg)
+    elif args.target == "postgres":
+        lines = setup_postgres(ws.cfg)
+    else:
+        if not args.client:
+            raise SystemExit("usage: twin setup mcp <claude-code|claude-desktop|cursor>")
+        lines = setup_mcp(ws.cfg, args.client)
+    print("\n".join(lines))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="twin", description="Personal Cognitive OS")
     parser.add_argument("--home", default=None, help="twin home dir (default ~/.twin or $TWIN_HOME)")
@@ -268,6 +423,72 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("session", help="cognitive session lifecycle")
+    session_sub = p.add_subparsers(dest="session_command", required=True)
+
+    ps = session_sub.add_parser("start", help="open a session and get a task-aware pack")
+    ps.add_argument("query")
+    ps.add_argument("--client", default="cli")
+    ps.add_argument("--cwd", default=None, help="repository/directory signal for project inference")
+    ps.add_argument("--domain", default=None)
+    ps.add_argument("--project", default=None)
+    ps.add_argument("--profile", default=None,
+                    help="coding | architecture | debugging | writing | planning | review | meeting_prep")
+    ps.add_argument("--max-tokens", type=int, default=1200)
+    ps.set_defaults(func=cmd_session_start)
+
+    ps = session_sub.add_parser("observe", help="record an artifact produced during the session")
+    ps.add_argument("session_id")
+    ps.add_argument("--kind", default="note")
+    ps.add_argument("--ref", default=None, help="file path, commit sha, PR url, ...")
+    ps.add_argument("--note", default=None)
+    ps.set_defaults(func=cmd_session_observe)
+
+    ps = session_sub.add_parser("complete", help="close the session and extract what changed")
+    ps.add_argument("session_id")
+    ps.add_argument("--summary", default=None,
+                    help="what was decided/changed during the work")
+    ps.add_argument("--abandon", action="store_true")
+    ps.set_defaults(func=cmd_session_complete)
+
+    ps = session_sub.add_parser("feedback", help="record usefulness feedback")
+    ps.add_argument("session_id")
+    ps.add_argument("verdict", choices=["useful", "partially_useful", "irrelevant",
+                                        "incorrect", "missing_context",
+                                        "privacy_overblock", "privacy_underblock"])
+    ps.add_argument("--memory", default=None,
+                    help="a memory this session supplied or created")
+    ps.add_argument("--note", default=None)
+    ps.add_argument("--scope", default=None, choices=["session", "pack", "memory"])
+    ps.set_defaults(func=cmd_session_feedback)
+
+    ps = session_sub.add_parser("cleanup", help="abandon stale active sessions")
+    ps.add_argument("--max-idle-hours", type=float, default=24.0)
+    ps.set_defaults(func=cmd_session_cleanup)
+
+    p = sub.add_parser("project", help="first-class projects")
+    project_sub = p.add_subparsers(dest="project_command", required=True)
+    pp = project_sub.add_parser("add", help="create or update a project")
+    pp.add_argument("name")
+    pp.add_argument("--repo", action="append")
+    pp.add_argument("--alias", action="append")
+    pp.add_argument("--goal", action="append")
+    pp.set_defaults(func=cmd_project)
+    pp = project_sub.add_parser("list")
+    pp.set_defaults(func=cmd_project)
+
+    p = sub.add_parser("watch", help="continuous incremental ingestion")
+    p.add_argument("paths", nargs="+")
+    p.add_argument("--interval", type=int, default=30)
+    p.set_defaults(func=cmd_watch)
+
+    sub.add_parser("doctor", help="verify the installation").set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("setup", help="bootstrap local infrastructure")
+    p.add_argument("target", choices=["ollama", "postgres", "mcp"])
+    p.add_argument("client", nargs="?", default=None)
+    p.set_defaults(func=cmd_setup)
 
     sub.add_parser("mcp", help="run MCP server (stdio)").set_defaults(func=cmd_mcp)
     sub.add_parser("export", help="export everything as JSON").set_defaults(func=cmd_export)

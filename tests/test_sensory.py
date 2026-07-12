@@ -75,6 +75,106 @@ def test_store_dedupes_percepts_by_content(store):
     assert store.insert_percept(again[0]) is None
 
 
+def _git_repo(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "atlas-api"
+    repo.mkdir(parents=True)
+    env = {"GIT_AUTHOR_NAME": "Edu", "GIT_AUTHOR_EMAIL": "edu@example.com",
+           "GIT_COMMITTER_NAME": "Edu", "GIT_COMMITTER_EMAIL": "edu@example.com",
+           "HOME": str(tmp_path), "PATH": "/usr/bin:/bin:/usr/local/bin"}
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True,
+                       capture_output=True, env=env)
+
+    git("init", "-b", "main")
+    (repo / "app.py").write_text("print('hi')\n")
+    git("add", "app.py")
+    git("commit", "-m", "Add webhook endpoint")
+    (repo / "queue.py").write_text("pass\n")
+    git("add", "queue.py")
+    git("commit", "-m", "Use RabbitMQ for delivery")
+    return repo
+
+
+def test_git_sensor_emits_one_percept_per_commit(tmp_path):
+    from twin.sensory.sensors.git import GitSensor
+
+    repo = _git_repo(tmp_path)
+    sensor = GitSensor()
+    assert sensor.can_handle(repo)
+    assert not sensor.can_handle(tmp_path)  # no .git
+    percepts = list(sensor.sense(repo))
+    assert len(percepts) == 2
+    newest = percepts[0]
+    assert newest.percept_type == "git_commit"
+    assert newest.actors == ["Edu"]
+    assert newest.source_trust == 0.9
+    assert "Use RabbitMQ for delivery" in newest.content
+    assert "queue.py" in newest.content
+    # the sensor never claims the commit was created on this branch — only
+    # that it was observed from it
+    assert newest.metadata["observed_from_branch"] == "main"
+    assert "observed from branch main" in newest.content
+    assert newest.content_refs[0]["kind"] == "git_commit"
+
+
+def test_git_sensor_dedup_is_incremental(tmp_path, store):
+    from twin.sensory.sensors.git import GitSensor
+
+    repo = _git_repo(tmp_path)
+    for p in GitSensor().sense(repo):
+        assert store.insert_percept(p) is not None
+    # re-sensing the same repo ingests nothing — dedup keys on the commit sha
+    for p in GitSensor().sense(repo):
+        assert store.insert_percept(p) is None
+
+
+def test_git_sensor_identity_distinguishes_same_basename(tmp_path, store):
+    """Two unrelated repositories named 'atlas-api' must not dedupe into one
+    — repository identity comes from the remote/toplevel, never the name."""
+    from twin.sensory.sensors.git import GitSensor, repository_identity
+
+    repo_a = _git_repo(tmp_path / "work")
+    repo_b = _git_repo(tmp_path / "personal")
+    assert repo_a.name == repo_b.name
+    assert repository_identity(repo_a) != repository_identity(repo_b)
+
+    for p in GitSensor().sense(repo_a):
+        assert store.insert_percept(p) is not None
+    # same subjects/files, different repository → still ingested
+    for p in GitSensor().sense(repo_b):
+        assert store.insert_percept(p) is not None
+
+
+def test_git_sensor_identity_prefers_remote(tmp_path):
+    import subprocess
+
+    from twin.sensory.sensors.git import repository_identity
+
+    repo = _git_repo(tmp_path)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "git@github.com:Edu/Atlas-API.git"], check=True,
+                   capture_output=True)
+    identity = repository_identity(repo)
+    assert identity == "github.com/edu/atlas-api"
+    # clones of the same remote share the identity regardless of URL form
+    subprocess.run(["git", "-C", str(repo), "remote", "set-url", "origin",
+                    "https://github.com/Edu/Atlas-API.git"], check=True,
+                   capture_output=True)
+    assert repository_identity(repo) == identity
+
+
+def test_sense_paths_senses_git_directories(tmp_path):
+    repo = _git_repo(tmp_path)
+    (repo / "README.md").write_text("# atlas\n")
+    percepts, _ = sense_paths([repo])
+    types = [p.percept_type for p in percepts]
+    assert types.count("git_commit") == 2
+    assert "document" in types  # file walk still runs after the dir sensors
+
+
 def test_source_qualification_fields_roundtrip(store):
     percepts, _ = sense_paths([EXAMPLES / "transcripts"])
     percept = percepts[0]

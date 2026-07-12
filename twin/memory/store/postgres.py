@@ -18,7 +18,7 @@ from ... import ids
 from ...sensory.percept import Percept
 from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
-from ..models import Entity, Evidence, MemoryItem, Relation
+from ..models import CognitiveSession, Entity, Evidence, MemoryItem, Project, Relation
 from .base import MemoryStore, now_iso
 
 _SCHEMA_BASE = """
@@ -38,11 +38,13 @@ CREATE TABLE IF NOT EXISTS percepts (
     source_trust REAL NOT NULL DEFAULT 0.8,
     source_scope TEXT NOT NULL DEFAULT 'work',
     source_confidentiality TEXT NOT NULL DEFAULT 'internal',
+    project_id TEXT,
     content_hash TEXT NOT NULL UNIQUE
 );
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_trust REAL NOT NULL DEFAULT 0.8;
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_scope TEXT NOT NULL DEFAULT 'work';
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_confidentiality TEXT NOT NULL DEFAULT 'internal';
+ALTER TABLE percepts ADD COLUMN IF NOT EXISTS project_id TEXT;
 
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
@@ -61,8 +63,10 @@ CREATE TABLE IF NOT EXISTS memories (
     payload JSONB NOT NULL DEFAULT '{}',
     needs_review BOOLEAN NOT NULL DEFAULT FALSE,
     review_reason TEXT,
+    project_id TEXT,
     fts tsvector GENERATED ALWAYS AS (to_tsvector('simple', title || ' ' || summary)) STORED
 );
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS project_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories(domain);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
@@ -103,6 +107,65 @@ CREATE TABLE IF NOT EXISTS relations (
 );
 CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
 CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
+
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    aliases JSONB NOT NULL DEFAULT '[]',
+    repos JSONB NOT NULL DEFAULT '[]',
+    goals JSONB NOT NULL DEFAULT '[]',
+    milestones JSONB NOT NULL DEFAULT '[]',
+    open_questions JSONB NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(LOWER(name));
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    client TEXT NOT NULL DEFAULT 'unknown',
+    project_id TEXT,
+    domain TEXT NOT NULL DEFAULT 'technical',
+    task_profile TEXT NOT NULL DEFAULT 'general',
+    initial_query TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    supplied_memory_ids JSONB NOT NULL DEFAULT '[]',
+    pack_chars INTEGER NOT NULL DEFAULT 0,
+    created_memory_ids JSONB NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_activity_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_error TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS summary_percept_id TEXT;
+
+-- append-only: concurrent observers never rewrite each other's rows
+CREATE TABLE IF NOT EXISTS session_artifacts (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref TEXT,
+    note TEXT,
+    percept_id TEXT,
+    observed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_artifacts ON session_artifacts(session_id);
+
+CREATE TABLE IF NOT EXISTS session_feedback (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'session',
+    verdict TEXT NOT NULL,
+    memory_id TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_feedback ON session_feedback(session_id);
 
 CREATE TABLE IF NOT EXISTS firewall_log (
     id BIGSERIAL PRIMARY KEY,
@@ -180,8 +243,8 @@ class PostgresStore(MemoryStore):
             "INSERT INTO percepts (id, percept_type, source_sensor, occurred_at,"
             " ingested_at, actors, content, content_refs, attachments,"
             " privacy_hints, integrity, metadata, source_trust, source_scope,"
-            " source_confidentiality, content_hash)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " source_confidentiality, project_id, content_hash)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 percept.id, percept.percept_type, percept.source_sensor,
                 percept.occurred_at, percept.ingested_at or now_iso(),
@@ -190,7 +253,7 @@ class PostgresStore(MemoryStore):
                 json.dumps(percept.privacy_hints), json.dumps(percept.integrity),
                 json.dumps(percept.metadata), percept.source_trust,
                 percept.source_scope, percept.source_confidentiality,
-                percept.content_hash,
+                percept.project_id, percept.content_hash,
             ),
         )
         return percept.id
@@ -205,6 +268,7 @@ class PostgresStore(MemoryStore):
             integrity=row["integrity"], metadata=row["metadata"],
             source_trust=row["source_trust"], source_scope=row["source_scope"],
             source_confidentiality=row["source_confidentiality"],
+            project_id=row["project_id"],
         )
 
     def get_percept(self, percept_id: str) -> Optional[Percept]:
@@ -232,14 +296,15 @@ class PostgresStore(MemoryStore):
         self._exec(
             "INSERT INTO memories (id, type, title, summary, domain, persona,"
             " sensitivity, confidence, status, valid_from, valid_until,"
-            " created_at, updated_at, payload, needs_review, review_reason)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " created_at, updated_at, payload, needs_review, review_reason,"
+            " project_id)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 mem.id, mem.type.value, mem.title, mem.summary, mem.domain,
                 mem.persona, mem.sensitivity.value, mem.confidence,
                 mem.status.value, mem.valid_from, mem.valid_until,
                 mem.created_at, mem.updated_at, json.dumps(mem.payload),
-                mem.needs_review, mem.review_reason,
+                mem.needs_review, mem.review_reason, mem.project_id,
             ),
         )
         for name in mem.entities:
@@ -271,7 +336,8 @@ class PostgresStore(MemoryStore):
             valid_from=row["valid_from"], valid_until=row["valid_until"],
             created_at=row["created_at"], updated_at=row["updated_at"],
             payload=row["payload"], needs_review=row["needs_review"],
-            review_reason=row["review_reason"], entities=entities, percept_ids=percept_ids,
+            review_reason=row["review_reason"], project_id=row["project_id"],
+            entities=entities, percept_ids=percept_ids,
         )
 
     def get_memory(self, memory_id: str) -> Optional[MemoryItem]:
@@ -284,10 +350,14 @@ class PostgresStore(MemoryStore):
         domain: Optional[str] = None,
         type_: Optional[str] = None,
         needs_review: Optional[bool] = None,
+        project_id: Optional[str] = None,
         limit: int = 200,
     ) -> list[MemoryItem]:
         query = "SELECT * FROM memories WHERE TRUE"
         params: list[Any] = []
+        if project_id:
+            query += " AND project_id = %s"
+            params.append(project_id)
         if status:
             query += " AND status = %s"
             params.append(status)
@@ -308,7 +378,7 @@ class PostgresStore(MemoryStore):
         allowed = {
             "title", "summary", "domain", "persona", "sensitivity", "confidence",
             "status", "valid_from", "valid_until", "needs_review", "review_reason",
-            "payload",
+            "payload", "project_id",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -443,6 +513,209 @@ class PostgresStore(MemoryStore):
             (tsquery, limit),
         )
         return {r["id"]: float(r["score"]) for r in rows}
+
+    # -- projects -----------------------------------------------------------------
+
+    def insert_project(self, project: Project) -> str:
+        ts = now_iso()
+        project.created_at = project.created_at or ts
+        project.updated_at = ts
+        self._exec(
+            "INSERT INTO projects (id, name, aliases, repos, goals, milestones,"
+            " open_questions, status, created_at, updated_at, metadata)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                project.id, project.name, json.dumps(project.aliases),
+                json.dumps(project.repos), json.dumps(project.goals),
+                json.dumps(project.milestones), json.dumps(project.open_questions),
+                project.status, project.created_at, project.updated_at,
+                json.dumps(project.metadata),
+            ),
+        )
+        return project.id
+
+    def update_project(self, project: Project) -> None:
+        project.updated_at = now_iso()
+        self._exec(
+            "UPDATE projects SET name = %s, aliases = %s, repos = %s, goals = %s,"
+            " milestones = %s, open_questions = %s, status = %s, updated_at = %s,"
+            " metadata = %s WHERE id = %s",
+            (
+                project.name, json.dumps(project.aliases), json.dumps(project.repos),
+                json.dumps(project.goals), json.dumps(project.milestones),
+                json.dumps(project.open_questions), project.status,
+                project.updated_at, json.dumps(project.metadata), project.id,
+            ),
+        )
+
+    @staticmethod
+    def _row_to_project(row: dict) -> Project:
+        return Project(
+            id=row["id"], name=row["name"], aliases=row["aliases"],
+            repos=row["repos"], goals=row["goals"], milestones=row["milestones"],
+            open_questions=row["open_questions"], status=row["status"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+            metadata=row["metadata"],
+        )
+
+    def get_project(self, project_id: str) -> Optional[Project]:
+        rows = self._exec("SELECT * FROM projects WHERE id = %s", (project_id,))
+        return self._row_to_project(rows[0]) if rows else None
+
+    def list_projects(self, status: Optional[str] = None) -> list[Project]:
+        if status:
+            rows = self._exec("SELECT * FROM projects WHERE status = %s ORDER BY name", (status,))
+        else:
+            rows = self._exec("SELECT * FROM projects ORDER BY name")
+        return [self._row_to_project(r) for r in rows]
+
+    # -- cognitive sessions ----------------------------------------------------------
+
+    def insert_session(self, session: CognitiveSession) -> str:
+        session.started_at = session.started_at or now_iso()
+        session.last_activity_at = session.last_activity_at or session.started_at
+        self._exec(
+            "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
+            " initial_query, status, started_at, ended_at, last_activity_at,"
+            " supplied_memory_ids, pack_chars, created_memory_ids,"
+            " consolidation_status, consolidation_error, summary_percept_id)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                session.id, session.client, session.project_id, session.domain,
+                session.task_profile, session.initial_query,
+                getattr(session.status, "value", session.status),
+                session.started_at, session.ended_at, session.last_activity_at,
+                json.dumps(session.supplied_memory_ids), session.pack_chars,
+                json.dumps(session.created_memory_ids),
+                getattr(session.consolidation_status, "value", session.consolidation_status),
+                session.consolidation_error, session.summary_percept_id,
+            ),
+        )
+        return session.id
+
+    def update_session(self, session: CognitiveSession) -> None:
+        self._exec(
+            "UPDATE sessions SET client = %s, project_id = %s, domain = %s,"
+            " task_profile = %s, initial_query = %s, status = %s, ended_at = %s,"
+            " last_activity_at = %s, supplied_memory_ids = %s, pack_chars = %s,"
+            " created_memory_ids = %s, consolidation_status = %s,"
+            " consolidation_error = %s, summary_percept_id = %s WHERE id = %s",
+            (
+                session.client, session.project_id, session.domain,
+                session.task_profile, session.initial_query,
+                getattr(session.status, "value", session.status),
+                session.ended_at, session.last_activity_at or now_iso(),
+                json.dumps(session.supplied_memory_ids), session.pack_chars,
+                json.dumps(session.created_memory_ids),
+                getattr(session.consolidation_status, "value", session.consolidation_status),
+                session.consolidation_error, session.summary_percept_id,
+                session.id,
+            ),
+        )
+
+    def append_session_artifact(self, session_id: str, artifact: dict) -> None:
+        with self._lock, self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET last_activity_at = %s"
+                " WHERE id = %s AND status = 'active'",
+                (now_iso(), session_id),
+            )
+            if cur.rowcount == 0:
+                cur.execute("SELECT status FROM sessions WHERE id = %s", (session_id,))
+                row = cur.fetchone()
+                if row is None:
+                    raise ValueError(f"session {session_id} not found")
+                raise ValueError(f"session {session_id} is {row['status']}, not active")
+            cur.execute(
+                "INSERT INTO session_artifacts (session_id, kind, ref, note,"
+                " percept_id, observed_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                (session_id, artifact.get("kind", "artifact"), artifact.get("ref"),
+                 artifact.get("note"), artifact.get("percept_id"),
+                 artifact.get("at") or now_iso()),
+            )
+
+    def append_session_feedback(self, session_id: str, feedback: dict) -> None:
+        with self._lock, self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET last_activity_at = %s WHERE id = %s",
+                (now_iso(), session_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"session {session_id} not found")
+            cur.execute(
+                "INSERT INTO session_feedback (session_id, scope, verdict, memory_id,"
+                " note, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                (session_id, feedback.get("scope", "session"), feedback["verdict"],
+                 feedback.get("memory_id"), feedback.get("note", ""),
+                 feedback.get("at") or now_iso()),
+            )
+
+    def transition_session(self, session_id: str, from_status: str,
+                           to_status: str, ended_at: Optional[str] = None) -> bool:
+        with self._lock, self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET status = %s, ended_at = COALESCE(%s, ended_at),"
+                " last_activity_at = %s WHERE id = %s AND status = %s",
+                (to_status, ended_at, now_iso(), session_id, from_status),
+            )
+            return cur.rowcount > 0
+
+    def _session_artifacts(self, session_id: str) -> list[dict]:
+        rows = self._exec(
+            "SELECT kind, ref, note, percept_id, observed_at FROM session_artifacts"
+            " WHERE session_id = %s ORDER BY id", (session_id,)
+        )
+        return [
+            {k: r[k] for k in ("kind", "ref", "note", "percept_id") if r[k] is not None}
+            | {"at": r["observed_at"]}
+            for r in rows
+        ]
+
+    def _session_feedback(self, session_id: str) -> list[dict]:
+        rows = self._exec(
+            "SELECT scope, verdict, memory_id, note, created_at FROM session_feedback"
+            " WHERE session_id = %s ORDER BY id", (session_id,)
+        )
+        return [
+            {"scope": r["scope"], "verdict": r["verdict"], "memory_id": r["memory_id"],
+             "note": r["note"], "at": r["created_at"]}
+            for r in rows
+        ]
+
+    def _row_to_session(self, row: dict) -> CognitiveSession:
+        return CognitiveSession(
+            id=row["id"], client=row["client"], project_id=row["project_id"],
+            domain=row["domain"], task_profile=row["task_profile"],
+            initial_query=row["initial_query"], status=row["status"],
+            started_at=row["started_at"], ended_at=row["ended_at"],
+            last_activity_at=row["last_activity_at"],
+            supplied_memory_ids=row["supplied_memory_ids"], pack_chars=row["pack_chars"],
+            artifacts=self._session_artifacts(row["id"]),
+            created_memory_ids=row["created_memory_ids"],
+            feedback=self._session_feedback(row["id"]),
+            consolidation_status=row["consolidation_status"],
+            consolidation_error=row["consolidation_error"],
+            summary_percept_id=row["summary_percept_id"],
+        )
+
+    def get_session(self, session_id: str) -> Optional[CognitiveSession]:
+        rows = self._exec("SELECT * FROM sessions WHERE id = %s", (session_id,))
+        return self._row_to_session(rows[0]) if rows else None
+
+    def list_sessions(self, status: Optional[str] = None,
+                      project_id: Optional[str] = None,
+                      limit: int = 200) -> list[CognitiveSession]:
+        query = "SELECT * FROM sessions WHERE TRUE"
+        params: list[Any] = []
+        if status:
+            query += " AND status = %s"
+            params.append(status)
+        if project_id:
+            query += " AND project_id = %s"
+            params.append(project_id)
+        query += " ORDER BY started_at DESC LIMIT %s"
+        params.append(limit)
+        return [self._row_to_session(r) for r in self._exec(query, tuple(params))]
 
     # -- metrics -----------------------------------------------------------------
 
