@@ -81,5 +81,73 @@ class MemoryItem(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)  # type-specific fields
     needs_review: bool = False
     review_reason: Optional[str] = None
+    project_id: Optional[str] = None
     percept_ids: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)  # entity names (resolved to ids in store)
+
+
+class TaskProfile(str, Enum):
+    general = "general"
+    coding = "coding"
+    architecture = "architecture"
+    debugging = "debugging"
+    writing = "writing"
+    planning = "planning"
+    review = "review"
+    meeting_prep = "meeting_prep"
+
+
+class FeedbackVerdict(str, Enum):
+    useful = "useful"
+    partially_useful = "partially_useful"
+    irrelevant = "irrelevant"
+    incorrect = "incorrect"
+    missing_context = "missing_context"
+    privacy_overblock = "privacy_overblock"
+    privacy_underblock = "privacy_underblock"
+
+
+class Project(BaseModel):
+    """A first-class cognitive unit: everything the system knows converges
+    on projects — decisions, constraints, sessions, percepts and people."""
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    repos: list[str] = Field(default_factory=list)  # repo names/paths/urls
+    goals: list[str] = Field(default_factory=list)
+    milestones: list[dict[str, Any]] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    status: str = "active"  # active | paused | done
+    created_at: str = ""
+    updated_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionStatus(str, Enum):
+    active = "active"
+    completed = "completed"
+    abandoned = "abandoned"
+
+
+class CognitiveSession(BaseModel):
+    """One unit of real work done with an external LLM/IDE on top of twin.
+
+    Closes the loop: context supplied → work performed → new percepts →
+    candidate memories → feedback.
+    """
+
+    id: str
+    client: str = "unknown"          # claude-code | cursor | claude-desktop | cli | ...
+    project_id: Optional[str] = None
+    domain: str = "technical"
+    task_profile: str = "general"
+    initial_query: str = ""
+    status: SessionStatus = SessionStatus.active
+    started_at: str = ""
+    ended_at: Optional[str] = None
+    supplied_memory_ids: list[str] = Field(default_factory=list)
+    pack_chars: int = 0              # size of the supplied context pack
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)  # observed refs/notes
+    created_memory_ids: list[str] = Field(default_factory=list)
+    feedback: list[dict[str, Any]] = Field(default_factory=list)   # {verdict, memory_id?, note, at}

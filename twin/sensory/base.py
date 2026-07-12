@@ -18,8 +18,10 @@ from .percept import Percept
 class Sensor(ABC):
     """Base class for all sensors."""
 
-    #: unique sensor name, e.g. "document", "meeting", "slack", "email"
+    #: unique sensor name, e.g. "document", "meeting", "slack", "git", "email"
     name: str = "abstract"
+    #: sensors like git operate on a directory (a repository), not on files
+    handles_directories: bool = False
 
     @abstractmethod
     def can_handle(self, path: Path) -> bool:
@@ -55,9 +57,11 @@ def _default_registry() -> SensorRegistry:
     """Populate the global registry lazily (avoids import cycles)."""
     if not registry.sensors:
         from .sensors.document import DocumentSensor
+        from .sensors.git import GitSensor
         from .sensors.meeting import MeetingSensor
         from .sensors.slack import SlackSensor
 
+        registry.register(GitSensor())
         registry.register(MeetingSensor())
         registry.register(SlackSensor())
         registry.register(DocumentSensor())
@@ -74,7 +78,18 @@ def sense_paths(paths: list[str | Path]) -> tuple[list[Percept], list[str]]:
     for p in paths:
         p = Path(p)
         if p.is_dir():
-            files.extend(sorted(f for f in p.rglob("*") if f.is_file()))
+            # directory-capable sensors (e.g. git) sense the directory itself…
+            for sensor in reg.sensors:
+                if sensor.handles_directories and sensor.can_handle(p):
+                    try:
+                        percepts.extend(sensor.sense(p))
+                    except Exception as exc:
+                        skipped.append(f"{p} ({exc})")
+            # …and file sensors still walk its contents (skipping .git internals)
+            files.extend(sorted(
+                f for f in p.rglob("*")
+                if f.is_file() and ".git" not in f.parts
+            ))
         elif p.is_file():
             files.append(p)
         else:

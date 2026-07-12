@@ -36,6 +36,20 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
     evidence_total = store.count_evidence()
     total = len(memories)
 
+    sessions = store.list_sessions(limit=1_000_000)
+    feedback: list[dict] = []
+    for ses in sessions:
+        feedback.extend(ses.feedback)
+    by_verdict: dict[str, int] = {}
+    for fb in feedback:
+        by_verdict[fb["verdict"]] = by_verdict.get(fb["verdict"], 0) + 1
+    relevance_rated = sum(by_verdict.get(v, 0) for v in
+                          ("useful", "partially_useful", "irrelevant", "incorrect"))
+    sessions_with_feedback = [s_ for s_ in sessions if s_.feedback]
+    supplied_total = sum(len(s_.supplied_memory_ids) for s_ in sessions)
+    used_memory_ids = {fb.get("memory_id") for fb in feedback
+                       if fb.get("memory_id") and fb["verdict"] in ("useful", "partially_useful")}
+
     return {
         "percepts": {
             "total": len(percepts),
@@ -61,6 +75,36 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
         },
         "firewall": {
             "blocks_logged": store.count_firewall_blocks(),
+        },
+        "sessions": {
+            "total": len(sessions),
+            "by_status": _count(sessions, lambda s_: getattr(s_.status, "value", s_.status)),
+            "by_task_profile": _count(sessions, lambda s_: s_.task_profile),
+            "avg_pack_tokens": round(
+                sum(s_.pack_chars for s_ in sessions) / len(sessions) / 4
+            ) if sessions else 0,
+            "memories_created": sum(len(s_.created_memory_ids) for s_ in sessions),
+        },
+        # The central product question: how often did the user need to
+        # explain something twin should already have known?
+        "product": {
+            "feedback_by_verdict": by_verdict,
+            "context_relevance_rate": round(
+                by_verdict.get("useful", 0) / relevance_rated, 3
+            ) if relevance_rated else None,
+            "false_memory_rate": round(
+                by_verdict.get("incorrect", 0) / relevance_rated, 3
+            ) if relevance_rated else None,
+            "re_explanation_rate": round(
+                sum(1 for s_ in sessions_with_feedback
+                    if any(fb["verdict"] == "missing_context" for fb in s_.feedback))
+                / len(sessions_with_feedback), 3
+            ) if sessions_with_feedback else None,
+            "privacy_overblocks": by_verdict.get("privacy_overblock", 0),
+            "privacy_underblocks": by_verdict.get("privacy_underblock", 0),
+            "memory_usage_rate": round(
+                len(used_memory_ids) / supplied_total, 3
+            ) if supplied_total else None,
         },
     }
 

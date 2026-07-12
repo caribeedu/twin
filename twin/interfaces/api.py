@@ -19,6 +19,13 @@ from pydantic import BaseModel
 from ..cognition import extract_pending
 from ..cognition.context_pack import build_context_pack
 from ..cognition.observer import observe
+from ..cognition.sessions import (
+    complete_session,
+    ensure_project,
+    observe_session,
+    record_feedback,
+    start_session,
+)
 from ..config import ALL_DOMAINS
 from ..judgment.profile import load_profile
 from ..memory.models import MemoryStatus
@@ -41,6 +48,42 @@ class PackRequest(BaseModel):
     max_tokens: int = 1200
     include_judgment: bool = True
     include_candidates: bool = False  # packs are confirmed-only by default
+    task_profile: str = "general"
+    project: Optional[str] = None  # project name, alias or id
+
+
+class SessionStartRequest(BaseModel):
+    query: str
+    client: str = "api"
+    cwd: Optional[str] = None
+    domain: Optional[str] = None
+    project: Optional[str] = None
+    task_profile: Optional[str] = None
+    max_tokens: int = 1200
+    include_candidates: bool = False
+
+
+class SessionObserveRequest(BaseModel):
+    kind: str = "artifact"
+    ref: Optional[str] = None
+    note: Optional[str] = None
+
+
+class SessionCompleteRequest(BaseModel):
+    summary: str = ""
+    abandoned: bool = False
+
+
+class SessionFeedbackRequest(BaseModel):
+    verdict: str
+    memory_id: Optional[str] = None
+    note: str = ""
+
+
+class ProjectRequest(BaseModel):
+    name: str
+    repos: list[str] = []
+    aliases: list[str] = []
 
 
 def _mem_dict(mem) -> dict[str, Any]:
@@ -126,6 +169,14 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "blocked": [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
         }
 
+    def _resolve_project_id(project: Optional[str]) -> Optional[str]:
+        if not project:
+            return None
+        found = ws.store.get_project(project) or ws.store.find_project(project)
+        if found is None:
+            raise HTTPException(404, f"project '{project}' not found")
+        return found.id
+
     @app.post("/api/context_pack")
     def api_pack(req: PackRequest):
         pack = build_context_pack(ws.store, ws.cfg, ws.embedder, req.query,
@@ -133,8 +184,94 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   max_tokens=req.max_tokens,
                                   include_judgment=req.include_judgment,
                                   include_candidates=req.include_candidates,
+                                  task_profile=req.task_profile,
+                                  project_id=_resolve_project_id(req.project),
                                   firewall=ws.firewall)
         return pack.__dict__
+
+    # -- Cognitive sessions ------------------------------------------------
+
+    def _session_dict(session) -> dict[str, Any]:
+        data = session.model_dump()
+        data["status"] = session.status.value
+        return data
+
+    @app.post("/api/sessions")
+    def api_session_start(req: SessionStartRequest):
+        started = start_session(
+            ws.store, ws.cfg, ws.embedder, req.query,
+            client=req.client, cwd=req.cwd, domain=req.domain,
+            project=req.project, task_profile=req.task_profile,
+            max_tokens=req.max_tokens, include_candidates=req.include_candidates,
+        )
+        return {
+            "session": _session_dict(started.session),
+            "context_pack": started.pack.__dict__,
+            "reading_confidences": started.reading_confidences,
+            "observer_mode": started.observer_mode,
+        }
+
+    @app.get("/api/sessions")
+    def api_sessions(status: Optional[str] = None, project_id: Optional[str] = None):
+        sessions = ws.store.list_sessions(status=status, project_id=project_id)
+        return [_session_dict(s) for s in sessions]
+
+    @app.get("/api/sessions/{session_id}")
+    def api_session(session_id: str):
+        session = ws.store.get_session(session_id)
+        if session is None:
+            raise HTTPException(404, "session not found")
+        return _session_dict(session)
+
+    @app.post("/api/sessions/{session_id}/observe")
+    def api_session_observe(session_id: str, req: SessionObserveRequest):
+        artifact = {"kind": req.kind}
+        if req.ref:
+            artifact["ref"] = req.ref
+        if req.note:
+            artifact["note"] = req.note
+        try:
+            session = observe_session(ws.store, session_id, artifact)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _session_dict(session)
+
+    @app.post("/api/sessions/{session_id}/complete")
+    def api_session_complete(session_id: str, req: SessionCompleteRequest):
+        try:
+            session = complete_session(ws.store, ws.cfg, ws.embedder, session_id,
+                                       summary=req.summary, abandoned=req.abandoned)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _session_dict(session)
+
+    @app.post("/api/sessions/{session_id}/feedback")
+    def api_session_feedback(session_id: str, req: SessionFeedbackRequest):
+        try:
+            session = record_feedback(ws.store, session_id, req.verdict,
+                                      memory_id=req.memory_id, note=req.note)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return _session_dict(session)
+
+    # -- Projects ----------------------------------------------------------
+
+    @app.post("/api/projects")
+    def api_project_add(req: ProjectRequest):
+        project = ensure_project(ws.store, req.name, repos=req.repos,
+                                 aliases=req.aliases)
+        return project.model_dump()
+
+    @app.get("/api/projects")
+    def api_projects(status: Optional[str] = None):
+        return [p.model_dump() for p in ws.store.list_projects(status=status)]
+
+    @app.get("/api/projects/{project_id}")
+    def api_project(project_id: str):
+        project = ws.store.get_project(project_id) or ws.store.find_project(project_id)
+        if project is None:
+            raise HTTPException(404, "project not found")
+        return project.model_dump()
 
     @app.post("/api/memories/{memory_id}/promote")
     def api_promote(memory_id: str):

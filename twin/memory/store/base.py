@@ -14,7 +14,10 @@ from typing import Iterable, Optional
 from ...clock import now_iso  # re-export for backends
 from ...sensory.percept import Percept
 from ..embeddings import cosine, from_blob
-from ..models import Entity, Evidence, MemoryItem, MemoryStatus, Relation
+from ..models import (
+    CognitiveSession, Entity, Evidence, MemoryItem, MemoryStatus,
+    Project, Relation,
+)
 
 __all__ = ["MemoryStore", "now_iso"]
 
@@ -52,6 +55,7 @@ class MemoryStore(ABC):
         domain: Optional[str] = None,
         type_: Optional[str] = None,
         needs_review: Optional[bool] = None,
+        project_id: Optional[str] = None,
         limit: int = 200,
     ) -> list[MemoryItem]: ...
 
@@ -124,6 +128,53 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def log_firewall(self, memory_id: str, target_domain: str, rule: str, action: str) -> None: ...
+
+    # -- projects -----------------------------------------------------------------
+
+    @abstractmethod
+    def insert_project(self, project: Project) -> str: ...
+
+    @abstractmethod
+    def update_project(self, project: Project) -> None: ...
+
+    @abstractmethod
+    def get_project(self, project_id: str) -> Optional[Project]: ...
+
+    @abstractmethod
+    def list_projects(self, status: Optional[str] = None) -> list[Project]: ...
+
+    def find_project(self, signal: str) -> Optional[Project]:
+        """Resolve a project from a name, alias or repository signal
+        (e.g. the basename of the current working directory)."""
+        needle = signal.strip().lower()
+        if not needle:
+            return None
+        for project in self.list_projects():
+            if project.name.lower() == needle:
+                return project
+            if any(a.lower() == needle for a in project.aliases):
+                return project
+            for repo in project.repos:
+                repo_l = repo.lower()
+                if repo_l == needle or repo_l.rstrip("/").split("/")[-1] == needle:
+                    return project
+        return None
+
+    # -- cognitive sessions ----------------------------------------------------------
+
+    @abstractmethod
+    def insert_session(self, session: CognitiveSession) -> str: ...
+
+    @abstractmethod
+    def update_session(self, session: CognitiveSession) -> None: ...
+
+    @abstractmethod
+    def get_session(self, session_id: str) -> Optional[CognitiveSession]: ...
+
+    @abstractmethod
+    def list_sessions(self, status: Optional[str] = None,
+                      project_id: Optional[str] = None,
+                      limit: int = 200) -> list[CognitiveSession]: ...
 
     # -- metrics ------------------------------------------------------------------
 

@@ -119,3 +119,160 @@ def observe(
         {"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked
     ]
     return suggestion
+
+
+# -- fast / deep observation ---------------------------------------------------
+#
+# Observation happens at two levels:
+#   fast: deterministic — keywords, entity matches, project/repository
+#         signals and graph votes; cheap enough to run on every call.
+#   deep: local LLM classification, used only when domain, project or task
+#         profile remains ambiguous after the fast pass.
+# The reading carries confidence per dimension, not a single guess.
+
+from pathlib import Path
+
+from .task_profiles import PROFILES, infer_task_profile
+
+_DEEP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "domain": {"type": "string"},
+        "task_profile": {"type": "string", "enum": list(PROFILES)},
+        "project": {"type": ["string", "null"]},
+        "domain_confidence": {"type": "number"},
+        "task_confidence": {"type": "number"},
+    },
+    "required": ["domain", "task_profile", "project",
+                 "domain_confidence", "task_confidence"],
+    "additionalProperties": False,
+}
+
+_DEEP_PROMPT = """\
+You classify the user's current text for a personal memory system.
+Known domains: work, technical, personal_preferences, assistant_preferences.
+Known task profiles: {profiles}.
+Known projects: {projects}.
+Return the most likely domain, task profile and project (or null), with
+confidence between 0 and 1 for domain and task. Respond with JSON only."""
+
+
+@dataclass
+class ObserverReading:
+    domain: str = "technical"
+    task_profile: str = "general"
+    project_id: Optional[str] = None
+    confidences: dict = field(default_factory=dict)  # {domain, task_profile, project}
+    uncertain: bool = False
+    mode: str = "fast"
+
+
+def _fast_read(store: MemoryStore, text: str, cwd: Optional[str] = None) -> ObserverReading:
+    lowered = text.lower()
+    domain_scores: dict[str, float] = {}
+    for domain, keywords in _DOMAIN_HINTS:
+        hits = sum(1 for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", lowered))
+        if hits:
+            domain_scores[domain] = domain_scores.get(domain, 0.0) + float(hits)
+    graph_votes = _graph_domain_votes(store, text)
+    total_votes = sum(graph_votes.values())
+    if total_votes:
+        for domain, count in graph_votes.items():
+            domain_scores[domain] = domain_scores.get(domain, 0.0) + 2.0 * (count / total_votes)
+
+    domain = max(domain_scores, key=domain_scores.get) if domain_scores else "technical"
+    domain_conf = min(1.0, domain_scores.get(domain, 0.0) / 3) if domain_scores else 0.0
+
+    task_profile, task_conf = infer_task_profile(text)
+
+    # project resolution: repository/directory signal first, then mentions
+    project_id: Optional[str] = None
+    project_conf = 0.0
+    if cwd:
+        project = store.find_project(Path(cwd).name)
+        if project is not None:
+            project_id, project_conf = project.id, 0.9
+    if project_id is None:
+        for p in store.list_projects():
+            names = [p.name] + p.aliases
+            if any(re.search(rf"\b{re.escape(n.lower())}\b", lowered) for n in names):
+                project_id, project_conf = p.id, 0.7
+                break
+
+    return ObserverReading(
+        domain=domain, task_profile=task_profile, project_id=project_id,
+        confidences={"domain": round(domain_conf, 2),
+                     "task_profile": round(task_conf, 2),
+                     "project": round(project_conf, 2)},
+        uncertain=(domain_conf < 0.34 or task_conf < 0.5),
+        mode="fast",
+    )
+
+
+def _deep_read(store: MemoryStore, cfg: Config, text: str,
+               fast: ObserverReading, client=None) -> ObserverReading:
+    import json as _json
+
+    import httpx
+
+    projects = store.list_projects()
+    http = client or httpx.Client(base_url=cfg.ollama_url.rstrip("/"), timeout=60)
+    resp = http.post("/api/chat", json={
+        "model": cfg.ollama_model,
+        "stream": False,
+        "format": _DEEP_SCHEMA,
+        "options": {"temperature": 0},
+        "messages": [
+            {"role": "system", "content": _DEEP_PROMPT.format(
+                profiles=", ".join(PROFILES),
+                projects=", ".join(p.name for p in projects) or "none",
+            )},
+            {"role": "user", "content": text},
+        ],
+    })
+    resp.raise_for_status()
+    data = _json.loads(resp.json()["message"]["content"])
+
+    project_id = fast.project_id
+    project_conf = fast.confidences.get("project", 0.0)
+    if project_id is None and data.get("project"):
+        found = store.find_project(str(data["project"]))
+        if found is not None:
+            project_id, project_conf = found.id, 0.6
+
+    domain = data.get("domain", fast.domain)
+    if domain not in {d for d, _ in _DOMAIN_HINTS} | {"work", "technical",
+                                                      "personal_preferences",
+                                                      "assistant_preferences"}:
+        domain = fast.domain
+    task_profile = data.get("task_profile", fast.task_profile)
+    if task_profile not in PROFILES:
+        task_profile = fast.task_profile
+
+    return ObserverReading(
+        domain=domain, task_profile=task_profile, project_id=project_id,
+        confidences={
+            "domain": round(float(data.get("domain_confidence", 0.5)), 2),
+            "task_profile": round(float(data.get("task_confidence", 0.5)), 2),
+            "project": round(project_conf, 2),
+        },
+        uncertain=False,
+        mode="deep",
+    )
+
+
+def read_context(store: MemoryStore, cfg: Config, text: str,
+                 cwd: Optional[str] = None, client=None) -> ObserverReading:
+    """Fast observation always; deep (local LLM) only when the fast pass is
+    uncertain and Ollama is reachable."""
+    fast = _fast_read(store, text, cwd=cwd)
+    if not fast.uncertain:
+        return fast
+    from .extractors import ollama as ollama_extractor
+
+    if client is None and not ollama_extractor.available(cfg.ollama_url):
+        return fast
+    try:
+        return _deep_read(store, cfg, text, fast, client=client)
+    except Exception:
+        return fast  # deep observation is best-effort

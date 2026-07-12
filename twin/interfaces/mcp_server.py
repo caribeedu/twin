@@ -18,6 +18,12 @@ from typing import Any, Optional
 
 from ..cognition.context_pack import build_context_pack
 from ..cognition.observer import observe
+from ..cognition.sessions import (
+    complete_session,
+    observe_session,
+    record_feedback,
+    start_session,
+)
 from ..judgment.profile import load_profile
 from ..memory.search import search
 from ..workspace import Workspace
@@ -149,6 +155,12 @@ def create_server(home: Optional[str] = None):
         thinks, not just what they know."""
         return json.dumps(load_profile(ws.cfg.judgment_path), ensure_ascii=False)
 
+    def _resolve_project_id(project: Optional[str]) -> Optional[str]:
+        if not project:
+            return None
+        found = ws.store.get_project(project) or ws.store.find_project(project)
+        return found.id if found else None
+
     @mcp.tool()
     def memory_safe_context_pack(
         query: str,
@@ -156,25 +168,148 @@ def create_server(home: Optional[str] = None):
         max_tokens: int = 1200,
         include_judgment: bool = True,
         include_candidates: bool = False,
+        task_profile: str = "general",
+        project: Optional[str] = None,
     ) -> str:
-        """MAIN TOOL — call this at the start of a task. Returns a compact,
-        privacy-filtered context pack (judgment profile + relevant memories,
-        organized in sections: decisions, constraints, tasks, preferences,
-        facts, evidence) to ground your work in the user's real context.
+        """Returns a compact, privacy-filtered context pack (judgment profile
+        + relevant memories, organized in sections: decisions, constraints,
+        tasks, preferences, facts, evidence) to ground your work in the
+        user's real context. For a full unit of work prefer session_start,
+        which wraps this pack in a trackable session.
         Only human-confirmed memories are included unless you explicitly set
         include_candidates=true — never treat candidates as established fact.
-        `query` should describe the task you are about to do."""
+        `query` should describe the task you are about to do; `task_profile`
+        (general, coding, architecture, debugging, writing, planning, review,
+        meeting_prep) reorders sections for that kind of task; `project` is
+        an optional project name/alias to boost project-linked memories."""
         pack = build_context_pack(
             ws.store, ws.cfg, ws.embedder, query,
             target_domain=target_domain, max_tokens=max_tokens,
             include_judgment=include_judgment,
-            include_candidates=include_candidates, firewall=ws.firewall,
+            include_candidates=include_candidates,
+            task_profile=task_profile,
+            project_id=_resolve_project_id(project),
+            firewall=ws.firewall,
         )
         return json.dumps({
             "context_pack": pack.context_pack,
             "sources": pack.sources,
             "confidence": pack.confidence,
             "blocked": pack.blocked,
+            "task_profile": pack.task_profile,
+            "project_id": pack.project_id,
+        }, ensure_ascii=False)
+
+    # -- Cognitive session lifecycle --------------------------------------
+
+    def _session_dict(session) -> dict[str, Any]:
+        data = session.model_dump()
+        data["status"] = session.status.value
+        return data
+
+    @mcp.tool()
+    def session_start(
+        query: str,
+        client: str = "mcp",
+        cwd: Optional[str] = None,
+        domain: Optional[str] = None,
+        project: Optional[str] = None,
+        task_profile: Optional[str] = None,
+        max_tokens: int = 1200,
+    ) -> str:
+        """MAIN TOOL — call this when starting a unit of work. twin identifies
+        the project, domain and task profile (pass `cwd` so the working
+        directory helps identify the project), builds a task-aware context
+        pack and opens a cognitive session that tracks what was supplied.
+        Returns {session_id, context_pack, sources, blocked, reading}.
+        Prepend the context_pack to your work; when the work is done call
+        session_complete with a summary so twin learns from what happened."""
+        started = start_session(
+            ws.store, ws.cfg, ws.embedder, query,
+            client=client, cwd=cwd, domain=domain, project=project,
+            task_profile=task_profile, max_tokens=max_tokens,
+        )
+        return json.dumps({
+            "session_id": started.session.id,
+            "project_id": started.session.project_id,
+            "domain": started.session.domain,
+            "task_profile": started.session.task_profile,
+            "context_pack": started.pack.context_pack,
+            "sources": started.pack.sources,
+            "blocked": started.pack.blocked,
+            "reading": {
+                "confidences": started.reading_confidences,
+                "observer_mode": started.observer_mode,
+            },
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def session_observe(
+        session_id: str,
+        kind: str,
+        ref: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> str:
+        """Record an artifact produced or changed during the session — a
+        file, commit, PR, document or decision made along the way.
+        `kind` is free-form (file, commit, pr, doc, decision, note);
+        `ref` points at the artifact (path, sha, url); `note` says what
+        happened. Call it as you work so session_complete has material."""
+        artifact: dict[str, Any] = {"kind": kind}
+        if ref:
+            artifact["ref"] = ref
+        if note:
+            artifact["note"] = note
+        try:
+            session = observe_session(ws.store, session_id, artifact)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        return json.dumps({
+            "session_id": session.id,
+            "artifacts": len(session.artifacts),
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def session_complete(
+        session_id: str,
+        summary: str = "",
+        abandoned: bool = False,
+    ) -> str:
+        """Close the session. `summary` should state what was decided, built
+        or changed — it becomes a percept and goes through extraction, so
+        decisions made during the work turn into candidate memories (reviewed
+        by the user later). Set abandoned=true when the work was dropped."""
+        try:
+            session = complete_session(ws.store, ws.cfg, ws.embedder, session_id,
+                                       summary=summary, abandoned=abandoned)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        return json.dumps({
+            "session_id": session.id,
+            "status": session.status.value,
+            "created_memory_ids": session.created_memory_ids,
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def session_feedback(
+        session_id: str,
+        verdict: str,
+        memory_id: Optional[str] = None,
+        note: str = "",
+    ) -> str:
+        """Record how useful the supplied context actually was. `verdict` is
+        one of: useful, partially_useful, irrelevant, incorrect,
+        missing_context (the user had to re-explain something twin should
+        have known), privacy_overblock, privacy_underblock. Optionally point
+        at a specific memory_id. This feeds twin's product metrics."""
+        try:
+            session = record_feedback(ws.store, session_id, verdict,
+                                      memory_id=memory_id, note=note)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        return json.dumps({
+            "session_id": session.id,
+            "feedback_count": len(session.feedback),
         }, ensure_ascii=False)
 
     @mcp.tool()

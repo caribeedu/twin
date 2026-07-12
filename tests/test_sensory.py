@@ -75,6 +75,68 @@ def test_store_dedupes_percepts_by_content(store):
     assert store.insert_percept(again[0]) is None
 
 
+def _git_repo(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "atlas-api"
+    repo.mkdir()
+    env = {"GIT_AUTHOR_NAME": "Edu", "GIT_AUTHOR_EMAIL": "edu@example.com",
+           "GIT_COMMITTER_NAME": "Edu", "GIT_COMMITTER_EMAIL": "edu@example.com",
+           "HOME": str(tmp_path), "PATH": "/usr/bin:/bin:/usr/local/bin"}
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True,
+                       capture_output=True, env=env)
+
+    git("init", "-b", "main")
+    (repo / "app.py").write_text("print('hi')\n")
+    git("add", "app.py")
+    git("commit", "-m", "Add webhook endpoint")
+    (repo / "queue.py").write_text("pass\n")
+    git("add", "queue.py")
+    git("commit", "-m", "Use RabbitMQ for delivery")
+    return repo
+
+
+def test_git_sensor_emits_one_percept_per_commit(tmp_path):
+    from twin.sensory.sensors.git import GitSensor
+
+    repo = _git_repo(tmp_path)
+    sensor = GitSensor()
+    assert sensor.can_handle(repo)
+    assert not sensor.can_handle(tmp_path)  # no .git
+    percepts = list(sensor.sense(repo))
+    assert len(percepts) == 2
+    newest = percepts[0]
+    assert newest.percept_type == "git_commit"
+    assert newest.actors == ["Edu"]
+    assert newest.source_trust == 0.9
+    assert "Use RabbitMQ for delivery" in newest.content
+    assert "queue.py" in newest.content
+    assert newest.metadata["branch"] == "main"
+    assert newest.content_refs[0]["kind"] == "git_commit"
+
+
+def test_git_sensor_dedup_is_incremental(tmp_path, store):
+    from twin.sensory.sensors.git import GitSensor
+
+    repo = _git_repo(tmp_path)
+    for p in GitSensor().sense(repo):
+        assert store.insert_percept(p) is not None
+    # re-sensing the same repo ingests nothing — dedup keys on the commit sha
+    for p in GitSensor().sense(repo):
+        assert store.insert_percept(p) is None
+
+
+def test_sense_paths_senses_git_directories(tmp_path):
+    repo = _git_repo(tmp_path)
+    (repo / "README.md").write_text("# atlas\n")
+    percepts, _ = sense_paths([repo])
+    types = [p.percept_type for p in percepts]
+    assert types.count("git_commit") == 2
+    assert "document" in types  # file walk still runs after the dir sensors
+
+
 def test_source_qualification_fields_roundtrip(store):
     percepts, _ = sense_paths([EXAMPLES / "transcripts"])
     percept = percepts[0]

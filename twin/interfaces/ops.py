@@ -1,0 +1,217 @@
+"""Operational ergonomics: twin doctor / twin setup.
+
+``twin doctor`` verifies models, stores, pgvector, migrations, encryption
+configuration, policies, judgment profile, embeddings and MCP client
+configuration. ``twin setup`` bootstraps Ollama models, the Postgres
+schema and MCP client configs.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import shutil
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+from ..config import Config
+
+OK, WARN, FAIL = "ok", "warn", "fail"
+
+
+@dataclass
+class Check:
+    name: str
+    status: str
+    detail: str = ""
+
+
+def _mcp_config_paths() -> dict[str, Path]:
+    home = Path.home()
+    if platform.system() == "Darwin":
+        desktop = home / "Library/Application Support/Claude/claude_desktop_config.json"
+    elif platform.system() == "Windows":
+        desktop = Path(os.environ.get("APPDATA", home)) / "Claude/claude_desktop_config.json"
+    else:
+        desktop = home / ".config/Claude/claude_desktop_config.json"
+    return {
+        "claude-desktop": desktop,
+        "cursor": home / ".cursor/mcp.json",
+        "claude-code": Path.cwd() / ".mcp.json",
+    }
+
+
+def doctor(cfg: Config) -> list[Check]:
+    checks: list[Check] = []
+
+    # optional dependencies
+    for module, extra in (("fastapi", "api"), ("mcp", "mcp"),
+                          ("psycopg", "postgres"), ("cryptography", "crypto")):
+        try:
+            __import__(module)
+            checks.append(Check(f"dependency:{module}", OK))
+        except ImportError:
+            checks.append(Check(f"dependency:{module}", WARN,
+                                f'not installed — pip install "twin[{extra}]"'))
+
+    # store connectivity + backend capabilities (also runs migrations)
+    url = cfg.resolved_db_url
+    try:
+        from ..memory.store import create_store
+
+        store = create_store(url)
+        backend = type(store).__name__
+        if backend == "PostgresStore":
+            detail = "pgvector active" if store.has_pgvector else \
+                "pgvector missing — vector search degrades to client-side"
+            checks.append(Check("store:postgres", OK if store.has_pgvector else WARN, detail))
+        else:
+            checks.append(Check("store:sqlite", WARN if url.startswith("postgres") else OK,
+                                url))
+        checks.append(Check("store:migrations", OK, "schema up to date"))
+        pending = len([m for m in store.list_memories(status="candidate") if m.needs_review])
+        if pending:
+            checks.append(Check("review:queue", WARN, f"{pending} memories awaiting review"))
+        else:
+            checks.append(Check("review:queue", OK, "empty"))
+        store.close()
+    except Exception as exc:
+        checks.append(Check("store:connection", FAIL, f"{url} → {exc}"))
+
+    # ollama + models
+    from ..memory.embeddings import ollama_reachable
+
+    if ollama_reachable(cfg.ollama_url):
+        try:
+            import httpx
+
+            tags = httpx.get(f"{cfg.ollama_url.rstrip('/')}/api/tags", timeout=5).json()
+            available = {m["name"].split(":")[0] for m in tags.get("models", [])}
+            for role, model in (("extraction", cfg.ollama_model),
+                                ("embeddings", cfg.ollama_embed_model)):
+                base = model.split(":")[0]
+                if base in available:
+                    checks.append(Check(f"ollama:{role}", OK, model))
+                else:
+                    checks.append(Check(f"ollama:{role}", WARN,
+                                        f"model {model} not pulled — twin setup ollama"))
+        except Exception as exc:
+            checks.append(Check("ollama:models", WARN, str(exc)))
+    else:
+        checks.append(Check("ollama:server", WARN,
+                            f"{cfg.ollama_url} unreachable — extraction falls back to "
+                            "heuristic, embeddings to hash"))
+
+    # embedder resolution
+    from ..memory.embeddings import get_embedder
+
+    embedder = get_embedder(cfg.embedder, cfg.embedding_dim,
+                            ollama_url=cfg.ollama_url, ollama_model=cfg.ollama_embed_model)
+    checks.append(Check("embedder", OK, embedder.name))
+
+    # policies + judgment parse
+    for label, path in (("policies", cfg.policies_path), ("judgment", cfg.judgment_path)):
+        try:
+            if path.exists():
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+                checks.append(Check(f"config:{label}", OK, str(path)))
+            else:
+                checks.append(Check(f"config:{label}", WARN, f"{path} missing — twin init"))
+        except yaml.YAMLError as exc:
+            checks.append(Check(f"config:{label}", FAIL, f"invalid YAML: {exc}"))
+
+    # encryption
+    if cfg.encryption_key:
+        try:
+            from ..memory.crypto import build_codec
+
+            build_codec(cfg.encryption_key, cfg.home)
+            checks.append(Check("encryption", OK, "at-rest encryption active"))
+        except RuntimeError as exc:
+            checks.append(Check("encryption", FAIL, str(exc)))
+    else:
+        checks.append(Check("encryption", WARN, "TWIN_ENCRYPTION_KEY not set (optional)"))
+
+    # MCP client configuration
+    found_any = False
+    for client, path in _mcp_config_paths().items():
+        if path.exists() and '"twin"' in path.read_text(encoding="utf-8", errors="ignore"):
+            checks.append(Check(f"mcp:{client}", OK, str(path)))
+            found_any = True
+    if not found_any:
+        checks.append(Check("mcp:clients", WARN,
+                            "no client configured — twin setup mcp <client>"))
+
+    return checks
+
+
+def setup_ollama(cfg: Config) -> list[str]:
+    """Pull the configured models (via the ollama CLI when available)."""
+    lines: list[str] = []
+    from ..memory.embeddings import ollama_reachable
+
+    if not ollama_reachable(cfg.ollama_url):
+        lines.append(f"Ollama unreachable at {cfg.ollama_url}.")
+        lines.append("Start it with one of:")
+        lines.append("  docker compose up -d ollama")
+        lines.append("  ollama serve   (native install: https://ollama.com/download)")
+        return lines
+    for model in (cfg.ollama_model, cfg.ollama_embed_model):
+        if shutil.which("ollama"):
+            lines.append(f"pulling {model} …")
+            proc = subprocess.run(["ollama", "pull", model], capture_output=True, text=True)
+            lines.append(f"  {'done' if proc.returncode == 0 else proc.stderr.strip()}")
+        else:
+            lines.append(f"run: docker compose exec ollama ollama pull {model}")
+    return lines
+
+
+def setup_postgres(cfg: Config) -> list[str]:
+    """Verify connectivity, create the extension/schema, or explain how."""
+    url = cfg.resolved_db_url
+    if not url.startswith(("postgres://", "postgresql://")):
+        return [
+            "TWIN_DB_URL does not point at Postgres.",
+            "  docker compose up -d postgres",
+            "  export TWIN_DB_URL=postgresql://twin:twin@localhost:5432/twin",
+        ]
+    try:
+        from ..memory.store.postgres import PostgresStore
+
+        store = PostgresStore(url)
+        pg = "pgvector active" if store.has_pgvector else "pgvector MISSING"
+        store.close()
+        return [f"connected to {url}", f"schema created/verified — {pg}"]
+    except Exception as exc:
+        return [f"connection failed: {exc}",
+                "  docker compose up -d postgres  (then retry)"]
+
+
+def setup_mcp(cfg: Config, client: str) -> list[str]:
+    """Write/merge the twin server entry into a client's MCP config."""
+    paths = _mcp_config_paths()
+    if client not in paths:
+        return [f"unknown client '{client}'. Options: {', '.join(paths)}"]
+    path = paths[client]
+    entry: dict = {"command": shutil.which("twin") or "twin", "args": ["mcp"]}
+    if os.environ.get("TWIN_DB_URL"):
+        entry["env"] = {"TWIN_DB_URL": os.environ["TWIN_DB_URL"]}
+    config: dict = {}
+    if path.exists():
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return [f"{path} exists but is not valid JSON — fix it manually"]
+    config.setdefault("mcpServers", {})["twin"] = entry
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    lines = [f"wrote {path}"]
+    if client == "claude-desktop":
+        lines.append("restart Claude Desktop to load the server")
+    if client == "claude-code":
+        lines.append("scope: project (.mcp.json in the current directory)")
+    return lines
