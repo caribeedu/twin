@@ -178,3 +178,30 @@ def test_infer_domain_uses_graph_entities(store, embedder):
     assert infer_domain("o que você sabe sobre Falstaff?", store) == "assistant_preferences"
     # without the graph there is no evidence — never assume a real domain
     assert infer_domain("o que você sabe sobre Falstaff?") == "unclassified"
+
+
+def test_inactive_statuses_excluded_from_search(store, embedder):
+    from twin import ids
+    from twin.memory.lifecycle import archive_memory
+    from twin.memory.models import MemoryItem
+
+    live = MemoryItem(
+        id=ids.memory_id(), type="fact", title="live fact",
+        summary="Twin is local-first.", domain="technical",
+        confidence=0.9, status="confirmed", entities=["Twin"],
+    )
+    dead = MemoryItem(
+        id=ids.memory_id(), type="fact", title="dead fact",
+        summary="Twin is local-first forever.", domain="technical",
+        confidence=0.9, status="merged", entities=["Twin"],
+    )
+    store.insert_memory(live)
+    store.insert_memory(dead)
+    store.store_embedding(live.id, "memory", embedder.name,
+                          embedder.embed(f"{live.title}\n{live.summary}"))
+    store.store_embedding(dead.id, "memory", embedder.name,
+                          embedder.embed(f"{dead.title}\n{dead.summary}"))
+    archive_memory(store, dead.id)
+    result = search(store, embedder, "local-first", include_candidates=False)
+    ids_hit = {h.memory.id for h in result.hits}
+    assert dead.id not in ids_hit
