@@ -6,6 +6,7 @@ Structural ops (merge/split/supersede/contradict/archive/undo) run inside
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -172,6 +173,9 @@ def contradict(store: MemoryStore, memory_id: str, contradicted_id: str,
     return LifecycleResult("contradict", memory_id, contradicted_id, relation_id, op_id)
 
 
+_OUTPUT_UNSET = object()
+
+
 def _assert_merge_compatible(
     mems: list[MemoryItem],
     *,
@@ -201,6 +205,73 @@ def _assert_merge_compatible(
         raise ValueError("merge blocked: some memories lack project_id")
 
 
+def _resolve_merge_semantics(
+    mems: list[MemoryItem],
+    *,
+    output_type: Optional[str] = None,
+    output_domain: Optional[str] = None,
+    output_persona: Optional[str] = None,
+    output_project_id: Any = _OUTPUT_UNSET,
+    output_canonical_claim: Any = _OUTPUT_UNSET,
+) -> dict[str, Any]:
+    """Pick result semantics; mixed inputs require explicit outputs."""
+    primary = mems[0]
+    types = {m.type.value for m in mems}
+    domains = {m.domain for m in mems}
+    personas = {m.persona for m in mems}
+    projects = {m.project_id for m in mems}
+    def _claim_key(claim: Any) -> str:
+        if claim is None:
+            return ""
+        if hasattr(claim, "model_dump"):
+            return json.dumps(claim.model_dump(mode="json"), sort_keys=True)
+        return str(claim)
+
+    claims = {_claim_key(m.canonical_claim) for m in mems}
+
+    if len(types) > 1 and output_type is None:
+        raise ValueError(
+            f"mixed types {sorted(types)} require explicit output_type "
+            "(confirm_cross_scope_merge only authorizes the attempt)"
+        )
+    if len(domains) > 1 and output_domain is None:
+        raise ValueError(
+            f"mixed domains {sorted(domains)} require explicit output_domain"
+        )
+    if len(personas) > 1 and output_persona is None:
+        raise ValueError(
+            f"mixed personas {sorted(personas)} require explicit output_persona"
+        )
+    if len(projects) > 1 and output_project_id is _OUTPUT_UNSET:
+        raise ValueError(
+            f"mixed project_id values require explicit output_project_id"
+        )
+    if len(claims) > 1 and output_canonical_claim is _OUTPUT_UNSET:
+        raise ValueError(
+            "mixed canonical_claim values require explicit output_canonical_claim"
+        )
+
+    resolved_type = output_type if output_type is not None else primary.type
+    resolved_domain = output_domain if output_domain is not None else primary.domain
+    resolved_persona = output_persona if output_persona is not None else primary.persona
+    if output_project_id is _OUTPUT_UNSET:
+        resolved_project = primary.project_id
+    else:
+        resolved_project = output_project_id
+    if output_canonical_claim is _OUTPUT_UNSET:
+        resolved_claim = primary.canonical_claim
+    else:
+        resolved_claim = output_canonical_claim
+
+    return {
+        "type": resolved_type,
+        "domain": resolved_domain,
+        "persona": resolved_persona,
+        "project_id": resolved_project,
+        "canonical_claim": resolved_claim,
+    }
+
+
 def merge_memories(
     store: MemoryStore,
     memory_ids: list[str],
@@ -211,6 +282,11 @@ def merge_memories(
     embedder=None,
     confirm_cross_scope_merge: bool = False,
     human_confirmed_synthesis: bool = False,
+    output_type: Optional[str] = None,
+    output_domain: Optional[str] = None,
+    output_persona: Optional[str] = None,
+    output_project_id: Any = _OUTPUT_UNSET,
+    output_canonical_claim: Any = _OUTPUT_UNSET,
 ) -> LifecycleResult:
     if len(memory_ids) < 2:
         raise ValueError("merge requires at least two memories")
@@ -223,6 +299,14 @@ def merge_memories(
             raise ValueError(f"memory {mid} cannot be merged (status={m.status.value})")
         mems.append(m)
     _assert_merge_compatible(mems, confirm_cross_scope_merge=confirm_cross_scope_merge)
+    semantics = _resolve_merge_semantics(
+        mems,
+        output_type=output_type,
+        output_domain=output_domain,
+        output_persona=output_persona,
+        output_project_id=output_project_id,
+        output_canonical_claim=output_canonical_claim,
+    )
 
     with store.transaction():
         before: dict[str, Any] = {
@@ -248,11 +332,11 @@ def merge_memories(
         )
         new = MemoryItem(
             id=ids.memory_id(),
-            type=primary.type,
+            type=semantics["type"],
             title=title or primary.title,
             summary=summary or " ".join(dict.fromkeys(m.summary for m in mems)),
-            domain=primary.domain,
-            persona=primary.persona,
+            domain=semantics["domain"],
+            persona=semantics["persona"],
             sensitivity=max(mems, key=lambda m: (
                 {"public": 0, "internal": 1, "private": 2, "restricted": 3}[m.sensitivity.value]
             )).sensitivity,
@@ -262,10 +346,10 @@ def merge_memories(
             payload={**primary.payload, "merged_from": memory_ids},
             needs_review=status == MemoryStatus.candidate,
             review_reason="merged synthesis — confirm" if status == MemoryStatus.candidate else None,
-            project_id=primary.project_id,
+            project_id=semantics["project_id"],
             entities=entities,
             impact=max(mems, key=lambda m: {"low": 0, "medium": 1, "high": 2}.get(m.impact, 1)).impact,
-            canonical_claim=primary.canonical_claim,
+            canonical_claim=semantics["canonical_claim"],
             extractor_version=primary.extractor_version,
         )
         store.insert_memory(new)

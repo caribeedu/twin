@@ -132,6 +132,44 @@ def apply_safe_automations(
     }
 
 
+def _memory_version_slice(m) -> dict[str, Any]:
+    """Stable per-memory state included in preview tokens (TOCTOU guard)."""
+    import hashlib
+
+    content_hash = hashlib.sha256(
+        f"{m.title}\n{m.summary}".encode()
+    ).hexdigest()[:16]
+    return {
+        "id": m.id,
+        "updated_at": m.updated_at or "",
+        "status": m.status.value if hasattr(m.status, "value") else str(m.status),
+        "domain": m.domain,
+        "sensitivity": (
+            m.sensitivity.value if hasattr(m.sensitivity, "value") else str(m.sensitivity)
+        ),
+        "project_id": m.project_id or "",
+        "quality_flags": sorted(m.quality_flags or []),
+        "content_hash": content_hash,
+    }
+
+
+def compute_preview_token(action: str, memories: list) -> str:
+    """Hash action + ordered memory version slices."""
+    import hashlib
+    import json
+
+    payload = {
+        "action": action,
+        "count": len(memories),
+        "memories": sorted(
+            (_memory_version_slice(m) for m in memories),
+            key=lambda row: row["id"],
+        ),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
 def batch_preview(
     store: MemoryStore,
     memory_ids: list[str],
@@ -162,10 +200,6 @@ def batch_preview(
     if any(m.type.value in ("belief",) for m in memories):
         individual_only = True
 
-    import hashlib
-    token_src = f"{action}:{','.join(sorted(m.id for m in memories))}:{len(memories)}"
-    preview_token = hashlib.sha256(token_src.encode()).hexdigest()[:24]
-
     return {
         "selected": len(memories),
         "action": action,
@@ -174,7 +208,7 @@ def batch_preview(
         "conflicts_detected": conflicts,
         "requires_individual_review": individual_only,
         "memory_ids": [m.id for m in memories],
-        "preview_token": preview_token,
+        "preview_token": compute_preview_token(action, memories),
     }
 
 
@@ -186,9 +220,22 @@ def batch_apply(
     force: bool = False,
     actor: str = "user",
     preview_token: Optional[str] = None,
+    require_preview_token: bool = True,
 ) -> dict[str, Any]:
+    """Apply a batch action previously previewed.
+
+    ``preview_token`` is mandatory for external/API callers (default). Pass
+    ``require_preview_token=False`` only for privileged internal automations.
+    The token covers selection *and* reviewed memory state (updated_at, status,
+    domain, sensitivity, content, project, quality flags).
+    """
     preview = batch_preview(store, memory_ids, action)
-    if preview_token and preview_token != preview["preview_token"]:
+    if require_preview_token:
+        if not preview_token:
+            return {**preview, "applied": 0, "error": "preview_token_required"}
+        if preview_token != preview["preview_token"]:
+            return {**preview, "applied": 0, "error": "preview_token_mismatch"}
+    elif preview_token and preview_token != preview["preview_token"]:
         return {**preview, "applied": 0, "error": "preview_token_mismatch"}
     if preview["requires_individual_review"] and not force:
         return {**preview, "applied": 0, "error": "requires_individual_review"}

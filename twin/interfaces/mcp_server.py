@@ -449,13 +449,32 @@ def create_server(home: Optional[str] = None):
 
     @mcp.tool()
     def memory_merge(memory_ids: list[str], confirm: bool = False,
-                     title: Optional[str] = None, summary: Optional[str] = None) -> str:
-        """Merge memories into one. Requires confirm=true."""
+                     title: Optional[str] = None, summary: Optional[str] = None,
+                     confirm_cross_scope_merge: bool = False,
+                     output_type: Optional[str] = None,
+                     output_domain: Optional[str] = None,
+                     output_persona: Optional[str] = None,
+                     output_project_id: Optional[str] = None) -> str:
+        """Merge memories into one. Requires confirm=true.
+
+        Mixed type/domain/persona/project requires the matching output_* field;
+        confirm_cross_scope_merge only authorizes the attempt.
+        """
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply", "preview": memory_ids})
         from ..memory.lifecycle import merge_memories
-        result = merge_memories(ws.store, memory_ids, title=title, summary=summary,
-                               embedder=ws.embedder)
+        kwargs: dict = {
+            "title": title, "summary": summary, "embedder": ws.embedder,
+            "confirm_cross_scope_merge": confirm_cross_scope_merge,
+            "output_type": output_type, "output_domain": output_domain,
+            "output_persona": output_persona,
+        }
+        if output_project_id is not None:
+            kwargs["output_project_id"] = output_project_id
+        try:
+            result = merge_memories(ws.store, memory_ids, **kwargs)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
         return json.dumps({"merged_id": result.extras.get("merged_id"),
                            "operation_id": result.operation_id})
 

@@ -152,8 +152,16 @@ def test_batch_preview_blocks_sensitive(store, embedder):
              type="belief", status="candidate", sensitivity="private", needs_review=True)
     preview = batch_preview(store, [m.id], "confirm")
     assert preview["requires_individual_review"]
-    result = batch_apply(store, [m.id], "confirm", force=False)
+    assert preview["preview_token"]
+    # token required — omitting it must not bypass
+    missing = batch_apply(store, [m.id], "confirm", force=False)
+    assert missing["applied"] == 0
+    assert missing["error"] == "preview_token_required"
+    result = batch_apply(
+        store, [m.id], "confirm", force=False, preview_token=preview["preview_token"],
+    )
     assert result["applied"] == 0
+    assert result["error"] == "requires_individual_review"
 
 
 def test_calibration_matrix():

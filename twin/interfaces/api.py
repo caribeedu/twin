@@ -414,6 +414,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         action: str
         memory_ids: Optional[list[str]] = None
         force: bool = False
+        preview_token: Optional[str] = None
 
     class MergeRequest(BaseModel):
         memory_ids: list[str] = Field(min_length=2)
@@ -421,6 +422,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         summary: Optional[str] = None
         confirm_cross_scope_merge: bool = False
         human_confirmed_synthesis: bool = False
+        output_type: Optional[str] = None
+        output_domain: Optional[str] = None
+        output_persona: Optional[str] = None
+        output_project_id: Optional[str] = None
+        output_canonical_claim: Optional[dict[str, Any]] = None
+        set_output_project_id: bool = False
+        set_output_canonical_claim: bool = False
 
     class SplitRequest(BaseModel):
         parts: list[dict[str, Any]] = Field(min_length=2)
@@ -450,7 +458,10 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         preview = batch_preview(ws.store, ids, req.action)
         if req.force is False and preview.get("requires_individual_review"):
             return {**preview, "preview_only": True}
-        return batch_apply(ws.store, ids, req.action, force=req.force)
+        return batch_apply(
+            ws.store, ids, req.action,
+            force=req.force, preview_token=req.preview_token,
+        )
 
     @app.get("/api/memories/{memory_id}/neighbors")
     def api_neighbors(memory_id: str):
@@ -484,13 +495,26 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/memories/merge")
     def api_merge(req: MergeRequest):
         from ..memory.lifecycle import merge_memories
-        try:
-            result = merge_memories(
-                ws.store, req.memory_ids, title=req.title, summary=req.summary,
-                embedder=ws.embedder,
-                confirm_cross_scope_merge=req.confirm_cross_scope_merge,
-                human_confirmed_synthesis=req.human_confirmed_synthesis,
+        from ..memory.models import CanonicalClaim
+        merge_kwargs: dict[str, Any] = {
+            "title": req.title,
+            "summary": req.summary,
+            "embedder": ws.embedder,
+            "confirm_cross_scope_merge": req.confirm_cross_scope_merge,
+            "human_confirmed_synthesis": req.human_confirmed_synthesis,
+            "output_type": req.output_type,
+            "output_domain": req.output_domain,
+            "output_persona": req.output_persona,
+        }
+        if req.set_output_project_id or req.output_project_id is not None:
+            merge_kwargs["output_project_id"] = req.output_project_id
+        if req.set_output_canonical_claim or req.output_canonical_claim is not None:
+            claim = req.output_canonical_claim
+            merge_kwargs["output_canonical_claim"] = (
+                CanonicalClaim(**claim) if isinstance(claim, dict) else claim
             )
+        try:
+            result = merge_memories(ws.store, req.memory_ids, **merge_kwargs)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "merged_id": result.extras.get("merged_id"),

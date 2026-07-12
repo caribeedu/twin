@@ -199,6 +199,83 @@ def test_merge_blocks_cross_domain(store, embedder):
         merge_memories(store, [a.id, b.id], confirm_cross_scope_merge=True, embedder=embedder)
 
 
+def test_merge_cross_type_requires_output_semantics(store, embedder):
+    a = _mem(store, embedder, type="decision", title="ship it",
+             summary="We decided to ship v0.3.")
+    b = _mem(store, embedder, type="belief", title="ship belief",
+             summary="I believe shipping v0.3 is right.")
+    with pytest.raises(ValueError, match="mixed types"):
+        merge_memories(store, [a.id, b.id], embedder=embedder)
+    with pytest.raises(ValueError, match="output_type"):
+        merge_memories(
+            store, [a.id, b.id], confirm_cross_scope_merge=True, embedder=embedder,
+        )
+    result = merge_memories(
+        store, [a.id, b.id],
+        confirm_cross_scope_merge=True,
+        output_type="decision",
+        title="Ship v0.3",
+        summary="Decision: ship v0.3.",
+        embedder=embedder,
+    )
+    merged = store.get_memory(result.extras["merged_id"])
+    assert merged is not None
+    assert merged.type.value == "decision"
+
+
+def test_preview_token_detects_state_change(store, embedder):
+    from twin.memory.automation import batch_apply, batch_preview
+
+    m = _mem(
+        store, embedder, title="note", summary="stable text",
+        status="candidate", needs_review=True, sensitivity="public", type="fact",
+    )
+    preview = batch_preview(store, [m.id], "confirm")
+    token = preview["preview_token"]
+    assert not preview["requires_individual_review"]
+
+    missing = batch_apply(store, [m.id], "confirm")
+    assert missing["error"] == "preview_token_required"
+
+    store.update_memory(m.id, summary="changed after preview")
+    stale = batch_apply(store, [m.id], "confirm", preview_token=token)
+    assert stale["applied"] == 0
+    assert stale["error"] == "preview_token_mismatch"
+
+    fresh = batch_preview(store, [m.id], "confirm")
+    ok = batch_apply(store, [m.id], "confirm", preview_token=fresh["preview_token"])
+    assert ok["applied"] == 1
+    assert store.get_memory(m.id).status == MemoryStatus.confirmed
+
+
+def test_merge_transaction_rollback_on_fault(store, embedder):
+    a = _mem(store, embedder, title="A", summary="alpha fact about Twin")
+    b = _mem(store, embedder, title="B", summary="beta fact about Twin")
+    a_id, b_id = a.id, b.id
+    before_ids = {m.id for m in store.list_memories(limit=1000)}
+
+    real_update = store.update_memory
+    calls = {"n": 0}
+
+    def boom(mid, **kwargs):
+        calls["n"] += 1
+        if kwargs.get("status") == MemoryStatus.merged.value and calls["n"] >= 2:
+            raise RuntimeError("injected failure")
+        return real_update(mid, **kwargs)
+
+    store.update_memory = boom  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError, match="injected"):
+            merge_memories(store, [a_id, b_id], embedder=embedder)
+    finally:
+        store.update_memory = real_update  # type: ignore[method-assign]
+
+    assert store.get_memory(a_id).status != MemoryStatus.merged
+    assert store.get_memory(b_id).status != MemoryStatus.merged
+    after_ids = {m.id for m in store.list_memories(limit=1000)}
+    assert after_ids == before_ids
+
+
 def test_split_evidence_mapping(store, embedder):
     mem = _mem(
         store, embedder, title="stack",
