@@ -1,0 +1,18 @@
+{
+  "id": "postgres_primary",
+  "input": {
+    "percept": "Architecture decision: Twin uses PostgreSQL as the primary production store. SQLite remains the zero-config development backend.",
+    "source_sensor": "document",
+    "source_trust": 0.95
+  },
+  "expected": {
+    "memories": [
+      {
+        "type": "decision",
+        "canonical_claim": "PostgreSQL",
+        "domain": "technical"
+      }
+    ],
+    "must_not_extract": ["Neo4j is mandatory"]
+  }
+}

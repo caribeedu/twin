@@ -1,0 +1,18 @@
+{
+  "id": "fastapi_decision",
+  "input": {
+    "percept": "Decision: Twin exposes its local HTTP API through FastAPI. We rejected Flask for typing and OpenAPI support.",
+    "source_sensor": "document",
+    "source_trust": 0.9
+  },
+  "expected": {
+    "memories": [
+      {
+        "type": "decision",
+        "canonical_claim": "FastAPI",
+        "domain": "technical"
+      }
+    ],
+    "must_not_extract": []
+  }
+}

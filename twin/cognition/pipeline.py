@@ -15,13 +15,16 @@ from dataclasses import dataclass, field
 from .. import ids
 from ..config import SENSITIVITY_ORDER, Config
 from ..judgment.pii import mask
+from ..memory.calibration import calibrated_confidence, load_calibration
 from ..memory.embeddings import Embedder
-from ..memory.models import Evidence, MemoryItem, Relation
+from ..memory.models import Evidence, ExtractorVersion, MemoryItem, Relation
+from ..memory.provenance import ensure_artifact_from_percept
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
 from .dedupe import check as dedupe_check
 from .extractors import heuristic as heuristic_extractor
 from .extractors import ollama as ollama_extractor
+from .quality import analyze_memory
 from .schema import ExtractedMemory, ExtractionResult
 
 
@@ -60,10 +63,21 @@ def _run_extractor(cfg: Config, percept: Percept) -> tuple[ExtractionResult, int
     return heuristic_extractor.extract(percept), len(findings)
 
 
-def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept) -> ExtractedMemory:
+def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept,
+                                extractor_name: str = "heuristic") -> ExtractedMemory:
     """Source metadata shapes the derived memory:
-    trust scales confidence; confidentiality is a sensitivity floor."""
-    extracted.confidence = round(extracted.confidence * percept.source_trust, 3)
+    trust scales confidence; confidentiality is a sensitivity floor.
+    v0.3: also apply source×type calibration matrix."""
+    cal = load_calibration()
+    extracted.confidence = calibrated_confidence(
+        percept.source_sensor,
+        extracted.type,
+        extracted.confidence,
+        source_trust=percept.source_trust,
+        evidence_directness=1.0,
+        extractor_reliability=1.0 if extractor_name == "ollama" else 0.95,
+        calibration=cal,
+    )
     order = SENSITIVITY_ORDER
     if order.index(extracted.sensitivity) < order.index(percept.source_confidentiality):
         extracted.sensitivity = percept.source_confidentiality
@@ -90,20 +104,24 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     result, pii_count = _run_extractor(cfg, percept)
     report.extractor = result.extractor
     report.pii_findings = pii_count
+    artifact_id = ensure_artifact_from_percept(store, percept)
 
     for extracted in result.memories:
-        extracted = _apply_source_qualification(extracted.normalized(), percept)
+        extracted = _apply_source_qualification(
+            extracted.normalized(), percept, extractor_name=result.extractor,
+        )
         dedupe_text = f"{extracted.title}\n{extracted.summary}"
         verdict = dedupe_check(store, embedder, extracted.type, dedupe_text)
 
         if verdict.action == "duplicate" and verdict.existing_id:
-            # New evidence for an existing memory, not a new memory.
-            store.insert_evidence(Evidence(
-                id=ids.evidence_id(),
-                memory_id=verdict.existing_id,
-                percept_id=percept.id,
-                quote=extracted.evidence_quote or extracted.summary,
-            ))
+            # New evidence for an existing memory — corroboration, not a new memory.
+            from ..memory.provenance import attach_corroborating_evidence
+            attach_corroborating_evidence(
+                store, verdict.existing_id, percept.id,
+                extracted.evidence_quote or extracted.summary,
+                independence_group=artifact_id or percept.id,
+                source_trust=percept.source_trust,
+            )
             report.duplicates += 1
             continue
 
@@ -126,6 +144,14 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             needs_review=review_reason is not None,
             review_reason=review_reason,
             entities=extracted.entities,
+            project_id=percept.project_id,
+            extractor_version=ExtractorVersion(
+                extractor=result.extractor,
+                model=cfg.ollama_model if result.extractor == "ollama" else "heuristic",
+                prompt_version="extract-v3",
+                schema_version="2",
+                created_at=percept.ingested_at or "",
+            ),
         )
         store.insert_memory(mem)
         store.insert_evidence(Evidence(
@@ -133,6 +159,9 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             memory_id=mem.id,
             percept_id=percept.id,
             quote=extracted.evidence_quote or extracted.summary,
+            source_trust=percept.source_trust,
+            independence_group=artifact_id or percept.id,
+            artifact_id=artifact_id,
         ))
         store.store_embedding(mem.id, "memory", embedder.name, embedder.embed(dedupe_text))
 
@@ -151,8 +180,17 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
                 memory_id=mem.id, valid_from=mem.valid_from,
             ))
 
+        # v0.3: quality neighborhood analysis + priority scoring
+        try:
+            analyze_memory(store, embedder, mem.id, persist=True)
+        except Exception:
+            pass
+
         report.inserted.append(mem.id)
-        if review_reason:
+        reloaded = store.get_memory(mem.id)
+        if reloaded and reloaded.needs_review:
+            report.flagged_for_review += 1
+        elif review_reason:
             report.flagged_for_review += 1
 
     return report

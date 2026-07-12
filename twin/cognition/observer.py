@@ -17,6 +17,7 @@ from typing import Optional
 from ..config import UNCLASSIFIED_DOMAIN, Config
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
+from ..memory.models import INACTIVE_STATUSES
 from ..memory.search import search
 from ..memory.store.base import MemoryStore
 
@@ -64,7 +65,7 @@ def _graph_domain_votes(store: MemoryStore, text: str) -> dict[str, int]:
         if entity is None:
             continue
         for mem in store.memories_for_entity(entity.id)[:20]:
-            if mem.status.value in ("rejected", "deprecated", "contradicted"):
+            if mem.status.value in INACTIVE_STATUSES:
                 continue
             votes[mem.domain] = votes.get(mem.domain, 0) + 1
     return votes

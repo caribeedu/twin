@@ -18,7 +18,10 @@ from ... import ids
 from ...sensory.percept import Percept
 from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
-from ..models import CognitiveSession, Entity, Evidence, MemoryItem, Project, Relation
+from ..models import (
+    Artifact, CognitiveSession, Entity, Evidence, MemoryItem, MemoryOperation,
+    Project, Relation, ReviewBatch, ReviewFinding,
+)
 from .base import MemoryStore, now_iso
 
 _SCHEMA_BASE = """
@@ -175,6 +178,92 @@ CREATE TABLE IF NOT EXISTS firewall_log (
     action TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- v0.3 quality / provenance / review
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS review_priority REAL NOT NULL DEFAULT 0;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS quality_score REAL NOT NULL DEFAULT 0;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS impact TEXT NOT NULL DEFAULT 'medium';
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS review_batch_id TEXT;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS canonical_claim JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS extractor_version JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_reconciled_at TEXT;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS retrieval_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_retrieved_at TEXT;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS deleted_at TEXT;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
+
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS evidence_type TEXT NOT NULL DEFAULT 'verbatim';
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS directness REAL NOT NULL DEFAULT 1.0;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS source_trust REAL NOT NULL DEFAULT 0.8;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS independence_group TEXT;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS supports BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS span_start INTEGER;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS span_end INTEGER;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS artifact_id TEXT;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS deleted_at TEXT;
+
+ALTER TABLE entities ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE entities ADD COLUMN IF NOT EXISTS canonical_id TEXT;
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    external_id TEXT,
+    source_system TEXT NOT NULL DEFAULT 'local',
+    uri TEXT,
+    content_hash TEXT,
+    occurred_at TEXT,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT,
+    deletion_reason TEXT,
+    content_destroyed BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(content_hash);
+CREATE INDEX IF NOT EXISTS idx_artifacts_system ON artifacts(source_system);
+
+CREATE TABLE IF NOT EXISTS review_findings (
+    id TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    related_memory_id TEXT,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    reason TEXT NOT NULL DEFAULT '',
+    suggested_action TEXT NOT NULL DEFAULT 'none',
+    requires_human_review BOOLEAN NOT NULL DEFAULT TRUE,
+    resolved BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(memory_id);
+
+CREATE TABLE IF NOT EXISTS review_batches (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    query JSONB NOT NULL DEFAULT '{}',
+    memory_ids JSONB NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    progress_total INTEGER NOT NULL DEFAULT 0,
+    progress_reviewed INTEGER NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS memory_operations (
+    id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'user',
+    at TEXT NOT NULL,
+    inputs JSONB NOT NULL DEFAULT '[]',
+    output TEXT,
+    before_state JSONB NOT NULL DEFAULT '{}',
+    after_state JSONB NOT NULL DEFAULT '{}',
+    undoable BOOLEAN NOT NULL DEFAULT TRUE,
+    undone_at TEXT
+);
 """
 
 _EMBEDDINGS_PGVECTOR = """
@@ -214,6 +303,7 @@ class PostgresStore(MemoryStore):
         # psycopg connections are not thread-safe; FastAPI sync endpoints run
         # in a thread pool, so serialize access.
         self._lock = threading.RLock()
+        self._tx_depth = 0
         with self._lock, self.conn.cursor() as cur:
             try:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -222,6 +312,26 @@ class PostgresStore(MemoryStore):
                 self.has_pgvector = False
             cur.execute(_SCHEMA_BASE)
             cur.execute(_EMBEDDINGS_PGVECTOR if self.has_pgvector else _EMBEDDINGS_FALLBACK)
+
+    def _begin_transaction(self) -> None:
+        with self._lock:
+            self.conn.autocommit = False
+
+    def _commit_transaction(self) -> None:
+        with self._lock:
+            self.conn.commit()
+            self.conn.autocommit = True
+
+    def _rollback_transaction(self) -> None:
+        with self._lock:
+            self.conn.rollback()
+            self.conn.autocommit = True
+
+    def _maybe_commit(self) -> None:
+        # Postgres runs with autocommit=True outside explicit transactions.
+        if getattr(self, "_tx_depth", 0) > 0:
+            return
+        # no-op when autocommit
 
     def close(self) -> None:
         self.conn.close()
@@ -317,6 +427,7 @@ class PostgresStore(MemoryStore):
         return mem.id
 
     def _row_to_memory(self, row: dict) -> MemoryItem:
+        from ..models import CanonicalClaim, ExtractorVersion
         entities = [
             r["name"] for r in self._exec(
                 "SELECT e.name FROM entities e"
@@ -326,9 +437,19 @@ class PostgresStore(MemoryStore):
         ]
         percept_ids = [
             r["percept_id"] for r in self._exec(
-                "SELECT DISTINCT percept_id FROM evidence WHERE memory_id = %s", (row["id"],)
+                "SELECT DISTINCT percept_id FROM evidence WHERE memory_id = %s"
+                " AND deleted_at IS NULL", (row["id"],)
             )
         ]
+        claim_raw = row.get("canonical_claim") or {}
+        ext_raw = row.get("extractor_version") or {}
+        if isinstance(claim_raw, str):
+            claim_raw = json.loads(claim_raw)
+        if isinstance(ext_raw, str):
+            ext_raw = json.loads(ext_raw)
+        flags = row.get("quality_flags") or []
+        if isinstance(flags, str):
+            flags = json.loads(flags)
         return MemoryItem(
             id=row["id"], type=row["type"], title=row["title"], summary=row["summary"],
             domain=row["domain"], persona=row["persona"], sensitivity=row["sensitivity"],
@@ -338,6 +459,19 @@ class PostgresStore(MemoryStore):
             payload=row["payload"], needs_review=row["needs_review"],
             review_reason=row["review_reason"], project_id=row["project_id"],
             entities=entities, percept_ids=percept_ids,
+            review_priority=float(row.get("review_priority") or 0),
+            quality_score=float(row.get("quality_score") or 0),
+            quality_flags=flags,
+            impact=row.get("impact") or "medium",
+            reviewed_at=row.get("reviewed_at"),
+            review_batch_id=row.get("review_batch_id"),
+            canonical_claim=CanonicalClaim(**claim_raw) if claim_raw else None,
+            extractor_version=ExtractorVersion(**ext_raw) if ext_raw else None,
+            last_reconciled_at=row.get("last_reconciled_at"),
+            retrieval_count=int(row.get("retrieval_count") or 0),
+            last_retrieved_at=row.get("last_retrieved_at"),
+            deleted_at=row.get("deleted_at"),
+            deletion_reason=row.get("deletion_reason"),
         )
 
     def get_memory(self, memory_id: str) -> Optional[MemoryItem]:
@@ -378,16 +512,23 @@ class PostgresStore(MemoryStore):
         allowed = {
             "title", "summary", "domain", "persona", "sensitivity", "confidence",
             "status", "valid_from", "valid_until", "needs_review", "review_reason",
-            "payload", "project_id",
+            "payload", "project_id", "review_priority", "quality_score", "quality_flags",
+            "impact", "reviewed_at", "review_batch_id", "canonical_claim",
+            "extractor_version", "last_reconciled_at", "retrieval_count",
+            "last_retrieved_at", "deleted_at", "deletion_reason",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return
-        if "payload" in updates and not isinstance(updates["payload"], str):
-            updates["payload"] = json.dumps(updates["payload"])
+        for key in ("payload", "quality_flags", "canonical_claim", "extractor_version"):
+            if key in updates and not isinstance(updates[key], str):
+                val = updates[key]
+                if hasattr(val, "model_dump"):
+                    val = val.model_dump()
+                updates[key] = json.dumps(val or ({} if key != "quality_flags" else []))
         sets = ", ".join(f"{k} = %s" for k in updates)
-        params = tuple(updates.values()) + (now_iso(), memory_id)
-        self._exec(f"UPDATE memories SET {sets}, updated_at = %s WHERE id = %s", params)
+        params = list(updates.values()) + [now_iso(), memory_id]
+        self._exec(f"UPDATE memories SET {sets}, updated_at = %s WHERE id = %s", tuple(params))
 
     # -- evidence ----------------------------------------------------------
 
@@ -734,4 +875,195 @@ class PostgresStore(MemoryStore):
             "INSERT INTO firewall_log (memory_id, target_domain, rule, action, created_at)"
             " VALUES (%s,%s,%s,%s,%s)",
             (memory_id, target_domain, rule, action, now_iso()),
+        )
+
+    # -- v0.3 artifacts / findings / batches / operations -------------------------
+
+    def delete_embedding(self, ref_id: str) -> None:
+        self._exec("DELETE FROM embeddings WHERE ref_id = %s", (ref_id,))
+
+    def insert_artifact(self, art: Artifact) -> str:
+        art.created_at = art.created_at or now_iso()
+        self._exec(
+            "INSERT INTO artifacts (id, kind, external_id, source_system, uri,"
+            " content_hash, occurred_at, created_at, deleted_at, deletion_reason,"
+            " content_destroyed, metadata) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                art.id, art.kind, art.external_id, art.source_system, art.uri,
+                art.content_hash, art.occurred_at, art.created_at, art.deleted_at,
+                art.deletion_reason, art.content_destroyed, json.dumps(art.metadata),
+            ),
+        )
+        return art.id
+
+    def get_artifact(self, artifact_id: str) -> Optional[Artifact]:
+        rows = self._exec("SELECT * FROM artifacts WHERE id = %s", (artifact_id,))
+        return self._row_to_artifact(rows[0]) if rows else None
+
+    def find_artifact_by_hash(self, content_hash: str) -> Optional[Artifact]:
+        rows = self._exec(
+            "SELECT * FROM artifacts WHERE content_hash = %s AND deleted_at IS NULL",
+            (content_hash,),
+        )
+        return self._row_to_artifact(rows[0]) if rows else None
+
+    def list_artifacts(self) -> list[Artifact]:
+        return [self._row_to_artifact(r) for r in self._exec(
+            "SELECT * FROM artifacts ORDER BY created_at"
+        )]
+
+    @staticmethod
+    def _row_to_artifact(row: dict) -> Artifact:
+        return Artifact(
+            id=row["id"], kind=row["kind"], external_id=row["external_id"],
+            source_system=row["source_system"], uri=row["uri"],
+            content_hash=row["content_hash"], occurred_at=row["occurred_at"],
+            created_at=row["created_at"], deleted_at=row["deleted_at"],
+            deletion_reason=row["deletion_reason"],
+            content_destroyed=bool(row["content_destroyed"]),
+            metadata=row["metadata"] if isinstance(row["metadata"], dict)
+            else json.loads(row["metadata"] or "{}"),
+        )
+
+    def tombstone_artifact(self, artifact_id: str, *, reason: str,
+                           destroy_content: bool = True) -> None:
+        self._exec(
+            "UPDATE artifacts SET deleted_at = %s, deletion_reason = %s,"
+            " content_destroyed = %s WHERE id = %s",
+            (now_iso(), reason, destroy_content, artifact_id),
+        )
+
+    def tombstone_percept(self, percept_id: str, *, reason: str,
+                          destroy_content: bool = True) -> None:
+        rows = self._exec("SELECT metadata FROM percepts WHERE id = %s", (percept_id,))
+        if not rows:
+            return
+        meta = rows[0]["metadata"] if isinstance(rows[0]["metadata"], dict) else json.loads(rows[0]["metadata"] or "{}")
+        meta["tombstoned"] = True
+        meta["deletion_reason"] = reason
+        if destroy_content:
+            self._exec(
+                "UPDATE percepts SET content = %s, metadata = %s WHERE id = %s",
+                (self.codec.encrypt("[content destroyed]"), json.dumps(meta), percept_id),
+            )
+        else:
+            self._exec("UPDATE percepts SET metadata = %s WHERE id = %s",
+                       (json.dumps(meta), percept_id))
+
+    def tombstone_evidence(self, evidence_id: str, *, reason: str) -> None:
+        self._exec(
+            "UPDATE evidence SET deleted_at = %s, quote = %s WHERE id = %s",
+            (now_iso(), f"[tombstoned:{reason}]", evidence_id),
+        )
+
+    def list_evidence_for_artifact(self, artifact_id: str) -> list[Evidence]:
+        rows = self._exec("SELECT * FROM evidence WHERE artifact_id = %s", (artifact_id,))
+        out = []
+        for r in rows:
+            r = dict(r)
+            r["quote"] = self.codec.decrypt(r["quote"])
+            r.pop("deleted_at", None)
+            out.append(Evidence(**{k: v for k, v in r.items() if k in Evidence.model_fields}))
+        return out
+
+    def replace_findings(self, memory_id: str, findings: list[ReviewFinding]) -> None:
+        self._exec("DELETE FROM review_findings WHERE memory_id = %s", (memory_id,))
+        for f in findings:
+            self.insert_finding(f)
+
+    def insert_finding(self, finding: ReviewFinding, commit: bool = True) -> str:
+        finding.created_at = finding.created_at or now_iso()
+        self._exec(
+            "INSERT INTO review_findings (id, memory_id, type, related_memory_id,"
+            " confidence, reason, suggested_action, requires_human_review, resolved,"
+            " created_at, resolved_at, metadata) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                finding.id, finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.confidence, finding.reason, finding.suggested_action.value,
+                finding.requires_human_review, finding.resolved,
+                finding.created_at, finding.resolved_at, json.dumps(finding.metadata),
+            ),
+        )
+        return finding.id
+
+    def insert_review_batch(self, batch: ReviewBatch) -> str:
+        self._exec(
+            "INSERT INTO review_batches (id, name, query, memory_ids, created_at,"
+            " completed_at, progress_total, progress_reviewed, metadata)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                batch.id, batch.name, json.dumps(batch.query),
+                json.dumps(batch.memory_ids), batch.created_at, batch.completed_at,
+                batch.progress_total, batch.progress_reviewed, json.dumps(batch.metadata),
+            ),
+        )
+        return batch.id
+
+    def get_review_batch(self, batch_id: str) -> Optional[ReviewBatch]:
+        rows = self._exec("SELECT * FROM review_batches WHERE id = %s", (batch_id,))
+        if not rows:
+            return None
+        row = rows[0]
+        return ReviewBatch(
+            id=row["id"], name=row["name"],
+            query=row["query"] if isinstance(row["query"], dict) else json.loads(row["query"]),
+            memory_ids=row["memory_ids"] if isinstance(row["memory_ids"], list)
+            else json.loads(row["memory_ids"]),
+            created_at=row["created_at"], completed_at=row["completed_at"],
+            progress_total=row["progress_total"], progress_reviewed=row["progress_reviewed"],
+            metadata=row["metadata"] if isinstance(row["metadata"], dict)
+            else json.loads(row["metadata"] or "{}"),
+        )
+
+    def update_review_batch(self, batch_id: str, **fields: Any) -> None:
+        allowed = {"completed_at", "progress_total", "progress_reviewed", "memory_ids", "metadata"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        for key in ("memory_ids", "metadata"):
+            if key in updates and not isinstance(updates[key], str):
+                updates[key] = json.dumps(updates[key])
+        if not updates:
+            return
+        sets = ", ".join(f"{k} = %s" for k in updates)
+        self._exec(f"UPDATE review_batches SET {sets} WHERE id = %s",
+                   tuple(list(updates.values()) + [batch_id]))
+
+    def insert_operation(self, op: MemoryOperation) -> str:
+        self._exec(
+            "INSERT INTO memory_operations (id, operation, actor, at, inputs, output,"
+            " before_state, after_state, undoable, undone_at)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                op.id, op.operation, op.actor, op.at, json.dumps(op.inputs), op.output,
+                json.dumps(op.before), json.dumps(op.after), op.undoable, op.undone_at,
+            ),
+        )
+        return op.id
+
+    def get_operation(self, operation_id: str) -> Optional[MemoryOperation]:
+        rows = self._exec("SELECT * FROM memory_operations WHERE id = %s", (operation_id,))
+        if not rows:
+            return None
+        row = rows[0]
+        return MemoryOperation(
+            id=row["id"], operation=row["operation"], actor=row["actor"], at=row["at"],
+            inputs=row["inputs"] if isinstance(row["inputs"], list) else json.loads(row["inputs"]),
+            output=row["output"],
+            before=row["before_state"] if isinstance(row["before_state"], dict)
+            else json.loads(row["before_state"]),
+            after=row["after_state"] if isinstance(row["after_state"], dict)
+            else json.loads(row["after_state"]),
+            undoable=bool(row["undoable"]), undone_at=row["undone_at"],
+        )
+
+    def mark_operation_undone(self, operation_id: str) -> None:
+        self._exec(
+            "UPDATE memory_operations SET undone_at = %s, undoable = FALSE WHERE id = %s",
+            (now_iso(), operation_id),
+        )
+
+    def bump_retrieval(self, memory_id: str) -> None:
+        self._exec(
+            "UPDATE memories SET retrieval_count = retrieval_count + 1,"
+            " last_retrieved_at = %s WHERE id = %s",
+            (now_iso(), memory_id),
         )

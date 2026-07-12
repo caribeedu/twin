@@ -27,7 +27,7 @@ from typing import Callable, Optional
 from ..clock import now_iso
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
-from ..memory.models import MemoryItem
+from ..memory.models import INACTIVE_STATUSES, MemoryItem
 from ..memory.search import BlockedHit, SearchHit, SearchResult, search
 from ..memory.store.base import MemoryStore
 
@@ -86,7 +86,7 @@ def _graph_expand(store: MemoryStore, hits: list[SearchHit],
             for mem in adjacent[:10]:
                 if mem.id in seen:
                     continue
-                if mem.status.value in ("rejected", "deprecated", "contradicted"):
+                if mem.status.value in INACTIVE_STATUSES:
                     continue
                 seen.add(mem.id)
                 expanded.append(_Expansion(memory=mem, score=score, via_entity=name))

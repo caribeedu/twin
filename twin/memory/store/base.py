@@ -213,6 +213,50 @@ class MemoryStore(ABC):
     @abstractmethod
     def close(self) -> None: ...
 
+    # -- transactions (v0.3 structural ops) ------------------------------------
+
+    def transaction(self):
+        """Context manager: all writes in the block commit together or roll back.
+
+        Nested calls reuse the outer transaction. Stores that auto-commit each
+        write must suppress mid-block commits while the depth is > 0.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _tx():
+            depth = getattr(self, "_tx_depth", 0)
+            self._tx_depth = depth + 1
+            started = depth == 0
+            try:
+                if started:
+                    self._begin_transaction()
+                yield self
+                if started:
+                    self._commit_transaction()
+            except Exception:
+                if started:
+                    self._rollback_transaction()
+                raise
+            finally:
+                self._tx_depth = depth
+
+        return _tx()
+
+    def _begin_transaction(self) -> None:
+        pass
+
+    def _commit_transaction(self) -> None:
+        pass
+
+    def _rollback_transaction(self) -> None:
+        pass
+
+    def _maybe_commit(self) -> None:
+        """Commit unless inside an open ``transaction()`` block."""
+        if getattr(self, "_tx_depth", 0) == 0:
+            self._commit_transaction()
+
     @staticmethod
     def sanitize_fts_terms(query: str) -> list[str]:
         return [t for t in "".join(c if c.isalnum() else " " for c in query).split() if len(t) > 1]

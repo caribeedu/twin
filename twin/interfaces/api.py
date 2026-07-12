@@ -384,6 +384,211 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "blocked_context": s.blocked_context,
         }
 
+    # -- v0.3 review / quality / consolidation --------------------------------
+
+    @app.get("/api/review/queue")
+    def api_review_queue(
+        project: Optional[str] = None,
+        domain: Optional[str] = None,
+        type: Optional[str] = None,
+        sensitivity: Optional[str] = None,
+        min_priority: float = 0.0,
+        conflicts: bool = False,
+        limit: int = 100,
+    ):
+        from ..cognition.quality import review_queue
+        project_id = _resolve_project_id(project) if project else None
+        queue = review_queue(
+            ws.store, project_id=project_id, domain=domain, type_=type,
+            sensitivity=sensitivity, min_priority=min_priority,
+            conflicts_only=conflicts, limit=limit,
+        )
+        return [_mem_dict(m) for m in queue]
+
+    class BatchCreateRequest(BaseModel):
+        name: str = Field(min_length=1, max_length=200)
+        query: dict[str, Any] = Field(default_factory=dict)
+        memory_ids: list[str] = Field(default_factory=list)
+
+    class BatchApplyRequest(BaseModel):
+        action: str
+        memory_ids: Optional[list[str]] = None
+        force: bool = False
+        preview_token: Optional[str] = None
+
+    class MergeRequest(BaseModel):
+        memory_ids: list[str] = Field(min_length=2)
+        title: Optional[str] = None
+        summary: Optional[str] = None
+        confirm_cross_scope_merge: bool = False
+        human_confirmed_synthesis: bool = False
+        output_type: Optional[str] = None
+        output_domain: Optional[str] = None
+        output_persona: Optional[str] = None
+        output_project_id: Optional[str] = None
+        output_canonical_claim: Optional[dict[str, Any]] = None
+        set_output_project_id: bool = False
+        set_output_canonical_claim: bool = False
+
+    class SplitRequest(BaseModel):
+        parts: list[dict[str, Any]] = Field(min_length=2)
+
+    @app.post("/api/review/batches")
+    def api_create_batch(req: BatchCreateRequest):
+        from ..memory.batches import create_batch
+        batch = create_batch(ws.store, req.name, query=req.query, memory_ids=req.memory_ids or None)
+        return batch.model_dump()
+
+    @app.get("/api/review/batches/{batch_id}")
+    def api_get_batch(batch_id: str):
+        from ..memory.batches import get_batch
+        batch = get_batch(ws.store, batch_id)
+        if batch is None:
+            raise HTTPException(404, "batch not found")
+        return batch.model_dump()
+
+    @app.post("/api/review/batches/{batch_id}/apply")
+    def api_apply_batch(batch_id: str, req: BatchApplyRequest):
+        from ..memory.automation import batch_apply, batch_preview
+        from ..memory.batches import get_batch
+        batch = get_batch(ws.store, batch_id)
+        if batch is None:
+            raise HTTPException(404, "batch not found")
+        ids = req.memory_ids or batch.memory_ids
+        preview = batch_preview(ws.store, ids, req.action)
+        if req.force is False and preview.get("requires_individual_review"):
+            return {**preview, "preview_only": True}
+        return batch_apply(
+            ws.store, ids, req.action,
+            force=req.force, preview_token=req.preview_token,
+        )
+
+    @app.get("/api/memories/{memory_id}/neighbors")
+    def api_neighbors(memory_id: str):
+        from ..cognition.quality import discover_neighbors
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        neighbors = discover_neighbors(ws.store, ws.embedder, mem)
+        return [
+            {**_mem_dict(n), "similarity": sim, "reason": reason}
+            for n, sim, reason in neighbors
+        ]
+
+    @app.get("/api/memories/{memory_id}/quality")
+    def api_quality(memory_id: str):
+        from ..cognition.quality import analyze_memory
+        try:
+            report = analyze_memory(ws.store, ws.embedder, memory_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return report.model_dump(mode="json")
+
+    @app.get("/api/memories/{memory_id}/provenance")
+    def api_provenance(memory_id: str):
+        from ..memory.provenance import memory_provenance
+        try:
+            return memory_provenance(ws.store, memory_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/memories/merge")
+    def api_merge(req: MergeRequest):
+        from ..memory.lifecycle import merge_memories
+        from ..memory.models import CanonicalClaim
+        merge_kwargs: dict[str, Any] = {
+            "title": req.title,
+            "summary": req.summary,
+            "embedder": ws.embedder,
+            "confirm_cross_scope_merge": req.confirm_cross_scope_merge,
+            "human_confirmed_synthesis": req.human_confirmed_synthesis,
+            "output_type": req.output_type,
+            "output_domain": req.output_domain,
+            "output_persona": req.output_persona,
+        }
+        if req.set_output_project_id or req.output_project_id is not None:
+            merge_kwargs["output_project_id"] = req.output_project_id
+        if req.set_output_canonical_claim or req.output_canonical_claim is not None:
+            claim = req.output_canonical_claim
+            merge_kwargs["output_canonical_claim"] = (
+                CanonicalClaim(**claim) if isinstance(claim, dict) else claim
+            )
+        try:
+            result = merge_memories(ws.store, req.memory_ids, **merge_kwargs)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"action": result.action, "merged_id": result.extras.get("merged_id"),
+                "operation_id": result.operation_id, **result.extras}
+
+    @app.post("/api/memories/{memory_id}/split")
+    def api_split(memory_id: str, req: SplitRequest):
+        from ..memory.lifecycle import split_memory
+        try:
+            result = split_memory(ws.store, memory_id, req.parts, embedder=ws.embedder)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"action": result.action, "children": result.extras.get("children"),
+                "operation_id": result.operation_id}
+
+    @app.post("/api/memories/{memory_id}/archive")
+    def api_archive(memory_id: str):
+        from ..memory.lifecycle import archive_memory
+        try:
+            result = archive_memory(ws.store, memory_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"action": result.action, "operation_id": result.operation_id}
+
+    @app.post("/api/memories/{memory_id}/request-evidence")
+    def api_request_evidence(memory_id: str):
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        ws.store.update_memory(
+            memory_id, needs_review=True,
+            review_reason="more evidence requested",
+            quality_flags=list(set(mem.quality_flags + ["weak_evidence"])),
+        )
+        return _mem_dict(ws.store.get_memory(memory_id))
+
+    @app.get("/api/artifacts/{artifact_id}")
+    def api_artifact(artifact_id: str):
+        if not hasattr(ws.store, "get_artifact"):
+            raise HTTPException(501, "artifacts not supported")
+        art = ws.store.get_artifact(artifact_id)
+        if art is None:
+            raise HTTPException(404, "artifact not found")
+        return art.model_dump()
+
+    @app.delete("/api/artifacts/{artifact_id}")
+    def api_delete_artifact(artifact_id: str, dry_run: bool = True):
+        from ..memory.retention import delete_artifact
+        try:
+            return delete_artifact(ws.store, artifact_id, dry_run=dry_run)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/evals/extraction")
+    def api_eval_extraction():
+        from pathlib import Path
+        from ..evals import default_eval_root, run_extraction_eval
+        run = run_extraction_eval(
+            ws.store, ws.cfg, ws.embedder,
+            default_eval_root() / "extraction",
+        )
+        return {"id": run.id, "kind": run.kind, "summary": run.summary,
+                "cases": [c.__dict__ for c in run.cases]}
+
+    @app.post("/api/evals/retrieval")
+    def api_eval_retrieval():
+        from ..evals import default_eval_root, run_retrieval_eval
+        run = run_retrieval_eval(
+            ws.store, ws.embedder, default_eval_root() / "retrieval",
+            firewall=ws.firewall,
+        )
+        return {"id": run.id, "kind": run.kind, "summary": run.summary,
+                "cases": [c.__dict__ for c in run.cases]}
+
     @app.get("/api/judgment")
     def api_judgment():
         return load_profile(ws.cfg.judgment_path)
@@ -401,30 +606,85 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "judgment": load_profile(ws.cfg.judgment_path),
         })
 
-    # -- Minimal review UI -------------------------------------------------
+    # -- Review Workbench UI (v0.3) ----------------------------------------
 
     _PAGE = """<!doctype html><html><head><meta charset="utf-8">
-    <title>twin — review</title>
+    <title>twin — review workbench</title>
     <style>
-      body {{ font-family: -apple-system, system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; color: #1a1a1a; }}
-      .mem {{ border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }}
-      .mem h3 {{ margin: 0 0 .3rem; font-size: 1rem; }}
-      .meta {{ color: #666; font-size: .82rem; margin-bottom: .5rem; }}
-      .reason {{ color: #b45309; font-size: .85rem; }}
-      blockquote {{ border-left: 3px solid #ccc; margin: .5rem 0; padding: .2rem .8rem; color: #444; font-size: .88rem; }}
-      form {{ display: inline-block; margin-right: .5rem; }}
-      button {{ padding: .35rem .9rem; border-radius: 6px; border: 1px solid #bbb; cursor: pointer; background: #fff; }}
-      button.ok {{ background: #16a34a; color: #fff; border-color: #16a34a; }}
-      button.no {{ background: #dc2626; color: #fff; border-color: #dc2626; }}
-      select {{ padding: .3rem; }}
-      nav a {{ margin-right: 1rem; }}
+      :root {{ --bg:#0f1419; --panel:#1a2332; --line:#2d3a4d; --text:#e7ecf3;
+               --muted:#8b9bb4; --ok:#3d9a6a; --no:#c44b4b; --warn:#c9a227; --accent:#5b8def; }}
+      * {{ box-sizing: border-box; }}
+      body {{ font-family: "IBM Plex Sans", "Segoe UI", sans-serif; margin: 0;
+              background: linear-gradient(160deg,#0f1419 0%,#15202b 50%,#1a1f2e 100%);
+              color: var(--text); min-height: 100vh; }}
+      header {{ padding: 1rem 1.5rem; border-bottom: 1px solid var(--line);
+                display:flex; gap:1rem; align-items:baseline; flex-wrap:wrap; }}
+      header h1 {{ font-family: "IBM Plex Serif", Georgia, serif; font-size: 1.35rem;
+                   margin:0; letter-spacing:.02em; }}
+      nav a {{ color: var(--muted); text-decoration:none; margin-right:1rem; font-size:.9rem; }}
+      nav a:hover {{ color: var(--accent); }}
+      .wrap {{ max-width: 1100px; margin: 0 auto; padding: 1.25rem; }}
+      .filters {{ display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem; }}
+      .filters select, .filters input {{ background:var(--panel); color:var(--text);
+        border:1px solid var(--line); border-radius:4px; padding:.35rem .5rem; }}
+      .pair {{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }}
+      @media (max-width:800px) {{ .pair {{ grid-template-columns:1fr; }} }}
+      .card {{ background:var(--panel); border:1px solid var(--line); border-radius:6px;
+               padding:1rem; }}
+      .card h3 {{ margin:0 0 .4rem; font-size:1rem; }}
+      .meta {{ color:var(--muted); font-size:.78rem; margin-bottom:.5rem; line-height:1.4; }}
+      .reason {{ color:var(--warn); font-size:.82rem; margin-bottom:.4rem; }}
+      .flags span {{ display:inline-block; background:#243044; color:var(--muted);
+                     font-size:.7rem; padding:.1rem .4rem; margin:.1rem; border-radius:3px; }}
+      blockquote {{ border-left:2px solid var(--line); margin:.4rem 0; padding:.2rem .6rem;
+                    color:var(--muted); font-size:.85rem; }}
+      .actions {{ display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.75rem; }}
+      button, .actions a.btn {{ padding:.4rem .75rem; border-radius:4px; border:1px solid var(--line);
+        cursor:pointer; background:#243044; color:var(--text); font-size:.82rem; text-decoration:none; }}
+      button.ok {{ background:var(--ok); border-color:var(--ok); color:#fff; }}
+      button.no {{ background:var(--no); border-color:var(--no); color:#fff; }}
+      .keys {{ color:var(--muted); font-size:.75rem; margin-top:1rem; }}
+      .prio {{ color:var(--accent); font-weight:600; }}
     </style></head><body>
-    <h1>twin — memory review</h1>
-    <nav><a href="/">review queue</a><a href="/all">all memories</a><a href="/api/export">export JSON</a></nav>
-    {body}
+    <header>
+      <h1>twin</h1>
+      <nav><a href="/">workbench</a><a href="/all">all</a><a href="/api/export">export</a>
+           <a href="/api/metrics">metrics</a></nav>
+    </header>
+    <div class="wrap">{body}</div>
+    <script>
+    document.addEventListener('keydown', (e) => {{
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      const form = document.querySelector('.work-item form');
+      if (!form) return;
+      const map = {{a:'approve',r:'reject',e:'update',d:'defer',m:'merge_hint',s:'supersede_hint',c:'contradict_hint'}};
+      if (map[e.key]) {{
+        const btn = form.querySelector('[value="'+map[e.key]+'"]');
+        if (btn) {{ e.preventDefault(); btn.click(); }}
+      }}
+      if (e.key === 'n') {{ const n = document.querySelector('a.next'); if (n) n.click(); }}
+      if (e.key === 'p') {{ const p = document.querySelector('a.prev'); if (p) p.click(); }}
+    }});
+    </script>
     </body></html>"""
 
-    def _render_memory(mem, evidence, review_mode: bool) -> str:
+    def _render_side(mem, evidence, label: str) -> str:
+        quotes = "".join(f"<blockquote>{html.escape(e.quote[:240])}</blockquote>" for e in evidence[:2])
+        flags = "".join(f"<span>{html.escape(f)}</span>" for f in mem.quality_flags[:6])
+        return f"""
+        <div class="card">
+          <div class="meta">{html.escape(label)}</div>
+          <h3>{html.escape(mem.title)}</h3>
+          <div class="meta">{mem.type.value} · {mem.domain} · {mem.sensitivity.value}
+            · conf {mem.confidence:.2f} · prio <span class="prio">{mem.review_priority:.2f}</span>
+            · {html.escape((mem.created_at or '')[:16])}
+            · entities: {html.escape(", ".join(mem.entities) or "—")}</div>
+          <div class="flags">{flags}</div>
+          <p>{html.escape(mem.summary)}</p>
+          {quotes}
+        </div>"""
+
+    def _render_work_item(mem, neighbor, evidence, n_evidence, idx: int, total: int) -> str:
         domain_opts = "".join(
             f'<option value="{d}" {"selected" if d == mem.domain else ""}>{d}</option>'
             for d in ALL_DOMAINS
@@ -433,54 +693,103 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             f'<option value="{s}" {"selected" if s == mem.sensitivity.value else ""}>{s}</option>'
             for s in ["public", "internal", "private", "restricted"]
         )
-        quotes = "".join(f"<blockquote>{html.escape(e.quote)}</blockquote>" for e in evidence[:3])
         reason = (
             f'<div class="reason">⚠ {html.escape(mem.review_reason or "")}</div>'
             if mem.needs_review else ""
         )
-        actions = f"""
-        <form method="post" action="/review/{mem.id}">
-          domain <select name="domain">{domain_opts}</select>
-          sensitivity <select name="sensitivity">{sens_opts}</select>
-          <button class="ok" name="action" value="approve">approve</button>
-          <button class="no" name="action" value="reject">reject</button>
-          <button name="action" value="update">save edits</button>
-        </form>""" if review_mode else f"<div class='meta'>status: {mem.status.value}</div>"
+        pair = _render_side(mem, evidence, "Candidate")
+        if neighbor:
+            pair = f'<div class="pair">{pair}{_render_side(neighbor, n_evidence, "Neighbor")}</div>'
+        else:
+            pair = f'<div class="pair">{pair}<div class="card"><div class="meta">No close neighbor</div></div></div>'
+        prev_href = f"/?i={idx-1}" if idx > 0 else "#"
+        next_href = f"/?i={idx+1}" if idx + 1 < total else "#"
         return f"""
-        <div class="mem">
-          <h3>{html.escape(mem.title)}</h3>
-          <div class="meta">{mem.type.value} · {mem.domain} · {mem.sensitivity.value}
-            · confidence {mem.confidence:.2f} · {mem.created_at[:16]}
-            · entities: {html.escape(", ".join(mem.entities) or "—")}</div>
+        <div class="work-item">
+          <div class="meta">item {idx+1} / {total}
+            <a class="prev" href="{prev_href}">prev</a> ·
+            <a class="next" href="{next_href}">next</a></div>
           {reason}
-          <p>{html.escape(mem.summary)}</p>
-          {quotes}
-          {actions}
+          {pair}
+          <form method="post" action="/review/{mem.id}" class="actions">
+            domain <select name="domain">{domain_opts}</select>
+            sensitivity <select name="sensitivity">{sens_opts}</select>
+            <input type="hidden" name="neighbor_id" value="{neighbor.id if neighbor else ''}">
+            <button class="ok" name="action" value="approve">A approve</button>
+            <button class="no" name="action" value="reject">R reject</button>
+            <button name="action" value="update">E edit/save</button>
+            <button name="action" value="defer">D defer</button>
+            <button name="action" value="supersede_hint">S supersede neighbor</button>
+            <button name="action" value="contradict_hint">C contradict</button>
+            <button name="action" value="merge_hint">M merge</button>
+            <button name="action" value="archive">archive</button>
+          </form>
+          <p class="keys">Keyboard: A approve · R reject · E edit · M merge · S supersede · C contradict · D defer · N/P next/prev</p>
         </div>"""
 
     @app.get("/", response_class=HTMLResponse)
-    def ui_review_queue():
-        pending = [
-            m for m in ws.store.list_memories(status="candidate")
-            if m.needs_review
-        ] or ws.store.list_memories(status="candidate")
-        body = "".join(
-            _render_memory(m, ws.store.get_evidence(m.id), review_mode=True) for m in pending
-        ) or "<p>Nothing to review 🎉</p>"
-        return _PAGE.format(body=f"<h2>{len(pending)} pending</h2>{body}")
+    def ui_review_queue(i: int = 0, conflicts: bool = False):
+        from ..cognition.quality import discover_neighbors, review_queue
+        pending = review_queue(ws.store, conflicts_only=conflicts, limit=200)
+        if not pending:
+            return _PAGE.format(body="<p>Nothing to review.</p>")
+        i = max(0, min(i, len(pending) - 1))
+        mem = pending[i]
+        neighbors = discover_neighbors(ws.store, ws.embedder, mem, limit=1)
+        neighbor = neighbors[0][0] if neighbors else None
+        body = f"<h2>{len(pending)} in priority queue</h2>" + _render_work_item(
+            mem, neighbor,
+            ws.store.get_evidence(mem.id),
+            ws.store.get_evidence(neighbor.id) if neighbor else [],
+            i, len(pending),
+        )
+        return _PAGE.format(body=body)
 
     @app.get("/all", response_class=HTMLResponse)
     def ui_all():
         memories = ws.store.list_memories(limit=500)
-        body = "".join(
-            _render_memory(m, ws.store.get_evidence(m.id), review_mode=False) for m in memories
-        ) or "<p>No memories yet. Ingest and extract first.</p>"
+        cards = []
+        for mem in memories:
+            cards.append(f"""
+            <div class="card" style="margin-bottom:.6rem">
+              <h3>{html.escape(mem.title)}</h3>
+              <div class="meta">{mem.status.value} · {mem.type.value} · prio {mem.review_priority:.2f}</div>
+              <p>{html.escape(mem.summary[:280])}</p>
+            </div>""")
+        body = "".join(cards) or "<p>No memories yet.</p>"
         return _PAGE.format(body=body)
 
     @app.post("/review/{memory_id}")
     def ui_review(memory_id: str, action: str = Form(...), domain: str = Form(None),
-                  sensitivity: str = Form(None)):
-        api_review(memory_id, action=action, domain=domain, sensitivity=sensitivity)
+                  sensitivity: str = Form(None), neighbor_id: str = Form(None)):
+        from ..clock import now_iso
+        from ..memory.lifecycle import archive_memory, contradict, merge_memories, supersede
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        if domain:
+            ws.store.update_memory(memory_id, domain=domain)
+        if sensitivity:
+            ws.store.update_memory(memory_id, sensitivity=sensitivity)
+        if action == "approve":
+            ws.store.set_status(memory_id, MemoryStatus.confirmed)
+            ws.store.update_memory(memory_id, reviewed_at=now_iso())
+        elif action == "reject":
+            ws.store.set_status(memory_id, MemoryStatus.rejected)
+            ws.store.update_memory(memory_id, reviewed_at=now_iso())
+        elif action == "defer":
+            ws.store.update_memory(memory_id, needs_review=True, review_reason="deferred")
+        elif action == "archive":
+            archive_memory(ws.store, memory_id)
+        elif action == "supersede_hint" and neighbor_id:
+            supersede(ws.store, memory_id, neighbor_id)
+            ws.store.set_status(memory_id, MemoryStatus.confirmed)
+        elif action == "contradict_hint" and neighbor_id:
+            contradict(ws.store, memory_id, neighbor_id)
+        elif action == "merge_hint" and neighbor_id:
+            merge_memories(ws.store, [memory_id, neighbor_id], embedder=ws.embedder)
+        elif action != "update":
+            raise HTTPException(400, "unknown action")
         return RedirectResponse("/", status_code=303)
 
     return app

@@ -169,3 +169,51 @@ def test_firewall_log_on_postgres(pg_store, cfg):
     assert not verdict.allowed
     rows = pg_store._exec("SELECT * FROM firewall_log")
     assert len(rows) == 1
+
+
+def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
+    """Same fault-injection as SQLite — Postgres must roll back structural merge."""
+    from twin import ids
+    from twin.memory.lifecycle import merge_memories
+    from twin.memory.models import MemoryItem, MemoryStatus
+
+    def _mem(**kw):
+        base = dict(
+            id=ids.memory_id(), type="fact", title="t", summary="s",
+            domain="technical", confidence=0.9, status="confirmed",
+            entities=["Twin"],
+        )
+        base.update(kw)
+        mem = MemoryItem(**base)
+        pg_store.insert_memory(mem)
+        pg_store.store_embedding(
+            mem.id, "memory", embedder.name,
+            embedder.embed(f"{mem.title}\n{mem.summary}"),
+        )
+        return mem
+
+    a = _mem(title="A", summary="alpha fact about Twin")
+    b = _mem(title="B", summary="beta fact about Twin")
+    a_id, b_id = a.id, b.id
+    before_ids = {m.id for m in pg_store.list_memories(limit=1000)}
+
+    real_update = pg_store.update_memory
+    calls = {"n": 0}
+
+    def boom(mid, **kwargs):
+        calls["n"] += 1
+        if kwargs.get("status") == MemoryStatus.merged.value and calls["n"] >= 2:
+            raise RuntimeError("injected failure")
+        return real_update(mid, **kwargs)
+
+    pg_store.update_memory = boom  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError, match="injected"):
+            merge_memories(pg_store, [a_id, b_id], embedder=embedder)
+    finally:
+        pg_store.update_memory = real_update  # type: ignore[method-assign]
+
+    assert pg_store.get_memory(a_id).status != MemoryStatus.merged
+    assert pg_store.get_memory(b_id).status != MemoryStatus.merged
+    after_ids = {m.id for m in pg_store.list_memories(limit=1000)}
+    assert after_ids == before_ids
