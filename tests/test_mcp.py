@@ -103,6 +103,17 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     assert any(s["memory_id"] == prior.id for s in started["sources"])
     session_id = started["session_id"]
 
+    # explicit-but-unknown project is an error, never silently re-inferred
+    bad = await _call(ide, "session_start", {
+        "query": "implement retry handling code", "project": "payments",
+    })
+    assert "not found" in bad["error"]
+
+    # an unclassifiable task supplies nothing and asks for the domain
+    vague = await _call(ide, "session_start", {"query": "resolve aquilo de ontem"})
+    assert vague["needs_domain_confirmation"] is True
+    assert vague["sources"] == []
+
     # 5: work happens — artifacts observed along the way
     observed = await _call(ide, "session_observe", {
         "session_id": session_id, "kind": "commit", "ref": "abc123",
@@ -111,11 +122,13 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     assert observed["artifacts"] == 1
 
     # 6-7: completion turns the session into percepts → candidate memories
+    # (the summary is the assistant's own account → moderate trust)
     completed = await _call(ide, "session_complete", {
         "session_id": session_id,
         "summary": "We decided to use exponential backoff for webhook retries.",
     })
     assert completed["status"] == "completed"
+    assert completed["consolidation_status"] == "completed"
     assert completed["created_memory_ids"]
 
     # 8: the human reviews and confirms the new candidate
@@ -125,12 +138,17 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     ws.store.set_status(new_id, MemoryStatus.confirmed)
     ws.close()
 
-    # 9: feedback is recorded against the session
+    # 9: feedback is recorded against the session; a memory that was not
+    # part of the session is rejected
     feedback = await _call(ide, "session_feedback", {
         "session_id": session_id, "verdict": "useful",
-        "note": "pack had the FastAPI decision",
+        "memory_id": prior.id, "note": "pack had the FastAPI decision",
     })
     assert feedback["feedback_count"] == 1
+    rejected = await _call(ide, "session_feedback", {
+        "session_id": session_id, "verdict": "useful", "memory_id": "mem_ghost",
+    })
+    assert "not found" in rejected["error"]
 
     # 10: another MCP client sees the confirmed context from this session
     other = create_server(str(home))

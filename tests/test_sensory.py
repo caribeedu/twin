@@ -79,7 +79,7 @@ def _git_repo(tmp_path):
     import subprocess
 
     repo = tmp_path / "atlas-api"
-    repo.mkdir()
+    repo.mkdir(parents=True)
     env = {"GIT_AUTHOR_NAME": "Edu", "GIT_AUTHOR_EMAIL": "edu@example.com",
            "GIT_COMMITTER_NAME": "Edu", "GIT_COMMITTER_EMAIL": "edu@example.com",
            "HOME": str(tmp_path), "PATH": "/usr/bin:/bin:/usr/local/bin"}
@@ -113,7 +113,10 @@ def test_git_sensor_emits_one_percept_per_commit(tmp_path):
     assert newest.source_trust == 0.9
     assert "Use RabbitMQ for delivery" in newest.content
     assert "queue.py" in newest.content
-    assert newest.metadata["branch"] == "main"
+    # the sensor never claims the commit was created on this branch — only
+    # that it was observed from it
+    assert newest.metadata["observed_from_branch"] == "main"
+    assert "observed from branch main" in newest.content
     assert newest.content_refs[0]["kind"] == "git_commit"
 
 
@@ -126,6 +129,41 @@ def test_git_sensor_dedup_is_incremental(tmp_path, store):
     # re-sensing the same repo ingests nothing — dedup keys on the commit sha
     for p in GitSensor().sense(repo):
         assert store.insert_percept(p) is None
+
+
+def test_git_sensor_identity_distinguishes_same_basename(tmp_path, store):
+    """Two unrelated repositories named 'atlas-api' must not dedupe into one
+    — repository identity comes from the remote/toplevel, never the name."""
+    from twin.sensory.sensors.git import GitSensor, repository_identity
+
+    repo_a = _git_repo(tmp_path / "work")
+    repo_b = _git_repo(tmp_path / "personal")
+    assert repo_a.name == repo_b.name
+    assert repository_identity(repo_a) != repository_identity(repo_b)
+
+    for p in GitSensor().sense(repo_a):
+        assert store.insert_percept(p) is not None
+    # same subjects/files, different repository → still ingested
+    for p in GitSensor().sense(repo_b):
+        assert store.insert_percept(p) is not None
+
+
+def test_git_sensor_identity_prefers_remote(tmp_path):
+    import subprocess
+
+    from twin.sensory.sensors.git import repository_identity
+
+    repo = _git_repo(tmp_path)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "git@github.com:Edu/Atlas-API.git"], check=True,
+                   capture_output=True)
+    identity = repository_identity(repo)
+    assert identity == "github.com/edu/atlas-api"
+    # clones of the same remote share the identity regardless of URL form
+    subprocess.run(["git", "-C", str(repo), "remote", "set-url", "origin",
+                    "https://github.com/Edu/Atlas-API.git"], check=True,
+                   capture_output=True)
+    assert repository_identity(repo) == identity
 
 
 def test_sense_paths_senses_git_directories(tmp_path):

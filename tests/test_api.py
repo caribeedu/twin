@@ -96,7 +96,7 @@ def test_session_lifecycle_over_api(client):
                                                  "repos": ["atlas-api"]}).json()
 
     r = client.post("/api/sessions", json={
-        "query": "implement the webhook retry endpoint",
+        "query": "implement the webhook retry endpoint code",
         "client": "test", "cwd": "/home/edu/atlas-api",
     })
     assert r.status_code == 200
@@ -105,6 +105,7 @@ def test_session_lifecycle_over_api(client):
     assert started["session"]["project_id"] == project["id"]
     assert started["session"]["task_profile"] == "coding"
     assert started["observer_mode"] in ("fast", "deep")
+    assert started["needs_domain_confirmation"] is False
     assert "context_pack" in started["context_pack"]
 
     r = client.post(f"/api/sessions/{session_id}/observe",
@@ -112,15 +113,24 @@ def test_session_lifecycle_over_api(client):
     assert len(r.json()["artifacts"]) == 1
 
     r = client.post(f"/api/sessions/{session_id}/complete",
-                    json={"summary": "We decided to use exponential backoff for retries."})
+                    json={"summary": "We decided to use exponential backoff for retries.",
+                          "summary_origin": "user"})
     assert r.json()["status"] == "completed"
+    assert r.json()["consolidation_status"] == "completed"
     assert r.json()["created_memory_ids"]
 
     r = client.post(f"/api/sessions/{session_id}/feedback",
                     json={"verdict": "useful", "note": "had the right decisions"})
     assert len(r.json()["feedback"]) == 1
+    # unknown verdicts/scopes die at the API edge (schema validation)
     assert client.post(f"/api/sessions/{session_id}/feedback",
-                       json={"verdict": "amazing"}).status_code == 400
+                       json={"verdict": "amazing"}).status_code == 422
+    assert client.post(f"/api/sessions/{session_id}/feedback",
+                       json={"verdict": "useful", "scope": "universe"}).status_code == 422
+    # a memory foreign to the session is rejected by the domain layer
+    assert client.post(f"/api/sessions/{session_id}/feedback",
+                       json={"verdict": "useful",
+                             "memory_id": "mem_ghost"}).status_code == 400
 
     # listings and filters
     assert client.get(f"/api/sessions/{session_id}").json()["status"] == "completed"
@@ -134,6 +144,78 @@ def test_session_lifecycle_over_api(client):
     metrics = client.get("/api/metrics").json()
     assert metrics["sessions"]["total"] == 1
     assert metrics["product"]["feedback_by_verdict"] == {"useful": 1}
+
+
+def test_session_start_unknown_explicit_project_is_404(client):
+    client.post("/api/projects", json={"name": "Atlas", "repos": ["atlas-api"]})
+    r = client.post("/api/sessions", json={
+        "query": "implement code", "project": "payments",
+        "cwd": "/repos/atlas-api",
+    })
+    assert r.status_code == 404
+    assert "payments" in r.json()["detail"]
+
+
+def test_session_start_unclassified_asks_for_domain(client):
+    r = client.post("/api/sessions", json={"query": "resolve aquilo de ontem"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["needs_domain_confirmation"] is True
+    assert body["session"]["domain"] == "unclassified"
+    assert body["context_pack"]["sources"] == []
+
+
+def test_api_edge_validation(client):
+    # empty query
+    assert client.post("/api/sessions", json={"query": ""}).status_code == 422
+    # unknown task profile / domain die in the schema, not deep in cognition
+    assert client.post("/api/context_pack",
+                       json={"query": "x", "task_profile": "sorcery"}).status_code == 422
+    assert client.post("/api/context_pack",
+                       json={"query": "x", "target_domain": "astral"}).status_code == 422
+    assert client.post("/api/sessions",
+                       json={"query": "x", "domain": "astral"}).status_code == 422
+    # max_tokens bounds
+    assert client.post("/api/context_pack",
+                       json={"query": "x", "max_tokens": 1}).status_code == 422
+    # artifact kind is required and non-empty
+    r = client.post("/api/sessions", json={"query": "implement code",
+                                           "domain": "technical"})
+    sid = r.json()["session"]["id"]
+    assert client.post(f"/api/sessions/{sid}/observe",
+                       json={"kind": ""}).status_code == 422
+    assert client.post(f"/api/sessions/{sid}/observe",
+                       json={"ref": "x"}).status_code == 422
+
+
+def test_project_update_endpoint(client):
+    project = client.post("/api/projects", json={"name": "Atlas"}).json()
+    r = client.patch(f"/api/projects/{project['id']}", json={
+        "goals": ["ship v2"], "status": "paused", "aliases": ["atl"],
+    })
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["goals"] == ["ship v2"]
+    assert updated["status"] == "paused"
+    assert updated["aliases"] == ["atl"]
+    assert updated["name"] == "Atlas"  # omitted fields untouched
+    assert client.patch("/api/projects/proj_ghost",
+                        json={"status": "done"}).status_code == 404
+    assert client.patch(f"/api/projects/{project['id']}",
+                        json={"status": "zombie"}).status_code == 422
+
+
+def test_sessions_cleanup_endpoint(client):
+    r = client.post("/api/sessions", json={"query": "implement code",
+                                           "domain": "technical"})
+    assert r.status_code == 200
+    result = client.post("/api/sessions/cleanup",
+                         params={"max_idle_hours": 0.001})
+    assert result.status_code == 200
+    # young session is stale only for absurdly small windows after some time;
+    # with ~0 idle allowed it may or may not trip depending on clock — just
+    # assert the endpoint answers with the expected shape
+    assert "abandoned" in result.json()
 
 
 def test_context_pack_accepts_profile_and_project(client):

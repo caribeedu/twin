@@ -132,14 +132,39 @@ CREATE TABLE IF NOT EXISTS sessions (
     status TEXT NOT NULL DEFAULT 'active',
     started_at TEXT NOT NULL,
     ended_at TEXT,
+    last_activity_at TEXT NOT NULL DEFAULT '',
     supplied_memory_ids TEXT NOT NULL DEFAULT '[]',
     pack_chars INTEGER NOT NULL DEFAULT 0,
-    artifacts TEXT NOT NULL DEFAULT '[]',
     created_memory_ids TEXT NOT NULL DEFAULT '[]',
-    feedback TEXT NOT NULL DEFAULT '[]'
+    consolidation_status TEXT NOT NULL DEFAULT 'none',
+    consolidation_error TEXT,
+    summary_percept_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+
+-- append-only: concurrent observers never rewrite each other's rows
+CREATE TABLE IF NOT EXISTS session_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref TEXT,
+    note TEXT,
+    percept_id TEXT,
+    observed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_artifacts ON session_artifacts(session_id);
+
+CREATE TABLE IF NOT EXISTS session_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'session',
+    verdict TEXT NOT NULL,
+    memory_id TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_feedback ON session_feedback(session_id);
 
 CREATE TABLE IF NOT EXISTS firewall_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,6 +207,15 @@ class SqliteStore(MemoryStore):
         mem_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(memories)")}
         if "project_id" not in mem_cols:
             self.conn.execute("ALTER TABLE memories ADD COLUMN project_id TEXT")
+        ses_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(sessions)")}
+        for name, ddl in (
+            ("last_activity_at", "TEXT NOT NULL DEFAULT ''"),
+            ("consolidation_status", "TEXT NOT NULL DEFAULT 'none'"),
+            ("consolidation_error", "TEXT"),
+            ("summary_percept_id", "TEXT"),
+        ):
+            if name not in ses_cols:
+                self.conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {ddl}")
         self.conn.commit()
 
     def close(self) -> None:
@@ -540,19 +574,22 @@ class SqliteStore(MemoryStore):
 
     def insert_session(self, session: CognitiveSession) -> str:
         session.started_at = session.started_at or now_iso()
+        session.last_activity_at = session.last_activity_at or session.started_at
         self.conn.execute(
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
-            " initial_query, status, started_at, ended_at, supplied_memory_ids,"
-            " pack_chars, artifacts, created_memory_ids, feedback)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " initial_query, status, started_at, ended_at, last_activity_at,"
+            " supplied_memory_ids, pack_chars, created_memory_ids,"
+            " consolidation_status, consolidation_error, summary_percept_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 session.id, session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
-                session.started_at, session.ended_at,
+                session.started_at, session.ended_at, session.last_activity_at,
                 json.dumps(session.supplied_memory_ids), session.pack_chars,
-                json.dumps(session.artifacts), json.dumps(session.created_memory_ids),
-                json.dumps(session.feedback),
+                json.dumps(session.created_memory_ids),
+                getattr(session.consolidation_status, "value", session.consolidation_status),
+                session.consolidation_error, session.summary_percept_id,
             ),
         )
         self.conn.commit()
@@ -562,31 +599,107 @@ class SqliteStore(MemoryStore):
         self.conn.execute(
             "UPDATE sessions SET client = ?, project_id = ?, domain = ?,"
             " task_profile = ?, initial_query = ?, status = ?, ended_at = ?,"
-            " supplied_memory_ids = ?, pack_chars = ?, artifacts = ?,"
-            " created_memory_ids = ?, feedback = ? WHERE id = ?",
+            " last_activity_at = ?, supplied_memory_ids = ?, pack_chars = ?,"
+            " created_memory_ids = ?, consolidation_status = ?,"
+            " consolidation_error = ?, summary_percept_id = ? WHERE id = ?",
             (
                 session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
-                session.ended_at, json.dumps(session.supplied_memory_ids),
-                session.pack_chars, json.dumps(session.artifacts),
-                json.dumps(session.created_memory_ids), json.dumps(session.feedback),
+                session.ended_at, session.last_activity_at or now_iso(),
+                json.dumps(session.supplied_memory_ids), session.pack_chars,
+                json.dumps(session.created_memory_ids),
+                getattr(session.consolidation_status, "value", session.consolidation_status),
+                session.consolidation_error, session.summary_percept_id,
                 session.id,
             ),
         )
         self.conn.commit()
 
-    @staticmethod
-    def _row_to_session(row: sqlite3.Row) -> CognitiveSession:
+    def append_session_artifact(self, session_id: str, artifact: dict) -> None:
+        with self.conn:  # one transaction: the active-guard and the append
+            cur = self.conn.execute(
+                "UPDATE sessions SET last_activity_at = ? WHERE id = ? AND status = 'active'",
+                (now_iso(), session_id),
+            )
+            if cur.rowcount == 0:
+                row = self.conn.execute(
+                    "SELECT status FROM sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"session {session_id} not found")
+                raise ValueError(f"session {session_id} is {row['status']}, not active")
+            self.conn.execute(
+                "INSERT INTO session_artifacts (session_id, kind, ref, note,"
+                " percept_id, observed_at) VALUES (?,?,?,?,?,?)",
+                (session_id, artifact.get("kind", "artifact"), artifact.get("ref"),
+                 artifact.get("note"), artifact.get("percept_id"),
+                 artifact.get("at") or now_iso()),
+            )
+
+    def append_session_feedback(self, session_id: str, feedback: dict) -> None:
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE sessions SET last_activity_at = ? WHERE id = ?",
+                (now_iso(), session_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"session {session_id} not found")
+            self.conn.execute(
+                "INSERT INTO session_feedback (session_id, scope, verdict, memory_id,"
+                " note, created_at) VALUES (?,?,?,?,?,?)",
+                (session_id, feedback.get("scope", "session"), feedback["verdict"],
+                 feedback.get("memory_id"), feedback.get("note", ""),
+                 feedback.get("at") or now_iso()),
+            )
+
+    def transition_session(self, session_id: str, from_status: str,
+                           to_status: str, ended_at: Optional[str] = None) -> bool:
+        cur = self.conn.execute(
+            "UPDATE sessions SET status = ?, ended_at = COALESCE(?, ended_at),"
+            " last_activity_at = ? WHERE id = ? AND status = ?",
+            (to_status, ended_at, now_iso(), session_id, from_status),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def _session_artifacts(self, session_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT kind, ref, note, percept_id, observed_at FROM session_artifacts"
+            " WHERE session_id = ? ORDER BY id", (session_id,)
+        ).fetchall()
+        return [
+            {k: r[k] for k in ("kind", "ref", "note", "percept_id") if r[k] is not None}
+            | {"at": r["observed_at"]}
+            for r in rows
+        ]
+
+    def _session_feedback(self, session_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT scope, verdict, memory_id, note, created_at FROM session_feedback"
+            " WHERE session_id = ? ORDER BY id", (session_id,)
+        ).fetchall()
+        return [
+            {"scope": r["scope"], "verdict": r["verdict"], "memory_id": r["memory_id"],
+             "note": r["note"], "at": r["created_at"]}
+            for r in rows
+        ]
+
+    def _row_to_session(self, row: sqlite3.Row) -> CognitiveSession:
         return CognitiveSession(
             id=row["id"], client=row["client"], project_id=row["project_id"],
             domain=row["domain"], task_profile=row["task_profile"],
             initial_query=row["initial_query"], status=row["status"],
             started_at=row["started_at"], ended_at=row["ended_at"],
+            last_activity_at=row["last_activity_at"],
             supplied_memory_ids=json.loads(row["supplied_memory_ids"]),
-            pack_chars=row["pack_chars"], artifacts=json.loads(row["artifacts"]),
+            pack_chars=row["pack_chars"],
+            artifacts=self._session_artifacts(row["id"]),
             created_memory_ids=json.loads(row["created_memory_ids"]),
-            feedback=json.loads(row["feedback"]),
+            feedback=self._session_feedback(row["id"]),
+            consolidation_status=row["consolidation_status"],
+            consolidation_error=row["consolidation_error"],
+            summary_percept_id=row["summary_percept_id"],
         )
 
     def get_session(self, session_id: str) -> Optional[CognitiveSession]:

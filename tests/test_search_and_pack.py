@@ -126,11 +126,55 @@ def test_pack_is_sectioned_with_evidence(store, cfg, embedder):
     assert "[mem_" in pack.context_pack
 
 
+def test_pack_evidence_survives_tight_budgets(store, cfg, embedder):
+    """Evidence space is reserved before memory sections are packed, so a
+    full pack can never silently squeeze the quotes out — and the flags say
+    exactly what happened."""
+    from twin.cognition import extract_percept
+    from twin.memory.models import MemoryStatus
+
+    percepts, _ = sense_paths([EXAMPLES / "transcripts"])
+    store.insert_percept(percepts[0])
+    report = extract_percept(store, cfg, embedder, percepts[0])
+    for mid in report.inserted:
+        store.set_status(mid, MemoryStatus.confirmed)
+
+    tight = build_context_pack(store, cfg, embedder,
+                               "FastAPI webhooks Atlas decisões tarefas",
+                               max_tokens=400)
+    assert tight.sources  # memories still fit
+    assert tight.evidence_included  # at least one quote made it in
+    assert "## Evidence" in tight.context_pack
+
+    roomy = build_context_pack(store, cfg, embedder,
+                               "FastAPI webhooks Atlas decisões tarefas",
+                               max_tokens=4000)
+    assert roomy.evidence_included
+    assert not roomy.evidence_omitted_due_to_budget
+
+
+def test_pack_unused_section_budget_is_redistributed(store, cfg, embedder):
+    """Space reserved for absent section types flows to the best remaining
+    hits instead of shipping a half-empty pack."""
+    for i in range(12):
+        _confirmed_mem(store, embedder, type="fact",
+                       title=f"Webhook fact {i}",
+                       summary=f"Webhook delivery detail number {i}, "
+                               "retries use exponential backoff.")
+    # 500 tokens → the facts section alone caps at ~4 entries; the rest of
+    # the budget would previously go unused
+    pack = build_context_pack(store, cfg, embedder, "webhook delivery retries",
+                              max_tokens=500, include_judgment=False)
+    assert "## Additional context" in pack.context_pack
+    in_section = pack.context_pack.split("## Additional context")[0].count("- (")
+    assert len(pack.sources) > in_section  # carry-over actually added hits
+
+
 def test_infer_domain_uses_graph_entities(store, embedder):
     _confirmed_mem(store, embedder, type="preference", domain="assistant_preferences",
                    title="Respostas diretas", summary="Prefere respostas diretas.",
                    entities=["Falstaff"])
     # no keywords at all — only the entity connects to a domain
     assert infer_domain("o que você sabe sobre Falstaff?", store) == "assistant_preferences"
-    # keywords still win without a store
-    assert infer_domain("o que você sabe sobre Falstaff?") == "technical"
+    # without the graph there is no evidence — never assume a real domain
+    assert infer_domain("o que você sabe sobre Falstaff?") == "unclassified"

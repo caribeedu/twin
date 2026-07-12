@@ -235,6 +235,10 @@ def cmd_session_start(args) -> None:
     print(f"  domain: {ses.domain} · profile: {ses.task_profile}"
           f" · project: {ses.project_id or '—'}"
           f" · observer: {started.observer_mode} {started.reading_confidences}")
+    if started.needs_domain_confirmation:
+        print("  ⚠ domain unclassified — no context supplied (default-deny)."
+              " Re-run with --domain work|technical|personal_preferences|"
+              "assistant_preferences")
     print(f"  supplied {len(ses.supplied_memory_ids)} memories"
           f" ({ses.pack_chars // 4} tokens approx)\n")
     print(started.pack.context_pack or "(empty pack)")
@@ -257,9 +261,15 @@ def cmd_session_complete(args) -> None:
     from ..cognition.sessions import complete_session
 
     ws = Workspace(args.home)
+    # a summary typed at the CLI comes from the human: origin "user"
     ses = complete_session(ws.store, ws.cfg, ws.embedder, args.session_id,
-                           summary=args.summary or "", abandoned=args.abandon)
-    print(f"session {ses.id} {ses.status.value}")
+                           summary=args.summary or "", abandoned=args.abandon,
+                           summary_origin="user", user_confirmed=bool(args.summary))
+    print(f"session {ses.id} {ses.status.value}"
+          f" (consolidation: {ses.consolidation_status.value})")
+    if ses.consolidation_error:
+        print(f"  ⚠ consolidation failed: {ses.consolidation_error}")
+        print("  retry with: twin session complete " + ses.id)
     if ses.created_memory_ids:
         print(f"  {len(ses.created_memory_ids)} candidate memories created"
               f" — review with: twin review")
@@ -270,8 +280,20 @@ def cmd_session_feedback(args) -> None:
 
     ws = Workspace(args.home)
     ses = record_feedback(ws.store, args.session_id, args.verdict,
-                          memory_id=args.memory, note=args.note or "")
+                          memory_id=args.memory, note=args.note or "",
+                          scope=args.scope)
     print(f"session {ses.id}: feedback '{args.verdict}' recorded")
+
+
+def cmd_session_cleanup(args) -> None:
+    from ..cognition.sessions import abandon_stale_sessions
+
+    ws = Workspace(args.home)
+    abandoned = abandon_stale_sessions(ws.store, args.max_idle_hours)
+    if abandoned:
+        print(f"abandoned {len(abandoned)} stale session(s): {', '.join(abandoned)}")
+    else:
+        print("no stale sessions")
 
 
 def cmd_project(args) -> None:
@@ -279,14 +301,12 @@ def cmd_project(args) -> None:
     if args.project_command == "add":
         from ..cognition.sessions import ensure_project
 
+        # idempotent: repos/aliases merge into an existing project
         project = ensure_project(ws.store, args.name,
                                  repos=args.repo or [], aliases=args.alias or [])
-        # idempotent add also updates repos/aliases
-        project.repos = sorted(set(project.repos) | set(args.repo or []))
-        project.aliases = sorted(set(project.aliases) | set(args.alias or []))
         if args.goal:
             project.goals = sorted(set(project.goals) | set(args.goal))
-        ws.store.update_project(project)
+            ws.store.update_project(project)
         print(f"{project.id}: {project.name} (repos: {', '.join(project.repos) or '—'})")
     else:
         for p in ws.store.list_projects():
@@ -437,9 +457,15 @@ def main(argv: list[str] | None = None) -> None:
     ps.add_argument("verdict", choices=["useful", "partially_useful", "irrelevant",
                                         "incorrect", "missing_context",
                                         "privacy_overblock", "privacy_underblock"])
-    ps.add_argument("--memory", default=None)
+    ps.add_argument("--memory", default=None,
+                    help="a memory this session supplied or created")
     ps.add_argument("--note", default=None)
+    ps.add_argument("--scope", default=None, choices=["session", "pack", "memory"])
     ps.set_defaults(func=cmd_session_feedback)
+
+    ps = session_sub.add_parser("cleanup", help="abandon stale active sessions")
+    ps.add_argument("--max-idle-hours", type=float, default=24.0)
+    ps.set_defaults(func=cmd_session_cleanup)
 
     p = sub.add_parser("project", help="first-class projects")
     project_sub = p.add_subparsers(dest="project_command", required=True)

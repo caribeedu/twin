@@ -135,12 +135,37 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     supplied_memory_ids JSONB NOT NULL DEFAULT '[]',
     pack_chars INTEGER NOT NULL DEFAULT 0,
-    artifacts JSONB NOT NULL DEFAULT '[]',
-    created_memory_ids JSONB NOT NULL DEFAULT '[]',
-    feedback JSONB NOT NULL DEFAULT '[]'
+    created_memory_ids JSONB NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_activity_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_error TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS summary_percept_id TEXT;
+
+-- append-only: concurrent observers never rewrite each other's rows
+CREATE TABLE IF NOT EXISTS session_artifacts (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref TEXT,
+    note TEXT,
+    percept_id TEXT,
+    observed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_artifacts ON session_artifacts(session_id);
+
+CREATE TABLE IF NOT EXISTS session_feedback (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'session',
+    verdict TEXT NOT NULL,
+    memory_id TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_feedback ON session_feedback(session_id);
 
 CREATE TABLE IF NOT EXISTS firewall_log (
     id BIGSERIAL PRIMARY KEY,
@@ -548,19 +573,22 @@ class PostgresStore(MemoryStore):
 
     def insert_session(self, session: CognitiveSession) -> str:
         session.started_at = session.started_at or now_iso()
+        session.last_activity_at = session.last_activity_at or session.started_at
         self._exec(
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
-            " initial_query, status, started_at, ended_at, supplied_memory_ids,"
-            " pack_chars, artifacts, created_memory_ids, feedback)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " initial_query, status, started_at, ended_at, last_activity_at,"
+            " supplied_memory_ids, pack_chars, created_memory_ids,"
+            " consolidation_status, consolidation_error, summary_percept_id)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 session.id, session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
-                session.started_at, session.ended_at,
+                session.started_at, session.ended_at, session.last_activity_at,
                 json.dumps(session.supplied_memory_ids), session.pack_chars,
-                json.dumps(session.artifacts), json.dumps(session.created_memory_ids),
-                json.dumps(session.feedback),
+                json.dumps(session.created_memory_ids),
+                getattr(session.consolidation_status, "value", session.consolidation_status),
+                session.consolidation_error, session.summary_percept_id,
             ),
         )
         return session.id
@@ -569,29 +597,105 @@ class PostgresStore(MemoryStore):
         self._exec(
             "UPDATE sessions SET client = %s, project_id = %s, domain = %s,"
             " task_profile = %s, initial_query = %s, status = %s, ended_at = %s,"
-            " supplied_memory_ids = %s, pack_chars = %s, artifacts = %s,"
-            " created_memory_ids = %s, feedback = %s WHERE id = %s",
+            " last_activity_at = %s, supplied_memory_ids = %s, pack_chars = %s,"
+            " created_memory_ids = %s, consolidation_status = %s,"
+            " consolidation_error = %s, summary_percept_id = %s WHERE id = %s",
             (
                 session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
-                session.ended_at, json.dumps(session.supplied_memory_ids),
-                session.pack_chars, json.dumps(session.artifacts),
-                json.dumps(session.created_memory_ids), json.dumps(session.feedback),
+                session.ended_at, session.last_activity_at or now_iso(),
+                json.dumps(session.supplied_memory_ids), session.pack_chars,
+                json.dumps(session.created_memory_ids),
+                getattr(session.consolidation_status, "value", session.consolidation_status),
+                session.consolidation_error, session.summary_percept_id,
                 session.id,
             ),
         )
 
-    @staticmethod
-    def _row_to_session(row: dict) -> CognitiveSession:
+    def append_session_artifact(self, session_id: str, artifact: dict) -> None:
+        with self._lock, self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET last_activity_at = %s"
+                " WHERE id = %s AND status = 'active'",
+                (now_iso(), session_id),
+            )
+            if cur.rowcount == 0:
+                cur.execute("SELECT status FROM sessions WHERE id = %s", (session_id,))
+                row = cur.fetchone()
+                if row is None:
+                    raise ValueError(f"session {session_id} not found")
+                raise ValueError(f"session {session_id} is {row['status']}, not active")
+            cur.execute(
+                "INSERT INTO session_artifacts (session_id, kind, ref, note,"
+                " percept_id, observed_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                (session_id, artifact.get("kind", "artifact"), artifact.get("ref"),
+                 artifact.get("note"), artifact.get("percept_id"),
+                 artifact.get("at") or now_iso()),
+            )
+
+    def append_session_feedback(self, session_id: str, feedback: dict) -> None:
+        with self._lock, self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET last_activity_at = %s WHERE id = %s",
+                (now_iso(), session_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"session {session_id} not found")
+            cur.execute(
+                "INSERT INTO session_feedback (session_id, scope, verdict, memory_id,"
+                " note, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                (session_id, feedback.get("scope", "session"), feedback["verdict"],
+                 feedback.get("memory_id"), feedback.get("note", ""),
+                 feedback.get("at") or now_iso()),
+            )
+
+    def transition_session(self, session_id: str, from_status: str,
+                           to_status: str, ended_at: Optional[str] = None) -> bool:
+        with self._lock, self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE sessions SET status = %s, ended_at = COALESCE(%s, ended_at),"
+                " last_activity_at = %s WHERE id = %s AND status = %s",
+                (to_status, ended_at, now_iso(), session_id, from_status),
+            )
+            return cur.rowcount > 0
+
+    def _session_artifacts(self, session_id: str) -> list[dict]:
+        rows = self._exec(
+            "SELECT kind, ref, note, percept_id, observed_at FROM session_artifacts"
+            " WHERE session_id = %s ORDER BY id", (session_id,)
+        )
+        return [
+            {k: r[k] for k in ("kind", "ref", "note", "percept_id") if r[k] is not None}
+            | {"at": r["observed_at"]}
+            for r in rows
+        ]
+
+    def _session_feedback(self, session_id: str) -> list[dict]:
+        rows = self._exec(
+            "SELECT scope, verdict, memory_id, note, created_at FROM session_feedback"
+            " WHERE session_id = %s ORDER BY id", (session_id,)
+        )
+        return [
+            {"scope": r["scope"], "verdict": r["verdict"], "memory_id": r["memory_id"],
+             "note": r["note"], "at": r["created_at"]}
+            for r in rows
+        ]
+
+    def _row_to_session(self, row: dict) -> CognitiveSession:
         return CognitiveSession(
             id=row["id"], client=row["client"], project_id=row["project_id"],
             domain=row["domain"], task_profile=row["task_profile"],
             initial_query=row["initial_query"], status=row["status"],
             started_at=row["started_at"], ended_at=row["ended_at"],
+            last_activity_at=row["last_activity_at"],
             supplied_memory_ids=row["supplied_memory_ids"], pack_chars=row["pack_chars"],
-            artifacts=row["artifacts"], created_memory_ids=row["created_memory_ids"],
-            feedback=row["feedback"],
+            artifacts=self._session_artifacts(row["id"]),
+            created_memory_ids=row["created_memory_ids"],
+            feedback=self._session_feedback(row["id"]),
+            consolidation_status=row["consolidation_status"],
+            consolidation_error=row["consolidation_error"],
+            summary_percept_id=row["summary_percept_id"],
         )
 
     def get_session(self, session_id: str) -> Optional[CognitiveSession]:

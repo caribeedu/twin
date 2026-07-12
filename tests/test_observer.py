@@ -19,6 +19,59 @@ def test_fast_read_uncertain_on_vague_text(store):
     reading = _fast_read(store, "hmm ok")
     assert reading.uncertain
     assert reading.confidences["domain"] == 0.0
+    # no evidence → no domain assumption; downstream this is default-deny
+    assert reading.domain == "unclassified"
+    assert reading.needs_domain_confirmation
+
+
+def test_ambiguous_personal_text_never_becomes_technical(store, cfg):
+    """A vague personal message with no recognized keywords and no Ollama
+    must NOT be classified into a permissive domain."""
+    reading = read_context(store, cfg,
+                           "preciso resolver aquilo que conversamos ontem")
+    assert reading.domain == "unclassified"
+    assert reading.needs_domain_confirmation
+    assert reading.mode == "fast"
+    assert reading.fallback_reason == "deep_observer_unavailable"
+
+
+def test_deep_read_invalid_json_falls_back_conservatively(store, cfg):
+    def bad_json(request):
+        return httpx.Response(200, json={"message": {"content": "not json {"}})
+
+    client = httpx.Client(transport=httpx.MockTransport(bad_json),
+                          base_url=cfg.ollama_url)
+    reading = read_context(store, cfg, "hmm ok", client=client)
+    assert reading.mode == "fast"
+    assert reading.domain == "unclassified"
+    assert reading.fallback_reason.startswith("deep_observer_failed:")
+
+
+def test_deep_read_low_confidence_stays_unclassified(store, cfg):
+    def unsure(request):
+        return httpx.Response(200, json={"message": {"content": json.dumps({
+            "domain": "technical", "task_profile": "coding", "project": None,
+            "domain_confidence": 0.2, "task_confidence": 0.9,
+        })}})
+
+    client = httpx.Client(transport=httpx.MockTransport(unsure),
+                          base_url=cfg.ollama_url)
+    reading = read_context(store, cfg, "hmm ok", client=client)
+    assert reading.mode == "deep"
+    assert reading.domain == "unclassified"  # the model itself was not sure
+
+
+def test_deep_fallback_is_logged(store, cfg, caplog):
+    def broken(request):
+        return httpx.Response(500, text="boom")
+
+    client = httpx.Client(transport=httpx.MockTransport(broken),
+                          base_url=cfg.ollama_url)
+    with caplog.at_level("WARNING", logger="twin.cognition.observer"):
+        read_context(store, cfg, "hmm ok", client=client)
+    assert any("deep observer failed" in r.message for r in caplog.records)
+    # the text being classified never reaches the log
+    assert all("hmm ok" not in r.getMessage() for r in caplog.records)
 
 
 def test_fast_read_project_from_cwd_beats_mention(store):
@@ -92,5 +145,7 @@ def test_deep_read_rejects_unknown_labels(store, cfg):
                           base_url=cfg.ollama_url)
     reading = read_context(store, cfg, "hmm ok", client=client)
     assert reading.mode == "deep"
-    assert reading.domain == "technical"       # fast fallback value
-    assert reading.task_profile == "general"   # fast fallback value
+    # unknown labels fall back to the fast (conservative) values — never to
+    # a permissive domain the model invented
+    assert reading.domain == "unclassified"
+    assert reading.task_profile == "general"

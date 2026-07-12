@@ -17,7 +17,7 @@ import yaml
 
 from typing import TYPE_CHECKING
 
-from ..config import SENSITIVITY_ORDER
+from ..config import SENSITIVITY_ORDER, UNCLASSIFIED_DOMAIN
 from ..memory.models import MemoryItem
 
 if TYPE_CHECKING:
@@ -77,6 +77,13 @@ class Firewall:
             ))
 
     def evaluate(self, mem: MemoryItem, target_domain: str, as_of: Optional[str] = None) -> Verdict:
+        # an unclassified target is restricted mode, never an alias for a
+        # permissive domain: nothing crosses until the domain is confirmed
+        if target_domain == UNCLASSIFIED_DOMAIN:
+            return self._log(mem, target_domain, Verdict(
+                False, "unclassified_target_default_deny",
+                "target domain is unclassified — confirm the domain to receive context",
+            ))
         # hard gates first
         if mem.status.value not in self.allowed_statuses:
             return self._log(mem, target_domain, Verdict(False, "status_gate", f"status={mem.status.value}"))

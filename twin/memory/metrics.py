@@ -46,9 +46,18 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
     relevance_rated = sum(by_verdict.get(v, 0) for v in
                           ("useful", "partially_useful", "irrelevant", "incorrect"))
     sessions_with_feedback = [s_ for s_ in sessions if s_.feedback]
-    supplied_total = sum(len(s_.supplied_memory_ids) for s_ in sessions)
-    used_memory_ids = {fb.get("memory_id") for fb in feedback
-                       if fb.get("memory_id") and fb["verdict"] in ("useful", "partially_useful")}
+
+    # memory usage is measured in (session, memory) pairs on BOTH sides of
+    # the ratio: a memory supplied in ten sessions counts ten times in the
+    # denominator and up to ten times in the numerator — never a mix of
+    # unique ids against occurrences
+    supplied_pairs = sum(len(set(s_.supplied_memory_ids)) for s_ in sessions)
+    used_pairs = len({
+        (s_.id, fb["memory_id"])
+        for s_ in sessions for fb in s_.feedback
+        if fb.get("memory_id") and fb["verdict"] in ("useful", "partially_useful")
+        and fb["memory_id"] in s_.supplied_memory_ids
+    })
 
     return {
         "percepts": {
@@ -79,6 +88,9 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
         "sessions": {
             "total": len(sessions),
             "by_status": _count(sessions, lambda s_: getattr(s_.status, "value", s_.status)),
+            "by_consolidation": _count(
+                sessions, lambda s_: getattr(s_.consolidation_status, "value",
+                                             s_.consolidation_status)),
             "by_task_profile": _count(sessions, lambda s_: s_.task_profile),
             "avg_pack_tokens": round(
                 sum(s_.pack_chars for s_ in sessions) / len(sessions) / 4
@@ -87,10 +99,28 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
         },
         # The central product question: how often did the user need to
         # explain something twin should already have known?
+        #
+        # Denominators, precisely:
+        # - *_relevant_rate: relevance verdicts only (useful, partially_useful,
+        #   irrelevant, incorrect); partially_useful counts 0.5 in the weighted
+        #   rate, fully in at_least_partially_relevant_rate, and not at all in
+        #   fully_relevant_rate.
+        # - re_explanation_rate: sessions with any feedback; a session counts
+        #   once no matter how many missing_context verdicts it received.
+        # - memory_usage_rate: (session, memory) pairs — supplied pairs below,
+        #   pairs with a useful/partially_useful memory-scoped verdict above.
         "product": {
             "feedback_by_verdict": by_verdict,
             "context_relevance_rate": round(
+                (by_verdict.get("useful", 0)
+                 + 0.5 * by_verdict.get("partially_useful", 0)) / relevance_rated, 3
+            ) if relevance_rated else None,
+            "fully_relevant_rate": round(
                 by_verdict.get("useful", 0) / relevance_rated, 3
+            ) if relevance_rated else None,
+            "at_least_partially_relevant_rate": round(
+                (by_verdict.get("useful", 0)
+                 + by_verdict.get("partially_useful", 0)) / relevance_rated, 3
             ) if relevance_rated else None,
             "false_memory_rate": round(
                 by_verdict.get("incorrect", 0) / relevance_rated, 3
@@ -103,8 +133,8 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
             "privacy_overblocks": by_verdict.get("privacy_overblock", 0),
             "privacy_underblocks": by_verdict.get("privacy_underblock", 0),
             "memory_usage_rate": round(
-                len(used_memory_ids) / supplied_total, 3
-            ) if supplied_total else None,
+                used_pairs / supplied_pairs, 3
+            ) if supplied_pairs else None,
         },
     }
 

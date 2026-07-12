@@ -161,12 +161,20 @@ class MemoryStore(ABC):
         return None
 
     # -- cognitive sessions ----------------------------------------------------------
+    #
+    # Artifacts and feedback are append-only rows in their own tables, never
+    # a JSON array rewritten from an in-memory copy — concurrent observers
+    # cannot lose each other's writes. update_session only writes the
+    # session's scalar fields.
 
     @abstractmethod
     def insert_session(self, session: CognitiveSession) -> str: ...
 
     @abstractmethod
-    def update_session(self, session: CognitiveSession) -> None: ...
+    def update_session(self, session: CognitiveSession) -> None:
+        """Persist the session's scalar fields (status, ended_at,
+        consolidation state, created/supplied ids…). Does NOT write
+        artifacts or feedback — use the append methods for those."""
 
     @abstractmethod
     def get_session(self, session_id: str) -> Optional[CognitiveSession]: ...
@@ -175,6 +183,24 @@ class MemoryStore(ABC):
     def list_sessions(self, status: Optional[str] = None,
                       project_id: Optional[str] = None,
                       limit: int = 200) -> list[CognitiveSession]: ...
+
+    @abstractmethod
+    def append_session_artifact(self, session_id: str, artifact: dict) -> None:
+        """Atomically append one artifact to an ACTIVE session and bump
+        last_activity_at. Raises ValueError if the session does not exist
+        or is not active."""
+
+    @abstractmethod
+    def append_session_feedback(self, session_id: str, feedback: dict) -> None:
+        """Atomically append one feedback entry (allowed on any existing
+        session — completed sessions still receive verdicts) and bump
+        last_activity_at. Raises ValueError if the session does not exist."""
+
+    @abstractmethod
+    def transition_session(self, session_id: str, from_status: str,
+                           to_status: str, ended_at: Optional[str] = None) -> bool:
+        """Compare-and-set status change. Returns False when the session was
+        not in ``from_status`` (someone else transitioned it first)."""
 
     # -- metrics ------------------------------------------------------------------
 

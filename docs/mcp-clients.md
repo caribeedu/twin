@@ -95,17 +95,32 @@ Any MCP stdio-compatible client works with:
    `query` and the working directory in `cwd` (it helps twin identify the
    project). twin infers project, domain and task profile, returns a
    task-aware context pack and a `session_id`.
+   - If the response has `needs_domain_confirmation: true`, twin could not
+     classify the domain and supplied **no** context (default-deny). Ask the
+     user which domain applies and start again with `domain` set.
+   - An explicit `project` that does not exist is an **error** — twin never
+     silently substitutes an inferred project for one you named.
 2. **Record artifacts with `session_observe`** as the work happens — files
-   touched, commits, PRs, decisions made along the way.
+   touched, commits, PRs, decisions made along the way. Appends are atomic:
+   concurrent clients never overwrite each other. If the artifact was
+   already ingested by a sensor, pass its `percept_id` so it is referenced,
+   not duplicated as text.
 3. **Close with `session_complete`**, summarizing what was decided, built or
    changed. The summary becomes a percept and goes through extraction, so
    the session's decisions turn into candidate memories the user reviews
    later — the loop that keeps twin's memory alive.
+   - Declare `summary_origin` (`assistant` | `user` | `client` | `derived`):
+     it sets how much the summary is trusted. Only pass
+     `user_confirmed: true` when the human explicitly approved the text.
+   - The response carries `consolidation_status`; `failed` means the work
+     is closed but extraction failed — call `session_complete` again to
+     retry, nothing gets duplicated.
 4. **Report usefulness with `session_feedback`** (`useful`,
    `partially_useful`, `irrelevant`, `incorrect`, `missing_context`,
-   `privacy_overblock`, `privacy_underblock`). This feeds twin's product
-   metrics — especially "did the user have to re-explain something twin
-   should already have known?".
+   `privacy_overblock`, `privacy_underblock`), with `scope` = `session`,
+   `pack` or `memory`. A `memory_id` must be one this session supplied or
+   created. This feeds twin's product metrics — especially "did the user
+   have to re-explain something twin should already have known?".
 
 ### One-shot context and exploration
 

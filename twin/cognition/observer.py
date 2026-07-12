@@ -9,15 +9,18 @@ return a compact suggestion payload (suggested_context / blocked_context).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..config import Config
+from ..config import UNCLASSIFIED_DOMAIN, Config
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
 from ..memory.search import search
 from ..memory.store.base import MemoryStore
+
+logger = logging.getLogger("twin.cognition.observer")
 
 _DOMAIN_HINTS: list[tuple[str, list[str]]] = [
     ("technical", [
@@ -68,7 +71,11 @@ def _graph_domain_votes(store: MemoryStore, text: str) -> dict[str, int]:
 
 
 def infer_domain(text: str, store: Optional[MemoryStore] = None) -> str:
-    """Keyword hints + (when a store is given) domain votes from the graph."""
+    """Keyword hints + (when a store is given) domain votes from the graph.
+
+    With no evidence at all the answer is ``unclassified`` — never a real
+    domain. Downstream the firewall treats it as default-deny, so ambiguity
+    degrades to *less* context, not to somebody else's context."""
     lowered = text.lower()
     scores: dict[str, float] = {}
     for domain, keywords in _DOMAIN_HINTS:
@@ -84,7 +91,7 @@ def infer_domain(text: str, store: Optional[MemoryStore] = None) -> str:
             for domain, count in graph_votes.items():
                 scores[domain] = scores.get(domain, 0.0) + 2.0 * (count / total)
     if not scores:
-        return "technical"
+        return UNCLASSIFIED_DOMAIN
     return max(scores, key=scores.get)  # ties resolve by insertion (keywords first)
 
 
@@ -157,14 +164,30 @@ Return the most likely domain, task profile and project (or null), with
 confidence between 0 and 1 for domain and task. Respond with JSON only."""
 
 
+# Below this confidence the observer refuses to name a domain: the reading
+# says "unclassified" and downstream operates default-deny until either the
+# deep observer resolves it or the client confirms the domain explicitly.
+# One explicit keyword hit scores ~0.33 — that IS evidence and passes; zero
+# evidence scores 0.0 and never does.
+DOMAIN_CONFIDENCE_THRESHOLD = 0.3
+# Below this the fast reading is *uncertain* and worth a deep (LLM) pass —
+# a higher bar than asserting the domain at all.
+UNCERTAIN_DOMAIN_CONFIDENCE = 0.34
+
+
 @dataclass
 class ObserverReading:
-    domain: str = "technical"
+    domain: str = UNCLASSIFIED_DOMAIN
     task_profile: str = "general"
     project_id: Optional[str] = None
     confidences: dict = field(default_factory=dict)  # {domain, task_profile, project}
     uncertain: bool = False
     mode: str = "fast"
+    fallback_reason: Optional[str] = None  # set when a deep read was attempted and failed
+
+    @property
+    def needs_domain_confirmation(self) -> bool:
+        return self.domain == UNCLASSIFIED_DOMAIN
 
 
 def _fast_read(store: MemoryStore, text: str, cwd: Optional[str] = None) -> ObserverReading:
@@ -180,8 +203,14 @@ def _fast_read(store: MemoryStore, text: str, cwd: Optional[str] = None) -> Obse
         for domain, count in graph_votes.items():
             domain_scores[domain] = domain_scores.get(domain, 0.0) + 2.0 * (count / total_votes)
 
-    domain = max(domain_scores, key=domain_scores.get) if domain_scores else "technical"
-    domain_conf = min(1.0, domain_scores.get(domain, 0.0) / 3) if domain_scores else 0.0
+    if domain_scores:
+        domain = max(domain_scores, key=domain_scores.get)
+        domain_conf = min(1.0, domain_scores[domain] / 3)
+    else:
+        domain, domain_conf = UNCLASSIFIED_DOMAIN, 0.0
+    if domain_conf < DOMAIN_CONFIDENCE_THRESHOLD:
+        # not enough evidence to assert a domain — never guess a permissive one
+        domain = UNCLASSIFIED_DOMAIN
 
     task_profile, task_conf = infer_task_profile(text)
 
@@ -204,7 +233,7 @@ def _fast_read(store: MemoryStore, text: str, cwd: Optional[str] = None) -> Obse
         confidences={"domain": round(domain_conf, 2),
                      "task_profile": round(task_conf, 2),
                      "project": round(project_conf, 2)},
-        uncertain=(domain_conf < 0.34 or task_conf < 0.5),
+        uncertain=(domain_conf < UNCERTAIN_DOMAIN_CONFIDENCE or task_conf < 0.5),
         mode="fast",
     )
 
@@ -244,7 +273,10 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
     if domain not in {d for d, _ in _DOMAIN_HINTS} | {"work", "technical",
                                                       "personal_preferences",
                                                       "assistant_preferences"}:
-        domain = fast.domain
+        domain = fast.domain  # may be unclassified — the safe answer stands
+    domain_conf = float(data.get("domain_confidence", 0.5))
+    if domain_conf < DOMAIN_CONFIDENCE_THRESHOLD:
+        domain = UNCLASSIFIED_DOMAIN  # the model itself is not sure — don't assert
     task_profile = data.get("task_profile", fast.task_profile)
     if task_profile not in PROFILES:
         task_profile = fast.task_profile
@@ -252,11 +284,11 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
     return ObserverReading(
         domain=domain, task_profile=task_profile, project_id=project_id,
         confidences={
-            "domain": round(float(data.get("domain_confidence", 0.5)), 2),
+            "domain": round(domain_conf, 2),
             "task_profile": round(float(data.get("task_confidence", 0.5)), 2),
             "project": round(project_conf, 2),
         },
-        uncertain=False,
+        uncertain=(domain == UNCLASSIFIED_DOMAIN),
         mode="deep",
     )
 
@@ -264,15 +296,26 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
 def read_context(store: MemoryStore, cfg: Config, text: str,
                  cwd: Optional[str] = None, client=None) -> ObserverReading:
     """Fast observation always; deep (local LLM) only when the fast pass is
-    uncertain and Ollama is reachable."""
+    uncertain and Ollama is reachable.
+
+    Every fallback is observable: when the deep read is skipped or fails,
+    the reading carries ``fallback_reason`` (error type only — never the
+    text being classified) and a warning is logged. An unresolved reading
+    keeps ``domain=unclassified``, which downstream means default-deny."""
     fast = _fast_read(store, text, cwd=cwd)
     if not fast.uncertain:
         return fast
     from .extractors import ollama as ollama_extractor
 
     if client is None and not ollama_extractor.available(cfg.ollama_url):
+        fast.fallback_reason = "deep_observer_unavailable"
+        logger.warning("deep observer unavailable (%s unreachable); "
+                       "fast reading stands with domain=%s", cfg.ollama_url, fast.domain)
         return fast
     try:
         return _deep_read(store, cfg, text, fast, client=client)
-    except Exception:
-        return fast  # deep observation is best-effort
+    except Exception as exc:  # deep observation is best-effort, but never silent
+        fast.fallback_reason = f"deep_observer_failed:{type(exc).__name__}"
+        logger.warning("deep observer failed (%s); fast reading stands with domain=%s",
+                       type(exc).__name__, fast.domain)
+        return fast

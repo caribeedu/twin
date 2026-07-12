@@ -119,18 +119,38 @@ def test_projects_and_sessions_on_postgres(pg_store, cfg, embedder):
                             client="pg-test", cwd="/home/edu/atlas-api")
     session = started.session
     assert session.project_id == project.id
-    observe_session(pg_store, session.id, {"kind": "commit", "ref": "abc"})
+
+    # append-only artifacts: stale copies cannot lose each other's writes
+    stale_a = pg_store.get_session(session.id)
+    stale_b = pg_store.get_session(session.id)
+    observe_session(pg_store, stale_a.id, {"kind": "commit", "ref": "abc"})
+    observe_session(pg_store, stale_b.id, {"kind": "file", "ref": "api.py"})
+    pg_store.update_session(stale_b)  # scalar update from stale copy
+    assert {a["ref"] for a in pg_store.get_session(session.id).artifacts} == \
+        {"abc", "api.py"}
+
     done = complete_session(
         pg_store, cfg, embedder, session.id,
         summary="We decided to use exponential backoff for retries.",
+        summary_origin="user",
     )
     assert done.status.value == "completed"
+    assert done.consolidation_status.value == "completed"
+    assert done.summary_percept_id
     assert done.created_memory_ids
     assert pg_store.get_memory(done.created_memory_ids[0]).project_id == project.id
+    # compare-and-set: a second complete is rejected
+    with pytest.raises(ValueError, match="not completable"):
+        complete_session(pg_store, cfg, embedder, session.id, summary="again")
+    # observing a completed session is rejected atomically
+    with pytest.raises(ValueError, match="not active"):
+        observe_session(pg_store, session.id, {"kind": "file"})
 
-    record_feedback(pg_store, session.id, "useful")
+    record_feedback(pg_store, session.id, "useful",
+                    memory_id=done.created_memory_ids[0])
     loaded = pg_store.get_session(session.id)
     assert loaded.artifacts and loaded.feedback
+    assert loaded.feedback[0]["scope"] == "memory"
     assert [s.id for s in pg_store.list_sessions(status="completed")] == [session.id]
     assert [s.id for s in pg_store.list_sessions(project_id=project.id)] == [session.id]
 

@@ -97,6 +97,50 @@ def test_reranker_is_applied_and_best_effort(store, embedder):
     assert {h.memory.id for h in survived.hits} == {a.id, b.id}
 
 
+def test_reranker_failure_is_observable(store, embedder, caplog):
+    _mem(store, embedder, "Webhook retries", "Retries use backoff.")
+
+    def broken(query, hits):
+        raise RuntimeError("model gone")
+
+    with caplog.at_level("WARNING", logger="twin.cognition.retrieval"):
+        result = retrieve(store, embedder, "webhooks", reranker=broken)
+    assert result.diagnostics["reranker"] == {
+        "attempted": True, "succeeded": False, "error_type": "RuntimeError",
+    }
+    assert any("reranker failed" in r.message for r in caplog.records)
+    # the query never reaches the log
+    assert all("webhooks" not in r.getMessage() for r in caplog.records)
+
+    ok = retrieve(store, embedder, "webhooks", reranker=lambda q, h: h)
+    assert ok.diagnostics["reranker"] == {"attempted": True, "succeeded": True}
+    assert retrieve(store, embedder, "webhooks").diagnostics == {}
+
+
+def test_graph_expansion_damps_broad_entities(store, embedder):
+    """An entity attached to many memories is weak evidence: its expansions
+    score below those carried by a specific entity, and hyper-broad ones are
+    dropped."""
+    _mem(store, embedder, "Webhooks decision", "Webhooks run on FastAPI.",
+         entities=["Zephyr", "Python"])
+    specific = _mem(store, embedder, "Zephyr quirk",
+                    "Zephyr needs the eu-west bucket.", entities=["Zephyr"])
+    # make "Python" a broad entity: attached to many unrelated memories
+    broad_members = [
+        _mem(store, embedder, f"Python note {i}", f"Unrelated python fact {i}.",
+             entities=["Python"])
+        for i in range(12)
+    ]
+    result = retrieve(store, embedder, "FastAPI webhooks", limit=30)
+    scores = {h.memory.id: h.score for h in result.hits}
+    whys = {h.memory.id: h.why for h in result.hits}
+    assert specific.id in scores
+    assert "via Zephyr" in whys[specific.id]
+    for mem in broad_members:
+        if mem.id in scores and "graph expansion" in whys[mem.id]:
+            assert scores[mem.id] < scores[specific.id]
+
+
 def test_candidates_excluded_unless_requested(store, embedder):
     cand = _mem(store, embedder, "Maybe switch to Kafka", "Considering Kafka.",
                 status="candidate")
