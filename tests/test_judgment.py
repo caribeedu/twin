@@ -17,6 +17,7 @@ from twin.judgment.models import (
     JudgmentItem,
     JudgmentKind,
     JudgmentProposal,
+    JudgmentProvenance,
     JudgmentScope,
     JudgmentStability,
     JudgmentStatus,
@@ -159,9 +160,9 @@ def test_proposal_actions_update_weaken_deprecate(store, cfg):
     approve_proposal(store, prop.id, preview_token=token)
     assert store.get_judgment_item(target.id).statement == "Updated statement"
     old_rev = target.current_revision_id
-    assert store.get_judgment_revision(old_rev).payload["statement"] != "Updated statement" or True
-    # historical revision still intact
-    assert store.get_judgment_revision(old_rev) is not None
+    hist = store.get_judgment_revision(old_rev)
+    assert hist is not None
+    assert hist.payload["statement"] != "Updated statement"
 
     # weaken
     head = store.get_judgment_item(target.id)
@@ -187,6 +188,161 @@ def test_proposal_actions_update_weaken_deprecate(store, cfg):
     approve_proposal(store, prop3.id, preview_token=preview_proposal(store, prop3.id)["preview_token"])
     assert store.get_judgment_item(target.id).status == JudgmentStatus.deprecated
 
+
+def _make_rich_item(**kw) -> JudgmentItem:
+    now = now_iso()
+    base = dict(
+        id=ids.judgment_id(), kind=JudgmentKind.principle,
+        statement="Prefer reversible infrastructure choices",
+        description="rich item",
+        domain="technical", persona="developer",
+        scope=JudgmentScope(
+            domains=["technical"], projects=["proj_twin"],
+            project_stages=["mvp"], audiences=["internal"],
+        ),
+        strength=0.9, confidence=0.85,
+        stability=JudgmentStability.stable,
+        status=JudgmentStatus.active,
+        created_at=now, updated_at=now, approved_at=now, approved_by="user",
+        provenance=JudgmentProvenance(
+            source="explicit_user_statement", memory_ids=["mem_1"],
+        ),
+        exceptions=[JudgmentException(
+            id=ids.judgment_exception_id(),
+            condition="client imposed legacy requirement",
+            effect=ExceptionEffect.reduce_strength, value=0.4,
+        )],
+        tradeoff="simplicity vs capability", lean=0.3,
+        metadata={"origin": "test"},
+    )
+    base.update(kw)
+    return JudgmentItem(**base)
+
+
+def test_update_partial_preserves_unmentioned_fields(store, cfg):
+    item, _ = commit_new_item(store, _make_rich_item())
+    create_version(store, reason="rich")
+    before = store.get_judgment_item(item.id)
+    prop = JudgmentProposal(
+        id=ids.judgment_proposal_id(), action=ProposalAction.update,
+        target_judgment_id=before.id, expected_revision_id=before.current_revision_id,
+        proposed_item={"statement": "Prefer reversible choices — clarified"},
+        reason="wording", confidence=0.9, status=ProposalStatus.pending, created_at=now_iso(),
+    )
+    store.insert_judgment_proposal(prop)
+    approve_proposal(
+        store, prop.id,
+        preview_token=preview_proposal(store, prop.id)["preview_token"],
+    )
+    after = store.get_judgment_item(item.id)
+    assert after.statement == "Prefer reversible choices — clarified"
+    assert after.strength == before.strength
+    assert after.confidence == before.confidence
+    assert after.stability == before.stability
+    assert after.persona == before.persona
+    assert after.scope.model_dump() == before.scope.model_dump()
+    assert after.provenance.model_dump() == before.provenance.model_dump()
+    assert [e.model_dump() for e in after.exceptions] == [
+        e.model_dump() for e in before.exceptions
+    ]
+    assert after.tradeoff == before.tradeoff
+    assert after.lean == before.lean
+    assert after.metadata == before.metadata
+    assert after.kind == before.kind
+    assert after.domain == before.domain
+    hist = store.get_judgment_revision(before.current_revision_id)
+    assert hist.payload["statement"] == before.statement
+
+
+def test_update_explicit_clear_exceptions(store, cfg):
+    item, _ = commit_new_item(store, _make_rich_item())
+    create_version(store, reason="rich2")
+    head = store.get_judgment_item(item.id)
+    assert head.exceptions
+    prop = JudgmentProposal(
+        id=ids.judgment_proposal_id(), action=ProposalAction.update,
+        target_judgment_id=head.id, expected_revision_id=head.current_revision_id,
+        proposed_item={"exceptions": []},
+        reason="clear exceptions", confidence=0.9,
+        status=ProposalStatus.pending, created_at=now_iso(),
+    )
+    store.insert_judgment_proposal(prop)
+    approve_proposal(
+        store, prop.id,
+        preview_token=preview_proposal(store, prop.id)["preview_token"],
+    )
+    after = store.get_judgment_item(item.id)
+    assert after.exceptions == []
+    assert after.statement == head.statement
+    assert after.scope.model_dump() == head.scope.model_dump()
+
+
+def test_constitutional_target_mutations_require_confirm(store, cfg):
+    item, _ = commit_new_item(store, _make_rich_item(
+        statement="Never mix intimate context with work",
+        kind=JudgmentKind.constraint,
+        stability=JudgmentStability.constitutional,
+        strength=1.0, confidence=0.95,
+    ))
+    create_version(store, reason="constitutional")
+    head = store.get_judgment_item(item.id)
+
+    cases = [
+        (ProposalAction.weaken, {"strength": 0.2}),
+        (ProposalAction.strengthen, {"strength": 1.0}),
+        (ProposalAction.update, {"statement": "Never mix intimate context with work."}),
+        (ProposalAction.add_exception, {
+            "exception": {
+                "id": ids.judgment_exception_id(),
+                "condition": "explicit user override for one case",
+                "effect": "disable",
+            },
+        }),
+        (ProposalAction.deprecate, {}),
+    ]
+    for action, proposed in cases:
+        head = store.get_judgment_item(item.id)
+        prop = JudgmentProposal(
+            id=ids.judgment_proposal_id(), action=action,
+            target_judgment_id=head.id, expected_revision_id=head.current_revision_id,
+            proposed_item=proposed, reason=f"try {action.value}",
+            confidence=0.9, status=ProposalStatus.pending, created_at=now_iso(),
+        )
+        store.insert_judgment_proposal(prop)
+        token = preview_proposal(store, prop.id)["preview_token"]
+        with pytest.raises(ValueError, match="constitutional"):
+            approve_proposal(store, prop.id, preview_token=token)
+        # same token works with confirmation
+        approve_proposal(
+            store, prop.id, preview_token=token, confirm_constitutional=True,
+        )
+        # refresh for next mutation on possibly changed head
+        if action == ProposalAction.deprecate:
+            assert store.get_judgment_item(item.id).status == JudgmentStatus.deprecated
+            break
+
+
+def test_stability_change_changes_preview_token(store, cfg):
+    item, _ = commit_new_item(store, _make_rich_item())
+    create_version(store, reason="stable item")
+    head = store.get_judgment_item(item.id)
+    prop = JudgmentProposal(
+        id=ids.judgment_proposal_id(), action=ProposalAction.update,
+        target_judgment_id=head.id, expected_revision_id=head.current_revision_id,
+        proposed_item={"statement": head.statement},
+        reason="stability edit", confidence=0.9,
+        status=ProposalStatus.pending, created_at=now_iso(),
+    )
+    store.insert_judgment_proposal(prop)
+    t1 = preview_proposal(store, prop.id)["preview_token"]
+    t2 = preview_proposal(
+        store, prop.id, edits={"stability": "evolving"},
+    )["preview_token"]
+    assert t1 != t2
+    preview = preview_proposal(store, prop.id, edits={"stability": "evolving"})
+    assert preview["signed_payload"]["target_stability"] == "stable"
+    assert preview["signed_payload"]["new_stability"] == "evolving"
+    assert preview["signed_payload"]["stability_change"] is True
 
 def test_approve_rollback_on_fault(store, cfg, embedder):
     mem = _mem(store, embedder, type="preference", title="t", summary="Prefere X.")

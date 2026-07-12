@@ -217,9 +217,22 @@ def compute_proposal_preview_token(
     supporting = [_memory_fingerprint(store, mid) for mid in proposal.supporting_memory_ids]
     contradicting = [_memory_fingerprint(store, mid) for mid in proposal.contradicting_memory_ids]
     target_rev = None
+    target_stability = None
+    target_snapshot: Optional[dict[str, Any]] = None
     if proposal.target_judgment_id:
         target = store.get_judgment_item(proposal.target_judgment_id)
-        target_rev = target.current_revision_id if target else None
+        if target:
+            target_rev = target.current_revision_id
+            target_stability = target.stability.value
+            target_snapshot = {
+                "stability": target.stability.value,
+                "kind": target.kind.value,
+                "domain": target.domain,
+                "persona": target.persona,
+                "strength": target.strength,
+                "confidence": target.confidence,
+            }
+    new_stability = final_item.get("stability", target_stability)
     payload = {
         "id": proposal.id,
         "action": proposal.action.value if hasattr(proposal.action, "value") else proposal.action,
@@ -234,6 +247,14 @@ def compute_proposal_preview_token(
         "active_version_id": active_version_id or "",
         "target_judgment_id": proposal.target_judgment_id,
         "expected_revision_id": proposal.expected_revision_id or target_rev,
+        "target_stability": target_stability,
+        "target_snapshot": target_snapshot,
+        "new_stability": new_stability,
+        "stability_change": (
+            target_stability is not None
+            and new_stability is not None
+            and str(new_stability) != str(target_stability)
+        ),
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()[:24], payload
@@ -270,6 +291,20 @@ def preview_proposal(
     }
 
 
+# Patchable content fields for update. Absent key → preserve; present → apply
+# (including empty list / None where allowed). Lifecycle fields are excluded.
+MUTABLE_JUDGMENT_FIELDS = frozenset({
+    "kind", "statement", "description", "domain", "persona", "scope",
+    "strength", "confidence", "stability", "valid_from", "valid_until",
+    "provenance", "exceptions", "conflicts_with", "tradeoff", "lean", "metadata",
+})
+
+LIFECYCLE_IMMUTABLE_FIELDS = frozenset({
+    "id", "revision", "current_revision_id", "created_at",
+    "approved_at", "approved_by", "supersedes", "status", "updated_at",
+})
+
+
 def _build_item_from_final(final: dict[str, Any], *, actor: str) -> JudgmentItem:
     now = now_iso()
     scope_raw = final.get("scope") or {}
@@ -302,6 +337,76 @@ def _build_item_from_final(final: dict[str, Any], *, actor: str) -> JudgmentItem
     )
 
 
+def _normalize_patch_value(key: str, value: Any) -> Any:
+    if key == "kind":
+        return JudgmentKind(value)
+    if key == "stability":
+        return JudgmentStability(value)
+    if key == "scope":
+        if isinstance(value, JudgmentScope):
+            return value
+        return JudgmentScope(**(value or {}))
+    if key == "provenance":
+        if isinstance(value, JudgmentProvenance):
+            return value
+        return JudgmentProvenance(**(value or {}))
+    if key == "exceptions":
+        out: list[JudgmentException] = []
+        for e in value or []:
+            if isinstance(e, JudgmentException):
+                out.append(e)
+            else:
+                raw = dict(e)
+                if "id" not in raw:
+                    raw["id"] = ids.judgment_exception_id()
+                out.append(JudgmentException(**raw))
+        return out
+    if key in ("strength", "confidence") and value is not None:
+        return float(value)
+    if key == "lean" and value is not None:
+        return float(value)
+    return value
+
+
+def apply_judgment_patch(target: JudgmentItem, final: dict[str, Any]) -> JudgmentItem:
+    """Apply only keys present in ``final`` onto a copy of ``target``.
+
+    Absent keys are preserved. Explicit empty values (e.g. ``exceptions: []``)
+    clear the field. Lifecycle identity fields are never taken from the patch.
+    """
+    nxt = target.model_copy(deep=True)
+    for key, value in final.items():
+        if key in LIFECYCLE_IMMUTABLE_FIELDS:
+            continue
+        if key not in MUTABLE_JUDGMENT_FIELDS:
+            continue
+        setattr(nxt, key, _normalize_patch_value(key, value))
+    return nxt
+
+
+def _require_constitutional_confirm(
+    *,
+    target: Optional[JudgmentItem],
+    final: dict[str, Any],
+    confirm_constitutional: bool,
+) -> None:
+    """Block constitutional create/mutate unless explicitly confirmed."""
+    if confirm_constitutional:
+        return
+    final_stability = final.get("stability")
+    if final_stability == JudgmentStability.constitutional.value or (
+        isinstance(final_stability, JudgmentStability)
+        and final_stability == JudgmentStability.constitutional
+    ):
+        raise ValueError(
+            "constitutional judgment requires confirm_constitutional=True"
+        )
+    if target is not None and target.stability == JudgmentStability.constitutional:
+        raise ValueError(
+            "changing a constitutional judgment requires confirm_constitutional=True"
+        )
+
+
 def approve_proposal(
     store: MemoryStore,
     proposal_id: str,
@@ -330,9 +435,17 @@ def approve_proposal(
     if action in ACTIONS_REQUIRING_TARGET and not proposal.target_judgment_id:
         raise ValueError(f"action {action.value} requires target_judgment_id")
 
-    stability = JudgmentStability(final.get("stability", "evolving"))
-    if stability == JudgmentStability.constitutional and not confirm_constitutional:
-        raise ValueError("constitutional judgment requires confirm_constitutional=True")
+    target = None
+    if proposal.target_judgment_id:
+        target = store.get_judgment_item(proposal.target_judgment_id)
+        if target is None and action in ACTIONS_REQUIRING_TARGET:
+            raise ValueError(f"target judgment {proposal.target_judgment_id} not found")
+
+    _require_constitutional_confirm(
+        target=target if action != ProposalAction.create else None,
+        final=final,
+        confirm_constitutional=confirm_constitutional,
+    )
 
     with store.transaction():
         result = _dispatch_action(
@@ -371,6 +484,11 @@ def _dispatch_action(
     if proposal.expected_revision_id and target.current_revision_id != proposal.expected_revision_id:
         raise ValueError("target revision changed since proposal was created")
 
+    # Defense in depth — also enforced in approve_proposal before the transaction.
+    _require_constitutional_confirm(
+        target=target, final=final, confirm_constitutional=confirm_constitutional,
+    )
+
     if action == ProposalAction.supersede:
         new_item = _build_item_from_final(final, actor=actor)
         item, version = supersede_item(
@@ -384,10 +502,7 @@ def _dispatch_action(
 
     nxt = target.model_copy(deep=True)
     if action == ProposalAction.update:
-        built = _build_item_from_final({**final, "id": target.id}, actor=actor)
-        built.status = JudgmentStatus.active
-        built.created_at = target.created_at
-        nxt = built
+        nxt = apply_judgment_patch(target, final)
     elif action == ProposalAction.weaken:
         nxt.strength = min(nxt.strength, float(final.get("strength", max(0.0, nxt.strength - 0.15))))
         if "statement" in final:
