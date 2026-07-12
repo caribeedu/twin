@@ -193,7 +193,7 @@ Cognitive psychology and neuroscience distinguish multiple memory systems. This 
 | Semantic memory | facts, concepts, consolidated relationships | `fact`, entities, relations, graph |
 | Procedural memory | ways of doing, habits, workflows | `procedure`, playbooks, scripts |
 | Working memory | current task focus | current query, observer, context pack |
-| Executive control | selection, inhibition, judgment | Domain Firewall, policies, judgment profile |
+| Executive control | selection, inhibition, judgment | Domain Firewall, policies, evolving judgment model |
 
 The hippocampus inspires the episodic capture and temporal consolidation layer. The associative cortex inspires semantic memory. The prefrontal cortex inspires the judgment, inhibition and context selection layer.
 
@@ -498,7 +498,7 @@ store (Postgres+pgvector primary | SQLite dev): memories + entities + relations 
 hybrid search ──► Domain Firewall ──► compact context pack
         │                                    ▲
         ▼                                    │
-MCP / API / CLI                    judgment profile (YAML)
+MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
 ```
 
 ---
@@ -748,7 +748,10 @@ Exposed tools:
 | `memory_project_context` | context about a project |
 | `memory_recent_decisions` | recent decisions |
 | `memory_user_preferences` | stable preferences |
-| `memory_judgment_profile` | judgment profile |
+| `memory_judgment_profile` | active judgment items (DB) + YAML bootstrap |
+| `judgment_applicable` | scoped applicable pack for the current context |
+| `judgment_simulate` / `judgment_proposals` / `judgment_conflicts` / `judgment_version` | judgment application and governance |
+| `judgment_proposal_preview` / `judgment_proposal_approve` / `judgment_proposal_reject` | human-gated proposal lifecycle |
 | `memory_observe` | memory observer for the current text/task |
 | `memory_quality` | quality analysis + review priority |
 | `memory_neighbors` | neighborhood for side-by-side review |
@@ -944,13 +947,15 @@ contradict, defer, archive and request_more_evidence.
 
 ---
 
-## 14. Judgment profile
+## 14. Evolving judgment model
 
 Memories say **what happened**.
 
-Judgment says **how the user thinks**.
+Judgment says **how the user thinks** — preferences, beliefs, principles, values, heuristics and hard constraints.
 
-Example:
+YAML under `~/.twin/judgment.yaml` remains bootstrap and export. The operational source of truth is the judgment store (SQLite/PostgreSQL): immutable revisions, versioned composition, proposals and snapshots.
+
+Bootstrap example (still valid as seed):
 
 ```yaml
 principles:
@@ -975,7 +980,9 @@ communication_style:
   tone: direct, technical, no basic tips
 ```
 
-Important next step: allow the system to propose changes to the judgment profile from confirmed memories, but **never write automatically without human approval**.
+Durable changes require human approval. Twin may observe and propose; only the user constitutes. Constitutional items need an extra confirmation flag. Heuristic conflict detection never deactivates active judgment on its own.
+
+Context packs receive an **applicable** judgment section (scoped by domain, persona, project, audience, client, stage and conditions), not the full profile. Sessions that consumed judgment mark extracted memories as `judgment_influenced` so Twin cannot quietly self-confirm its own recommendations.
 
 ---
 
@@ -1061,7 +1068,13 @@ twin pack "write the Atlas architecture RFC" --domain technical
 twin observe "I'm reviewing the webhooks retry"
 
 # 5. Curation and lifecycle
-twin promote mem_xxx           # memory becomes part of the judgment profile
+twin promote mem_xxx           # opens a judgment proposal (does not auto-write)
+twin judgment import           # bootstrap YAML → versioned store
+twin judgment proposals
+twin judgment preview jprop_xxx
+twin judgment approve jprop_xxx --token <preview_token>
+twin judgment simulate "PostgreSQL vs Neo4j?" --domain technical
+twin judgment conflicts --refresh
 twin supersede mem_new mem_old
 twin contradict mem_a mem_b
 twin memory merge mem_a mem_b
@@ -1145,6 +1158,17 @@ Main endpoints:
 /api/context_pack
 /api/observer
 /api/judgment
+/api/judgment/items
+/api/judgment/versions
+/api/judgment/proposals
+/api/judgment/proposals/generate
+/api/judgment/proposals/{id}/preview
+/api/judgment/proposals/{id}/approve
+/api/judgment/proposals/{id}/reject
+/api/judgment/import
+/api/judgment/applicable
+/api/judgment/simulate
+/api/judgment/conflicts
 /api/metrics
 /api/export
 ```
@@ -1281,17 +1305,19 @@ Make different LLMs apply a stable yet evolving model of how the user evaluates 
 
 Delivered:
 
-- first-class `JudgmentItem` taxonomy (preference, belief, principle, value, heuristic, constraint) with confidence, strength, stability and scope;
+- first-class `JudgmentItem` taxonomy (preference, belief, principle, value, heuristic, constraint) with confidence, strength, stability and typed scope;
 - canonical judgment store (SQLite/PostgreSQL) with YAML as bootstrap/export only;
-- versioned judgment (`JudgmentVersion`, snapshots) with supersedence and restore-as-new-version;
-- proposal engine (`propose_from_memory` / `propose_from_pattern`) — observation may propose, only the user constitutes;
-- state-aware preview tokens for proposal approval; constitutional items need extra confirmation;
-- application engine with constraint→principle→heuristic→preference precedence and exception handling;
-- explainable `simulate` / counterfactual removal and persisted `JudgmentTrace`;
-- conflict detection (judgment↔judgment and behavior drift signals);
-- Twin-influenced evidence down-weighted so recommendations cannot self-confirm;
+- immutable `JudgmentRevision`s; versions and snapshots point at revision IDs (restore clones history, never rewrites it);
+- proposal engine (`propose_from_memory` / demo pattern detector) — observation may propose, only the user constitutes;
+- state-aware preview tokens covering final payload, edits and supporting-memory fingerprints;
+- all proposal actions (`create`, `update` as patch, `weaken`, `strengthen`, `supersede`, `add_exception`, `deprecate`) with transactional approve/versioning;
+- constitutional mutations require `confirm_constitutional`, including when the target is already constitutional;
+- application engine with `JudgmentContext` (domain, persona, project, audience, client, stage, conditions) and exception effects (`disable`, `reduce_strength`, `replace_with`, `require_confirmation`);
+- explainable `simulate` / counterfactual (`evaluate` without side effects); abstention when judgment signal is insufficient;
+- conflict detection that records open conflicts without deactivating active judgment;
+- Twin-influenced evidence down-weighted; sessions that consumed judgment auto-mark extracted memories;
 - structured applicable judgment section in context packs (not the full profile);
-- CLI (`twin judgment …`), HTTP API and MCP tools for proposals, simulate and approve;
+- CLI (`twin judgment …`), HTTP API and MCP tools for proposals, applicable packs, simulate and approve;
 - `evals/judgment/` fixtures for scope/precedence scenarios.
 
 ### v0.5 — Persona-aware Privacy and Governance
