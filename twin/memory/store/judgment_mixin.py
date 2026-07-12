@@ -12,6 +12,7 @@ from twin.judgment.models import (
     JudgmentConflict,
     JudgmentItem,
     JudgmentProposal,
+    JudgmentRevision,
     JudgmentSnapshot,
     JudgmentTrace,
     JudgmentVersion,
@@ -20,9 +21,11 @@ from twin.judgment.persistence import (
     conflict_to_row,
     item_to_row,
     proposal_to_row,
+    revision_to_row,
     row_to_conflict,
     row_to_item,
     row_to_proposal,
+    row_to_revision,
     row_to_snapshot,
     row_to_trace,
     row_to_version,
@@ -45,6 +48,31 @@ class JudgmentStoreMixin:
         )
         self._j_commit()
         return item.id
+
+    def insert_judgment_revision(self, revision: JudgmentRevision) -> str:
+        row = revision_to_row(revision)
+        cols = list(row.keys())
+        ph = ", ".join("?" for _ in cols)
+        self._j_exec(
+            f"INSERT INTO judgment_revisions ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+        self._j_commit()
+        return revision.id
+
+    def get_judgment_revision(self, revision_id: str) -> Optional[JudgmentRevision]:
+        row = self._j_fetchone(
+            "SELECT * FROM judgment_revisions WHERE id = ?", (revision_id,),
+        )
+        return row_to_revision(row) if row else None
+
+    def list_judgment_revisions(self, judgment_id: str) -> list[JudgmentRevision]:
+        rows = self._j_fetchall(
+            "SELECT * FROM judgment_revisions WHERE judgment_id = ?"
+            " ORDER BY revision ASC",
+            (judgment_id,),
+        )
+        return [row_to_revision(r) for r in rows]
 
     def get_judgment_item(self, judgment_id: str) -> Optional[JudgmentItem]:
         row = self._j_fetchone("SELECT * FROM judgment_items WHERE id = ?", (judgment_id,))
@@ -195,6 +223,29 @@ class JudgmentStoreMixin:
         return row_to_snapshot(row) if row else None
 
     def insert_judgment_conflict(self, conflict: JudgmentConflict) -> str:
+        # Dedup open conflicts for same pair/type/analyzer
+        if conflict.other_judgment_id:
+            existing = self.find_open_judgment_conflict(
+                conflict.judgment_id, conflict.other_judgment_id,
+                conflict.type.value, conflict.analyzer_version,
+            )
+            if existing:
+                return existing.id
+        else:
+            existing = self.find_open_behavior_conflict(
+                conflict.judgment_id, conflict.type.value,
+                conflict.evidence_fingerprint, conflict.analyzer_version,
+            )
+            if existing:
+                # refresh evidence set
+                self.update_judgment_conflict(
+                    existing.id,
+                    memory_ids=conflict.memory_ids,
+                    confidence=conflict.confidence,
+                    reason=conflict.reason,
+                    evidence_fingerprint=conflict.evidence_fingerprint,
+                )
+                return existing.id
         row = conflict_to_row(conflict)
         cols = list(row.keys())
         ph = ", ".join("?" for _ in cols)
@@ -204,6 +255,33 @@ class JudgmentStoreMixin:
         )
         self._j_commit()
         return conflict.id
+
+    def find_open_judgment_conflict(
+        self, judgment_id: str, other_id: str, type_: str, analyzer_version: str,
+    ) -> Optional[JudgmentConflict]:
+        # order-independent pair match
+        row = self._j_fetchone(
+            "SELECT * FROM judgment_conflicts WHERE status = 'open'"
+            " AND type = ? AND analyzer_version = ?"
+            " AND ((judgment_id = ? AND other_judgment_id = ?)"
+            "  OR (judgment_id = ? AND other_judgment_id = ?))"
+            " LIMIT 1",
+            (type_, analyzer_version, judgment_id, other_id, other_id, judgment_id),
+        )
+        return row_to_conflict(row) if row else None
+
+    def find_open_behavior_conflict(
+        self, judgment_id: str, type_: str, fingerprint: str, analyzer_version: str,
+    ) -> Optional[JudgmentConflict]:
+        row = self._j_fetchone(
+            "SELECT * FROM judgment_conflicts WHERE status = 'open'"
+            " AND judgment_id = ? AND type = ? AND analyzer_version = ?"
+            " AND other_judgment_id IS NULL"
+            " AND (evidence_fingerprint = ? OR evidence_fingerprint = '' OR ? = '')"
+            " LIMIT 1",
+            (judgment_id, type_, analyzer_version, fingerprint, fingerprint),
+        )
+        return row_to_conflict(row) if row else None
 
     def get_judgment_conflict(self, conflict_id: str) -> Optional[JudgmentConflict]:
         row = self._j_fetchone(

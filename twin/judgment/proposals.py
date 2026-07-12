@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import defaultdict
 from typing import Any, Optional
 
 from .. import ids
@@ -13,7 +12,10 @@ from ..clock import now_iso
 from ..memory.models import MemoryItem, MemoryStatus
 from ..memory.store.base import MemoryStore
 from .models import (
+    ACTIONS_REQUIRING_TARGET,
     DURABLE_KINDS,
+    ExceptionEffect,
+    JudgmentException,
     JudgmentItem,
     JudgmentKind,
     JudgmentProposal,
@@ -24,6 +26,7 @@ from .models import (
     ProposalAction,
     ProposalStatus,
 )
+from .revisions import commit_new_item, commit_new_revision
 from .versions import create_version, supersede_item
 
 
@@ -47,7 +50,6 @@ def propose_from_memory(
     if mem.status != MemoryStatus.confirmed and mem.status.value != "confirmed":
         raise ValueError("only confirmed memories can seed judgment proposals")
 
-    # Twin-influenced decisions get reduced independence.
     twin_influenced = bool(
         (mem.payload or {}).get("judgment_influenced")
         or (mem.payload or {}).get("twin_assisted")
@@ -99,16 +101,14 @@ def propose_from_pattern(
     min_evidence: int = 3,
     min_projects: int = 2,
 ) -> list[JudgmentProposal]:
-    """Detect repeated decision rationales → heuristic proposals.
+    """Initial demonstrative detector: operational simplicity / reversibility cluster.
 
-    Twin-influenced memories count at reduced weight and never alone suffice.
+    Not a general-purpose pattern engine — see README.
     """
     decisions = [
         m for m in store.list_memories(type_="decision", status="confirmed", limit=2000)
         if m.domain == domain or domain == "any"
     ]
-    # group by project for independence
-    buckets: dict[str, list[MemoryItem]] = defaultdict(list)
     weighted: list[tuple[MemoryItem, float]] = []
     for m in decisions:
         weight = 0.4 if (m.payload or {}).get("judgment_influenced") else 1.0
@@ -117,9 +117,7 @@ def propose_from_pattern(
         ):
             continue
         weighted.append((m, weight))
-        buckets[m.project_id or m.id].append(m)
 
-    # simplicity / reversibility cluster
     cluster = [
         (m, w) for m, w in weighted
         if _SIMPLICITY_RE.search(f"{m.title} {m.summary}")
@@ -130,18 +128,18 @@ def propose_from_pattern(
         return []
 
     supporting = [m.id for m, _ in cluster]
-    # find contradictions: decisions that chose complexity explicitly
     contradicting = [
         m.id for m in decisions
         if m.id not in supporting
         and re.search(r"microservice|neo4j|kubernetes|distributed", f"{m.title} {m.summary}", re.I)
+        and not (m.payload or {}).get("judgment_influenced")
     ]
     item = {
         "kind": JudgmentKind.heuristic.value,
         "statement": "Prefer operational simplicity and reversible choices during early project stages.",
         "description": (
-            "Observed repeated confirmed decisions favoring simplicity, "
-            "maintenance cost, and reversibility. Not a deep value claim."
+            "Observed repeated confirmed decisions favoring simplicity. "
+            "Not a deep value claim. Detector: rationale_cluster/simplicity (demo)."
         ),
         "domain": domain,
         "strength": 0.72,
@@ -164,7 +162,7 @@ def propose_from_pattern(
         action=ProposalAction.create,
         proposed_item=item,
         reason=(
-            f"Repeated confirmed decisions across {len(projects)} projects "
+            f"[demo detector] Repeated decisions across {len(projects)} projects "
             f"favor operational simplicity (support={len(supporting)}, "
             f"contradictions={len(contradicting)})."
         ),
@@ -176,44 +174,132 @@ def propose_from_pattern(
         scope={"domain": domain},
         status=ProposalStatus.pending,
         created_at=now_iso(),
+        metadata={"detector": "simplicity_cluster_demo"},
     )
     store.insert_judgment_proposal(proposal)
     return [proposal]
 
 
-def compute_proposal_preview_token(proposal: JudgmentProposal, *,
-                                   active_version_id: Optional[str] = None) -> str:
+def _memory_fingerprint(store: MemoryStore, memory_id: str) -> dict[str, Any]:
+    m = store.get_memory(memory_id)
+    if m is None:
+        return {"id": memory_id, "missing": True}
+    content_hash = hashlib.sha256(f"{m.title}\n{m.summary}".encode()).hexdigest()[:16]
+    evidence = store.get_evidence(memory_id) if hasattr(store, "get_evidence") else []
+    ev_fp = hashlib.sha256(
+        "|".join(sorted(f"{e.id}:{e.quote[:40]}" for e in evidence)).encode()
+    ).hexdigest()[:16] if evidence else ""
+    return {
+        "id": m.id,
+        "updated_at": m.updated_at or "",
+        "status": m.status.value if hasattr(m.status, "value") else str(m.status),
+        "content_hash": content_hash,
+        "confidence": m.confidence,
+        "evidence_fingerprint": ev_fp,
+    }
+
+
+def merge_proposed_item(proposal: JudgmentProposal, edits: Optional[dict[str, Any]]) -> dict[str, Any]:
+    final = dict(proposal.proposed_item or {})
+    if edits:
+        final.update(edits)
+    return final
+
+
+def compute_proposal_preview_token(
+    store: MemoryStore,
+    proposal: JudgmentProposal,
+    *,
+    edits: Optional[dict[str, Any]] = None,
+    active_version_id: Optional[str] = None,
+) -> tuple[str, dict[str, Any]]:
+    final_item = merge_proposed_item(proposal, edits)
+    supporting = [_memory_fingerprint(store, mid) for mid in proposal.supporting_memory_ids]
+    contradicting = [_memory_fingerprint(store, mid) for mid in proposal.contradicting_memory_ids]
+    target_rev = None
+    if proposal.target_judgment_id:
+        target = store.get_judgment_item(proposal.target_judgment_id)
+        target_rev = target.current_revision_id if target else None
     payload = {
         "id": proposal.id,
         "action": proposal.action.value if hasattr(proposal.action, "value") else proposal.action,
         "proposed_item": proposal.proposed_item,
-        "supporting": sorted(proposal.supporting_memory_ids),
-        "contradicting": sorted(proposal.contradicting_memory_ids),
+        "edits": edits or {},
+        "final_item": final_item,
+        "supporting": supporting,
+        "contradicting": contradicting,
         "confidence": proposal.confidence,
         "scope": proposal.scope,
         "status": proposal.status.value if hasattr(proposal.status, "value") else proposal.status,
         "active_version_id": active_version_id or "",
+        "target_judgment_id": proposal.target_judgment_id,
+        "expected_revision_id": proposal.expected_revision_id or target_rev,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+    return hashlib.sha256(raw.encode()).hexdigest()[:24], payload
 
 
-def preview_proposal(store: MemoryStore, proposal_id: str) -> dict[str, Any]:
+def preview_proposal(
+    store: MemoryStore,
+    proposal_id: str,
+    *,
+    edits: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     proposal = store.get_judgment_proposal(proposal_id)
     if proposal is None:
         raise ValueError(f"proposal {proposal_id} not found")
     version = store.get_active_judgment_version()
-    token = compute_proposal_preview_token(
-        proposal, active_version_id=version.id if version else None,
+    token, signed = compute_proposal_preview_token(
+        store, proposal, edits=edits,
+        active_version_id=version.id if version else None,
     )
-    store.update_judgment_proposal(proposal_id, preview_token=token)
+    store.update_judgment_proposal(
+        proposal_id,
+        preview_token=token,
+        metadata={**(proposal.metadata or {}), "last_preview": signed},
+    )
     return {
         "proposal": proposal.model_dump(mode="json"),
+        "edits": edits or {},
+        "final_item": signed["final_item"],
         "preview_token": token,
+        "signed_payload": signed,
         "active_version_id": version.id if version else None,
         "requires_human_approval": True,
-        "durable": proposal.proposed_item.get("kind") in {k.value for k in DURABLE_KINDS},
+        "durable": signed["final_item"].get("kind") in {k.value for k in DURABLE_KINDS},
     }
+
+
+def _build_item_from_final(final: dict[str, Any], *, actor: str) -> JudgmentItem:
+    now = now_iso()
+    scope_raw = final.get("scope") or {}
+    scope = JudgmentScope(**scope_raw) if isinstance(scope_raw, dict) else JudgmentScope()
+    prov_raw = final.get("provenance") or {}
+    provenance = JudgmentProvenance(**prov_raw) if isinstance(prov_raw, dict) else JudgmentProvenance()
+    exceptions = [
+        JudgmentException(**e) if isinstance(e, dict) else e
+        for e in (final.get("exceptions") or [])
+    ]
+    return JudgmentItem(
+        id=final.get("id") or ids.judgment_id(),
+        kind=JudgmentKind(final["kind"]),
+        statement=final["statement"],
+        description=final.get("description", ""),
+        domain=final.get("domain", "technical"),
+        persona=final.get("persona", "individual"),
+        scope=scope,
+        strength=float(final.get("strength", 0.5)),
+        confidence=float(final.get("confidence", 0.5)),
+        stability=JudgmentStability(final.get("stability", "evolving")),
+        status=JudgmentStatus.active,
+        created_at=now,
+        updated_at=now,
+        approved_at=now,
+        approved_by=actor,
+        provenance=provenance,
+        exceptions=exceptions,
+        valid_from=now,
+    )
 
 
 def approve_proposal(
@@ -230,66 +316,115 @@ def approve_proposal(
         raise ValueError(f"proposal {proposal_id} not found")
     if proposal.status != ProposalStatus.pending:
         raise ValueError(f"proposal is {proposal.status.value}, not pending")
-    preview = preview_proposal(store, proposal_id)
-    if not preview_token or preview_token != preview["preview_token"]:
+
+    version = store.get_active_judgment_version()
+    token, signed = compute_proposal_preview_token(
+        store, proposal, edits=edits,
+        active_version_id=version.id if version else None,
+    )
+    if not preview_token or preview_token != token:
         raise ValueError("preview_token_mismatch")
 
-    item_data = dict(proposal.proposed_item)
-    if edits:
-        item_data.update(edits)
-    kind = JudgmentKind(item_data["kind"])
-    stability = JudgmentStability(item_data.get("stability", "evolving"))
+    final = signed["final_item"]
+    action = proposal.action if isinstance(proposal.action, ProposalAction) else ProposalAction(proposal.action)
+    if action in ACTIONS_REQUIRING_TARGET and not proposal.target_judgment_id:
+        raise ValueError(f"action {action.value} requires target_judgment_id")
+
+    stability = JudgmentStability(final.get("stability", "evolving"))
     if stability == JudgmentStability.constitutional and not confirm_constitutional:
-        raise ValueError(
-            "constitutional judgment requires confirm_constitutional=True"
+        raise ValueError("constitutional judgment requires confirm_constitutional=True")
+
+    with store.transaction():
+        result = _dispatch_action(
+            store, proposal, action, final, actor=actor,
+            confirm_constitutional=confirm_constitutional,
+            expected_parent_version_id=version.id if version else None,
         )
+        store.update_judgment_proposal(proposal_id, status=ProposalStatus.approved.value)
+    return result
 
-    now = now_iso()
-    scope_raw = item_data.get("scope") or {}
-    scope = JudgmentScope(**scope_raw) if isinstance(scope_raw, dict) else JudgmentScope()
-    prov_raw = item_data.get("provenance") or {}
-    provenance = JudgmentProvenance(**prov_raw) if isinstance(prov_raw, dict) else JudgmentProvenance()
 
-    new_item = JudgmentItem(
-        id=ids.judgment_id(),
-        kind=kind,
-        statement=item_data["statement"],
-        description=item_data.get("description", ""),
-        domain=item_data.get("domain", "technical"),
-        persona=item_data.get("persona", "individual"),
-        scope=scope,
-        strength=float(item_data.get("strength", 0.5)),
-        confidence=float(item_data.get("confidence", proposal.confidence)),
-        stability=stability,
-        status=JudgmentStatus.active,
-        created_at=now,
-        updated_at=now,
-        approved_at=now,
-        approved_by=actor,
-        provenance=provenance,
-        valid_from=now,
-    )
-
-    if proposal.action == ProposalAction.supersede and proposal.target_judgment_id:
-        supersede_item(
-            store, proposal.target_judgment_id, new_item,
-            actor=actor, reason=proposal.reason,
+def _dispatch_action(
+    store: MemoryStore,
+    proposal: JudgmentProposal,
+    action: ProposalAction,
+    final: dict[str, Any],
+    *,
+    actor: str,
+    confirm_constitutional: bool,
+    expected_parent_version_id: Optional[str],
+) -> dict[str, Any]:
+    if action == ProposalAction.create:
+        item = _build_item_from_final(final, actor=actor)
+        item, rev = commit_new_item(store, item, actor=actor, reason=proposal.reason)
+        version = create_version(
+            store, reason=f"approved proposal {proposal.id}",
+            actor=actor, expected_parent_version_id=expected_parent_version_id,
         )
+        return {"proposal_id": proposal.id, "judgment_id": item.id,
+                "revision_id": rev.id, "version_id": version.id, "status": "approved",
+                "action": action.value}
+
+    target = store.get_judgment_item(proposal.target_judgment_id)  # type: ignore[arg-type]
+    if target is None:
+        raise ValueError(f"target judgment {proposal.target_judgment_id} not found")
+    if proposal.expected_revision_id and target.current_revision_id != proposal.expected_revision_id:
+        raise ValueError("target revision changed since proposal was created")
+
+    if action == ProposalAction.supersede:
+        new_item = _build_item_from_final(final, actor=actor)
+        item, version = supersede_item(
+            store, target.id, new_item, actor=actor, reason=proposal.reason,
+            confirm_constitutional=confirm_constitutional,
+            expected_parent_version_id=expected_parent_version_id,
+        )
+        return {"proposal_id": proposal.id, "judgment_id": item.id,
+                "revision_id": item.current_revision_id, "version_id": version.id,
+                "status": "approved", "action": action.value}
+
+    nxt = target.model_copy(deep=True)
+    if action == ProposalAction.update:
+        built = _build_item_from_final({**final, "id": target.id}, actor=actor)
+        built.status = JudgmentStatus.active
+        built.created_at = target.created_at
+        nxt = built
+    elif action == ProposalAction.weaken:
+        nxt.strength = min(nxt.strength, float(final.get("strength", max(0.0, nxt.strength - 0.15))))
+        if "statement" in final:
+            nxt.statement = final["statement"]
+    elif action == ProposalAction.strengthen:
+        nxt.strength = max(nxt.strength, float(final.get("strength", min(1.0, nxt.strength + 0.15))))
+    elif action == ProposalAction.add_exception:
+        raw_exc = final.get("exception") or final.get("exceptions")
+        if isinstance(raw_exc, list):
+            for e in raw_exc:
+                nxt.exceptions.append(JudgmentException(**e) if isinstance(e, dict) else e)
+        elif isinstance(raw_exc, dict):
+            if "id" not in raw_exc:
+                raw_exc = {**raw_exc, "id": ids.judgment_exception_id()}
+            nxt.exceptions.append(JudgmentException(**raw_exc))
+        else:
+            raise ValueError("add_exception requires exception or exceptions in final item")
+    elif action == ProposalAction.deprecate:
+        nxt.status = JudgmentStatus.deprecated
+        nxt.valid_until = now_iso()
     else:
-        store.insert_judgment_item(new_item)
-        create_version(
-            store,
-            reason=f"approved proposal {proposal_id}",
-            actor=actor,
-        )
+        raise ValueError(f"unsupported action: {action}")
 
-    store.update_judgment_proposal(
-        proposal_id, status=ProposalStatus.approved.value,
+    nxt.approved_at = now_iso()
+    nxt.approved_by = actor
+    item, rev = commit_new_revision(store, nxt, actor=actor, reason=f"{action.value}: {proposal.reason}")
+    version = create_version(
+        store, reason=f"approved proposal {proposal.id} ({action.value})",
+        actor=actor, expected_parent_version_id=expected_parent_version_id,
     )
     return {
-        "proposal_id": proposal_id,
-        "judgment_id": new_item.id,
+        "proposal_id": proposal.id,
+        "judgment_id": item.id,
+        "revision_id": rev.id,
+        "version_id": version.id,
         "status": "approved",
+        "action": action.value,
     }
 
 

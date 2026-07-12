@@ -4,50 +4,69 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .. import ids
+from ..clock import now_iso
 from ..memory.store.base import MemoryStore
 from .models import (
     KIND_PRECEDENCE,
     AppliedJudgmentEffect,
+    AppliedRevisionRef,
+    ExceptionEffect,
+    JudgmentContext,
     JudgmentItem,
     JudgmentKind,
-    JudgmentStatus,
     JudgmentTrace,
 )
-from .. import ids
-from ..clock import now_iso
 from .versions import active_items, make_snapshot
 
 
-def _scope_matches(
-    item: JudgmentItem,
-    *,
-    domain: str,
-    persona: str,
-    task_profile: str,
-    project_id: Optional[str],
-) -> bool:
+def _dim_matches(required: list[str], actual: Optional[str], *, required_when_set: bool) -> bool:
+    if not required:
+        return True
+    if required_when_set and not actual:
+        return False
+    return actual in required if actual else False
+
+
+def scope_matches(item: JudgmentItem, ctx: JudgmentContext) -> bool:
     scope = item.scope
+    # domain
     if scope.domains:
-        if domain not in scope.domains:
+        if ctx.domain not in scope.domains:
             return False
-    elif item.domain not in ("general", domain):
+    elif item.domain not in ("general", ctx.domain):
         return False
-    if scope.personas and persona not in scope.personas:
+    # persona
+    if scope.personas:
+        if ctx.persona not in scope.personas:
+            return False
+    elif item.persona not in ("general", ctx.persona):
         return False
-    if scope.task_profiles and task_profile not in scope.task_profiles:
+    if scope.task_profiles and ctx.task_profile not in scope.task_profiles:
         return False
-    if scope.projects and project_id and project_id not in scope.projects:
-        return False
+    if scope.projects:
+        if not ctx.project_id or ctx.project_id not in scope.projects:
+            return False
+    if scope.audiences:
+        if not ctx.audience or ctx.audience not in scope.audiences:
+            return False
+    if scope.clients:
+        if not ctx.client or ctx.client not in scope.clients:
+            return False
+    if scope.project_stages:
+        if not ctx.project_stage or ctx.project_stage not in scope.project_stages:
+            return False
+    if scope.conditions:
+        # all declared conditions must appear in context.conditions
+        if not set(scope.conditions).issubset(set(ctx.conditions or [])):
+            return False
     return True
 
 
 def select_applicable(
     store: MemoryStore,
+    ctx: JudgmentContext,
     *,
-    domain: str = "technical",
-    persona: str = "individual",
-    task_profile: str = "general",
-    project_id: Optional[str] = None,
     as_of: Optional[str] = None,
 ) -> list[JudgmentItem]:
     items = active_items(store)
@@ -58,10 +77,7 @@ def select_applicable(
                 continue
             if item.valid_until and item.valid_until < as_of:
                 continue
-        if not _scope_matches(
-            item, domain=domain, persona=persona,
-            task_profile=task_profile, project_id=project_id,
-        ):
+        if not scope_matches(item, ctx):
             continue
         applicable.append(item)
     applicable.sort(key=lambda i: (KIND_PRECEDENCE.get(i.kind, 99), -i.strength))
@@ -70,85 +86,160 @@ def select_applicable(
 
 def apply_exceptions(
     item: JudgmentItem,
-    *,
-    context_text: str = "",
-) -> tuple[JudgmentItem, list[str]]:
-    """Return a copy with strength adjusted by matching exceptions."""
+    ctx: JudgmentContext,
+) -> dict[str, Any]:
+    """Apply matching exceptions. Returns effective state flags."""
     used: list[str] = []
     strength = item.strength
     disabled = False
+    requires_confirmation = False
+    replacement_revision_id: Optional[str] = None
+
     for exc in item.exceptions:
-        cond = (exc.condition or "").lower()
-        if cond and cond not in context_text.lower() and not any(
-            tok in context_text.lower() for tok in cond.split() if len(tok) > 3
-        ):
-            # soft match: if condition keywords appear
-            continue
-        if not cond:
+        if not _exception_matches(exc, ctx):
             continue
         used.append(exc.id)
-        if exc.effect.value == "disable":
+        effect = exc.effect.value if hasattr(exc.effect, "value") else exc.effect
+        if effect == ExceptionEffect.disable.value:
             disabled = True
-        elif exc.effect.value == "reduce_strength":
+        elif effect == ExceptionEffect.reduce_strength.value:
             strength = min(strength, float(exc.value))
-    if disabled:
-        strength = 0.0
+        elif effect == ExceptionEffect.replace_with.value:
+            replacement_revision_id = exc.replace_with_revision_id
+            if not replacement_revision_id:
+                requires_confirmation = True
+        elif effect == ExceptionEffect.require_confirmation.value:
+            requires_confirmation = True
+
     clone = item.model_copy(deep=True)
-    clone.strength = strength
-    return clone, used
+    clone.strength = 0.0 if disabled else strength
+    return {
+        "item": clone,
+        "disabled": disabled,
+        "requires_confirmation": requires_confirmation,
+        "replacement_revision_id": replacement_revision_id,
+        "exception_ids": used,
+        "effective_strength": 0.0 if disabled else strength,
+    }
+
+
+def _exception_matches(exc, ctx: JudgmentContext) -> bool:
+    match = exc.match or {}
+    if match:
+        for key, expected in match.items():
+            actual = getattr(ctx, key, None)
+            if isinstance(expected, list):
+                if actual not in expected:
+                    return False
+            elif actual != expected and expected not in (ctx.conditions or []):
+                return False
+        return True
+    cond = (exc.condition or "").strip().lower()
+    if not cond:
+        return False
+    tokens = [t for t in cond.replace(",", " ").split() if len(t) > 3]
+    if len(tokens) < 2:
+        return False
+    hay = " ".join([
+        ctx.query.lower(),
+        ctx.audience or "",
+        ctx.client or "",
+        ctx.project_stage or "",
+        " ".join(ctx.conditions or []),
+    ])
+    hits = sum(1 for t in tokens if t in hay)
+    return hits >= max(2, (len(tokens) + 1) // 2)
 
 
 def applicable_pack(
     store: MemoryStore,
+    ctx: Optional[JudgmentContext] = None,
     *,
     domain: str = "technical",
     persona: str = "individual",
     task_profile: str = "general",
     project_id: Optional[str] = None,
+    audience: Optional[str] = None,
+    client: Optional[str] = None,
+    project_stage: Optional[str] = None,
     query: str = "",
+    persist_snapshot: bool = True,
 ) -> dict[str, Any]:
-    raw = select_applicable(
-        store, domain=domain, persona=persona,
-        task_profile=task_profile, project_id=project_id,
+    ctx = ctx or JudgmentContext(
+        domain=domain, persona=persona, task_profile=task_profile,
+        project_id=project_id, audience=audience, client=client,
+        project_stage=project_stage, query=query,
     )
-    applied: list[JudgmentItem] = []
+    raw = select_applicable(store, ctx)
+    applied_items: list[JudgmentItem] = []
+    applied_refs: list[AppliedRevisionRef] = []
     exceptions_used: list[str] = []
-    for item in raw:
-        adj, used = apply_exceptions(item, context_text=query)
-        if adj.strength <= 0 and item.kind != JudgmentKind.constraint:
-            exceptions_used.extend(used)
-            continue
-        exceptions_used.extend(used)
-        applied.append(adj)
+    requires_confirmation = False
+    confirmation_reasons: list[str] = []
 
-    constraints = [i for i in applied if i.kind == JudgmentKind.constraint]
-    principles = [i for i in applied if i.kind == JudgmentKind.principle]
-    heuristics = [i for i in applied if i.kind == JudgmentKind.heuristic]
-    preferences = [i for i in applied if i.kind == JudgmentKind.preference]
-    beliefs = [i for i in applied if i.kind == JudgmentKind.belief]
-    values = [i for i in applied if i.kind == JudgmentKind.value]
+    for item in raw:
+        result = apply_exceptions(item, ctx)
+        exceptions_used.extend(result["exception_ids"])
+        if result["requires_confirmation"]:
+            requires_confirmation = True
+            confirmation_reasons.append(item.statement)
+        if result["disabled"]:
+            # disabled items — including constraints — are excluded
+            applied_refs.append(AppliedRevisionRef(
+                judgment_id=item.id,
+                revision_id=item.current_revision_id or "",
+                effective_strength=0.0,
+                disabled=True,
+                requires_confirmation=result["requires_confirmation"],
+                exception_ids=result["exception_ids"],
+                payload=item.model_dump(mode="json"),
+            ))
+            continue
+        if result["replacement_revision_id"]:
+            repl = store.get_judgment_revision(result["replacement_revision_id"])
+            if repl:
+                from .revisions import item_from_revision
+                item = item_from_revision(repl)
+        adj: JudgmentItem = result["item"]
+        applied_items.append(adj)
+        applied_refs.append(AppliedRevisionRef(
+            judgment_id=adj.id,
+            revision_id=adj.current_revision_id or item.current_revision_id or "",
+            effective_strength=float(result["effective_strength"]),
+            disabled=False,
+            requires_confirmation=result["requires_confirmation"],
+            exception_ids=result["exception_ids"],
+            replacement_revision_id=result["replacement_revision_id"],
+            payload=adj.model_dump(mode="json"),
+        ))
+
+    def _section(kind: JudgmentKind) -> list[dict]:
+        return [i.model_dump(mode="json") for i in applied_items if i.kind == kind]
 
     snapshot = make_snapshot(
-        store, applied,
-        target_domain=domain, persona=persona,
-        task_profile=task_profile, project_id=project_id,
+        store, applied_refs,
+        context=ctx.model_dump(),
+        persist=persist_snapshot,
     )
     return {
-        "applicable_judgments": [i.model_dump(mode="json") for i in applied],
-        "hard_constraints": [i.model_dump(mode="json") for i in constraints],
-        "principles": [i.model_dump(mode="json") for i in principles],
-        "heuristics": [i.model_dump(mode="json") for i in heuristics],
-        "preferences": [i.model_dump(mode="json") for i in preferences],
-        "beliefs": [i.model_dump(mode="json") for i in beliefs],
-        "values": [i.model_dump(mode="json") for i in values],
+        "applicable_judgments": [i.model_dump(mode="json") for i in applied_items],
+        "hard_constraints": _section(JudgmentKind.constraint),
+        "principles": _section(JudgmentKind.principle),
+        "heuristics": _section(JudgmentKind.heuristic),
+        "preferences": _section(JudgmentKind.preference),
+        "beliefs": _section(JudgmentKind.belief),
+        "values": _section(JudgmentKind.value),
         "exceptions_used": exceptions_used,
-        "snapshot_id": snapshot.id,
+        "requires_confirmation": requires_confirmation,
+        "confirmation_reasons": confirmation_reasons,
+        "snapshot_id": snapshot.id if persist_snapshot else None,
         "snapshot": snapshot.model_dump(mode="json"),
+        "applied_revisions": [a.model_dump(mode="json") for a in applied_refs],
+        "context": ctx.model_dump(),
     }
 
 
 def render_applicable(pack: dict[str, Any]) -> str:
-    """Structured context-pack judgment section."""
     lines = ["## Judgment (applicable)"]
 
     def section(title: str, key: str) -> None:
@@ -157,8 +248,7 @@ def render_applicable(pack: dict[str, Any]) -> str:
             return
         lines.append(f"### {title}")
         for it in items:
-            stmt = it.get("statement", "")
-            lines.append(f"- {stmt}")
+            lines.append(f"- {it.get('statement', '')}")
         lines.append("")
 
     section("Hard constraints", "hard_constraints")
@@ -171,10 +261,15 @@ def render_applicable(pack: dict[str, Any]) -> str:
         for it in pack["values"]:
             lines.append(f"- {it.get('statement', '')}")
         lines.append("")
+    if pack.get("requires_confirmation"):
+        lines.append("### Requires confirmation")
+        for reason in pack.get("confirmation_reasons") or []:
+            lines.append(f"- {reason}")
+        lines.append("")
 
     meta = pack.get("snapshot") or {}
     lines.append("### Judgment metadata")
-    lines.append(f"- Snapshot: {pack.get('snapshot_id', '')}")
+    lines.append(f"- Snapshot: {pack.get('snapshot_id') or '(ephemeral)'}")
     lines.append(f"- Domain: {meta.get('target_domain', '')}")
     lines.append(f"- Persona: {meta.get('persona', '')}")
     lines.append(f"- Task profile: {meta.get('task_profile', '')}")
@@ -190,6 +285,7 @@ def record_trace(
     blocked_options: Optional[list[str]] = None,
     exceptions_used: Optional[list[str]] = None,
     result: Optional[dict[str, Any]] = None,
+    persist: bool = True,
 ) -> JudgmentTrace:
     trace = JudgmentTrace(
         id=ids.judgment_trace_id(),
@@ -201,5 +297,6 @@ def record_trace(
         result=result or {},
         created_at=now_iso(),
     )
-    store.insert_judgment_trace(trace)
+    if persist:
+        store.insert_judgment_trace(trace)
     return trace

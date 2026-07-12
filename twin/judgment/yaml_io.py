@@ -19,6 +19,7 @@ from .models import (
     JudgmentStatus,
 )
 from .profile import load_profile
+from .revisions import commit_new_item
 from .versions import create_version
 
 
@@ -115,6 +116,7 @@ def apply_yaml_import(
     preview = classifications or preview_yaml_import(path)
     now = now_iso()
     created: list[str] = []
+    revision_ids: list[str] = []
     for raw in preview:
         kind = JudgmentKind(raw["kind"])
         item = JudgmentItem(
@@ -138,16 +140,19 @@ def apply_yaml_import(
             ),
             metadata={"yaml_section": raw.get("source_section")},
         )
-        store.insert_judgment_item(item)
+        item, rev = commit_new_item(store, item, actor=actor, reason="yaml_import")
         created.append(item.id)
+        revision_ids.append(rev.id)
     version = create_version(
         store,
         reason=f"import from {Path(path).name}",
+        revision_ids=revision_ids,
         item_ids=created,
         actor=actor,
     )
     return {
         "created": created,
+        "revision_ids": revision_ids,
         "version_id": version.id,
         "version": version.version,
         "count": len(created),

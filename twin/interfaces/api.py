@@ -610,6 +610,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         edits: Optional[dict[str, Any]] = None
         confirm_constitutional: bool = False
 
+    class ProposalPreviewRequest(BaseModel):
+        edits: Optional[dict[str, Any]] = None
+
     class JudgmentSimulateRequest(BaseModel):
         query: str
         domain: str = "technical"
@@ -622,6 +625,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         persona: str = "individual"
         task_profile: str = "general"
         project_id: Optional[str] = None
+        audience: Optional[str] = None
+        client: Optional[str] = None
+        project_stage: Optional[str] = None
         query: str = ""
 
     @app.get("/api/judgment/items")
@@ -651,10 +657,10 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return [p.model_dump(mode="json") for p in propose_from_pattern(ws.store, domain=domain)]
 
     @app.post("/api/judgment/proposals/{proposal_id}/preview")
-    def api_preview_proposal(proposal_id: str):
+    def api_preview_proposal(proposal_id: str, req: ProposalPreviewRequest = ProposalPreviewRequest()):
         from ..judgment.proposals import preview_proposal
         try:
-            return preview_proposal(ws.store, proposal_id)
+            return preview_proposal(ws.store, proposal_id, edits=req.edits)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -690,7 +696,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         from ..judgment.application import applicable_pack
         return applicable_pack(
             ws.store, domain=req.domain, persona=req.persona,
-            task_profile=req.task_profile, project_id=req.project_id, query=req.query,
+            task_profile=req.task_profile, project_id=req.project_id,
+            audience=req.audience, client=req.client,
+            project_stage=req.project_stage, query=req.query,
         )
 
     @app.post("/api/judgment/simulate")

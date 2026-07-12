@@ -147,6 +147,7 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_activity_at TEXT NOT NULL DEF
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_status TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS consolidation_error TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS summary_percept_id TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS judgment_snapshot_id TEXT;
 
 -- append-only: concurrent observers never rewrite each other's rows
 CREATE TABLE IF NOT EXISTS session_artifacts (
@@ -290,16 +291,31 @@ CREATE TABLE IF NOT EXISTS judgment_items (
     supersedes TEXT,
     tradeoff TEXT,
     lean DOUBLE PRECISION,
+    current_revision_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
     metadata JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_judgment_status ON judgment_items(status);
 CREATE INDEX IF NOT EXISTS idx_judgment_kind ON judgment_items(kind);
 CREATE INDEX IF NOT EXISTS idx_judgment_domain ON judgment_items(domain);
 
+CREATE TABLE IF NOT EXISTS judgment_revisions (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'user',
+    reason TEXT NOT NULL DEFAULT '',
+    UNIQUE(judgment_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_jrev_judgment ON judgment_revisions(judgment_id);
+
 CREATE TABLE IF NOT EXISTS judgment_proposals (
     id TEXT PRIMARY KEY,
     action TEXT NOT NULL,
     target_judgment_id TEXT,
+    expected_revision_id TEXT,
     proposed_item JSONB NOT NULL DEFAULT '{}',
     reason TEXT NOT NULL DEFAULT '',
     supporting_memory_ids JSONB NOT NULL DEFAULT '[]',
@@ -318,25 +334,32 @@ CREATE INDEX IF NOT EXISTS idx_jprop_status ON judgment_proposals(status);
 
 CREATE TABLE IF NOT EXISTS judgment_versions (
     id TEXT PRIMARY KEY,
-    version INTEGER NOT NULL,
+    version INTEGER NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
     reason TEXT NOT NULL DEFAULT '',
     parent_version_id TEXT,
     active INTEGER NOT NULL DEFAULT 0,
+    revision_ids JSONB NOT NULL DEFAULT '[]',
     item_ids JSONB NOT NULL DEFAULT '[]',
     actor TEXT NOT NULL DEFAULT 'user',
     metadata JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_jver_active ON judgment_versions(active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jver_one_active ON judgment_versions ((active)) WHERE active != 0;
 
 CREATE TABLE IF NOT EXISTS judgment_snapshots (
     id TEXT PRIMARY KEY,
     judgment_version_id TEXT NOT NULL,
     item_ids JSONB NOT NULL DEFAULT '[]',
+    applied_revisions JSONB NOT NULL DEFAULT '[]',
     target_domain TEXT NOT NULL DEFAULT 'technical',
     persona TEXT NOT NULL DEFAULT 'individual',
     task_profile TEXT NOT NULL DEFAULT 'general',
     project_id TEXT,
+    audience TEXT,
+    client TEXT,
+    project_stage TEXT,
+    application_engine TEXT NOT NULL DEFAULT 'judgment-app-v2',
     created_at TEXT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'
 );
@@ -353,6 +376,10 @@ CREATE TABLE IF NOT EXISTS judgment_conflicts (
     reason TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     resolved_at TEXT,
+    resolution_operation_id TEXT,
+    proposal_id TEXT,
+    analyzer_version TEXT NOT NULL DEFAULT 'conflict-v1',
+    evidence_fingerprint TEXT NOT NULL DEFAULT '',
     metadata JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_jconf_status ON judgment_conflicts(status);
@@ -823,8 +850,9 @@ class PostgresStore(JudgmentStoreMixin, MemoryStore):
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
             " initial_query, status, started_at, ended_at, last_activity_at,"
             " supplied_memory_ids, pack_chars, created_memory_ids,"
-            " consolidation_status, consolidation_error, summary_percept_id)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " consolidation_status, consolidation_error, summary_percept_id,"
+            " judgment_snapshot_id)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 session.id, session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
@@ -834,6 +862,7 @@ class PostgresStore(JudgmentStoreMixin, MemoryStore):
                 json.dumps(session.created_memory_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
+                session.judgment_snapshot_id,
             ),
         )
         return session.id
@@ -844,7 +873,8 @@ class PostgresStore(JudgmentStoreMixin, MemoryStore):
             " task_profile = %s, initial_query = %s, status = %s, ended_at = %s,"
             " last_activity_at = %s, supplied_memory_ids = %s, pack_chars = %s,"
             " created_memory_ids = %s, consolidation_status = %s,"
-            " consolidation_error = %s, summary_percept_id = %s WHERE id = %s",
+            " consolidation_error = %s, summary_percept_id = %s,"
+            " judgment_snapshot_id = %s WHERE id = %s",
             (
                 session.client, session.project_id, session.domain,
                 session.task_profile, session.initial_query,
@@ -854,6 +884,7 @@ class PostgresStore(JudgmentStoreMixin, MemoryStore):
                 json.dumps(session.created_memory_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
+                session.judgment_snapshot_id,
                 session.id,
             ),
         )
@@ -941,6 +972,7 @@ class PostgresStore(JudgmentStoreMixin, MemoryStore):
             consolidation_status=row["consolidation_status"],
             consolidation_error=row["consolidation_error"],
             summary_percept_id=row["summary_percept_id"],
+            judgment_snapshot_id=row.get("judgment_snapshot_id"),
         )
 
     def get_session(self, session_id: str) -> Optional[CognitiveSession]:

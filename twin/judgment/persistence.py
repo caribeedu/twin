@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from .models import (
+    AppliedJudgmentEffect,
+    AppliedRevisionRef,
     JudgmentConflict,
+    JudgmentException,
     JudgmentItem,
     JudgmentProposal,
     JudgmentProvenance,
+    JudgmentRevision,
     JudgmentScope,
     JudgmentSnapshot,
     JudgmentTrace,
     JudgmentVersion,
-    AppliedJudgmentEffect,
-    JudgmentException,
 )
+
+
+def _loads(raw: Any, default: Any):
+    if raw is None or raw == "":
+        return default
+    return json.loads(raw) if isinstance(raw, str) else raw
 
 
 def item_to_row(item: JudgmentItem) -> dict[str, Any]:
@@ -44,23 +52,17 @@ def item_to_row(item: JudgmentItem) -> dict[str, Any]:
         "supersedes": item.supersedes,
         "tradeoff": item.tradeoff,
         "lean": item.lean,
+        "current_revision_id": item.current_revision_id,
+        "revision": item.revision,
         "metadata": json.dumps(item.metadata),
     }
 
 
 def row_to_item(row: Any) -> JudgmentItem:
     get = row.__getitem__ if not isinstance(row, dict) else row.get
-    keys = row.keys() if hasattr(row, "keys") else row
-
-    def _j(key: str, default: Any):
-        raw = get(key) if not isinstance(row, dict) else row.get(key)
-        if raw is None or raw == "":
-            return default
-        return json.loads(raw) if isinstance(raw, str) else raw
-
-    scope = JudgmentScope(**_j("scope", {}))
-    prov = JudgmentProvenance(**_j("provenance", {}))
-    exceptions = [JudgmentException(**e) for e in _j("exceptions", [])]
+    scope = JudgmentScope(**_loads(get("scope"), {}))
+    prov = JudgmentProvenance(**_loads(get("provenance"), {}))
+    exceptions = [JudgmentException(**e) for e in _loads(get("exceptions"), [])]
     return JudgmentItem(
         id=get("id"),
         kind=get("kind"),
@@ -81,11 +83,38 @@ def row_to_item(row: Any) -> JudgmentItem:
         approved_by=get("approved_by"),
         provenance=prov,
         exceptions=exceptions,
-        conflicts_with=_j("conflicts_with", []),
+        conflicts_with=_loads(get("conflicts_with"), []),
         supersedes=get("supersedes"),
         tradeoff=get("tradeoff"),
         lean=float(get("lean")) if get("lean") is not None else None,
-        metadata=_j("metadata", {}),
+        current_revision_id=get("current_revision_id") if "current_revision_id" in (row.keys() if hasattr(row, "keys") else row) else None,
+        revision=int(get("revision") or 1) if ("revision" in (row.keys() if hasattr(row, "keys") else row) or get("revision") is not None) else 1,
+        metadata=_loads(get("metadata"), {}),
+    )
+
+
+def revision_to_row(rev: JudgmentRevision) -> dict[str, Any]:
+    return {
+        "id": rev.id,
+        "judgment_id": rev.judgment_id,
+        "revision": rev.revision,
+        "payload": json.dumps(rev.payload),
+        "created_at": rev.created_at,
+        "actor": rev.actor,
+        "reason": rev.reason,
+    }
+
+
+def row_to_revision(row: Any) -> JudgmentRevision:
+    get = row.__getitem__ if not isinstance(row, dict) else row.get
+    return JudgmentRevision(
+        id=get("id"),
+        judgment_id=get("judgment_id"),
+        revision=int(get("revision")),
+        payload=_loads(get("payload"), {}),
+        created_at=get("created_at"),
+        actor=get("actor") or "user",
+        reason=get("reason") or "",
     )
 
 
@@ -94,6 +123,7 @@ def proposal_to_row(p: JudgmentProposal) -> dict[str, Any]:
         "id": p.id,
         "action": p.action.value,
         "target_judgment_id": p.target_judgment_id,
+        "expected_revision_id": p.expected_revision_id,
         "proposed_item": json.dumps(p.proposed_item),
         "reason": p.reason,
         "supporting_memory_ids": json.dumps(p.supporting_memory_ids),
@@ -112,30 +142,25 @@ def proposal_to_row(p: JudgmentProposal) -> dict[str, Any]:
 
 def row_to_proposal(row: Any) -> JudgmentProposal:
     get = row.__getitem__ if not isinstance(row, dict) else row.get
-
-    def _j(key: str, default: Any):
-        raw = get(key) if not isinstance(row, dict) else row.get(key)
-        if raw is None or raw == "":
-            return default
-        return json.loads(raw) if isinstance(raw, str) else raw
-
+    keys = set(row.keys()) if hasattr(row, "keys") else set(row)
     return JudgmentProposal(
         id=get("id"),
         action=get("action"),
         target_judgment_id=get("target_judgment_id"),
-        proposed_item=_j("proposed_item", {}),
+        expected_revision_id=get("expected_revision_id") if "expected_revision_id" in keys else None,
+        proposed_item=_loads(get("proposed_item"), {}),
         reason=get("reason") or "",
-        supporting_memory_ids=_j("supporting_memory_ids", []),
-        contradicting_memory_ids=_j("contradicting_memory_ids", []),
+        supporting_memory_ids=_loads(get("supporting_memory_ids"), []),
+        contradicting_memory_ids=_loads(get("contradicting_memory_ids"), []),
         support_count=int(get("support_count") or 0),
         contradiction_count=int(get("contradiction_count") or 0),
         confidence=float(get("confidence") or 0.5),
-        scope=_j("scope", {}),
+        scope=_loads(get("scope"), {}),
         status=get("status") or "pending",
         created_at=get("created_at") or "",
         expires_at=get("expires_at"),
         preview_token=get("preview_token"),
-        metadata=_j("metadata", {}),
+        metadata=_loads(get("metadata"), {}),
     )
 
 
@@ -147,6 +172,7 @@ def version_to_row(v: JudgmentVersion) -> dict[str, Any]:
         "reason": v.reason,
         "parent_version_id": v.parent_version_id,
         "active": int(v.active),
+        "revision_ids": json.dumps(v.revision_ids),
         "item_ids": json.dumps(v.item_ids),
         "actor": v.actor,
         "metadata": json.dumps(v.metadata),
@@ -155,13 +181,7 @@ def version_to_row(v: JudgmentVersion) -> dict[str, Any]:
 
 def row_to_version(row: Any) -> JudgmentVersion:
     get = row.__getitem__ if not isinstance(row, dict) else row.get
-
-    def _j(key: str, default: Any):
-        raw = get(key) if not isinstance(row, dict) else row.get(key)
-        if raw is None or raw == "":
-            return default
-        return json.loads(raw) if isinstance(raw, str) else raw
-
+    keys = set(row.keys()) if hasattr(row, "keys") else set(row)
     active = get("active")
     return JudgmentVersion(
         id=get("id"),
@@ -170,9 +190,10 @@ def row_to_version(row: Any) -> JudgmentVersion:
         reason=get("reason") or "",
         parent_version_id=get("parent_version_id"),
         active=bool(active) if not isinstance(active, bool) else active,
-        item_ids=_j("item_ids", []),
+        revision_ids=_loads(get("revision_ids"), []) if "revision_ids" in keys else [],
+        item_ids=_loads(get("item_ids"), []),
         actor=get("actor") or "user",
-        metadata=_j("metadata", {}),
+        metadata=_loads(get("metadata"), {}),
     )
 
 
@@ -181,10 +202,15 @@ def snapshot_to_row(s: JudgmentSnapshot) -> dict[str, Any]:
         "id": s.id,
         "judgment_version_id": s.judgment_version_id,
         "item_ids": json.dumps(s.item_ids),
+        "applied_revisions": json.dumps([a.model_dump(mode="json") for a in s.applied_revisions]),
         "target_domain": s.target_domain,
         "persona": s.persona,
         "task_profile": s.task_profile,
         "project_id": s.project_id,
+        "audience": s.audience,
+        "client": s.client,
+        "project_stage": s.project_stage,
+        "application_engine": s.application_engine,
         "created_at": s.created_at,
         "metadata": json.dumps(s.metadata),
     }
@@ -192,23 +218,24 @@ def snapshot_to_row(s: JudgmentSnapshot) -> dict[str, Any]:
 
 def row_to_snapshot(row: Any) -> JudgmentSnapshot:
     get = row.__getitem__ if not isinstance(row, dict) else row.get
-
-    def _j(key: str, default: Any):
-        raw = get(key) if not isinstance(row, dict) else row.get(key)
-        if raw is None or raw == "":
-            return default
-        return json.loads(raw) if isinstance(raw, str) else raw
-
+    keys = set(row.keys()) if hasattr(row, "keys") else set(row)
     return JudgmentSnapshot(
         id=get("id"),
         judgment_version_id=get("judgment_version_id"),
-        item_ids=_j("item_ids", []),
+        item_ids=_loads(get("item_ids"), []),
+        applied_revisions=[
+            AppliedRevisionRef(**a) for a in _loads(get("applied_revisions"), [])
+        ] if "applied_revisions" in keys else [],
         target_domain=get("target_domain") or "technical",
         persona=get("persona") or "individual",
         task_profile=get("task_profile") or "general",
         project_id=get("project_id"),
+        audience=get("audience") if "audience" in keys else None,
+        client=get("client") if "client" in keys else None,
+        project_stage=get("project_stage") if "project_stage" in keys else None,
+        application_engine=(get("application_engine") if "application_engine" in keys else None) or "judgment-app-v2",
         created_at=get("created_at") or "",
-        metadata=_j("metadata", {}),
+        metadata=_loads(get("metadata"), {}),
     )
 
 
@@ -225,23 +252,21 @@ def conflict_to_row(c: JudgmentConflict) -> dict[str, Any]:
         "reason": c.reason,
         "created_at": c.created_at,
         "resolved_at": c.resolved_at,
+        "resolution_operation_id": c.resolution_operation_id,
+        "proposal_id": c.proposal_id,
+        "analyzer_version": c.analyzer_version,
+        "evidence_fingerprint": c.evidence_fingerprint,
         "metadata": json.dumps(c.metadata),
     }
 
 
 def row_to_conflict(row: Any) -> JudgmentConflict:
     get = row.__getitem__ if not isinstance(row, dict) else row.get
-
-    def _j(key: str, default: Any):
-        raw = get(key) if not isinstance(row, dict) else row.get(key)
-        if raw is None or raw == "":
-            return default
-        return json.loads(raw) if isinstance(raw, str) else raw
-
+    keys = set(row.keys()) if hasattr(row, "keys") else set(row)
     return JudgmentConflict(
         id=get("id"),
         judgment_id=get("judgment_id"),
-        memory_ids=_j("memory_ids", []),
+        memory_ids=_loads(get("memory_ids"), []),
         other_judgment_id=get("other_judgment_id"),
         type=get("type"),
         confidence=float(get("confidence") or 0.5),
@@ -250,7 +275,11 @@ def row_to_conflict(row: Any) -> JudgmentConflict:
         reason=get("reason") or "",
         created_at=get("created_at") or "",
         resolved_at=get("resolved_at"),
-        metadata=_j("metadata", {}),
+        resolution_operation_id=get("resolution_operation_id") if "resolution_operation_id" in keys else None,
+        proposal_id=get("proposal_id") if "proposal_id" in keys else None,
+        analyzer_version=(get("analyzer_version") if "analyzer_version" in keys else None) or "conflict-v1",
+        evidence_fingerprint=(get("evidence_fingerprint") if "evidence_fingerprint" in keys else None) or "",
+        metadata=_loads(get("metadata"), {}),
     )
 
 
@@ -270,21 +299,21 @@ def trace_to_row(t: JudgmentTrace) -> dict[str, Any]:
 
 def row_to_trace(row: Any) -> JudgmentTrace:
     get = row.__getitem__ if not isinstance(row, dict) else row.get
-
-    def _j(key: str, default: Any):
-        raw = get(key) if not isinstance(row, dict) else row.get(key)
-        if raw is None or raw == "":
-            return default
-        return json.loads(raw) if isinstance(raw, str) else raw
-
     return JudgmentTrace(
         id=get("id"),
         query=get("query") or "",
         snapshot_id=get("snapshot_id"),
-        applied_items=[AppliedJudgmentEffect(**a) for a in _j("applied_items", [])],
-        blocked_options=_j("blocked_options", []),
-        exceptions_used=_j("exceptions_used", []),
-        result=_j("result", {}),
+        applied_items=[AppliedJudgmentEffect(**a) for a in _loads(get("applied_items"), [])],
+        blocked_options=_loads(get("blocked_options"), []),
+        exceptions_used=_loads(get("exceptions_used"), []),
+        result=_loads(get("result"), {}),
         created_at=get("created_at") or "",
-        metadata=_j("metadata", {}),
+        metadata=_loads(get("metadata"), {}),
     )
+
+
+def item_payload(item: JudgmentItem) -> dict[str, Any]:
+    """Frozen content for a revision (excludes mutable head pointers)."""
+    data = item.model_dump(mode="json")
+    data.pop("current_revision_id", None)
+    return data

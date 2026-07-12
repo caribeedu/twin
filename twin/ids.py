@@ -97,5 +97,9 @@ def judgment_exception_id() -> str:
     return new_id("jexc")
 
 
+def judgment_revision_id() -> str:
+    return new_id("jrev")
+
+
 def tradeoff_id() -> str:
     return new_id("toff")

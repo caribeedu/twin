@@ -2,7 +2,7 @@
 
 Decides what may flow where (Domain Firewall), what must never leave the
 machine unmasked (PII filter) and how the user decides (evolving judgment
-model: versioned, scoped, proposal-driven).
+model: versioned revisions, scoped application, proposal-driven).
 """
 
 from .application import applicable_pack, render_applicable
@@ -17,7 +17,7 @@ from .proposals import (
     propose_from_pattern,
     reject_proposal,
 )
-from .simulate import counterfactual, simulate
+from .simulate import counterfactual, evaluate, simulate
 from .yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
 
 __all__ = [
@@ -27,5 +27,5 @@ __all__ = [
     "propose_from_memory", "propose_from_pattern",
     "preview_proposal", "approve_proposal", "reject_proposal", "defer_proposal",
     "applicable_pack", "render_applicable",
-    "simulate", "counterfactual",
+    "simulate", "evaluate", "counterfactual",
 ]

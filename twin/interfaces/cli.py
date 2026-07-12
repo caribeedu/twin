@@ -375,7 +375,11 @@ def cmd_judgment(args) -> None:
         for c in ws.store.list_judgment_conflicts(status=args.status or "open"):
             print(f"{c.id}  {c.type.value:20}  {c.reason[:70]}")
     elif cmd == "resolve-conflict":
-        resolve_conflict(ws.store, args.conflict_id, resolution=args.resolution or "dismissed")
+        resolve_conflict(
+            ws.store, args.conflict_id,
+            resolution=args.resolution or "dismiss",
+            dismiss=True,
+        )
         print("resolved")
     else:
         raise SystemExit(f"unknown judgment command: {cmd}")
