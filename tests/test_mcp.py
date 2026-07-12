@@ -32,6 +32,9 @@ async def test_tools_are_registered(server):
         "memory_search", "memory_get", "memory_related", "memory_project_context",
         "memory_recent_decisions", "memory_user_preferences",
         "memory_judgment_profile", "memory_safe_context_pack", "memory_observe",
+        "judgment_applicable", "judgment_simulate", "judgment_proposals",
+        "judgment_proposal_preview", "judgment_proposal_approve",
+        "judgment_proposal_reject", "judgment_conflicts", "judgment_version",
         "session_start", "session_observe", "session_complete", "session_feedback",
     } <= tools
 

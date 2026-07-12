@@ -23,6 +23,7 @@ from ..models import (
     Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
+from .judgment_mixin import JudgmentStoreMixin
 
 _SCHEMA_BASE = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -264,6 +265,109 @@ CREATE TABLE IF NOT EXISTS memory_operations (
     undoable BOOLEAN NOT NULL DEFAULT TRUE,
     undone_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS judgment_items (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    scope JSONB NOT NULL DEFAULT '{}',
+    strength DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    stability TEXT NOT NULL DEFAULT 'evolving',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    valid_from TEXT,
+    valid_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by TEXT,
+    provenance JSONB NOT NULL DEFAULT '{}',
+    exceptions JSONB NOT NULL DEFAULT '[]',
+    conflicts_with JSONB NOT NULL DEFAULT '[]',
+    supersedes TEXT,
+    tradeoff TEXT,
+    lean DOUBLE PRECISION,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_judgment_status ON judgment_items(status);
+CREATE INDEX IF NOT EXISTS idx_judgment_kind ON judgment_items(kind);
+CREATE INDEX IF NOT EXISTS idx_judgment_domain ON judgment_items(domain);
+
+CREATE TABLE IF NOT EXISTS judgment_proposals (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    target_judgment_id TEXT,
+    proposed_item JSONB NOT NULL DEFAULT '{}',
+    reason TEXT NOT NULL DEFAULT '',
+    supporting_memory_ids JSONB NOT NULL DEFAULT '[]',
+    contradicting_memory_ids JSONB NOT NULL DEFAULT '[]',
+    support_count INTEGER NOT NULL DEFAULT 0,
+    contradiction_count INTEGER NOT NULL DEFAULT 0,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    scope JSONB NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    preview_token TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jprop_status ON judgment_proposals(status);
+
+CREATE TABLE IF NOT EXISTS judgment_versions (
+    id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    parent_version_id TEXT,
+    active INTEGER NOT NULL DEFAULT 0,
+    item_ids JSONB NOT NULL DEFAULT '[]',
+    actor TEXT NOT NULL DEFAULT 'user',
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jver_active ON judgment_versions(active);
+
+CREATE TABLE IF NOT EXISTS judgment_snapshots (
+    id TEXT PRIMARY KEY,
+    judgment_version_id TEXT NOT NULL,
+    item_ids JSONB NOT NULL DEFAULT '[]',
+    target_domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    task_profile TEXT NOT NULL DEFAULT 'general',
+    project_id TEXT,
+    created_at TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS judgment_conflicts (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    memory_ids JSONB NOT NULL DEFAULT '[]',
+    other_judgment_id TEXT,
+    type TEXT NOT NULL,
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'open',
+    suggested_resolution TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jconf_status ON judgment_conflicts(status);
+
+CREATE TABLE IF NOT EXISTS judgment_traces (
+    id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    applied_items JSONB NOT NULL DEFAULT '[]',
+    blocked_options JSONB NOT NULL DEFAULT '[]',
+    exceptions_used JSONB NOT NULL DEFAULT '[]',
+    result JSONB NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
 """
 
 _EMBEDDINGS_PGVECTOR = """
@@ -293,7 +397,7 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
 
 
-class PostgresStore(MemoryStore):
+class PostgresStore(JudgmentStoreMixin, MemoryStore):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
         from psycopg.rows import dict_row
@@ -1067,3 +1171,21 @@ class PostgresStore(MemoryStore):
             " last_retrieved_at = %s WHERE id = %s",
             (now_iso(), memory_id),
         )
+
+    # -- judgment mixin hooks -----------------------------------------------
+
+    def _j_sql(self, sql: str) -> str:
+        return sql.replace("?", "%s")
+
+    def _j_exec(self, sql: str, params: tuple) -> None:
+        self._exec(self._j_sql(sql), params)
+
+    def _j_fetchone(self, sql: str, params: tuple):
+        rows = self._exec(self._j_sql(sql), params)
+        return rows[0] if rows else None
+
+    def _j_fetchall(self, sql: str, params: tuple) -> list:
+        return self._exec(self._j_sql(sql), params)
+
+    def _j_commit(self) -> None:
+        self._maybe_commit()

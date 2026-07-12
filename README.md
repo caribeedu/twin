@@ -1277,18 +1277,22 @@ Delivered:
 
 ### v0.4 — Evolving Judgment Model
 
-Goal: make different LLMs apply a stable yet evolving model of how the user evaluates trade-offs.
+Make different LLMs apply a stable yet evolving model of how the user evaluates trade-offs — without confusing observed behavior with personal principle, and without silent identity changes.
 
-Promotion from confirmed memories into the judgment profile already exists. v0.4 should add:
+Delivered:
 
-- proposed judgment changes derived from repeated confirmed evidence;
-- explicit separation of preference, belief, principle, value, heuristic and hard constraint;
-- versioned judgment with temporal validity and provenance;
-- conflict detection between principles and observed behavior;
-- confidence and scope for each judgment item;
-- domain-specific decision criteria;
-- simulations that explain how a judgment profile affected a recommendation;
-- mandatory human approval for durable judgment changes.
+- first-class `JudgmentItem` taxonomy (preference, belief, principle, value, heuristic, constraint) with confidence, strength, stability and scope;
+- canonical judgment store (SQLite/PostgreSQL) with YAML as bootstrap/export only;
+- versioned judgment (`JudgmentVersion`, snapshots) with supersedence and restore-as-new-version;
+- proposal engine (`propose_from_memory` / `propose_from_pattern`) — observation may propose, only the user constitutes;
+- state-aware preview tokens for proposal approval; constitutional items need extra confirmation;
+- application engine with constraint→principle→heuristic→preference precedence and exception handling;
+- explainable `simulate` / counterfactual removal and persisted `JudgmentTrace`;
+- conflict detection (judgment↔judgment and behavior drift signals);
+- Twin-influenced evidence down-weighted so recommendations cannot self-confirm;
+- structured applicable judgment section in context packs (not the full profile);
+- CLI (`twin judgment …`), HTTP API and MCP tools for proposals, simulate and approve;
+- `evals/judgment/` fixtures for scope/precedence scenarios.
 
 ### v0.5 — Persona-aware Privacy and Governance
 

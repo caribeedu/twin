@@ -1,5 +1,6 @@
-# Judgment profile — edit freely; this is read (never written) by tools.
-# Memories say WHAT happened; this file says HOW the user thinks and decides.
+# Judgment profile — human-editable bootstrap / export.
+# Canonical operational state lives in the judgment store (DB).
+# Twin may propose changes; only the user constitutes durable judgment.
 
 principles:
   - "privacidade > conveniência em dados pessoais"

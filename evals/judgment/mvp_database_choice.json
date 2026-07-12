@@ -1,0 +1,15 @@
+{
+  "id": "mvp_database_choice",
+  "context": {
+    "domain": "technical",
+    "task_profile": "architecture",
+    "project_stage": "mvp"
+  },
+  "query": "Should Twin migrate from PostgreSQL to Neo4j for the MVP?",
+  "options": ["PostgreSQL", "Neo4j", "custom graph engine"],
+  "expected": {
+    "must_not_choose": ["custom graph engine"],
+    "required_explanation_terms": ["simpl", "reversib", "mainten"],
+    "must_not_apply_domains": ["assistant_preferences"]
+  }
+}

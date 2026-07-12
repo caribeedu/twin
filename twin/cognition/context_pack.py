@@ -109,7 +109,21 @@ def build_context_pack(
         return True
 
     if include_judgment:
-        judgment_text = render_profile(load_profile(cfg.judgment_path))
+        judgment_text = ""
+        if hasattr(store, "list_judgment_items"):
+            from ..judgment.application import applicable_pack, render_applicable
+            active = store.list_judgment_items(status="active", limit=1)
+            if active:
+                pack_j = applicable_pack(
+                    store,
+                    domain=target_domain or "technical",
+                    task_profile=task_profile or "general",
+                    project_id=project_id,
+                    query=query,
+                )
+                judgment_text = render_applicable(pack_j)
+        if not judgment_text:
+            judgment_text = render_profile(load_profile(cfg.judgment_path))
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
 

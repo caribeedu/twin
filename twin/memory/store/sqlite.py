@@ -16,6 +16,7 @@ from ..models import (
     Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
+from .judgment_mixin import JudgmentStoreMixin
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -269,10 +270,114 @@ CREATE TABLE IF NOT EXISTS memory_operations (
     undoable INTEGER NOT NULL DEFAULT 1,
     undone_at TEXT
 );
+
+-- v0.4: evolving judgment model
+CREATE TABLE IF NOT EXISTS judgment_items (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    statement TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    scope TEXT NOT NULL DEFAULT '{}',
+    strength REAL NOT NULL DEFAULT 0.5,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    stability TEXT NOT NULL DEFAULT 'evolving',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    valid_from TEXT,
+    valid_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by TEXT,
+    provenance TEXT NOT NULL DEFAULT '{}',
+    exceptions TEXT NOT NULL DEFAULT '[]',
+    conflicts_with TEXT NOT NULL DEFAULT '[]',
+    supersedes TEXT,
+    tradeoff TEXT,
+    lean REAL,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_judgment_status ON judgment_items(status);
+CREATE INDEX IF NOT EXISTS idx_judgment_kind ON judgment_items(kind);
+CREATE INDEX IF NOT EXISTS idx_judgment_domain ON judgment_items(domain);
+
+CREATE TABLE IF NOT EXISTS judgment_proposals (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    target_judgment_id TEXT,
+    proposed_item TEXT NOT NULL DEFAULT '{}',
+    reason TEXT NOT NULL DEFAULT '',
+    supporting_memory_ids TEXT NOT NULL DEFAULT '[]',
+    contradicting_memory_ids TEXT NOT NULL DEFAULT '[]',
+    support_count INTEGER NOT NULL DEFAULT 0,
+    contradiction_count INTEGER NOT NULL DEFAULT 0,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    scope TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    preview_token TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jprop_status ON judgment_proposals(status);
+
+CREATE TABLE IF NOT EXISTS judgment_versions (
+    id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    parent_version_id TEXT,
+    active INTEGER NOT NULL DEFAULT 0,
+    item_ids TEXT NOT NULL DEFAULT '[]',
+    actor TEXT NOT NULL DEFAULT 'user',
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jver_active ON judgment_versions(active);
+
+CREATE TABLE IF NOT EXISTS judgment_snapshots (
+    id TEXT PRIMARY KEY,
+    judgment_version_id TEXT NOT NULL,
+    item_ids TEXT NOT NULL DEFAULT '[]',
+    target_domain TEXT NOT NULL DEFAULT 'technical',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    task_profile TEXT NOT NULL DEFAULT 'general',
+    project_id TEXT,
+    created_at TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS judgment_conflicts (
+    id TEXT PRIMARY KEY,
+    judgment_id TEXT NOT NULL,
+    memory_ids TEXT NOT NULL DEFAULT '[]',
+    other_judgment_id TEXT,
+    type TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'open',
+    suggested_resolution TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_jconf_status ON judgment_conflicts(status);
+
+CREATE TABLE IF NOT EXISTS judgment_traces (
+    id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    applied_items TEXT NOT NULL DEFAULT '[]',
+    blocked_options TEXT NOT NULL DEFAULT '[]',
+    exceptions_used TEXT NOT NULL DEFAULT '[]',
+    result TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
 """
 
 
-class SqliteStore(MemoryStore):
+class SqliteStore(JudgmentStoreMixin, MemoryStore):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()
         self.path = Path(path)
@@ -1331,3 +1436,17 @@ class SqliteStore(MemoryStore):
             self._maybe_commit()
         except sqlite3.OperationalError:
             pass
+
+    # -- judgment mixin hooks -----------------------------------------------
+
+    def _j_exec(self, sql: str, params: tuple) -> None:
+        self.conn.execute(sql, params)
+
+    def _j_fetchone(self, sql: str, params: tuple):
+        return self.conn.execute(sql, params).fetchone()
+
+    def _j_fetchall(self, sql: str, params: tuple) -> list:
+        return list(self.conn.execute(sql, params).fetchall())
+
+    def _j_commit(self) -> None:
+        self._maybe_commit()

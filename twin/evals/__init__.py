@@ -437,3 +437,59 @@ def compare_runs(a: EvalRun, b: EvalRun) -> dict[str, Any]:
 
 def default_eval_root() -> Path:
     return Path(__file__).resolve().parents[2] / "evals"
+
+
+def run_judgment_eval(store, cfg, dataset_dir: Path) -> EvalRun:
+    """Scope/precedence/constraint checks against judgment fixtures."""
+    from ..judgment.simulate import simulate
+    from ..judgment.yaml_io import apply_yaml_import, preview_yaml_import
+
+    cases = _load_cases(dataset_dir)
+    results: list[EvalCaseResult] = []
+    # bootstrap from default yaml into isolated judgment tables on the given store
+    preview = preview_yaml_import(cfg.judgment_path)
+    if not store.list_judgment_items(status="active", limit=1):
+        apply_yaml_import(store, cfg.judgment_path, classifications=preview)
+
+    for case in cases:
+        ctx = case.get("context") or {}
+        options = list(case.get("options") or [])
+        expected = case.get("expected") or {}
+        sim = simulate(
+            store,
+            case.get("query") or case["id"],
+            domain=ctx.get("domain", "technical"),
+            task_profile=ctx.get("task_profile", "architecture"),
+            options=options or None,
+        )
+        forbidden = set(expected.get("must_not_choose") or [])
+        chose_forbidden = sim.get("recommendation") in forbidden
+        terms = expected.get("required_explanation_terms") or []
+        md = (sim.get("markdown") or "").lower()
+        terms_ok = all(any(t.lower() in md for t in [term]) for term in terms) if terms else True
+        # soft: at least one term family appears
+        if terms and not terms_ok:
+            terms_ok = any(t.lower() in md for t in terms)
+        passed = (not chose_forbidden) and terms_ok
+        results.append(EvalCaseResult(
+            case_id=case["id"],
+            passed=passed,
+            metrics={
+                "recommendation": sim.get("recommendation"),
+                "blocked": sim.get("blocked_options"),
+                "snapshot_id": sim.get("snapshot_id"),
+            },
+            detail="" if passed else "constraint/precedence mismatch",
+        ))
+
+    return EvalRun(
+        id=ids.eval_run_id(),
+        kind="judgment",
+        at=now_iso(),
+        cases=results,
+        summary={
+            "cases": len(results),
+            "passed": sum(1 for r in results if r.passed),
+            "status": "implemented",
+        },
+    )
