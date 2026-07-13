@@ -21,7 +21,7 @@ from .grants import (
 )
 from .identity import (
     active_consent_covers,
-    principal_has_capability,
+    principal_can_read,
     resolve_execution_location,
     validate_vault_access,
 )
@@ -163,13 +163,15 @@ def evaluate_resource(
             labels=classification.labels,
         )
 
-    # Capability gate for non-public (scoped)
+    # Capability gate for non-public: base action AND scopes
     if principal and classification.sensitivity not in ("public",):
-        if not principal_has_capability(
-            principal, "read_context_pack",
+        effective_caps = (request.metadata or {}).get("resolved_capabilities")
+        if not principal_can_read(
+            principal,
             domain=classification.domain,
             vault_id=classification.vault_id,
             project_id=request.project_id,
+            effective_capabilities=effective_caps,
         ):
             return ResourceDecision(
                 resource_id=classification.resource_id,

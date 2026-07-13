@@ -84,6 +84,7 @@ def start_session(
     purpose: str = "task_execution",
     audience: str = "self",
     tool_id: Optional[str] = None,
+    api_token: Optional[str] = None,
 ) -> SessionStart:
     """Identify project/domain/task profile (unless given explicitly), build
     a task-aware pack and open the session that records what was supplied.
@@ -120,7 +121,7 @@ def start_session(
     if client in ("unknown", "", None) and not tool_id:
         surface = "unknown"
     if surface == "cli":
-        bootstrap_policy_set(store)
+        bootstrap_policy_set(store, policies_path=cfg.policies_path)
         ensure_local_identity(store)
     access = resolve_access(
         store,
@@ -132,6 +133,7 @@ def start_session(
         audience=audience,
         project_id=project_id,
         requested_domains=[session_domain] if session_domain else [],
+        api_token=api_token,
     )
     session = CognitiveSession(
         id=ids.session_id(),

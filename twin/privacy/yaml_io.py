@@ -202,15 +202,39 @@ def resolve_tool(tool_id: str, *, store: Optional[MemoryStore] = None) -> Option
     return DEFAULT_TOOLS.get(tool_id)
 
 
-def bootstrap_policy_set(store: MemoryStore, *, actor: str = "system") -> PolicySetVersion:
-    """Persist builtin policies as immutable revisions and activate a policy set."""
+def bootstrap_policy_set(
+    store: MemoryStore,
+    *,
+    actor: str = "system",
+    policies_path: Optional[Path | str] = None,
+) -> PolicySetVersion:
+    """Persist builtin + YAML policies as immutable revisions; activate a set."""
+    import hashlib
+    import json
+
     from .identity import ensure_local_identity
     from .models import PrivacyPolicyRevision
 
     ensure_local_identity(store)
-    policies = builtin_governance_policies()
-    # Also import YAML if present — as revisions, not ad-hoc runtime mix
-    # (YAML path handled by caller via load when bootstrapping workspace)
+
+    policies_map = {p.id: p for p in builtin_governance_policies()}
+    if policies_path and Path(policies_path).exists():
+        data = yaml.safe_load(Path(policies_path).read_text(encoding="utf-8")) or {}
+        for raw in data.get("governance") or data.get("privacy_policies") or []:
+            p = _policy_from_yaml(raw)
+            policies_map[p.id] = p
+    if hasattr(store, "list_privacy_policies"):
+        for p in store.list_privacy_policies(enabled=True):
+            # Only add store-only policies — never overwrite builtins/YAML with
+            # round-tripped rows (timestamps would create orphan revisions).
+            if p.id not in policies_map:
+                policies_map[p.id] = p
+    policies = list(policies_map.values())
+
+    def _payload_hash(payload: dict) -> str:
+        cleaned = {k: v for k, v in payload.items() if k != "_payload_hash"}
+        raw = json.dumps(cleaned, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
     revision_ids: list[str] = []
     policy_ids: list[str] = []
@@ -218,26 +242,35 @@ def bootstrap_policy_set(store: MemoryStore, *, actor: str = "system") -> Policy
         existing = store.get_privacy_policy(p.id) if hasattr(store, "get_privacy_policy") else None
         if existing is None:
             store.insert_privacy_policy(p)
-        # Always append an immutable revision for this bootstrap payload
-        rev = PrivacyPolicyRevision(
-            id=ids.new_id("prev"),
-            policy_id=p.id,
-            version=p.version,
-            payload=p.model_dump(mode="json"),
-            created_at=now_iso(),
-            actor=actor,
-            reason="bootstrap",
-        )
-        # Dedupe: if identical payload revision already in active set, reuse
-        store.insert_privacy_policy_revision(rev)
-        revision_ids.append(rev.id)
+        payload = p.model_dump(mode="json")
+        ph = _payload_hash(payload)
+        reused = None
+        if hasattr(store, "list_privacy_policy_revisions"):
+            for rev in store.list_privacy_policy_revisions(policy_id=p.id):
+                prev = dict(rev.payload or {})
+                prev_hash = prev.get("_payload_hash") or _payload_hash(prev)
+                if prev_hash == ph:
+                    reused = rev.id
+                    break
+        if reused:
+            revision_ids.append(reused)
+        else:
+            rev = PrivacyPolicyRevision(
+                id=ids.new_id("prev"),
+                policy_id=p.id,
+                version=p.version,
+                payload={**payload, "_payload_hash": ph},
+                created_at=now_iso(),
+                actor=actor,
+                reason="bootstrap",
+            )
+            store.insert_privacy_policy_revision(rev)
+            revision_ids.append(rev.id)
         policy_ids.append(p.id)
 
     parent = store.get_active_policy_set_version()
-    if parent and set(parent.revision_ids or []) and set(parent.policy_ids) == set(policy_ids):
-        # Still refresh if revision_ids empty (legacy)
-        if parent.revision_ids:
-            return parent
+    if parent and set(parent.revision_ids or []) == set(revision_ids):
+        return parent
     store.deactivate_policy_set_versions()
     version = PolicySetVersion(
         id=ids.new_id("psv"),
@@ -261,7 +294,8 @@ def load_active_policy_revisions(store: MemoryStore) -> list[PrivacyPolicy]:
         for rid in version.revision_ids:
             rev = store.get_privacy_policy_revision(rid)
             if rev and rev.payload:
-                out.append(PrivacyPolicy.model_validate(rev.payload))
+                payload = {k: v for k, v in rev.payload.items() if k != "_payload_hash"}
+                out.append(PrivacyPolicy.model_validate(payload))
         if out:
             return out
     # Fallback for stores without revisions yet

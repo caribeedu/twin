@@ -439,3 +439,83 @@ def execute_deletion(
         },
     )
     return store.get_deletion_request(deletion_id)  # type: ignore[return-value]
+
+
+def retry_deletion_residuals(
+    store: MemoryStore,
+    deletion_id: str,
+    *,
+    confirm: bool = False,
+) -> DeletionRequest:
+    """Resume cleanup for completed_with_residuals / failed requests."""
+    if not confirm:
+        raise ValueError("retry_deletion_residuals requires confirm=True")
+    req = store.get_deletion_request(deletion_id)
+    if req is None:
+        raise ValueError(f"deletion {deletion_id} not found")
+    if req.status not in (
+        DeletionStatus.completed_with_residuals,
+        DeletionStatus.failed,
+        DeletionStatus.running,
+    ):
+        raise ValueError(
+            f"deletion is {req.status.value}; retry only for residuals/failed"
+        )
+
+    man = req.manifest or {}
+    residuals: list[str] = []
+    store.update_deletion_request(deletion_id, status=DeletionStatus.running.value)
+    try:
+        with store.transaction():
+            for eid in man.get("evidence_delete") or []:
+                try:
+                    if hasattr(store, "tombstone_evidence"):
+                        store.tombstone_evidence(eid, reason=req.reason or "privacy_retry")
+                    elif hasattr(store, "delete_evidence_row"):
+                        store.delete_evidence_row(eid)
+                except Exception as exc:
+                    residuals.append(f"evidence:{eid}:{exc}")
+            for aid in man.get("artifacts") or []:
+                try:
+                    if hasattr(store, "tombstone_artifact"):
+                        store.tombstone_artifact(aid, reason=req.reason or "privacy_retry")
+                except Exception as exc:
+                    residuals.append(f"artifact:{aid}:{exc}")
+            for pid in man.get("percepts") or []:
+                try:
+                    if hasattr(store, "tombstone_percept"):
+                        store.tombstone_percept(pid, reason=req.reason or "privacy_retry")
+                except Exception as exc:
+                    residuals.append(f"percept:{pid}:{exc}")
+            for mid in man.get("embeddings") or man.get("memories_delete") or []:
+                if hasattr(store, "delete_embedding"):
+                    try:
+                        store.delete_embedding(mid)
+                    except Exception as exc:
+                        residuals.append(f"embedding:{mid}:{exc}")
+                if hasattr(store, "get_embedding_blob"):
+                    try:
+                        if store.get_embedding_blob(mid) is not None:
+                            residuals.append(f"embedding_residual:{mid}")
+                    except Exception:
+                        pass
+    except Exception:
+        store.update_deletion_request(deletion_id, status=DeletionStatus.failed.value)
+        raise
+
+    status = (
+        DeletionStatus.completed_with_residuals
+        if residuals
+        else DeletionStatus.completed
+    )
+    store.update_deletion_request(
+        deletion_id,
+        status=status.value,
+        completed_at=now_iso(),
+        preview={
+            **(req.preview or {}),
+            "residuals": residuals,
+            "retried_at": now_iso(),
+        },
+    )
+    return store.get_deletion_request(deletion_id)  # type: ignore[return-value]

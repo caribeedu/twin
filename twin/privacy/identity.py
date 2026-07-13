@@ -1,8 +1,16 @@
 """Trusted access context — server resolves identity; clients never self-assert.
 
-Rule: registered binding > authenticated capability > request claims.
-Absence of authenticated binding → restricted mode, never local-cli.
-Known tool names alone never mint principals or capabilities.
+Effective authority is always an intersection:
+
+    authenticated principal
+  ∩ client binding
+  ∩ persona allowance
+  ∩ scoped capability
+  ∩ vault allowance
+  ∩ policy
+  ∩ grant
+
+Binding never amplifies principal. External surfaces require a credential.
 """
 
 from __future__ import annotations
@@ -21,10 +29,11 @@ from .models import (
     ToolIdentity,
     Vault,
 )
-from .yaml_io import DEFAULT_TOOLS, resolve_tool
+from .yaml_io import resolve_tool
 
 
 LOCAL_SURFACES = frozenset({"cli", "local-cli", "twin-cli"})
+EXTERNAL_SURFACES = frozenset({"mcp", "http", "api", "unknown", ""})
 
 # No wildcards — unknown persona on a vault is deny.
 DEFAULT_VAULT_PERSONAS: dict[str, set[str]] = {
@@ -78,6 +87,29 @@ def hash_credential(token: str) -> str:
     return hashlib.sha256((token or "").encode()).hexdigest()
 
 
+def intersect_allowlists(
+    base: Optional[list[str]],
+    restrictor: Optional[list[str]],
+) -> list[str]:
+    """Binding never amplifies — only restricts (or inherits when empty)."""
+    base_s = set(base or [])
+    if not restrictor:
+        return sorted(base_s)
+    rest_s = set(restrictor)
+    if "*" in base_s:
+        return ["*"] if "*" in rest_s else sorted(rest_s)
+    if "*" in rest_s:
+        return sorted(base_s)
+    return sorted(base_s & rest_s)
+
+
+def intersect_capabilities(
+    principal_caps: Optional[list[str]],
+    binding_caps: Optional[list[str]],
+) -> list[str]:
+    return intersect_allowlists(principal_caps, binding_caps)
+
+
 def register_client_binding(
     store: MemoryStore,
     *,
@@ -85,13 +117,22 @@ def register_client_binding(
     tool_id: str,
     principal_id: str,
     credential: Optional[str] = None,
+    authentication_mode: str = "credential",
     capabilities: Optional[list[str]] = None,
     allowed_personas: Optional[list[str]] = None,
     allowed_purposes: Optional[list[str]] = None,
     allowed_audiences: Optional[list[str]] = None,
     allowed_vaults: Optional[list[str]] = None,
 ) -> ClientBinding:
-    """Administrative provisioning — never called from a read path."""
+    """Administrative provisioning — never called from a read path.
+
+    External MCP/HTTP clients must receive a credential (or an explicit
+    trusted_local_transport mode that the surface can prove).
+    """
+    if authentication_mode not in ("credential", "trusted_local_transport"):
+        raise ValueError("authentication_mode must be credential | trusted_local_transport")
+    if authentication_mode == "credential" and not credential:
+        raise ValueError("credential required for authentication_mode=credential")
     binding = ClientBinding(
         id=ids.new_id("cbind"),
         client_id=client_id,
@@ -104,6 +145,7 @@ def register_client_binding(
         allowed_audiences=list(allowed_audiences or ["self"]),
         allowed_vaults=list(allowed_vaults or ["vault_general"]),
         created_at=now_iso(),
+        metadata={"authentication_mode": authentication_mode},
     )
     store.insert_client_binding(binding)
     return binding
@@ -124,11 +166,9 @@ def resolve_access(
     requested_domains: Optional[list[str]] = None,
     api_token: Optional[str] = None,
     capabilities_hint: Optional[list[str]] = None,
+    trusted_local_transport: bool = False,
 ) -> AccessRequest:
-    """Build a trusted AccessRequest from authenticated binding or local CLI.
-
-    Declaring ``client=cursor`` without a registered binding stays restricted.
-    """
+    """Build a trusted AccessRequest from authenticated binding or local CLI."""
     _ = capabilities_hint  # never trusted from the wire
     surface_l = (surface or "").lower()
     client_l = (client or "").lower()
@@ -152,7 +192,7 @@ def resolve_access(
                 project_id=project_id, session_id=session_id,
                 requested_domains=requested_domains, claims=claims,
             )
-        resolved = _apply_allowlists(
+        return _apply_allowlists(
             principal=principal,
             tool_id="local-cli",
             persona=persona,
@@ -165,10 +205,13 @@ def resolve_access(
             binding=None,
             extra_meta={"surface": "cli", "trusted_level": "local"},
         )
-        return resolved
 
-    # External / MCP / HTTP — require registered client binding (+ credential if set)
-    binding = _find_binding(store, client_l or tool_id, api_token)
+    # External / MCP / HTTP — require registered + authenticated binding
+    binding = _find_binding(
+        store, client_l or tool_id, api_token,
+        surface=surface_l,
+        trusted_local_transport=trusted_local_transport,
+    )
     if binding is None:
         return restricted_access(
             project_id=project_id, session_id=session_id,
@@ -210,13 +253,31 @@ def _find_binding(
     store: MemoryStore,
     client_key: Optional[str],
     api_token: Optional[str],
+    *,
+    surface: str,
+    trusted_local_transport: bool = False,
 ) -> Optional[ClientBinding]:
     if not client_key or not hasattr(store, "get_client_binding_by_client"):
         return None
     binding = store.get_client_binding_by_client(client_key)
     if binding is None or binding.revoked_at:
         return None
-    if binding.credential_hash:
+
+    auth_mode = (binding.metadata or {}).get("authentication_mode") or (
+        "credential" if binding.credential_hash else "none"
+    )
+
+    # External surfaces: name alone never authenticates
+    if surface in EXTERNAL_SURFACES or surface not in LOCAL_SURFACES:
+        if auth_mode == "trusted_local_transport":
+            if not trusted_local_transport:
+                return None
+        elif not binding.credential_hash:
+            return None
+        else:
+            if not api_token or hash_credential(api_token) != binding.credential_hash:
+                return None
+    elif binding.credential_hash:
         if not api_token or hash_credential(api_token) != binding.credential_hash:
             return None
     return binding
@@ -236,21 +297,28 @@ def _apply_allowlists(
     binding: Optional[ClientBinding],
     extra_meta: dict[str, Any],
 ) -> AccessRequest:
-    allowed_personas = list(
-        (binding.allowed_personas if binding and binding.allowed_personas else None)
-        or principal.allowed_personas
-        or (["individual"] if principal.local else [])
+    # Binding ∩ principal — binding never amplifies
+    allowed_personas = intersect_allowlists(
+        principal.allowed_personas or (["individual"] if principal.local else []),
+        binding.allowed_personas if binding else None,
     )
-    allowed_purposes = list(
-        (binding.allowed_purposes if binding and binding.allowed_purposes else None)
-        or principal.allowed_purposes
-        or ["memory_retrieval", "task_execution"]
+    allowed_purposes = intersect_allowlists(
+        principal.allowed_purposes or ["memory_retrieval", "task_execution"],
+        binding.allowed_purposes if binding else None,
     )
-    allowed_audiences = list(
-        (binding.allowed_audiences if binding and binding.allowed_audiences else None)
-        or principal.allowed_audiences
-        or ["self"]
+    allowed_audiences = intersect_allowlists(
+        principal.allowed_audiences or ["self"],
+        binding.allowed_audiences if binding else None,
     )
+    allowed_vaults = intersect_allowlists(
+        principal.allowed_vaults,
+        binding.allowed_vaults if binding else None,
+    )
+    caps = intersect_capabilities(
+        principal.capabilities,
+        binding.capabilities if binding else None,
+    )
+
     requested_persona = persona or (allowed_personas[0] if allowed_personas else "unknown")
     requested_purpose = purpose or "memory_retrieval"
     requested_audience = audience or "self"
@@ -279,7 +347,6 @@ def _apply_allowlists(
             requested_domains=requested_domains, claims=claims,
         )
 
-    caps = list(binding.capabilities if binding and binding.capabilities else principal.capabilities)
     return AccessRequest(
         principal_id=principal.id,
         persona=requested_persona,
@@ -295,11 +362,7 @@ def _apply_allowlists(
             "claims": claims,
             "resolved_capabilities": caps,
             "allowed_personas": allowed_personas,
-            "allowed_vaults": list(
-                (binding.allowed_vaults if binding and binding.allowed_vaults else None)
-                or principal.allowed_vaults
-                or []
-            ),
+            "allowed_vaults": allowed_vaults,
         },
     )
 
@@ -317,6 +380,52 @@ def _authenticated_local(
     return False
 
 
+def _scope_matches(caps: set[str], prefix: str, value: Optional[str]) -> bool:
+    """If any prefix scopes exist, value must match one (or wildcard)."""
+    scoped = {c for c in caps if c.startswith(prefix + ":")}
+    if not scoped:
+        return True  # no scopes of this kind → not restricting
+    if value is None:
+        return True
+    return f"{prefix}:{value}" in scoped or f"{prefix}:*" in scoped
+
+
+def principal_can_read(
+    principal: Principal,
+    *,
+    domain: Optional[str] = None,
+    vault_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    effective_capabilities: Optional[list[str]] = None,
+) -> bool:
+    """Base action AND resource scopes (never base OR scope)."""
+    caps = set(
+        effective_capabilities
+        if effective_capabilities is not None
+        else (principal.capabilities or [])
+    )
+    if "*" in caps or "privacy:admin" in caps:
+        return True
+    if "read_context_pack" not in caps:
+        return False
+    if not _scope_matches(caps, "read:domain", domain):
+        return False
+    if vault_id:
+        short = vault_id.replace("vault_", "") if vault_id.startswith("vault_") else vault_id
+        scoped = {c for c in caps if c.startswith("read:vault:")}
+        if scoped:
+            ok = (
+                f"read:vault:{vault_id}" in scoped
+                or f"read:vault:{short}" in scoped
+                or "read:vault:*" in scoped
+            )
+            if not ok:
+                return False
+    if project_id and not _scope_matches(caps, "read:project", project_id):
+        return False
+    return True
+
+
 def principal_has_capability(
     principal: Principal,
     capability: str,
@@ -324,22 +433,25 @@ def principal_has_capability(
     domain: Optional[str] = None,
     vault_id: Optional[str] = None,
     project_id: Optional[str] = None,
+    effective_capabilities: Optional[list[str]] = None,
 ) -> bool:
-    caps = set(principal.capabilities or [])
+    """Backward-compatible entry; read paths use principal_can_read semantics."""
+    if capability == "read_context_pack":
+        return principal_can_read(
+            principal,
+            domain=domain,
+            vault_id=vault_id,
+            project_id=project_id,
+            effective_capabilities=effective_capabilities,
+        )
+    caps = set(
+        effective_capabilities
+        if effective_capabilities is not None
+        else (principal.capabilities or [])
+    )
     if "*" in caps or "privacy:admin" in caps:
         return True
-    if capability in caps:
-        return True
-    # Scoped forms
-    candidates = [capability]
-    if domain:
-        candidates.append(f"read:domain:{domain}")
-    if vault_id:
-        candidates.append(f"read:vault:{vault_id.replace('vault_', '')}")
-        candidates.append(f"read:vault:{vault_id}")
-    if project_id:
-        candidates.append(f"read:project:{project_id}")
-    return any(c in caps for c in candidates)
+    return capability in caps
 
 
 def validate_vault_access(
@@ -350,23 +462,20 @@ def validate_vault_access(
     principal: Optional[Principal] = None,
     allowed_vaults_extra: Optional[list[str]] = None,
 ) -> bool:
-    """Deny unknown vaults. No wildcard personas in defaults."""
-    if allowed_vaults_extra and (
-        vault_id in allowed_vaults_extra or "*" in allowed_vaults_extra
-    ):
-        pass  # principal/binding may expand; still check persona on vault
-    if principal and principal.allowed_vaults:
-        if vault_id not in principal.allowed_vaults and "*" not in principal.allowed_vaults:
+    """Effective vaults = principal ∩ binding; then persona must be allowed."""
+    principal_vaults = list((principal.allowed_vaults if principal else None) or [])
+    effective = intersect_allowlists(principal_vaults, allowed_vaults_extra)
+    # If either side declared vaults, enforce membership
+    if principal_vaults or allowed_vaults_extra:
+        if "*" not in effective and vault_id not in effective:
             return False
 
     vault: Optional[Vault] = None
     if hasattr(store, "get_vault"):
         vault = store.get_vault(vault_id)
     if vault is not None:
-        allowed = set(vault.allowed_personas or [])
-        return persona in allowed
+        return persona in set(vault.allowed_personas or [])
 
-    # Unknown vault id → default-deny (except known defaults without *)
     allowed = DEFAULT_VAULT_PERSONAS.get(vault_id)
     if allowed is None:
         return False
@@ -452,18 +561,22 @@ def ensure_local_identity(store: MemoryStore) -> Principal:
         allowed_vaults=list(DEFAULT_VAULT_PERSONAS.keys()),
     )
     store.insert_principal(p)
-    # Local binding for tool local-cli (no credential — surface auth is enough)
+    # Local binding is surface-authenticated (CLI path), not name-authenticated
     if hasattr(store, "get_client_binding_by_client"):
         if store.get_client_binding_by_client("local-cli") is None:
-            register_client_binding(
-                store,
+            binding = ClientBinding(
+                id=ids.new_id("cbind"),
                 client_id="local-cli",
                 tool_id="local-cli",
                 principal_id=p.id,
+                credential_hash=None,
                 capabilities=list(p.capabilities),
                 allowed_personas=list(p.allowed_personas),
                 allowed_purposes=list(p.allowed_purposes),
                 allowed_audiences=list(p.allowed_audiences),
                 allowed_vaults=list(p.allowed_vaults),
+                created_at=now_iso(),
+                metadata={"authentication_mode": "trusted_local_transport"},
             )
+            store.insert_client_binding(binding)
     return p

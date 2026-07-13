@@ -105,6 +105,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     register_client_binding(
         ws.store, client_id="cursor", tool_id="cursor",
         principal_id="principal_cursor",
+        credential="test-cursor-secret",
         capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
         allowed_personas=["individual", "developer"],
         allowed_vaults=["vault_general", "vault_work"],
@@ -117,7 +118,8 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     # project and task profile and supplies prior decisions without re-asking
     started = await _call(ide, "session_start", {
         "query": "implement retry handling in the webhook endpoint code",
-        "client": "cursor", "cwd": "/home/edu/code/atlas-api",
+        "client": "cursor", "client_token": "test-cursor-secret",
+        "cwd": "/home/edu/code/atlas-api",
     })
     assert started["project_id"] == project.id
     assert started["task_profile"] == "coding"
@@ -198,6 +200,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
         register_client_binding(
             ws_bind.store, client_id="cursor", tool_id="cursor",
             principal_id="principal_cursor",
+            credential="test-cursor-secret",
             capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
             allowed_personas=["individual", "developer"],
             allowed_vaults=["vault_general", "vault_work"],
@@ -207,7 +210,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     other = create_server(str(home))
     pack = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
-        "client": "cursor",
+        "client": "cursor", "client_token": "test-cursor-secret",
     })
     pack_ids = {s["memory_id"] for s in pack["sources"]}
     assert set(created) & pack_ids, f"expected one of {created} in pack {pack_ids}"

@@ -176,6 +176,7 @@ def create_server(home: Optional[str] = None):
         task_profile: str = "general",
         project: Optional[str] = None,
         client: Optional[str] = None,
+        client_token: Optional[str] = None,
         persona: str = "individual",
         purpose: str = "memory_retrieval",
         audience: str = "self",
@@ -191,14 +192,15 @@ def create_server(home: Optional[str] = None):
         (general, coding, architecture, debugging, writing, planning, review,
         meeting_prep) reorders sections for that kind of task; `project` is
         an optional project name/alias to boost project-linked memories.
-        Identity: pass `client` (cursor, claude-desktop, …). Omitting identity
-        activates restricted mode — MCP never inherits local-cli privileges."""
+        Identity: pass registered `client` + `client_token` (credential).
+        Omitting them activates restricted mode — MCP never inherits local-cli."""
         from ..privacy.identity import resolve_access
         access = resolve_access(
             ws.store, surface="mcp", client=client,
             persona=persona, purpose=purpose, audience=audience,
             project_id=_resolve_project_id(project),
             requested_domains=[target_domain],
+            api_token=client_token,
         )
         pack = build_context_pack(
             ws.store, ws.cfg, ws.embedder, query,
@@ -234,6 +236,7 @@ def create_server(home: Optional[str] = None):
     def session_start(
         query: str,
         client: str = "mcp",
+        client_token: Optional[str] = None,
         cwd: Optional[str] = None,
         domain: Optional[str] = None,
         project: Optional[str] = None,
@@ -259,6 +262,7 @@ def create_server(home: Optional[str] = None):
                 ws.store, ws.cfg, ws.embedder, query,
                 client=client, cwd=cwd, domain=domain, project=project,
                 task_profile=task_profile, max_tokens=max_tokens,
+                api_token=client_token,
             )
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
@@ -598,19 +602,21 @@ def create_server(home: Optional[str] = None):
     def privacy_evaluate(
         memory_ids: Optional[list[str]] = None,
         client: Optional[str] = None,
+        client_token: Optional[str] = None,
         persona: str = "individual",
         purpose: str = "memory_retrieval",
         audience: str = "self",
     ) -> str:
         """Evaluate privacy policies for memories under a resolved client identity.
-        Omitting `client` activates restricted mode (never local-cli)."""
+        Omitting `client`/`client_token` activates restricted mode (never local-cli)."""
         from ..privacy.engine import evaluate_access
         from ..privacy.identity import resolve_access
         from ..privacy.yaml_io import bootstrap_policy_set
-        bootstrap_policy_set(ws.store)
+        bootstrap_policy_set(ws.store, policies_path=ws.cfg.policies_path)
         access = resolve_access(
             ws.store, surface="mcp", client=client,
             persona=persona, purpose=purpose, audience=audience,
+            api_token=client_token,
         )
         memories = []
         for mid in memory_ids or []:
@@ -643,12 +649,15 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def privacy_validate_output(text: str, client: Optional[str] = None) -> str:
+    def privacy_validate_output(text: str, client: Optional[str] = None,
+                                client_token: Optional[str] = None) -> str:
         """Scan generated/exported text before release."""
         from ..privacy.engine import validate_output
         from ..privacy.identity import resolve_access
-        access = resolve_access(ws.store, surface="mcp", client=client)
-        return json.dumps(validate_output(text, access=access), ensure_ascii=False)
+        access = resolve_access(
+            ws.store, surface="mcp", client=client, api_token=client_token,
+        )
+        return json.dumps(validate_output(text, access=access, store=ws.store), ensure_ascii=False)
 
     return mcp
 

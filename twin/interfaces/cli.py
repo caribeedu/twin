@@ -248,7 +248,7 @@ def cmd_pack(args) -> None:
     from ..privacy.yaml_io import bootstrap_policy_set
 
     ws = Workspace(args.home)
-    bootstrap_policy_set(ws.store)
+    bootstrap_policy_set(ws.store, policies_path=ws.cfg.policies_path)
     ensure_local_identity(ws.store)
     access = resolve_access(
         ws.store, surface="cli", client="local-cli",

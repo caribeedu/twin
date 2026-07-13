@@ -229,36 +229,56 @@ def test_mcp_identity_resolve_restricted():
         access = resolve_access(store, surface="mcp", client=None)
         assert access.tool_id == "unknown"
         assert access.is_restricted_mode
-        # Declaring local-cli via MCP must not work
         spoof = resolve_access(store, surface="mcp", client="local-cli", tool_id="local-cli")
         assert spoof.tool_id == "unknown"
-        # Declaring cursor without binding stays restricted
         bare = resolve_access(store, surface="mcp", client="cursor")
         assert bare.is_restricted_mode
         assert resolve_execution_location("chatgpt-cloud", claimed="local") == "cloud"
         assert resolve_execution_location("no-such-tool") == "unknown"
-        # Binding unlocks authenticated client
         bootstrap_policy_set(store)
         ensure_local_identity(store)
         from twin.privacy.models import Principal, PrincipalType
         store.insert_principal(Principal(
             id="principal_cursor", type=PrincipalType.tool, name="cursor",
-            capabilities=["read_context_pack", "read:domain:technical"],
+            capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
             allowed_personas=["developer", "individual"],
             allowed_vaults=["vault_general", "vault_work"],
         ))
+        # Binding without credential cannot be registered for credential mode
+        import pytest
+        with pytest.raises(ValueError, match="credential"):
+            register_client_binding(
+                store, client_id="cursor-bad", tool_id="cursor",
+                principal_id="principal_cursor",
+            )
         register_client_binding(
             store, client_id="cursor", tool_id="cursor",
             principal_id="principal_cursor",
-            capabilities=["read_context_pack", "read:domain:technical"],
+            credential="secret-ok",
+            capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
             allowed_personas=["developer", "individual"],
-            allowed_vaults=["vault_general", "vault_work"],
+            allowed_vaults=["vault_general"],  # stricter than principal
         )
-        ok = resolve_access(store, surface="mcp", client="cursor", persona="developer")
+        # Name alone still restricted
+        assert resolve_access(store, surface="mcp", client="cursor").is_restricted_mode
+        # Wrong token
+        assert resolve_access(
+            store, surface="mcp", client="cursor", api_token="wrong",
+        ).is_restricted_mode
+        ok = resolve_access(
+            store, surface="mcp", client="cursor", persona="developer",
+            api_token="secret-ok",
+        )
         assert ok.tool_id == "cursor"
         assert not ok.is_restricted_mode
-        # Unauthorized persona → restricted
-        bad_persona = resolve_access(store, surface="mcp", client="cursor", persona="employee")
+        # Binding ∩ principal vaults — only vault_general
+        assert ok.metadata["allowed_vaults"] == ["vault_general"]
+        # Binding cannot amplify to privacy:admin
+        assert "privacy:admin" not in ok.metadata["resolved_capabilities"]
+        bad_persona = resolve_access(
+            store, surface="mcp", client="cursor", persona="employee",
+            api_token="secret-ok",
+        )
         assert bad_persona.is_restricted_mode
 
 
@@ -463,3 +483,127 @@ def test_artifact_delete_preserves_partial_memory(store, embedder):
     assert out.status.value in ("completed", "completed_with_residuals")
     still = store.get_memory(mem.id)
     assert still is not None and not still.deleted_at
+
+
+def test_capability_requires_base_and_scopes(store, embedder):
+    from twin.privacy.identity import principal_can_read
+    from twin.privacy.models import Principal, PrincipalType
+    bootstrap_policy_set(store)
+    p = Principal(
+        id="p_scoped", type=PrincipalType.tool, name="scoped",
+        capabilities=[
+            "read_context_pack",
+            "read:domain:technical",
+            "read:vault:vault_general",
+        ],
+    )
+    store.insert_principal(p)
+    assert principal_can_read(p, domain="technical", vault_id="vault_general")
+    assert not principal_can_read(p, domain="health", vault_id="vault_general")
+    assert not principal_can_read(p, domain="technical", vault_id="vault_work")
+    assert not principal_can_read(p, domain="technical", vault_id="vault_restricted")
+    # scopes alone insufficient
+    p2 = Principal(
+        id="p_noscope", type=PrincipalType.tool,
+        capabilities=["read:domain:technical"],
+    )
+    assert not principal_can_read(p2, domain="technical", vault_id="vault_general")
+    # admin bypass
+    admin = Principal(id="p_admin", capabilities=["privacy:admin"])
+    assert principal_can_read(admin, domain="health", vault_id="vault_restricted")
+
+
+def test_binding_vault_intersection_enforced(store, embedder):
+    from twin.privacy.identity import (
+        ensure_local_identity, register_client_binding, resolve_access,
+    )
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    from twin.privacy.models import Principal, PrincipalType
+    store.insert_principal(Principal(
+        id="p_bind", type=PrincipalType.tool,
+        capabilities=["read_context_pack", "read:domain:technical",
+                       "read:vault:vault_general", "read:vault:vault_work"],
+        allowed_personas=["individual"],
+        allowed_vaults=["vault_general", "vault_work"],
+    ))
+    register_client_binding(
+        store, client_id="c1", tool_id="cursor", principal_id="p_bind",
+        credential="tok",
+        capabilities=["read_context_pack", "read:domain:technical",
+                       "read:vault:vault_general"],
+        allowed_personas=["individual"],
+        allowed_vaults=["vault_general"],
+    )
+    access = resolve_access(
+        store, surface="mcp", client="c1", api_token="tok", persona="individual",
+    )
+    mem_ok = _mem(store, embedder, domain="technical",
+                  payload={"vault_id": "vault_general"})
+    mem_work = _mem(store, embedder, domain="technical",
+                    payload={"source_owner": "employer", "vault_id": "vault_work"})
+    r = evaluate_access(store, access, [mem_ok, mem_work], persist=True)
+    effects = {rd.resource_id: rd.effect for rd in r["decision"].resource_decisions}
+    assert effects[mem_ok.id] == PolicyEffect.allow
+    assert effects[mem_work.id] == PolicyEffect.deny
+
+
+def test_bootstrap_dedupes_revisions(store, cfg):
+    from twin.privacy.yaml_io import bootstrap_policy_set
+    v1 = bootstrap_policy_set(store, policies_path=cfg.policies_path)
+    revs_before = len(store.list_privacy_policy_revisions())
+    v2 = bootstrap_policy_set(store, policies_path=cfg.policies_path)
+    revs_after = len(store.list_privacy_policy_revisions())
+    assert v1.id == v2.id
+    assert revs_before == revs_after
+    assert v1.revision_ids
+
+
+def test_grant_rolls_back_when_decision_insert_fails(store, embedder):
+    bootstrap_policy_set(store)
+    mem = _mem(
+        store, embedder, domain="finance", title="Income", summary="income",
+        sensitivity="restricted",
+        payload={"salary": 50000, "privacy_labels": ["financial"]},
+    )
+    req = AccessRequest(
+        principal_id="tool_cloud", persona="individual",
+        purpose="financial_planning", audience="self", tool_id="chatgpt-cloud",
+    )
+    grant = create_grant(
+        store, principal_id=req.principal_id, persona=req.persona,
+        purpose=req.purpose, resource_scope={"domains": ["finance"]},
+        allowed_effects=["read_redacted"], tool_ids=["chatgpt-cloud"],
+        max_uses=1, ttl_seconds=600,
+    )
+    real_insert = store.insert_privacy_decision
+
+    def boom(decision):
+        raise RuntimeError("inject decision failure")
+
+    store.insert_privacy_decision = boom  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError, match="inject"):
+            evaluate_access(store, req, [mem], consume_grants=True, persist=True)
+    finally:
+        store.insert_privacy_decision = real_insert  # type: ignore[method-assign]
+    g = store.get_permission_grant(grant.id)
+    assert g.uses == 0
+    assert g.status.value == "active"
+
+
+def test_retry_deletion_residuals(store, embedder):
+    from twin.privacy.deletion import (
+        execute_deletion, preview_deletion, retry_deletion_residuals,
+    )
+    from twin.privacy.models import DeletionStatus
+    m = _mem(store, embedder, domain="technical", title="gone", summary="x")
+    req = preview_deletion(store, {"memory_ids": [m.id]})
+    out = execute_deletion(store, req.id, confirm=True, preview_token=req.preview_token)
+    # Force residual state then retry
+    store.update_deletion_request(
+        out.id, status=DeletionStatus.completed_with_residuals.value,
+        preview={**(out.preview or {}), "residuals": ["embedding_residual:x"]},
+    )
+    retried = retry_deletion_residuals(store, out.id, confirm=True)
+    assert retried.status.value in ("completed", "completed_with_residuals")

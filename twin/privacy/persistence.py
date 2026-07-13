@@ -166,6 +166,8 @@ def row_to_export(row: Any) -> ExportRecord:
 
 
 def policy_set_to_row(v: PolicySetVersion) -> dict[str, Any]:
+    meta = dict(v.metadata or {})
+    meta["revision_ids"] = list(v.revision_ids or [])
     return {
         "id": v.id,
         "version": v.version,
@@ -174,20 +176,23 @@ def policy_set_to_row(v: PolicySetVersion) -> dict[str, Any]:
         "policy_ids": _j(v.policy_ids),
         "active": 1 if v.active else 0,
         "actor": v.actor,
-        "metadata": _j(v.metadata),
+        "metadata": _j(meta),
     }
 
 
 def row_to_policy_set(row: Any) -> PolicySetVersion:
+    meta = _loads(row["metadata"], {})
+    revision_ids = list(meta.pop("revision_ids", []) or [])
     return PolicySetVersion(
         id=row["id"],
         version=int(row["version"]),
         created_at=row["created_at"],
         reason=row["reason"] or "",
         policy_ids=_loads(row["policy_ids"], []),
+        revision_ids=revision_ids,
         active=bool(row["active"]),
         actor=row["actor"] or "user",
-        metadata=_loads(row["metadata"], {}),
+        metadata=meta,
     )
 
 
