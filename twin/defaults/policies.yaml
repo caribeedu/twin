@@ -40,3 +40,17 @@ rules:
       memory_domain: [work]
       target_domain: [family, relationship, health]
     action: block
+
+# v0.5 governance policies (persona / purpose / tool / ownership).
+# The domain firewall rules above remain the legacy gate; these extend
+# contextual access. YAML is bootstrap; the store is operational canonical.
+governance:
+  - id: pol_yaml_no_credentials
+    name: Credentials never leave the vault
+    effect: deny
+    priority: 1000
+    constitutional: true
+    overrideable: false
+    resources:
+      labels: [credential, authentication, secret]
+    reason: Credentials and secrets are never injectable

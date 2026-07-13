@@ -372,3 +372,12 @@ class CognitiveSession(BaseModel):
     consolidation_error: Optional[str] = None   # error type/summary, never content
     summary_percept_id: Optional[str] = None    # deterministic idempotency anchor
     judgment_snapshot_id: Optional[str] = None  # pack snapshot that influenced this session
+    # v0.5 authorization context captured at session start
+    principal_id: Optional[str] = None
+    persona: str = "individual"
+    purpose: str = "task_execution"
+    audience: str = "self"
+    tool_id: Optional[str] = None
+    privacy_decision_ids: list[str] = Field(default_factory=list)
+    grant_ids: list[str] = Field(default_factory=list)
+    policy_snapshot_id: Optional[str] = None

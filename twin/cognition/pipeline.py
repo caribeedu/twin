@@ -101,6 +101,20 @@ def _needs_review(cfg: Config, mem: ExtractedMemory, percept: Percept) -> str | 
 def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
                     percept: Percept) -> ExtractReport:
     report = ExtractReport(percept_id=percept.id)
+
+    # Quarantine prompt-injection content before extraction can produce memories
+    from ..privacy.quarantine import is_quarantined, quarantine_content
+    q = quarantine_content(
+        store, percept.content or "",
+        percept_id=percept.id,
+        artifact_id=(percept.content_refs[0].get("artifact_id")
+                     if percept.content_refs and isinstance(percept.content_refs[0], dict)
+                     else None),
+    )
+    if q is not None or is_quarantined(store, percept_id=percept.id):
+        report.extractor = "quarantined"
+        return report
+
     result, pii_count = _run_extractor(cfg, percept)
     report.extractor = result.extractor
     report.pii_findings = pii_count

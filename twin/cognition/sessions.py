@@ -80,6 +80,11 @@ def start_session(
     task_profile: Optional[str] = None,
     max_tokens: int = 1200,
     include_candidates: bool = False,
+    persona: str = "individual",
+    purpose: str = "task_execution",
+    audience: str = "self",
+    tool_id: Optional[str] = None,
+    api_token: Optional[str] = None,
 ) -> SessionStart:
     """Identify project/domain/task profile (unless given explicitly), build
     a task-aware pack and open the session that records what was supplied.
@@ -108,6 +113,28 @@ def start_session(
     needs_confirmation = session_domain == UNCLASSIFIED_DOMAIN
 
     started_at = now_iso()
+    from ..privacy.identity import ensure_local_identity, resolve_access
+    from ..privacy.yaml_io import bootstrap_policy_set
+    # Surface identity is resolved server-side. Missing/unknown client →
+    # restricted mode — never silently elevate to local-cli.
+    surface = "cli" if client in ("cli", "local-cli", "twin-cli") else "mcp"
+    if client in ("unknown", "", None) and not tool_id:
+        surface = "unknown"
+    if surface == "cli":
+        bootstrap_policy_set(store, policies_path=cfg.policies_path)
+        ensure_local_identity(store)
+    access = resolve_access(
+        store,
+        surface=surface,
+        client=client if client not in ("unknown", "") else None,
+        tool_id=tool_id,
+        persona=persona,
+        purpose=purpose,
+        audience=audience,
+        project_id=project_id,
+        requested_domains=[session_domain] if session_domain else [],
+        api_token=api_token,
+    )
     session = CognitiveSession(
         id=ids.session_id(),
         client=client,
@@ -117,7 +144,13 @@ def start_session(
         initial_query=query,
         started_at=started_at,
         last_activity_at=started_at,
+        principal_id=access.principal_id,
+        persona=access.persona,
+        purpose=access.purpose,
+        audience=access.audience,
+        tool_id=access.tool_id,
     )
+    access = access.model_copy(update={"session_id": session.id})
     pack = build_context_pack(
         store, cfg, embedder, query,
         target_domain=session.domain, max_tokens=max_tokens,
@@ -125,10 +158,16 @@ def start_session(
         # an unconfirmed domain gets nothing, not even the judgment profile
         include_judgment=not needs_confirmation,
         task_profile=session.task_profile, project_id=project_id,
+        access=access,
     )
     session.supplied_memory_ids = [s["memory_id"] for s in pack.sources]
     session.pack_chars = len(pack.context_pack)
     session.judgment_snapshot_id = pack.judgment_snapshot_id
+    session.privacy_decision_ids = (
+        [pack.privacy_decision_id] if pack.privacy_decision_id else []
+    )
+    session.grant_ids = list((pack.privacy_meta or {}).get("grant_ids") or [])
+    session.policy_snapshot_id = (pack.privacy_meta or {}).get("policy_set_version")
     store.insert_session(session)
     return SessionStart(
         session=session, pack=pack,

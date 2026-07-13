@@ -4,6 +4,16 @@ from twin import ids
 from twin.cognition.context_pack import build_context_pack
 from twin.cognition.task_profiles import PROFILES, get_profile, infer_task_profile
 from twin.memory.models import MemoryItem
+from twin.privacy.identity import ensure_local_identity, resolve_access
+from twin.privacy.yaml_io import bootstrap_policy_set
+
+
+def _cli_access(store):
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    return resolve_access(store, surface="cli", persona="individual",
+                          purpose="memory_retrieval", audience="self")
+
 
 
 def test_every_profile_is_well_formed():
@@ -49,9 +59,9 @@ def test_profiles_reorder_sections(store, cfg, embedder):
     _seed(store, embedder)
     query = "webhook RFC RabbitMQ retries local models"
     arch = build_context_pack(store, cfg, embedder, query,
-                              task_profile="architecture", max_tokens=2000)
+                              task_profile="architecture", max_tokens=2000, access=_cli_access(store))
     coding = build_context_pack(store, cfg, embedder, query,
-                                task_profile="coding", max_tokens=2000)
+                                task_profile="coding", max_tokens=2000, access=_cli_access(store))
     assert arch.task_profile == "architecture"
     # architecture leads with prior decisions; coding with project context
     assert arch.context_pack.index("## Prior decisions & rejected alternatives") \
@@ -64,6 +74,6 @@ def test_profiles_reorder_sections(store, cfg, embedder):
 def test_unknown_profile_uses_general_sections(store, cfg, embedder):
     _seed(store, embedder)
     pack = build_context_pack(store, cfg, embedder, "webhook RabbitMQ",
-                              task_profile="nonsense", max_tokens=2000)
+                              task_profile="nonsense", max_tokens=2000, access=_cli_access(store))
     assert pack.task_profile == "general"
     assert "## Decisions" in pack.context_pack

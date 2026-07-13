@@ -244,12 +244,23 @@ def cmd_search(args) -> None:
 
 def cmd_pack(args) -> None:
     from ..cognition.context_pack import build_context_pack
+    from ..privacy.identity import ensure_local_identity, resolve_access
+    from ..privacy.yaml_io import bootstrap_policy_set
 
     ws = Workspace(args.home)
+    bootstrap_policy_set(ws.store, policies_path=ws.cfg.policies_path)
+    ensure_local_identity(ws.store)
+    access = resolve_access(
+        ws.store, surface="cli", client="local-cli",
+        persona=getattr(args, "persona", None) or "individual",
+        purpose=getattr(args, "purpose", None) or "memory_retrieval",
+        audience=getattr(args, "audience", None) or "self",
+        requested_domains=[args.domain] if getattr(args, "domain", None) else [],
+    )
     pack = build_context_pack(ws.store, ws.cfg, ws.embedder, args.query,
                               target_domain=args.domain, max_tokens=args.max_tokens,
                               include_candidates=args.include_candidates,
-                              firewall=ws.firewall)
+                              firewall=ws.firewall, access=access)
     if args.json:
         _print(pack.__dict__)
     else:
@@ -383,6 +394,93 @@ def cmd_judgment(args) -> None:
         print("resolved")
     else:
         raise SystemExit(f"unknown judgment command: {cmd}")
+
+
+def cmd_privacy(args) -> None:
+    from ..privacy.deletion import preview_deletion
+    from ..privacy.engine import evaluate_access, explain_decision
+    from ..privacy.grants import create_grant, revoke_grant
+    from ..privacy.models import AccessRequest
+    from ..privacy.yaml_io import bootstrap_policy_set
+
+    ws = Workspace(args.home)
+    cmd = args.privacy_command
+    if cmd == "bootstrap":
+        v = bootstrap_policy_set(ws.store)
+        print(f"policy set {v.id} v{v.version} ({len(v.policy_ids)} policies)")
+    elif cmd == "simulate":
+        bootstrap_policy_set(ws.store)
+        memories = []
+        for mid in args.memory or []:
+            m = ws.store.get_memory(mid)
+            if m:
+                memories.append(m)
+        if not memories:
+            memories = ws.store.list_memories(status="confirmed", limit=20)
+        req = AccessRequest(
+            principal_id=f"tool_{args.tool}",
+            persona=args.persona,
+            purpose=args.purpose,
+            audience=args.audience,
+            tool_id=args.tool,
+        )
+        result = evaluate_access(ws.store, req, memories, persist=True)
+        d = result["decision"]
+        print(f"Decision: {d.effect.value.upper()}  id={d.id}")
+        print(f"Allowed={d.metadata.get('resources_allowed')} "
+              f"Redacted={d.metadata.get('resources_redacted')} "
+              f"Denied={d.metadata.get('resources_denied')}")
+        for rd in d.resource_decisions:
+            print(f"  {rd.resource_id}  {rd.effect.value:18}  {rd.reason[:60]}")
+    elif cmd == "explain":
+        print(explain_decision(ws.store, args.decision_id))
+    elif cmd == "grants":
+        for g in ws.store.list_permission_grants(status=args.status):
+            print(f"{g.id}  {g.status.value:10}  uses={g.uses}/{g.max_uses}  "
+                  f"{g.purpose} → {g.principal_id}")
+    elif cmd == "grant-create":
+        g = create_grant(
+            ws.store,
+            principal_id=f"tool_{args.tool}",
+            persona=args.persona,
+            purpose=args.purpose,
+            resource_scope={"domains": args.domain or []},
+            ttl_seconds=args.ttl,
+            max_uses=args.max_uses,
+        )
+        print(g.id, g.valid_until, f"max_uses={g.max_uses}")
+    elif cmd == "grant-revoke":
+        print(revoke_grant(ws.store, args.grant_id).status.value)
+    elif cmd == "quarantine":
+        for q in ws.store.list_quarantine(status=args.status):
+            print(f"{q.id}  {q.severity:6}  {q.reason}  {q.detected_patterns}")
+    elif cmd == "delete-preview":
+        sel = {}
+        if args.domain:
+            sel["domain"] = args.domain
+        if args.source_account:
+            sel["source_account"] = args.source_account
+        req = preview_deletion(ws.store, sel)
+        print(req.id)
+        print(f"token={req.preview_token}")
+        print(req.preview)
+    elif cmd == "delete-execute":
+        from ..privacy.deletion import execute_deletion
+        out = execute_deletion(
+            ws.store, args.deletion_id,
+            confirm=True, preview_token=args.token,
+        )
+        print(out.id, out.status.value, (out.preview or {}).get("deleted_count"))
+    elif cmd == "quarantine-release":
+        from ..privacy.quarantine import release_quarantine
+        out = release_quarantine(
+            ws.store, args.quarantine_id,
+            actor=args.actor, reason=args.reason,
+            mode=args.mode, confirm=True,
+        )
+        print(out.id, out.status.value)
+    else:
+        raise SystemExit(f"unknown privacy command: {cmd}")
 
 
 def cmd_supersede(args) -> None:
@@ -729,6 +827,38 @@ def main(argv: list[str] | None = None) -> None:
     prc = js.add_parser("resolve-conflict")
     prc.add_argument("conflict_id"); prc.add_argument("--resolution")
     prc.set_defaults(func=cmd_judgment)
+
+    p = sub.add_parser("privacy", help="persona-aware privacy & governance")
+    ps = p.add_subparsers(dest="privacy_command", required=True)
+    psim = ps.add_parser("simulate")
+    psim.add_argument("--persona", default="individual")
+    psim.add_argument("--purpose", default="memory_retrieval")
+    psim.add_argument("--audience", default="self")
+    psim.add_argument("--tool", default="local-cli")
+    psim.add_argument("--memory", action="append", default=[])
+    psim.set_defaults(func=cmd_privacy)
+    pex = ps.add_parser("explain"); pex.add_argument("decision_id"); pex.set_defaults(func=cmd_privacy)
+    ppol = ps.add_parser("bootstrap"); ppol.set_defaults(func=cmd_privacy)
+    pgl = ps.add_parser("grants"); pgl.add_argument("--status", default="active"); pgl.set_defaults(func=cmd_privacy)
+    pgc = ps.add_parser("grant-create")
+    pgc.add_argument("--tool", required=True); pgc.add_argument("--purpose", required=True)
+    pgc.add_argument("--persona", default="individual"); pgc.add_argument("--domain", action="append", default=[])
+    pgc.add_argument("--ttl", type=int, default=900); pgc.add_argument("--max-uses", type=int, default=1)
+    pgc.set_defaults(func=cmd_privacy)
+    pgr = ps.add_parser("grant-revoke"); pgr.add_argument("grant_id"); pgr.set_defaults(func=cmd_privacy)
+    pql = ps.add_parser("quarantine"); pql.add_argument("--status", default="quarantined"); pql.set_defaults(func=cmd_privacy)
+    pqr = ps.add_parser("quarantine-release")
+    pqr.add_argument("quarantine_id")
+    pqr.add_argument("--actor", required=True)
+    pqr.add_argument("--reason", required=True)
+    pqr.add_argument("--mode", default="release_as_safe",
+                     choices=["release_as_safe", "release_sanitized", "reject"])
+    pqr.set_defaults(func=cmd_privacy)
+    pdp = ps.add_parser("delete-preview"); pdp.add_argument("--domain"); pdp.add_argument("--source-account")
+    pdp.set_defaults(func=cmd_privacy)
+    pde = ps.add_parser("delete-execute")
+    pde.add_argument("deletion_id"); pde.add_argument("--token", required=True)
+    pde.set_defaults(func=cmd_privacy)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")

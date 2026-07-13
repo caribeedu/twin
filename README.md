@@ -1322,19 +1322,22 @@ Delivered:
 
 ### v0.5 — Persona-aware Privacy and Governance
 
-Goal: prepare the system for sensitive personal domains without relying on the main LLM to enforce boundaries.
+Transform the domain firewall into contextual, verifiable governance independent of the main LLM.
 
-Candidate memories are already excluded from packs by default, firewall decisions are logged, PII detection is broad and encryption is available. v0.5 should add:
+Delivered:
 
-- policies scoped by persona, purpose, audience, source ownership and target tool;
-- explicit, time-limited permission grants;
-- contextual redaction rather than only allow/block decisions;
-- field-level sensitivity and encrypted searchable metadata where practical;
-- stronger default-deny rules for cross-domain retrieval;
-- consent and third-party-data policies;
-- prompt-injection quarantine for ingested content;
-- deletion propagation through memories, evidence, embeddings and exports;
-- privacy regression tests and intentional leakage canaries.
+- authorization context (`AccessRequest`: principal, persona, purpose, audience, tool) shared across pack/session surfaces;
+- governance policy engine with precedence (constitutional deny → deny → grant/redact → allow → default-deny in restricted mode);
+- `PrivacyDecision` audit trail with per-resource effects and policy-set version references;
+- field/domain/ownership classification and ephemeral `RedactionPlan` transforms (canonical store untouched);
+- temporary `PermissionGrant`s with TTL, max-uses and compare-and-set consumption;
+- prompt-injection quarantine before extraction (quarantined content cannot become memory/judgment);
+- logical vault labels and employer-ownership policies (no work data to personal cloud);
+- deletion preview/execute with lineage accounting; leakage canaries;
+- context packs evaluate privacy after retrieval (deny/redact before assembly; evidence skipped for redacted items);
+- sessions capture persona/purpose/tool and privacy decision ids;
+- CLI (`twin privacy …`) for simulate, explain, grants, quarantine and delete-preview;
+- `tests/test_privacy.py` covering deny/redact/grant/quarantine/canary invariants.
 
 ### v0.6 — Professional Connectors
 
