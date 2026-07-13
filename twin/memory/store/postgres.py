@@ -498,6 +498,20 @@ CREATE TABLE IF NOT EXISTS privacy_vaults (
     id TEXT PRIMARY KEY,
     payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS privacy_client_bindings (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL UNIQUE,
+    tool_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS privacy_policy_revisions (
+    id TEXT PRIMARY KEY,
+    policy_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
 """
 
 _EMBEDDINGS_PGVECTOR = """

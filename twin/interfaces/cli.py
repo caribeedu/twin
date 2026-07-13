@@ -244,9 +244,12 @@ def cmd_search(args) -> None:
 
 def cmd_pack(args) -> None:
     from ..cognition.context_pack import build_context_pack
-    from ..privacy.identity import resolve_access
+    from ..privacy.identity import ensure_local_identity, resolve_access
+    from ..privacy.yaml_io import bootstrap_policy_set
 
     ws = Workspace(args.home)
+    bootstrap_policy_set(ws.store)
+    ensure_local_identity(ws.store)
     access = resolve_access(
         ws.store, surface="cli", client="local-cli",
         persona=getattr(args, "persona", None) or "individual",

@@ -6,7 +6,16 @@ from twin import ids
 from twin.cognition.context_pack import build_context_pack
 from twin.judgment.profile import load_profile, promote_memory, render_profile
 from twin.memory.models import MemoryItem
-from twin.privacy.identity import resolve_access
+from twin.privacy.identity import ensure_local_identity, resolve_access
+from twin.privacy.yaml_io import bootstrap_policy_set
+
+
+def _cli_access(store):
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    return resolve_access(store, surface="cli", persona="individual",
+                          purpose="memory_retrieval", audience="self")
+
 
 
 def _mem(store, embedder, **kw):
@@ -38,9 +47,12 @@ def test_promote_preference_to_judgment(store, cfg, embedder):
     # idempotent
     promote_memory(cfg.judgment_path, mem)
     assert len(load_profile(cfg.judgment_path)["promoted_preferences"]) == 1
-    # promoted content rides along in packs via the judgment section
-    pack = build_context_pack(store, cfg, embedder, "qualquer tarefa", access=resolve_access(store, surface="cli"))
-    assert "ADRs no próprio repositório" in pack.context_pack
+    # YAML promotion is bootstrap/export only — runtime packs do not load
+    # judgment.yaml (would bypass governance). Preference remains in YAML profile.
+    assert any(
+        e["memory_id"] == mem.id
+        for e in load_profile(cfg.judgment_path)["promoted_preferences"]
+    )
 
 
 def test_promote_rejects_non_judgment_types(store, cfg, embedder):

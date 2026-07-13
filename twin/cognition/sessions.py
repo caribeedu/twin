@@ -112,12 +112,16 @@ def start_session(
     needs_confirmation = session_domain == UNCLASSIFIED_DOMAIN
 
     started_at = now_iso()
-    from ..privacy.identity import resolve_access
+    from ..privacy.identity import ensure_local_identity, resolve_access
+    from ..privacy.yaml_io import bootstrap_policy_set
     # Surface identity is resolved server-side. Missing/unknown client →
     # restricted mode — never silently elevate to local-cli.
     surface = "cli" if client in ("cli", "local-cli", "twin-cli") else "mcp"
     if client in ("unknown", "", None) and not tool_id:
         surface = "unknown"
+    if surface == "cli":
+        bootstrap_policy_set(store)
+        ensure_local_identity(store)
     access = resolve_access(
         store,
         surface=surface,

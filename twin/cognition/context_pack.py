@@ -28,7 +28,7 @@ from typing import Optional
 
 from ..config import Config
 from ..judgment.firewall import Firewall
-from ..judgment.profile import load_profile, render_profile
+from ..judgment.profile import load_profile
 from ..memory.embeddings import Embedder
 from ..memory.search import SearchHit
 from ..memory.store.base import MemoryStore
@@ -167,7 +167,8 @@ def build_context_pack(
         judgment_text = ""
         if hasattr(store, "list_judgment_items"):
             from ..judgment.application import applicable_pack, render_applicable
-            from ..judgment.models import JudgmentItem
+            from ..judgment.models import AppliedRevisionRef, JudgmentItem
+            from ..judgment.versions import make_snapshot
             from ..privacy.engine import evaluate_judgment_items
             active = store.list_judgment_items(status="active", limit=1)
             if active:
@@ -177,9 +178,11 @@ def build_context_pack(
                     task_profile=task_profile or "general",
                     project_id=project_id,
                     query=query,
+                    persona=access.persona,
+                    audience=access.audience,
+                    client=access.tool_id,
                     persist_snapshot=False,
                 )
-                # Governance before judgment application
                 raw_items = []
                 for key in ("hard_constraints", "principles", "heuristics",
                             "preferences", "beliefs", "values"):
@@ -192,21 +195,37 @@ def build_context_pack(
                     store, access, raw_items,
                     policies_path=cfg.policies_path, persist=True,
                 )
-                allowed_j = {v["id"] for v in gov["allowed"]}
+                views_by_id = {v["id"]: v for v in gov["allowed"]}
+                allowed_j = set(views_by_id)
                 for key in ("hard_constraints", "principles", "heuristics",
                             "preferences", "beliefs", "values", "applicable_judgments"):
-                    pack_j[key] = [
-                        it for it in (pack_j.get(key) or [])
-                        if it.get("id") in allowed_j
-                    ]
-                # Apply authorized judgment statement views
-                views_by_id = {v["id"]: v for v in gov["allowed"]}
-                for key in ("hard_constraints", "principles", "heuristics",
-                            "preferences", "beliefs", "values"):
+                    filtered = []
                     for it in pack_j.get(key) or []:
-                        view = views_by_id.get(it["id"])
-                        if view and view.get("redacted"):
-                            it["statement"] = view.get("summary") or "[redacted]"
+                        if it.get("id") not in allowed_j:
+                            continue
+                        view = views_by_id.get(it["id"]) or {}
+                        # Full authorized judgment view — never mix canonical fields
+                        authorized = {
+                            "id": it["id"],
+                            "kind": it.get("kind"),
+                            "statement": view.get("summary") or it.get("statement") or "",
+                            "domain": it.get("domain"),
+                            "persona": it.get("persona"),
+                            "strength": it.get("strength"),
+                            "redacted": bool(view.get("redacted")),
+                        }
+                        if view.get("redacted"):
+                            authorized["statement"] = view.get("summary") or "[redacted]"
+                            authorized["description"] = None
+                            authorized["provenance"] = None
+                            authorized["exceptions"] = []
+                            authorized["metadata"] = {"redacted": True}
+                        else:
+                            for field in ("description", "scope", "exceptions", "metadata"):
+                                if field in it:
+                                    authorized[field] = it[field]
+                        filtered.append(authorized)
+                    pack_j[key] = filtered
                 for d in gov["denied"]:
                     privacy_blocked.append({
                         "memory_id": d.get("memory_id", ""),
@@ -214,13 +233,40 @@ def build_context_pack(
                         "rule": d.get("rule", "judgment_denied"),
                     })
                 privacy_meta["judgment_privacy_decision_id"] = gov.get("decision_id")
+                # Persist snapshot AFTER governance with authorized payloads only
+                authorized_refs: list[AppliedRevisionRef] = []
+                for ref in pack_j.get("applied_revisions") or []:
+                    jid = ref.get("judgment_id")
+                    if jid not in allowed_j:
+                        continue
+                    view = views_by_id.get(jid) or {}
+                    payload = dict(ref.get("payload") or {})
+                    if view.get("redacted"):
+                        payload = {
+                            "id": jid,
+                            "statement": view.get("summary") or "[redacted]",
+                            "redacted": True,
+                        }
+                    authorized_refs.append(AppliedRevisionRef(
+                        judgment_id=jid,
+                        revision_id=ref.get("revision_id") or "",
+                        effective_strength=float(ref.get("effective_strength") or 0),
+                        disabled=False,
+                        payload=payload,
+                    ))
+                snap = make_snapshot(
+                    store, authorized_refs,
+                    context={
+                        **(pack_j.get("context") or {}),
+                        "privacy_decision_id": gov.get("decision_id"),
+                        "policy_set_version": privacy_meta.get("policy_set_version"),
+                    },
+                    persist=True,
+                )
+                judgment_snapshot_id = snap.id
+                pack_j["snapshot_id"] = snap.id
                 judgment_text = render_applicable(pack_j)
-                # Persist snapshot only after governance filter
-                from ..judgment.application import applicable_pack as _ap
-                # snapshot id from ephemeral pack metadata if present
-                judgment_snapshot_id = pack_j.get("snapshot_id")
-        if not judgment_text:
-            judgment_text = render_profile(load_profile(cfg.judgment_path))
+        # No runtime judgment.yaml fallback — YAML is bootstrap/export only (v0.4+)
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
 

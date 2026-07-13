@@ -92,6 +92,27 @@ class Principal(BaseModel):
     trusted: bool = False
     local: bool = True
     capabilities: list[str] = Field(default_factory=list)
+    allowed_personas: list[str] = Field(default_factory=list)
+    allowed_purposes: list[str] = Field(default_factory=list)
+    allowed_audiences: list[str] = Field(default_factory=list)
+    allowed_vaults: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ClientBinding(BaseModel):
+    """Authenticated client registration — not a self-asserted tool name."""
+    id: str
+    client_id: str
+    tool_id: str
+    principal_id: str
+    credential_hash: Optional[str] = None
+    capabilities: list[str] = Field(default_factory=list)
+    allowed_personas: list[str] = Field(default_factory=list)
+    allowed_purposes: list[str] = Field(default_factory=list)
+    allowed_audiences: list[str] = Field(default_factory=list)
+    allowed_vaults: list[str] = Field(default_factory=list)
+    revoked_at: Optional[str] = None
+    created_at: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -199,9 +220,21 @@ class PolicySetVersion(BaseModel):
     created_at: str
     reason: str = ""
     policy_ids: list[str] = Field(default_factory=list)
+    revision_ids: list[str] = Field(default_factory=list)
     active: bool = True
     actor: str = "user"
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PrivacyPolicyRevision(BaseModel):
+    """Immutable policy payload at evaluation time (v0.4-style)."""
+    id: str
+    policy_id: str
+    version: int = 1
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+    actor: str = "system"
+    reason: str = ""
 
 
 class ResourceDecision(BaseModel):

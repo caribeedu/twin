@@ -30,7 +30,10 @@ def embedder(cfg):
 @pytest.fixture()
 def local_access(store):
     """Authenticated local CLI access for pack/session tests (not restricted)."""
-    from twin.privacy.identity import resolve_access
+    from twin.privacy.identity import ensure_local_identity, resolve_access
+    from twin.privacy.yaml_io import bootstrap_policy_set
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
     return resolve_access(
         store, surface="cli", client="local-cli",
         persona="individual", purpose="memory_retrieval", audience="self",

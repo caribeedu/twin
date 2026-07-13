@@ -42,7 +42,8 @@ def test_employer_data_denied_to_personal_cloud(store, embedder):
         store, embedder,
         domain="work", title="Slack thread",
         summary="Internal roadmap discussion",
-        payload={"source_owner": "employer", "vault_id": "vault_work"},
+        # vault_general so persona individual may enter; ownership policy still denies cloud
+        payload={"source_owner": "employer", "vault_id": "vault_general"},
     )
     req = AccessRequest(
         principal_id="tool_chatgpt",
@@ -215,7 +216,11 @@ def test_missing_access_not_local_cli(store, cfg, embedder):
 
 
 def test_mcp_identity_resolve_restricted():
-    from twin.privacy.identity import resolve_access, resolve_execution_location
+    from twin.privacy.identity import (
+        ensure_local_identity, register_client_binding, resolve_access,
+        resolve_execution_location,
+    )
+    from twin.privacy.yaml_io import bootstrap_policy_set
     from twin.memory.store.sqlite import SqliteStore
     import tempfile
     from pathlib import Path
@@ -224,11 +229,37 @@ def test_mcp_identity_resolve_restricted():
         access = resolve_access(store, surface="mcp", client=None)
         assert access.tool_id == "unknown"
         assert access.is_restricted_mode
-        # Claiming local-cli via MCP must not work
+        # Declaring local-cli via MCP must not work
         spoof = resolve_access(store, surface="mcp", client="local-cli", tool_id="local-cli")
         assert spoof.tool_id == "unknown"
+        # Declaring cursor without binding stays restricted
+        bare = resolve_access(store, surface="mcp", client="cursor")
+        assert bare.is_restricted_mode
         assert resolve_execution_location("chatgpt-cloud", claimed="local") == "cloud"
         assert resolve_execution_location("no-such-tool") == "unknown"
+        # Binding unlocks authenticated client
+        bootstrap_policy_set(store)
+        ensure_local_identity(store)
+        from twin.privacy.models import Principal, PrincipalType
+        store.insert_principal(Principal(
+            id="principal_cursor", type=PrincipalType.tool, name="cursor",
+            capabilities=["read_context_pack", "read:domain:technical"],
+            allowed_personas=["developer", "individual"],
+            allowed_vaults=["vault_general", "vault_work"],
+        ))
+        register_client_binding(
+            store, client_id="cursor", tool_id="cursor",
+            principal_id="principal_cursor",
+            capabilities=["read_context_pack", "read:domain:technical"],
+            allowed_personas=["developer", "individual"],
+            allowed_vaults=["vault_general", "vault_work"],
+        )
+        ok = resolve_access(store, surface="mcp", client="cursor", persona="developer")
+        assert ok.tool_id == "cursor"
+        assert not ok.is_restricted_mode
+        # Unauthorized persona → restricted
+        bad_persona = resolve_access(store, surface="mcp", client="cursor", persona="employee")
+        assert bad_persona.is_restricted_mode
 
 
 def test_title_pii_redacted_in_pack(store, cfg, embedder):
@@ -352,3 +383,83 @@ def test_validate_output_blocks_leakage():
     access = restricted_access()
     out = validate_output("CPF 123.456.789-00 secret", access=access)
     assert out["allowed"] is False
+
+
+def test_vault_persona_enforced(store, embedder):
+    bootstrap_policy_set(store)
+    mem = _mem(
+        store, embedder, domain="work", title="sprint notes",
+        summary="employer sprint board",
+        payload={"source_owner": "employer", "vault_id": "vault_work"},
+    )
+    # individual must not read vault_work
+    req = AccessRequest(
+        principal_id="principal_local_cli",
+        persona="individual", purpose="memory_retrieval",
+        audience="self", tool_id="local-cli",
+    )
+    result = evaluate_access(store, req, [mem], persist=True)
+    assert result["decision"].resource_decisions[0].effect == PolicyEffect.deny
+    assert "vault_persona_denied" in result["decision"].resource_decisions[0].matched_policy_ids
+
+
+def test_consent_requires_full_category_cover(store, embedder):
+    from twin.privacy.identity import active_consent_covers
+    from twin.privacy.models import ConsentRecord, ConsentStatus
+    bootstrap_policy_set(store)
+    store.insert_consent(ConsentRecord(
+        id=ids.new_id("cons"),
+        subject_id="alice",
+        purposes=["sharing"],
+        data_categories=["email"],
+        allowed_tools=["local"],
+        status=ConsentStatus.active,
+        created_at=now_iso(),
+    ))
+    assert not active_consent_covers(
+        store, subject_ids=["alice"], purpose="sharing",
+        tool_id="chatgpt-cloud", categories=["email", "health"],
+        execution_location="cloud",
+    )
+    assert not active_consent_covers(
+        store, subject_ids=["alice"], purpose="sharing",
+        tool_id="chatgpt-cloud", categories=["email"],
+        execution_location="cloud",
+    )
+    assert active_consent_covers(
+        store, subject_ids=["alice"], purpose="sharing",
+        tool_id="local-cli", categories=["email"],
+        execution_location="local",
+    )
+
+
+def test_artifact_delete_preserves_partial_memory(store, embedder):
+    from twin.privacy.deletion import execute_deletion, preview_deletion
+    from twin.memory.models import Evidence
+    from twin.sensory.percept import Percept
+    mem = _mem(store, embedder, domain="technical", title="multi-src",
+               summary="supported by two artifacts")
+    for pid, aid, quote in (
+        ("per_A", "art_A", "from A"),
+        ("per_B", "art_B", "from B"),
+    ):
+        p = Percept(
+            id=pid, percept_type="note", source_sensor="test",
+            occurred_at=now_iso(), ingested_at=now_iso(),
+            content=quote, source_trust=0.5, source_scope="technical",
+            source_confidentiality="internal",
+        )
+        p.seal()
+        store.insert_percept(p)
+        store.insert_evidence(Evidence(
+            id=ids.new_id("ev"), memory_id=mem.id, quote=quote,
+            artifact_id=aid, percept_id=pid,
+            independence_group=aid,
+        ))
+    req = preview_deletion(store, {"artifact_id": "art_A"})
+    assert mem.id in req.manifest["memories_recalculate"]
+    assert mem.id not in req.manifest["memories_delete"]
+    out = execute_deletion(store, req.id, confirm=True, preview_token=req.preview_token)
+    assert out.status.value in ("completed", "completed_with_residuals")
+    still = store.get_memory(mem.id)
+    assert still is not None and not still.deleted_at

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from twin.privacy.models import (
+    ClientBinding,
     ConsentRecord,
     DeletionRequest,
     ExportRecord,
@@ -14,23 +15,27 @@ from twin.privacy.models import (
     Principal,
     PrivacyDecision,
     PrivacyPolicy,
+    PrivacyPolicyRevision,
     QuarantineRecord,
     RedactionPlan,
     ToolIdentity,
     Vault,
 )
 from twin.privacy.persistence import (
+    binding_to_row,
     canary_to_row,
     consent_to_row,
     decision_to_row,
     deletion_to_row,
     export_to_row,
     grant_to_row,
+    policy_revision_to_row,
     policy_set_to_row,
     policy_to_row,
     principal_to_row,
     quarantine_to_row,
     redaction_to_row,
+    row_to_binding,
     row_to_canary,
     row_to_consent,
     row_to_decision,
@@ -38,6 +43,7 @@ from twin.privacy.persistence import (
     row_to_export,
     row_to_grant,
     row_to_policy,
+    row_to_policy_revision,
     row_to_policy_set,
     row_to_principal,
     row_to_quarantine,
@@ -334,3 +340,61 @@ class PrivacyStoreMixin:
     def insert_vault(self, vault: Vault) -> str:
         self._p_insert("privacy_vaults", vault_to_row(vault))
         return vault.id
+
+    def get_vault(self, vault_id: str) -> Optional[Vault]:
+        row = self._j_fetchone("SELECT * FROM privacy_vaults WHERE id = ?", (vault_id,))
+        return row_to_vault(row) if row else None
+
+    def list_vaults(self) -> list[Vault]:
+        rows = self._j_fetchall("SELECT * FROM privacy_vaults", ())
+        return [row_to_vault(r) for r in rows]
+
+    def update_vault(self, vault_id: str, **fields: Any) -> Vault:
+        vault = self.get_vault(vault_id)
+        if vault is None:
+            raise ValueError(f"vault {vault_id} not found")
+        data = vault.model_dump(mode="json")
+        data.update(fields)
+        updated = Vault.model_validate(data)
+        self._p_update_payload("privacy_vaults", vault_id, updated.model_dump(mode="json"))
+        return updated
+
+    def insert_client_binding(self, binding: ClientBinding) -> str:
+        self._p_insert("privacy_client_bindings", binding_to_row(binding))
+        return binding.id
+
+    def get_client_binding(self, binding_id: str) -> Optional[ClientBinding]:
+        row = self._j_fetchone(
+            "SELECT * FROM privacy_client_bindings WHERE id = ?", (binding_id,),
+        )
+        return row_to_binding(row) if row else None
+
+    def get_client_binding_by_client(self, client_id: str) -> Optional[ClientBinding]:
+        row = self._j_fetchone(
+            "SELECT * FROM privacy_client_bindings WHERE client_id = ?", (client_id,),
+        )
+        return row_to_binding(row) if row else None
+
+    def insert_privacy_policy_revision(self, rev: PrivacyPolicyRevision) -> str:
+        self._p_insert("privacy_policy_revisions", policy_revision_to_row(rev))
+        return rev.id
+
+    def get_privacy_policy_revision(self, revision_id: str) -> Optional[PrivacyPolicyRevision]:
+        row = self._j_fetchone(
+            "SELECT * FROM privacy_policy_revisions WHERE id = ?", (revision_id,),
+        )
+        return row_to_policy_revision(row) if row else None
+
+    def list_privacy_policy_revisions(
+        self, policy_id: Optional[str] = None,
+    ) -> list[PrivacyPolicyRevision]:
+        if policy_id:
+            rows = self._j_fetchall(
+                "SELECT * FROM privacy_policy_revisions WHERE policy_id = ? ORDER BY version",
+                (policy_id,),
+            )
+        else:
+            rows = self._j_fetchall(
+                "SELECT * FROM privacy_policy_revisions ORDER BY created_at", (),
+            )
+        return [row_to_policy_revision(r) for r in rows]

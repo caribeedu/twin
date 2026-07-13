@@ -51,7 +51,7 @@ def test_find_project_resolves_alias_and_repo(store):
 def test_start_session_records_supplied_context(store, cfg, embedder):
     started = start_session(store, cfg, embedder,
                             "implementar endpoint de webhooks",
-                            client="test", domain="technical")
+                            client="cli", domain="technical")
     session = started.session
     assert session.id.startswith("ses_")
     assert session.status == SessionStatus.active

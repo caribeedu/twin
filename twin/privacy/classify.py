@@ -62,13 +62,15 @@ def classify_memory(mem: MemoryItem) -> ResourceClassification:
                 labels=["financial"] if key in ("salary", "income", "bank_account") else ["pii"],
             )
 
+    # Employer ownership must be explicit — domain=work alone does not imply
+    # vault_work (personal twin notes about work stay in vault_general).
     source_owner = (
         payload.get("source_owner")
         or payload.get("owner")
-        or ("employer" if mem.domain == "work" else "user")
+        or "user"
     )
     vault_id = payload.get("vault_id") or (
-        "vault_work" if source_owner == "employer" or mem.domain == "work"
+        "vault_work" if source_owner == "employer"
         else "vault_personal" if mem.domain in ("finance", "health", "relationship", "family")
         else "vault_general"
     )

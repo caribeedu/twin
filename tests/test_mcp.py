@@ -90,6 +90,25 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     ws.store.insert_memory(prior)
     ws.store.store_embedding(prior.id, "memory", ws.embedder.name,
                              ws.embedder.embed(f"{prior.title}\n{prior.summary}"))
+    # Authenticated Cursor binding required — tool name alone is not enough
+    from twin.privacy.identity import ensure_local_identity, register_client_binding
+    from twin.privacy.models import Principal, PrincipalType
+    from twin.privacy.yaml_io import bootstrap_policy_set
+    bootstrap_policy_set(ws.store)
+    ensure_local_identity(ws.store)
+    ws.store.insert_principal(Principal(
+        id="principal_cursor", type=PrincipalType.tool, name="cursor",
+        capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
+        allowed_personas=["individual", "developer"],
+        allowed_vaults=["vault_general", "vault_work"],
+    ))
+    register_client_binding(
+        ws.store, client_id="cursor", tool_id="cursor",
+        principal_id="principal_cursor",
+        capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
+        allowed_personas=["individual", "developer"],
+        allowed_vaults=["vault_general", "vault_work"],
+    )
     ws.close()
 
     ide = create_server(str(home))  # e.g. Cursor / Claude Code
@@ -160,7 +179,31 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     assert "not found" in rejected["error"]
 
     # 10: another MCP client sees the confirmed context from this session
-    # (must declare client identity — omitting it is restricted mode)
+    # (must have registered client binding — name alone is not enough)
+    from twin.privacy.identity import ensure_local_identity, register_client_binding
+    from twin.privacy.models import Principal, PrincipalType
+    from twin.privacy.yaml_io import bootstrap_policy_set
+    from twin.workspace import Workspace as WS
+    ws_bind = WS(str(home))
+    bootstrap_policy_set(ws_bind.store)
+    ensure_local_identity(ws_bind.store)
+    if ws_bind.store.get_principal("principal_cursor") is None:
+        ws_bind.store.insert_principal(Principal(
+            id="principal_cursor", type=PrincipalType.tool, name="cursor",
+            capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
+            allowed_personas=["individual", "developer"],
+            allowed_vaults=["vault_general", "vault_work"],
+        ))
+    if ws_bind.store.get_client_binding_by_client("cursor") is None:
+        register_client_binding(
+            ws_bind.store, client_id="cursor", tool_id="cursor",
+            principal_id="principal_cursor",
+            capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
+            allowed_personas=["individual", "developer"],
+            allowed_vaults=["vault_general", "vault_work"],
+        )
+    ws_bind.close()
+
     other = create_server(str(home))
     pack = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
@@ -174,9 +217,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     restricted = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
-    assert restricted.get("privacy_meta", {}).get("execution_location") in (
-        "unknown", None,
-    ) or not (set(created) & {s["memory_id"] for s in restricted.get("sources") or []})
+    assert not (set(created) & {s["memory_id"] for s in restricted.get("sources") or []})
 
 
 @pytest.fixture

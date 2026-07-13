@@ -23,7 +23,6 @@ from .identity import (
     active_consent_covers,
     principal_has_capability,
     resolve_execution_location,
-    restricted_access,
     validate_vault_access,
 )
 from .models import (
@@ -36,7 +35,7 @@ from .models import (
     ResourceDecision,
 )
 from .redact import apply_redaction_plan, leakage_scan, plan_redaction
-from .yaml_io import load_governance_policies, resolve_tool
+from .yaml_io import load_active_policy_revisions, load_governance_policies, resolve_tool
 
 
 _EFFECT_RANK = {
@@ -147,7 +146,14 @@ def evaluate_resource(
             matched.append(p)
 
     # Vault persona gate
-    if not validate_vault_access(store, vault_id=classification.vault_id, persona=request.persona):  # type: ignore[arg-type]
+    allowed_vaults = list((request.metadata or {}).get("allowed_vaults") or [])
+    if not validate_vault_access(
+        store,  # type: ignore[arg-type]
+        vault_id=classification.vault_id,
+        persona=request.persona,
+        principal=principal,
+        allowed_vaults_extra=allowed_vaults,
+    ):
         return ResourceDecision(
             resource_id=classification.resource_id,
             effect=PolicyEffect.deny,
@@ -157,19 +163,24 @@ def evaluate_resource(
             labels=classification.labels,
         )
 
-    # Capability gate for non-public
+    # Capability gate for non-public (scoped)
     if principal and classification.sensitivity not in ("public",):
-        if not principal_has_capability(principal, "read_context_pack"):
+        if not principal_has_capability(
+            principal, "read_context_pack",
+            domain=classification.domain,
+            vault_id=classification.vault_id,
+            project_id=request.project_id,
+        ):
             return ResourceDecision(
                 resource_id=classification.resource_id,
                 effect=PolicyEffect.deny,
                 matched_policy_ids=["capability_denied"],
-                reason="principal lacks read_context_pack capability",
+                reason="principal lacks scoped read capability",
                 sensitivity=classification.sensitivity,
                 labels=classification.labels,
             )
 
-    # Third-party consent
+    # Third-party consent — full category coverage + tool/location semantics
     if classification.third_party or "third_party" in classification.labels:
         subjects = classification.subjects or ["unknown_third_party"]
         if not active_consent_covers(
@@ -178,13 +189,14 @@ def evaluate_resource(
             purpose=request.purpose,
             tool_id=request.tool_id,
             categories=classification.labels,
+            execution_location=execution_location,
         ):
             if request.audience in ("public", "client", "unknown") or execution_location == "cloud":
                 return ResourceDecision(
                     resource_id=classification.resource_id,
                     effect=PolicyEffect.deny,
                     matched_policy_ids=["third_party_consent_required"],
-                    reason="third-party data requires active consent for this purpose/tool",
+                    reason="third-party data requires active consent covering all categories",
                     sensitivity=classification.sensitivity,
                     labels=classification.labels,
                 )
@@ -311,12 +323,17 @@ def evaluate_access(
         "resolved_execution_location": execution_location,
     }
 
-    policies = policies or load_governance_policies(policies_path, store=store)
-    # Snapshot of policies actually evaluated (payloads) for reproducibility
+    policies = policies or (
+        load_active_policy_revisions(store)
+        if hasattr(store, "get_active_policy_set_version")
+        else load_governance_policies(policies_path, store=store)
+    )
+    # Snapshot of policies actually evaluated (immutable revision payloads)
     policy_snapshot = [p.model_dump(mode="json") for p in policies]
-    policy_revision_ids = [
+    active = store.get_active_policy_set_version() if hasattr(store, "get_active_policy_set_version") else None
+    policy_revision_ids = list((active.revision_ids if active else None) or [
         f"{p.id}@v{p.version}" for p in policies
-    ]
+    ])
 
     principal = None
     if hasattr(store, "get_principal"):
@@ -332,9 +349,12 @@ def evaluate_access(
     grant_ids: list[str] = []
     obligations: set[str] = {"log_decision"}
 
+    plans_to_persist: list[Any] = []
+
     def _run() -> PrivacyDecision:
         nonlocal resource_decisions, allowed_views, denied, redacted
         nonlocal needs_grant, needs_confirm, all_policy_ids, grant_ids, obligations
+        nonlocal plans_to_persist
         resource_decisions = []
         allowed_views = []
         denied = []
@@ -344,6 +364,7 @@ def evaluate_access(
         all_policy_ids = []
         grant_ids = []
         obligations = {"log_decision"}
+        plans_to_persist = []
 
         for mem in memories:
             classification = classify_memory(mem)
@@ -377,9 +398,9 @@ def evaluate_access(
                 PolicyEffect.aggregate, PolicyEffect.pseudonymize,
             ):
                 plan = plan_redaction(classification, rd, effect=rd.effect)
-                if persist and hasattr(store, "insert_redaction_plan"):
-                    store.insert_redaction_plan(plan)
                 rd.redaction_plan_id = plan.id
+                if persist and hasattr(store, "insert_redaction_plan"):
+                    plans_to_persist.append(plan)
                 view = apply_redaction_plan(classification, plan)
                 view["effect"] = rd.effect.value
                 redacted.append(view)
@@ -414,7 +435,16 @@ def evaluate_access(
             obligations=sorted(obligations),
             policy_set_version_id=version.id if version else None,
             grant_ids=sorted(set(grant_ids)),
-            access_request=request.model_dump(),
+            access_request={
+                **request.model_dump(),
+                "_resolved": {
+                    "principal_id": request.principal_id,
+                    "tool_id": request.tool_id,
+                    "persona": request.persona,
+                    "capabilities": (request.metadata or {}).get("resolved_capabilities"),
+                },
+                "_claims": (request.metadata or {}).get("claims"),
+            },
             engine_version=ENGINE_VERSION,
             created_at=now_iso(),
             metadata={
@@ -427,14 +457,20 @@ def evaluate_access(
             },
         )
 
-    if persist and consume_grants and hasattr(store, "transaction"):
+    if persist and hasattr(store, "transaction"):
         with store.transaction():
             decision = _run()
+            for plan in plans_to_persist:
+                store.insert_redaction_plan(plan)
             store.insert_privacy_decision(decision)
     else:
         decision = _run()
-        if persist and hasattr(store, "insert_privacy_decision"):
-            store.insert_privacy_decision(decision)
+        if persist:
+            for plan in plans_to_persist:
+                if hasattr(store, "insert_redaction_plan"):
+                    store.insert_redaction_plan(plan)
+            if hasattr(store, "insert_privacy_decision"):
+                store.insert_privacy_decision(decision)
 
     return {
         "decision": decision,
@@ -531,13 +567,23 @@ def validate_output(
     access: AccessRequest,
     decision: Optional[PrivacyDecision] = None,
     forbidden_substrings: Optional[list[str]] = None,
+    store: Optional[MemoryStore] = None,
 ) -> dict[str, Any]:
     """Scan generated/exported text before release to an external consumer."""
     findings = leakage_scan(output, forbidden_substrings=forbidden_substrings)
-    blocked = bool(findings) or access.is_restricted_mode
+    canaries: list[str] = []
+    if store is not None and hasattr(store, "list_leakage_canaries"):
+        from .canaries import scan_for_canaries
+        canaries = scan_for_canaries(store, output)
+    blocked = bool(findings) or bool(canaries) or access.is_restricted_mode
     return {
         "allowed": not blocked,
         "findings": findings,
+        "canaries": canaries,
         "decision_id": decision.id if decision else None,
         "action": "block" if blocked else "release",
     }
+
+
+# Alias used by outbound surfaces
+validate_outbound_content = validate_output

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from .models import (
+    ClientBinding,
     ConsentRecord,
     DeletionRequest,
     ExportRecord,
@@ -15,6 +16,7 @@ from .models import (
     Principal,
     PrivacyDecision,
     PrivacyPolicy,
+    PrivacyPolicyRevision,
     QuarantineRecord,
     RedactionPlan,
     ToolIdentity,
@@ -211,6 +213,34 @@ def vault_to_row(v: Vault) -> dict[str, Any]:
 
 def row_to_vault(row: Any) -> Vault:
     return Vault.model_validate(_loads(row["payload"], {}))
+
+
+def binding_to_row(b: ClientBinding) -> dict[str, Any]:
+    return {
+        "id": b.id,
+        "client_id": b.client_id,
+        "tool_id": b.tool_id,
+        "principal_id": b.principal_id,
+        "payload": _j(b.model_dump(mode="json")),
+    }
+
+
+def row_to_binding(row: Any) -> ClientBinding:
+    return ClientBinding.model_validate(_loads(row["payload"], {}))
+
+
+def policy_revision_to_row(r: PrivacyPolicyRevision) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "policy_id": r.policy_id,
+        "version": r.version,
+        "payload": _j(r.model_dump(mode="json")),
+        "created_at": r.created_at,
+    }
+
+
+def row_to_policy_revision(row: Any) -> PrivacyPolicyRevision:
+    return PrivacyPolicyRevision.model_validate(_loads(row["payload"], {}))
 
 
 def redaction_to_row(r: RedactionPlan) -> dict[str, Any]:
