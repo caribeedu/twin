@@ -23,6 +23,7 @@ from .identity import (
     active_consent_covers,
     principal_can_read,
     resolve_execution_location,
+    restricted_access,
     validate_vault_access,
 )
 from .models import (
@@ -145,6 +146,17 @@ def evaluate_resource(
         if policy_matches(p, request, classification, execution_location=execution_location):
             matched.append(p)
 
+    # Fail closed: filled AccessRequest ≠ authenticated AccessRequest
+    if classification.sensitivity not in ("public",) and principal is None:
+        return ResourceDecision(
+            resource_id=classification.resource_id,
+            effect=PolicyEffect.deny,
+            matched_policy_ids=["unregistered_principal_default_deny"],
+            reason="principal is not registered",
+            sensitivity=classification.sensitivity,
+            labels=classification.labels,
+        )
+
     # Vault persona gate
     allowed_vaults = list((request.metadata or {}).get("allowed_vaults") or [])
     if not validate_vault_access(
@@ -164,7 +176,7 @@ def evaluate_resource(
         )
 
     # Capability gate for non-public: base action AND scopes
-    if principal and classification.sensitivity not in ("public",):
+    if classification.sensitivity not in ("public",):
         effective_caps = (request.metadata or {}).get("resolved_capabilities")
         if not principal_can_read(
             principal,
@@ -340,6 +352,18 @@ def evaluate_access(
     principal = None
     if hasattr(store, "get_principal"):
         principal = store.get_principal(request.principal_id)
+    if principal is None:
+        # Filled AccessRequest ≠ authenticated AccessRequest
+        request = restricted_access(
+            project_id=request.project_id,
+            session_id=request.session_id,
+            requested_domains=request.requested_domains,
+            claims={
+                "principal_id": request.principal_id,
+                "tool_id": request.tool_id,
+                "reason": "unregistered_principal",
+            },
+        )
 
     resource_decisions: list[ResourceDecision] = []
     allowed_views: list[dict[str, Any]] = []

@@ -232,7 +232,11 @@ def bootstrap_policy_set(
     policies = list(policies_map.values())
 
     def _payload_hash(payload: dict) -> str:
-        cleaned = {k: v for k, v in payload.items() if k != "_payload_hash"}
+        # Ignore volatile timestamps so identical policy content reuses revisions
+        cleaned = {
+            k: v for k, v in payload.items()
+            if k not in ("_payload_hash", "created_at", "updated_at")
+        }
         raw = json.dumps(cleaned, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 

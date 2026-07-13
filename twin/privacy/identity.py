@@ -381,12 +381,15 @@ def _authenticated_local(
 
 
 def _scope_matches(caps: set[str], prefix: str, value: Optional[str]) -> bool:
-    """If any prefix scopes exist, value must match one (or wildcard)."""
+    """If any prefix scopes exist, value must match one (or wildcard).
+
+    Declared scopes never widen when the required context value is omitted.
+    """
     scoped = {c for c in caps if c.startswith(prefix + ":")}
     if not scoped:
         return True  # no scopes of this kind → not restricting
     if value is None:
-        return True
+        return False
     return f"{prefix}:{value}" in scoped or f"{prefix}:*" in scoped
 
 
@@ -410,18 +413,19 @@ def principal_can_read(
         return False
     if not _scope_matches(caps, "read:domain", domain):
         return False
-    if vault_id:
+    scoped_vaults = {c for c in caps if c.startswith("read:vault:")}
+    if scoped_vaults:
+        if not vault_id:
+            return False
         short = vault_id.replace("vault_", "") if vault_id.startswith("vault_") else vault_id
-        scoped = {c for c in caps if c.startswith("read:vault:")}
-        if scoped:
-            ok = (
-                f"read:vault:{vault_id}" in scoped
-                or f"read:vault:{short}" in scoped
-                or "read:vault:*" in scoped
-            )
-            if not ok:
-                return False
-    if project_id and not _scope_matches(caps, "read:project", project_id):
+        ok = (
+            f"read:vault:{vault_id}" in scoped_vaults
+            or f"read:vault:{short}" in scoped_vaults
+            or "read:vault:*" in scoped_vaults
+        )
+        if not ok:
+            return False
+    if not _scope_matches(caps, "read:project", project_id):
         return False
     return True
 

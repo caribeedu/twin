@@ -30,6 +30,40 @@ def _mem(store, embedder, **kw):
     return mem
 
 
+def _ensure_tool_principal(store, principal_id: str, *, domains=None, vaults=None,
+                           projects=None, extra_caps=None):
+    """Register a tool principal so evaluate_access is not fail-closed."""
+    from twin.privacy.identity import ensure_local_identity
+    from twin.privacy.models import Principal, PrincipalType
+    ensure_local_identity(store)
+    existing = store.get_principal(principal_id)
+    if existing:
+        return existing
+    domains = list(domains or ["technical", "work", "finance"])
+    vaults = list(vaults or [
+        "vault_general", "vault_work", "vault_personal", "vault_restricted",
+    ])
+    caps = (
+        ["read_context_pack"]
+        + [f"read:domain:{d}" for d in domains]
+        + [f"read:vault:{v}" for v in vaults]
+        + [f"read:project:{p}" for p in (projects or [])]
+        + list(extra_caps or [])
+    )
+    p = Principal(
+        id=principal_id,
+        type=PrincipalType.tool,
+        name=principal_id,
+        capabilities=caps,
+        allowed_personas=["individual", "developer", "employee", "assistant_user"],
+        allowed_purposes=["*"],
+        allowed_audiences=["self", "local", "public", "client"],
+        allowed_vaults=vaults,
+    )
+    store.insert_principal(p)
+    return p
+
+
 def test_bootstrap_policy_set(store):
     v = bootstrap_policy_set(store)
     assert v.active
@@ -38,6 +72,7 @@ def test_bootstrap_policy_set(store):
 
 def test_employer_data_denied_to_personal_cloud(store, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_chatgpt")
     mem = _mem(
         store, embedder,
         domain="work", title="Slack thread",
@@ -61,6 +96,7 @@ def test_employer_data_denied_to_personal_cloud(store, embedder):
 
 def test_finance_cloud_generalizes(store, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_claude")
     mem = _mem(
         store, embedder,
         domain="finance", title="Salary R$ 32,400 — TechFX",
@@ -89,6 +125,7 @@ def test_finance_cloud_generalizes(store, embedder):
 
 def test_grant_single_use_atomic(store, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_cloud")
     mem = _mem(
         store, embedder,
         domain="finance", title="Income",
@@ -149,6 +186,7 @@ def test_canary_scan(store):
 
 def test_explain_decision_omits_content(store, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_x")
     mem = _mem(
         store, embedder, domain="work",
         summary="SECRET_SALARY_99999",
@@ -168,6 +206,7 @@ def test_explain_decision_omits_content(store, embedder):
 
 def test_context_pack_applies_privacy(store, cfg, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_chatgpt")
     _mem(
         store, embedder, domain="work", title="Employer note",
         summary="confidential employer roadmap",
@@ -284,6 +323,7 @@ def test_mcp_identity_resolve_restricted():
 
 def test_title_pii_redacted_in_pack(store, cfg, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_claude")
     _mem(
         store, embedder,
         domain="finance",
@@ -315,6 +355,7 @@ def test_title_pii_redacted_in_pack(store, cfg, embedder):
 def test_grant_concurrent_single_use(store, embedder):
     import threading
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_cloud")
     mem = _mem(
         store, embedder,
         domain="finance", title="Income", summary="income",
@@ -382,6 +423,7 @@ def test_deletion_full_manifest_not_capped(store, embedder):
 
 def test_policy_snapshot_records_revisions(store, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "t")
     mem = _mem(store, embedder, domain="work",
                payload={"source_owner": "employer"})
     req = AccessRequest(
@@ -407,6 +449,8 @@ def test_validate_output_blocks_leakage():
 
 def test_vault_persona_enforced(store, embedder):
     bootstrap_policy_set(store)
+    from twin.privacy.identity import ensure_local_identity
+    ensure_local_identity(store)
     mem = _mem(
         store, embedder, domain="work", title="sprint notes",
         summary="employer sprint board",
@@ -561,6 +605,7 @@ def test_bootstrap_dedupes_revisions(store, cfg):
 
 def test_grant_rolls_back_when_decision_insert_fails(store, embedder):
     bootstrap_policy_set(store)
+    _ensure_tool_principal(store, "tool_cloud")
     mem = _mem(
         store, embedder, domain="finance", title="Income", summary="income",
         sensitivity="restricted",
@@ -607,3 +652,171 @@ def test_retry_deletion_residuals(store, embedder):
     )
     retried = retry_deletion_residuals(store, out.id, confirm=True)
     assert retried.status.value in ("completed", "completed_with_residuals")
+
+
+def test_unregistered_principal_denied_even_with_known_tool(store, embedder):
+    bootstrap_policy_set(store)
+    mem = _mem(
+        store, embedder, domain="technical", sensitivity="internal",
+        payload={"vault_id": "vault_general"},
+    )
+    req = AccessRequest(
+        principal_id="arbitrary_nonexistent_principal",
+        persona="individual",
+        purpose="financial_planning",
+        audience="self",
+        tool_id="chatgpt-cloud",
+    )
+    result = evaluate_access(store, req, [mem], persist=True)
+    rd = result["decision"].resource_decisions[0]
+    assert rd.effect == PolicyEffect.deny
+    assert "unregistered_principal_default_deny" in rd.matched_policy_ids
+
+
+def test_unregistered_principal_denied_for_vault_general(store, embedder):
+    bootstrap_policy_set(store)
+    mem = _mem(
+        store, embedder, domain="technical", sensitivity="internal",
+        title="ok vault", summary="general note",
+        payload={"vault_id": "vault_general"},
+    )
+    req = AccessRequest(
+        principal_id="ghost",
+        persona="individual", purpose="memory_retrieval",
+        audience="self", tool_id="local-cli",
+    )
+    rd = evaluate_access(store, req, [mem], persist=True)["decision"].resource_decisions[0]
+    assert rd.effect == PolicyEffect.deny
+    assert "unregistered_principal_default_deny" in rd.matched_policy_ids
+
+
+def test_grant_does_not_rescue_unregistered_principal(store, embedder):
+    bootstrap_policy_set(store)
+    mem = _mem(
+        store, embedder, domain="finance", title="Income", summary="income",
+        sensitivity="restricted",
+        payload={"salary": 50000, "privacy_labels": ["financial"]},
+    )
+    req = AccessRequest(
+        principal_id="tool_cloud_unregistered",
+        persona="individual", purpose="financial_planning",
+        audience="self", tool_id="chatgpt-cloud",
+    )
+    create_grant(
+        store, principal_id=req.principal_id, persona=req.persona,
+        purpose=req.purpose, resource_scope={"domains": ["finance"]},
+        allowed_effects=["read_redacted"], tool_ids=["chatgpt-cloud"],
+        max_uses=1, ttl_seconds=600,
+    )
+    rd = evaluate_access(store, req, [mem], consume_grants=True, persist=True)[
+        "decision"
+    ].resource_decisions[0]
+    assert rd.effect == PolicyEffect.deny
+    assert rd.grant_id is None
+    assert "unregistered_principal_default_deny" in rd.matched_policy_ids
+
+
+def test_external_surface_without_binding_is_restricted(store):
+    from twin.privacy.identity import ensure_local_identity, resolve_access
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    access = resolve_access(
+        store, surface="mcp", client=None,
+        principal_id="principal_local_cli", persona="individual",
+    )
+    assert access.is_restricted_mode
+
+
+def test_resolved_binding_and_local_principal_behave_normally(store, embedder):
+    from twin.privacy.identity import (
+        ensure_local_identity, register_client_binding, resolve_access,
+    )
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    _ensure_tool_principal(store, "p_ok")
+    register_client_binding(
+        store, client_id="ok-client", tool_id="cursor", principal_id="p_ok",
+        credential="tok-ok",
+        capabilities=["read_context_pack", "read:domain:technical",
+                       "read:vault:vault_general"],
+        allowed_personas=["individual"],
+        allowed_vaults=["vault_general"],
+    )
+    bound = resolve_access(
+        store, surface="mcp", client="ok-client", api_token="tok-ok",
+        persona="individual",
+    )
+    local = resolve_access(store, surface="cli", persona="individual")
+    mem = _mem(store, embedder, domain="technical",
+               payload={"vault_id": "vault_general"})
+    for access in (bound, local):
+        assert not access.is_restricted_mode
+        rd = evaluate_access(store, access, [mem], persist=True)[
+            "decision"
+        ].resource_decisions[0]
+        assert rd.effect == PolicyEffect.allow
+
+
+def test_project_scope_requires_matching_project_id(store, embedder):
+    from twin.privacy.identity import principal_can_read
+    from twin.privacy.models import Principal, PrincipalType
+    bootstrap_policy_set(store)
+    p = Principal(
+        id="p_proj", type=PrincipalType.tool, name="proj",
+        capabilities=[
+            "read_context_pack",
+            "read:domain:technical",
+            "read:vault:vault_general",
+            "read:project:twin",
+        ],
+    )
+    store.insert_principal(p)
+    assert not principal_can_read(
+        p, domain="technical", vault_id="vault_general", project_id=None,
+    )
+    assert principal_can_read(
+        p, domain="technical", vault_id="vault_general", project_id="twin",
+    )
+    assert not principal_can_read(
+        p, domain="technical", vault_id="vault_general", project_id="genrefy",
+    )
+    wild = Principal(
+        id="p_wild", capabilities=[
+            "read_context_pack", "read:domain:technical",
+            "read:vault:vault_general", "read:project:*",
+        ],
+    )
+    assert principal_can_read(
+        wild, domain="technical", vault_id="vault_general", project_id="anything",
+    )
+    unscoped = Principal(
+        id="p_free", capabilities=[
+            "read_context_pack", "read:domain:technical", "read:vault:vault_general",
+        ],
+    )
+    assert principal_can_read(
+        unscoped, domain="technical", vault_id="vault_general", project_id=None,
+    )
+    mem = _mem(store, embedder, domain="technical",
+               payload={"vault_id": "vault_general"})
+    denied = evaluate_access(
+        store,
+        AccessRequest(
+            principal_id="p_proj", persona="individual",
+            purpose="memory_retrieval", audience="self", tool_id="local-cli",
+            project_id=None,
+        ),
+        [mem], persist=True,
+    )["decision"].resource_decisions[0]
+    assert denied.effect == PolicyEffect.deny
+    assert "capability_denied" in denied.matched_policy_ids
+    allowed = evaluate_access(
+        store,
+        AccessRequest(
+            principal_id="p_proj", persona="individual",
+            purpose="memory_retrieval", audience="self", tool_id="local-cli",
+            project_id="twin",
+        ),
+        [mem], persist=True,
+    )["decision"].resource_decisions[0]
+    assert allowed.effect == PolicyEffect.allow
