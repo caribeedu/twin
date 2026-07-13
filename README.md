@@ -590,25 +590,26 @@ Events support idempotency, replay, schema evolution, provenance, correlation an
 }
 ```
 
-### 8.4 Artifact → Event → Percept → Memory
+### 8.4 Universal Events and the existing Percept lifecycle
 
-`Percept` is an **existing Twin concept**, not a future abstraction:
+`Percept` is an **existing Twin concept**, not a future abstraction. Universal Events and Artifacts are related inputs, not mandatory sequential stages:
 
 ```text
 External occurrence
         ↓
 Universal Event (planned metadata envelope)
-        ↓
-Artifact reference/content (optional durable source object)
-        ↓
-Percept (existing sealed observation)
-        ↓
-Memory candidate → confirmed Memory
+        ├── occurrence metadata ──────────────────────┐
+        └── may reference or create an Artifact ──────┤
+Existing sensor path: Artifact ───────────────────────┤
+                                                     ↓
+                                                  Percept
+                                                     ↓
+                                 Memory candidate / confirmed Memory
 ```
 
-An Artifact is external content. A Universal Event describes what occurred and may reference an Artifact. A Percept is the normalized observation accepted by Twin's existing ingestion, evidence and provenance lifecycle. A Memory is consolidated temporal knowledge. Judgment is an approved decision rule. An Effector Intent is a proposed abstract output, not an executed action.
+An Artifact is external content. A Universal Event describes what occurred and may reference, create or omit a durable Artifact. Both event metadata and optional Artifact content can contribute to the Percept. A Percept is the normalized observation accepted by Twin's existing ingestion, evidence and provenance lifecycle. A Memory is consolidated temporal knowledge. Judgment is an approved decision rule. An Effector Intent is a proposed abstract output, not an executed action.
 
-Existing sensors may produce Percepts directly. Planned adapters should emit Universal Events that are converted into Percepts while preserving existing identifiers and lineage. The explicit conversion boundary is future architecture; Percepts themselves are implemented today.
+Existing sensors may continue to produce Percepts directly from Artifacts. Planned adapters should emit Universal Events that are converted into Percepts, optionally through Artifact references, while preserving existing identifiers and lineage. The explicit conversion boundary is future architecture; Percepts themselves are implemented today.
 
 ### 8.5 Observer orchestration
 
@@ -635,18 +636,26 @@ A **Context Pack is the authorized, consumer-specific serialization of Twin's Wo
 ```text
 event or authenticated query
         ↓
-Observer coordination + retrieval
+Observer coordination
         ↓
-Privacy and Governance Policy Engine
-        ↓
-applicable Judgment
-        ↓
-Working Memory
-        ↓  authorized consumer-specific projection
-Context Pack → Host LLM
+┌─────────────────────────────┬──────────────────────────────┐
+│ Memory retrieval candidates │ Semantically applicable     │
+│                             │ Judgment revisions           │
+└──────────────┬──────────────┴──────────────┬───────────────┘
+               └──────────────┬──────────────┘
+                              ↓
+             Privacy and Governance Policy Engine
+                              ↓
+                  Authorized Working Memory
+                              ↓
+             Consumer-specific Context Pack
+                              ↓
+                           Host LLM
 ```
 
-The original Domain Firewall remains a domain-isolation and compatibility signal inside the broader v0.5 governance layer. Governance and applicable Judgment are evaluated before protected material enters a Context Pack.
+Semantic applicability determines which Judgment revisions are relevant; privacy governance determines whether those relevant items may be exposed. Memory candidates and semantically applicable Judgment items are both evaluated by the Privacy and Governance Policy Engine before entering authorized Working Memory or a Context Pack.
+
+The original Domain Firewall remains a domain-isolation and compatibility signal inside the broader v0.5 governance layer.
 
 ### 8.7 Effector Intents
 
