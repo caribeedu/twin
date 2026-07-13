@@ -193,7 +193,7 @@ Cognitive psychology and neuroscience distinguish multiple memory systems. This 
 | Semantic memory | facts, concepts, consolidated relationships | `fact`, entities, relations, graph |
 | Procedural memory | ways of doing, habits, workflows | `procedure`, playbooks, scripts |
 | Working memory | current task focus | current query, observer, context pack |
-| Executive control | selection, inhibition, judgment | Privacy/Governance, domain isolation, evolving Judgment |
+| Executive control | selection, inhibition, judgment | Domain Firewall, policies, evolving judgment model |
 
 The hippocampus inspires the episodic capture and temporal consolidation layer. The associative cortex inspires semantic memory. The prefrontal cortex inspires the judgment, inhibition and context selection layer.
 
@@ -205,7 +205,7 @@ The hippocampus inspires the episodic capture and temporal consolidation layer. 
 |---|---|---|
 | Hippocampus | Episodic encoding | Percepts + Events |
 | Cortex | Semantic consolidation | Knowledge Graph |
-| Prefrontal Cortex | Executive control | Judgment + Privacy/Governance |
+| Prefrontal Cortex | Executive control | Judgment + Domain Firewall |
 | Basal Ganglia | Action selection | Action Policy (future) |
 | Amygdala | Salience/Risk | Sensitivity + Priority |
 | Working Memory | Current reasoning | Context Pack |
@@ -457,7 +457,7 @@ type
 + evidence
 ```
 
-The Domain Firewall decides whether a memory may cross a domain boundary. Since v0.5, it operates as one domain-isolation signal inside the broader Privacy and Governance Policy Engine, which also evaluates identity, purpose, audience, capabilities, grants, consent, ownership and redaction.
+The Domain Firewall decides whether a memory may enter a given context.
 
 Example:
 
@@ -495,7 +495,7 @@ candidate memories ──► dedupe ──► selective review queue
 store (Postgres+pgvector primary | SQLite dev): memories + entities + relations + evidence + embeddings + FTS
         │
         ▼
-hybrid search ──► Privacy/Governance ──► applicable Judgment ──► compact context pack
+hybrid search ──► Domain Firewall ──► compact context pack
         │                                    ▲
         ▼                                    │
 MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
@@ -504,203 +504,11 @@ MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
 ---
 
 
-## 8. Integration architecture — target model
-
-This section describes the **target integration architecture**, not the current implementation in its entirety. It expands the existing cognitive architecture; it does not replace it.
-
-| Status | Capabilities |
-|---|---|
-| Implemented | MCP, HTTP API and CLI; Percepts and evidence lineage; sessions; retrieval and Context Packs; Judgment; privacy/governance; current sensors and ingestion |
-| Partial | source normalization, Observer coordination and authenticated clients with authorization capabilities |
-| Planned | native adapters; versioned Universal Events; an event plane; host-affordance negotiation; Effector Intents and result events |
-| Future fallback | OS-level observation or automation for closed applications |
-
-> **Native where possible. MCP everywhere. One cognitive core. No proprietary memory silos.**
-
-> **Application-specific ingestion. Application-agnostic cognition.**
-
-Applications are sources and destinations, not separate cognitive cores. Protocol and transport details remain in integrations; semantic source context crosses the boundary as normalized metadata.
-
-### 8.1 Two integration planes
-
-```text
-Observation / event plane (planned)
-
-hooks / sensors / connectors
-        ↓
-Application Adapters
-        ↓
-Universal Events → Event Bus
-        ↓
-Percept creation + Observer coordination
-```
-
-```text
-Query / control plane (implemented)
-
-MCP / HTTP API / CLI
-        ↓
-authenticated command or query
-        ↓
-cognitive services
-        ↓
-Context Pack / session / review / provenance
-```
-
-Both planes converge on the same services, governance, Judgment and stores. Synchronous commands need not become artificial events. Native observation uses the event plane when available; MCP remains the universal query and control contract.
-
-### 8.2 Native, MCP and adapters
-
-**Native Integration** is preferred when a host exposes APIs, hooks or streams. Codex App-Server and Claude Code Hooks are target examples. It may support real-time observation, proactive context, steering or interruption, subject to host support and authorization.
-
-**MCP Integration** is implemented and remains the universal interface even when a native adapter exists. Skills teach agents when to consult memory, Judgment, context, provenance and sessions. Native is the richest target experience; MCP is the portable contract. Both share the same core.
-
-Planned Application Adapters own application-specific APIs, authentication, callbacks, WebSockets, formats and streaming. Target adapters include Codex App-Server, Claude Code Hooks, Slack, Gmail, WhatsApp, Cursor, VS Code, Browser, Voice, OCR and Screen. Adding a supported application should require an adapter that emits Universal Events and consumes authorized Effector Intents, not a Cognitive Core change. Application **protocol and transport specificity** ends in the adapter. Source application, workspace, channel, thread, participants, ownership, confidentiality, transport trust, artifact type and social setting cross the boundary because they affect interpretation and governance.
-
-### 8.3 Universal Event envelope
-
-A Universal Event is a planned, versioned envelope describing an observed occurrence. It is not a Memory and may reference rather than copy a large Artifact.
-
-Minimum target fields include:
-
-- `event_id`, `event_type`, `schema_version`;
-- source adapter and identity; actor and participants;
-- `occurred_at`, `observed_at`;
-- workspace, channel, thread and session;
-- artifact references;
-- `causation_id`, `correlation_id`, deduplication key;
-- confidentiality and ownership hints;
-- raw metadata or an external raw-payload reference.
-
-Events support idempotency, replay, schema evolution, provenance, correlation and partial—not global—ordering. Origin is never discarded. Prefer observable facts such as `MessageObserved` with `author_id`, `direction_relative_to_user` and `participant_role` over application-relative `MessageSent` and `MessageReceived`.
-
-```json
-{
-  "event_id": "evt_...",
-  "event_type": "message.observed",
-  "schema_version": 1,
-  "source": {"adapter": "slack", "workspace_id": "...", "thread_id": "..."},
-  "actor": {"id": "...", "participant_role": "coworker"},
-  "direction_relative_to_user": "inbound",
-  "artifact_ref": "art_...",
-  "occurred_at": "...",
-  "observed_at": "...",
-  "correlation_id": "...",
-  "deduplication_key": "..."
-}
-```
-
-### 8.4 Universal Events and the existing Percept lifecycle
-
-`Percept` is an **existing Twin concept**, not a future abstraction. Universal Events and Artifacts are related inputs, not mandatory sequential stages:
-
-```text
-External occurrence
-        ↓
-Universal Event (planned metadata envelope)
-        ├── occurrence metadata ──────────────────────┐
-        └── may reference or create an Artifact ──────┤
-Existing sensor path: Artifact ───────────────────────┤
-                                                     ↓
-                                                  Percept
-                                                     ↓
-                                 Memory candidate / confirmed Memory
-```
-
-An Artifact is external content. A Universal Event describes what occurred and may reference, create or omit a durable Artifact. Both event metadata and optional Artifact content can contribute to the Percept. A Percept is the normalized observation accepted by Twin's existing ingestion, evidence and provenance lifecycle. A Memory is consolidated temporal knowledge. Judgment is an approved decision rule. An Effector Intent is a proposed abstract output, not an executed action.
-
-Existing sensors may continue to produce Percepts directly from Artifacts. Planned adapters should emit Universal Events that are converted into Percepts, optionally through Artifact references, while preserving existing identifiers and lineage. The explicit conversion boundary is future architecture; Percepts themselves are implemented today.
-
-### 8.5 Observer orchestration
-
-The **Memory Observer coordinates** attention and interpretation and requests services from retrieval, privacy/governance, Judgment applicability and Context Pack composition. Those remain independent modules with their own policies, tests, stores and lifecycle.
-
-```text
-Observer
-├── intention/context interpretation
-├── attention policy
-├── retrieval request
-├── governance request
-├── Judgment applicability request
-└── intervention recommendation
-```
-
-The Observer does not own the privacy engine, Judgment store, retrieval engine or Context Pack builder. Attention remains internal to the Observer.
-
-### 8.6 Working Memory and Context Packs
-
-Working Memory is transient state: current input, session, inferred intention, attention, task profile, retrieved candidates, applicable Judgment, governance decisions and integration state.
-
-A **Context Pack is the authorized, consumer-specific serialization of Twin's Working Memory for a particular request or session**. Projections may differ by principal, persona, purpose, audience, authorization, token budget, redaction and format.
-
-```text
-event or authenticated query
-        ↓
-Observer coordination
-        ↓
-┌─────────────────────────────┬──────────────────────────────┐
-│ Memory retrieval candidates │ Semantically applicable     │
-│                             │ Judgment revisions           │
-└──────────────┬──────────────┴──────────────┬───────────────┘
-               └──────────────┬──────────────┘
-                              ↓
-             Privacy and Governance Policy Engine
-                              ↓
-                  Authorized Working Memory
-                              ↓
-             Consumer-specific Context Pack
-                              ↓
-                           Host LLM
-```
-
-Semantic applicability determines which Judgment revisions are relevant; privacy governance determines whether those relevant items may be exposed. Memory candidates and semantically applicable Judgment items are both evaluated by the Privacy and Governance Policy Engine before entering authorized Working Memory or a Context Pack.
-
-The original Domain Firewall remains a domain-isolation and compatibility signal inside the broader v0.5 governance layer.
-
-### 8.7 Effector Intents
-
-Effectors are planned output architecture. The core proposes `Suggest`, `Draft`, `Highlight`, `Interrupt`, `Notify`, `RequestConfirmation` or `CreateReminder`; it does not execute platform commands directly.
-
-```text
-Effector Intent
-  → host-affordance check
-  → authorization + governance
-  → confirmation when required
-  → adapter command
-  → execution result
-  → Universal result event
-```
-
-Execution requires: host support **AND** principal authorization **AND** policy approval **AND** confirmation when required. Results such as `ReminderCreated` and `ReminderCreationFailed` return through the event plane for auditability.
-
-### 8.8 Host affordances vs authorization capabilities
-
-| Concept | Meaning | Examples |
-|---|---|---|
-| Integration affordances | What a host can technically do | `can_observe_messages`, `can_insert_context`, `can_interrupt` |
-| Authorization capabilities | What a principal may do | `read_context_pack`, `read:vault:vault_work`, `session:write`, `privacy:admin` |
-
-A future **Integration Affordance Registry** negotiates host affordances. The implemented governance layer evaluates authorization. Technical ability never grants permission.
-
-### 8.9 Strategies and migration
-
-| Strategy | Status | Advantages | Limitations |
-|---|---|---|---|
-| Native | Planned per application | Real-time, rich metadata, proactive assistance | Adapter and host API limits |
-| MCP | Implemented | Universal, explicit, interoperable | Usually request-driven |
-| OS-level | Future fallback | Reaches closed applications | Fragile semantics, weak provenance, high privacy risk |
-
-The MVP does not require an Event Bus, public Universal Event model, Effector runtime or separate perception service. It validates memory, Judgment, retrieval, governance, Context Packs and interoperable access using existing Percepts and service interfaces.
-
-A later **Unified Cognitive Perception** milestone may add the versioned envelope and explicit `Universal Event → Percept` conversion. The migration must preserve Percept identifiers, evidence lineage, quarantine, deletion propagation and session/consolidation behavior.
-
----
-
-## 9. Architecture Principles
+## 8. Architecture Principles
 
 These principles are the constitution of `twin`. Roadmaps can change, backends can change and interfaces can change, but new features should remain compatible with these rules. When an implementation choice is ambiguous, the preferred option is the one that preserves cognition, autonomy, evidence, safety and portability.
 
-### 9.1 Twin is a cognitive infrastructure
+### 8.1 Twin is a cognitive infrastructure
 
 `twin` is not a memory database. It is an attempt to externalize part of a person's cognition without externalizing their autonomy.
 
@@ -708,7 +516,7 @@ That first principle changes the meaning of every technical decision in the proj
 
 Autonomy is the boundary. `twin` may remember, organize, retrieve, suggest and explain, but it must not quietly take ownership of the user's values or decisions. The project succeeds when it gives external tools access to a safer cognitive substrate while keeping the user in control of durable memory, judgment and action.
 
-### 9.2 Knowledge is not understanding
+### 8.2 Knowledge is not understanding
 
 A million perfectly indexed facts do not produce good decisions. Knowledge answers what is known; understanding emerges from the interaction between memory, context, temporal state, constraints, relationships, consequences and judgment.
 
@@ -716,7 +524,7 @@ A million perfectly indexed facts do not produce good decisions. Knowledge answe
 
 This is the difference between a retrieval layer and a cognitive layer. Retrieval can return information; understanding requires organizing information so that future reasoning improves.
 
-### 9.3 Memory is compression
+### 8.3 Memory is compression
 
 The system should never try to store reality itself. The brain does not preserve every signal; it compresses experience into patterns, episodes, concepts, salience and decision-relevant traces. `twin` should do the same.
 
@@ -724,7 +532,7 @@ A memory is worth keeping when it can change future action: a decision, constrai
 
 This principle changes the ingestion pipeline. The goal is not maximum capture. The goal is selective consolidation: preserve what has future cognitive value, keep evidence links for auditability and avoid turning the user's life into an indiscriminate archive.
 
-### 9.4 Artifact ≠ Percept ≠ Memory ≠ Judgment
+### 8.4 Artifact ≠ Percept ≠ Memory ≠ Judgment
 
 The backbone of the project is a pipeline from reality to action:
 
@@ -735,7 +543,7 @@ Artifact
 (file, transcript, message, note, issue, commit)
     ↓
 Percept
-(normalized, sealed observation)
+(normalized observation)
     ↓
 Memory
 (consolidated knowledge with evidence and temporal validity)
@@ -747,11 +555,11 @@ Action
 (suggestion, draft, reminder, automation or silence)
 ```
 
-An artifact is a source object. A Percept is the normalized, sealed observation Twin accepts from that artifact or from a future Universal Event. A memory is a durable structured claim extracted from one or more Percepts. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
+An artifact is a source object. A percept is what the system notices from that artifact. A memory is a durable structured claim extracted from one or more percepts. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
 
-Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a Percept to action without evidence, governance and Judgment, it is unsafe.
+Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a percept to action without evidence, firewall and judgment, it is unsafe.
 
-### 9.5 The graph is truth; embeddings are indexes
+### 8.5 The graph is truth; embeddings are indexes
 
 Embeddings answer similarity. They do not answer truth. They cannot explain why a memory exists, when it was true, which source supports it, whether it supersedes another memory or whether it is allowed in the current domain. They are indexes, not memory.
 
@@ -759,7 +567,7 @@ The canonical memory of `twin` is the temporal graph: memory items, entities, re
 
 This is both a technical and philosophical decision. The user must be able to delete every embedding, regenerate indexes with a different model and still preserve the cognitive substrate. Similarity is useful; truth requires structure, evidence and time.
 
-### 9.6 Evidence before memory
+### 8.6 Evidence before memory
 
 Every durable memory must point back to evidence. Evidence can be a source document, transcript segment, commit, issue, note, calendar event, message or explicit user confirmation. Without evidence, the system may hold a hypothesis, but it should not promote it to confirmed memory.
 
@@ -767,7 +575,7 @@ Evidence is what makes the system inspectable. It lets the user correct bad extr
 
 This principle does not mean all evidence must be exposed to every tool. Evidence has its own sensitivity and domain. But the link must exist inside the local system so the user can audit, export, revise or delete it.
 
-### 9.7 Memory evolves
+### 8.7 Memory evolves
 
 `twin` is an evolving cognitive model, not a static database. It is expected to change continuously as projects, preferences, constraints, relationships and beliefs change. Static memories are a bug when they pretend old context is still current.
 
@@ -775,7 +583,7 @@ Memories should carry temporal validity through dates, conditions, supersedence 
 
 This protects the user from stale personalization. A tool that remembers the user well in 2026 but keeps applying 2023 preferences without context is not intelligent; it is outdated with confidence.
 
-### 9.8 Sessions are units of cognition
+### 8.8 Sessions are units of cognition
 
 A session is where context, intention, evidence and interpretation meet. It may be a conversation, work block, meeting, debugging run or planning episode. `twin` should treat sessions as the primary unit for observing cognitive change.
 
@@ -783,15 +591,15 @@ This prevents the system from overreacting to isolated sentences. A single utter
 
 Session-based change also improves auditability. Instead of asking "why does the system believe this?", the user can inspect which session produced the candidate memory or judgment update, what evidence was present and whether the conclusion still holds.
 
-### 9.9 Governance before reasoning
+### 8.9 Firewall before reasoning
 
-Privacy and contextual governance must happen before reasoning, not after. The main LLM receives only memories and applicable Judgment authorized for the current principal, client binding, persona, purpose, audience, tool, vault and policy revision.
+Privacy and domain separation must happen before reasoning, not after. The main LLM should receive only the memories that are allowed for the current target domain, persona, sensitivity level and task.
 
-This is a hard safety boundary. Once sensitive context enters a model prompt, the leak has already happened. The v0.5 Privacy and Governance Policy Engine evaluates policies, grants, consent, capabilities and redaction before Context Pack assembly and records the resulting decisions for auditability.
+This is one of the project's hard safety boundaries. Once sensitive context enters a model prompt, the leak has already happened. Even if the model behaves well, the system has lost the ability to prove that forbidden content was not considered. A firewall is therefore not a formatting layer; it is an access-control layer.
 
-The original Domain Firewall remains a domain-isolation and compatibility signal inside this broader governance layer. Features that bypass governance are architectural regressions: retrieval may produce candidates, but policy evaluation and redaction determine what can enter the consumer-specific Context Pack.
+Features that bypass the firewall for convenience are architectural regressions. The right flow is retrieval, classification, filtering, logging and then context packing. The LLM reasons over the safe pack, not over the raw memory universe.
 
-### 9.10 Judgment evolves independently
+### 8.10 Judgment evolves independently
 
 Memory describes what happened, what was decided, what exists and what evidence supports it. Judgment describes how the user tends to decide, prioritize, reject, approve or communicate. They are related, but they should not be collapsed into the same mechanism.
 
@@ -799,15 +607,15 @@ A new memory can be added without changing judgment. Conversely, judgment can ev
 
 This independence makes the system safer and more explainable. Memory can be frequent; judgment should be conservative because it changes how future tools act on behalf of the user.
 
-### 9.11 MCP before UI
+### 8.11 Native integration where possible, MCP everywhere
 
-`twin` should be useful from many tools, not trapped inside a custom interface. MCP is the primary interface because it lets IDEs, desktop assistants, coding agents and future tools safely request memory, context and judgment through explicit capabilities.
+`twin` should integrate directly into a host application's UI when the host provides supported APIs, hooks or protocols. Native integration offers the best experience because it can surface memory and context within the tool the user is already using.
 
-This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces. The goal is to make them better by giving them a portable, filtered and auditable cognitive substrate.
+When native integration is not available, MCP remains the universal and interoperable interface for safely requesting memory, context and judgment. The two modes share the same cognitive core and data; native integration must not create a proprietary memory silo.
 
-A feature that only works in one UI is less valuable than a capability exposed through MCP, API and CLI. Interfaces may differ, but the same memory and governance semantics should be available everywhere.
+This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces, but to improve them through native integration where possible and MCP everywhere else.
 
-### 9.12 Exportability over lock-in
+### 8.12 Exportability over lock-in
 
 The user must be able to leave. Exportability is not a nice-to-have; it is a moral and architectural requirement for a system that stores personal cognition. Memories, evidence, entities, relations, policies, judgment profiles and index metadata should be representable in formats that can be inspected and migrated.
 
@@ -815,7 +623,7 @@ This protects the user from the project itself. If `twin` succeeds, it may becom
 
 Implementers should prefer boring, documented and portable representations over clever storage tricks that only one runtime understands. Performance optimizations are welcome when they do not compromise export.
 
-### 9.13 Progressive cognition
+### 8.13 Progressive cognition
 
 The system should never jump directly from observation to autonomy. Each cognitive layer must become reliable before the next one exists:
 
@@ -837,7 +645,7 @@ This principle defines the roadmap more clearly than a feature list. A reliable 
 
 Progressive cognition does not reduce the vision; it makes the vision survivable. Each version should create practical value while preserving the path toward deeper cognition and safer action.
 
-### 9.14 Local-first by default
+### 8.14 Local-first by default
 
 The default assumption is that personal memory, judgment, evidence and indexes live locally under user control. Cloud services may be useful for specific extraction, backup or collaboration flows, but they should not become mandatory for the core system to function.
 
@@ -845,7 +653,7 @@ Local-first is not nostalgia; it is a safety and agency requirement. The data in
 
 This principle also improves longevity. A personal cognitive OS should outlive model providers, SaaS pricing changes and product shutdowns. Local data plus open export paths are what make that possible.
 
-### 9.15 Human approval for durable judgment
+### 8.15 Human approval for durable judgment
 
 Judgment changes affect future behavior. They can change what the system recommends, blocks, prioritizes, summarizes or exposes. For that reason, durable changes to judgment should require explicit human approval or a conservative review workflow.
 
@@ -853,7 +661,7 @@ The system may propose judgment updates. It may notice repeated patterns, contra
 
 This principle preserves agency. `twin` can learn with the user, but it should not silently rewrite the user's values, boundaries or decision model.
 
-### 9.16 Memory exists to improve future action
+### 8.16 Memory exists to improve future action
 
 Memory is not archival for its own sake. `twin` remembers because future thinking, decisions and actions can become better when the right context is available at the right moment.
 
@@ -862,9 +670,9 @@ Action does not need to mean autonomous execution. It can mean a better answer, 
 Reducing cognitive latency is one of `twin`'s primary goals. The system should make relevant context feel close to thought without sacrificing evidence, privacy or user control.
 
 
-## 10. Stack and technical decisions
+## 9. Stack and technical decisions
 
-### 10.1 Local-first
+### 9.1 Local-first
 
 Everything lives in `~/.twin` or `$TWIN_HOME`:
 
@@ -878,7 +686,7 @@ Backup = copy the folder.
 
 Full export = `twin export`.
 
-### 10.2 SQLite as a light graph
+### 9.2 SQLite as a light graph
 
 The MVP uses SQLite with tables for:
 
@@ -899,7 +707,7 @@ JSONB) and SQLite remains the zero-config backend for dev/tests.
 Neo4j, FalkorDB or Graphiti may come later, but the canonical memory must
 remain exportable.
 
-### 10.3 Vectors as index, not as memory
+### 9.3 Vectors as index, not as memory
 
 Embeddings are useful for semantic search, but they are not the true memory.
 
@@ -914,7 +722,7 @@ MCP = interface
 
 This avoids lock-in and allows reindexing in the future.
 
-### 10.4 Hybrid search
+### 9.4 Hybrid search
 
 Search combines:
 
@@ -925,7 +733,7 @@ Search combines:
 
 Search must answer not only "what looks semantically similar?", but "what is relevant, allowed and trustworthy for this context?".
 
-### 10.5 MCP-first
+### 9.5 MCP-first
 
 The project must not depend on its own UI. MCP lets external tools query `twin`.
 
@@ -955,9 +763,9 @@ Exposed tools:
 
 ---
 
-## 11. Data model
+## 10. Data model
 
-### 11.1 Memory Item
+### 10.1 Memory Item
 
 A memory item must contain:
 
@@ -982,7 +790,7 @@ A memory item must contain:
 }
 ```
 
-### 11.2 Memory types
+### 10.2 Memory types
 
 | Type | Meaning |
 |---|---|
@@ -997,7 +805,7 @@ A memory item must contain:
 | `communication_act` | communicative act: request, promise, refusal, apology, decision |
 | `constraint` | rule, limit or prohibition |
 
-### 11.3 Mandatory evidence
+### 10.3 Mandatory evidence
 
 Every memory must carry evidence, preferably a verbatim excerpt from the source.
 
@@ -1005,7 +813,7 @@ Without evidence, a memory is suspect.
 
 This reduces memory hallucination and enables human review.
 
-### 11.4 Temporality
+### 10.4 Temporality
 
 Memories must have temporal validity.
 
@@ -1028,7 +836,7 @@ Desired future:
 
 ---
 
-## 12. Ingestion and extraction pipeline
+## 11. Ingestion and extraction pipeline
 
 Flow:
 
@@ -1072,7 +880,7 @@ Future sources:
 
 ---
 
-## 13. PII and privacy
+## 12. PII and privacy
 
 The project assumes that leaking personal data can cause real harm.
 
@@ -1109,7 +917,7 @@ Rule: sensitive data must be blocked, masked, hashed or kept local.
 
 ---
 
-## 14. Selective review
+## 13. Selective review
 
 The user must not review everything manually. Review should happen by exception.
 
@@ -1139,7 +947,7 @@ contradict, defer, archive and request_more_evidence.
 
 ---
 
-## 15. Evolving judgment model
+## 14. Evolving judgment model
 
 Memories say **what happened**.
 
@@ -1178,28 +986,26 @@ Context packs receive an **applicable** judgment section (scoped by domain, pers
 
 ---
 
-## 16. Memory Observer
+## 15. Memory Observer
 
-The Memory Observer coordinates attention around the current task, text or session. Today it is reached through cognitive sessions and MCP/API/CLI service flows; planned native integrations may also drive it from Universal Events.
+The Memory Observer is a parallel AI/module that follows the current text and suggests related memories.
 
-The Observer interprets intention and context, applies attention policy and requests work from independent retrieval, privacy/governance, Judgment-applicability and Context Pack services. It does not own those modules, answer in place of the Host LLM or execute application-specific actions.
+It does not answer for the user. It must not act. It only remembers.
 
 Flow:
 
 ```text
-current task / session / future Universal Event
+current text / task / draft
         ↓
-Observer: intention + context + attention
+domain inference
         ↓
-retrieval candidates
+candidate memory search
         ↓
-Privacy and Governance Policy Engine
+firewall
         ↓
-applicable Judgment
+ranking
         ↓
-Working Memory
-        ↓
-authorized consumer-specific Context Pack
+compact suggestion for the main AI
 ```
 
 This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
@@ -1229,7 +1035,7 @@ Desired format:
 
 ---
 
-## 17. Installation
+## 16. Installation
 
 ```bash
 pip install -e ".[dev]"        # everything (api + mcp + postgres + crypto + tests)
@@ -1241,7 +1047,7 @@ twin init                      # creates ~/.twin (policies.yaml, judgment.yaml)
 
 ---
 
-## 18. Basic flow
+## 17. Basic flow
 
 ```bash
 # 1. Ingestion: markdown, .txt transcripts, .json meetings, Slack .json exports
@@ -1285,7 +1091,7 @@ twin reindex                   # after switching embedders
 
 ---
 
-## 19. MCP
+## 18. MCP
 
 ```bash
 twin mcp
@@ -1318,7 +1124,7 @@ troubleshooting): [docs/mcp-clients.md](docs/mcp-clients.md).
 
 ---
 
-## 20. Local API
+## 19. Local API
 
 `twin serve` starts:
 
@@ -1369,7 +1175,7 @@ Main endpoints:
 
 ---
 
-## 21. Configuration
+## 20. Configuration
 
 | variable | default | effect |
 |---|---|---|
@@ -1388,7 +1194,7 @@ mix across different models.
 
 ---
 
-## 22. Tests
+## 21. Tests
 
 ```bash
 python -m pytest
@@ -1409,7 +1215,7 @@ Expected coverage:
 
 ---
 
-## 23. MVP scope
+## 22. MVP scope
 
 Includes:
 
@@ -1440,7 +1246,7 @@ Deliberately does not include:
 
 ---
 
-## 24. Roadmap
+## 23. Roadmap
 
 ### v0.1 — Local Technical Memory
 
@@ -1448,7 +1254,7 @@ Prove the system reduces re-explanation in technical work.
 
 Delivered:
 
-- local ingestion with normalized Percepts;
+- local ingestion with normalized percepts;
 - local extraction through Ollama with an offline heuristic fallback;
 - selective review and confirmed-only context packs by default;
 - sectioned context packs with judgment, decisions, constraints, tasks, preferences, facts/events and evidence;
@@ -1469,12 +1275,12 @@ Delivered:
 
 - cognitive sessions with start, observe, complete and feedback over MCP, API and CLI;
 - task-aware context packs (coding, architecture, debugging, writing, planning, review, meeting prep);
-- first-class projects with repos, aliases, goals and session/Percept linkage;
+- first-class projects with repos, aliases, goals and session/percept linkage;
 - product usefulness feedback and session/product metrics;
 - multi-stage retrieval with graph expansion, firewall and source-trust weighting;
 - fast and deep observer modes with domain/project/task uncertainty;
 - `twin doctor` and `twin setup` for ollama, postgres and MCP clients;
-- incremental developer sensors (Git, watch) preserving artifact ≠ Percept ≠ memory.
+- incremental developer sensors (Git, watch) preserving artifact ≠ percept ≠ memory.
 
 ### v0.3 — Memory Quality, Consolidation and Review at Scale
 
@@ -1485,7 +1291,7 @@ Delivered:
 - quality analyzer with neighborhood discovery, claim-aware findings and recomputable review priority (with conflict/privacy floors);
 - Review Workbench with priority queue, side-by-side diffs, keyboard shortcuts and batch preview/apply;
 - transactional merge and split with compatibility gates, evidence mapping on split, provenance and full undo;
-- artifact provenance chain via explicit artifact↔Percept links (no content-hash cascade);
+- artifact provenance chain via explicit artifact↔percept links (no content-hash cascade);
 - source×type calibration and soft confidence adjustment at extraction;
 - safe duplicate-group automation (single canonical survivor) and policy-gated task archival;
 - retention and deletion propagation with tombstones and dry-run;
@@ -1521,27 +1327,17 @@ Transform the domain firewall into contextual, verifiable governance independent
 Delivered:
 
 - authorization context (`AccessRequest`: principal, persona, purpose, audience, tool) shared across pack/session surfaces;
-- server-side identity resolution (`resolve_access`) — MCP/API without identity enter restricted mode (never inherit `local-cli`);
-- tool registry owns `execution_location` (client claims ignored);
 - governance policy engine with precedence (constitutional deny → deny → grant/redact → allow → default-deny in restricted mode);
-- `PrivacyDecision` audit trail with per-resource effects, policy revision ids and evaluated policy snapshot;
-- field/domain/ownership classification and ephemeral `RedactionPlan` transforms (canonical store untouched; title+summary+sources scrubbed);
-- temporary `PermissionGrant`s with TTL, max-uses, scoped tool/audience/location and CAS consumption with real rowcount;
-- consent / capability / vault gates on third-party and non-public resources;
-- judgment items pass through the same policy engine before pack assembly;
-- prompt-injection quarantine before extraction (release requires actor/reason/confirm);
+- `PrivacyDecision` audit trail with per-resource effects and policy-set version references;
+- field/domain/ownership classification and ephemeral `RedactionPlan` transforms (canonical store untouched);
+- temporary `PermissionGrant`s with TTL, max-uses and compare-and-set consumption;
+- prompt-injection quarantine before extraction (quarantined content cannot become memory/judgment);
 - logical vault labels and employer-ownership policies (no work data to personal cloud);
-- deletion preview with immutable full-id manifest + preview_token (UI sample capped; execute never uses truncated lists);
-- leakage scan + canaries on assembled packs; `validate_output` primitive on MCP;
+- deletion preview/execute with lineage accounting; leakage canaries;
 - context packs evaluate privacy after retrieval (deny/redact before assembly; evidence skipped for redacted items);
 - sessions capture persona/purpose/tool and privacy decision ids;
-- CLI (`twin privacy …`) for simulate, explain, grants, quarantine, delete-preview/execute;
-- MCP tools `privacy_evaluate` / `privacy_explain` / `privacy_validate_output`;
-- `tests/test_privacy.py` covering deny/redact/grant/quarantine/canary/identity/deletion invariants.
-
-Scaffolded (not a full adversarial regression suite yet):
-
-- `evals/privacy/` placeholder for future privacy eval harness.
+- CLI (`twin privacy …`) for simulate, explain, grants, quarantine and delete-preview;
+- `tests/test_privacy.py` covering deny/redact/grant/quarantine/canary invariants.
 
 ### v0.6 — Professional Connectors
 
@@ -1621,7 +1417,7 @@ A trustworthy, daily-usable version of the infrastructure with:
 
 ---
 
-## 25. Future major versions
+## 24. Future major versions
 
 ### v2 — Extended Brain
 
@@ -1678,7 +1474,7 @@ Prepare the cognitive substrate for physical agents:
 
 ---
 
-## 26. Related projects
+## 25. Related projects
 
 ### Graphiti / Zep
 
@@ -1712,7 +1508,7 @@ Inspiration for continuous local capture of screen/audio/context. Not an MVP pri
 
 ---
 
-## 27. Success metrics
+## 26. Success metrics
 
 ### MVP
 
@@ -1740,9 +1536,9 @@ The MVP is successful if it:
 
 ---
 
-## 28. Risks
+## 27. Risks
 
-### 28.1 Privacy
+### 27.1 Privacy
 
 Maximum risk. The system may contain intimate and professional information. Mitigations:
 
@@ -1755,7 +1551,7 @@ Maximum risk. The system may contain intimate and professional information. Miti
 - export/delete;
 - future encryption.
 
-### 28.2 Memory hallucination
+### 27.2 Memory hallucination
 
 LLMs can extract false memories. Mitigations:
 
@@ -1766,17 +1562,17 @@ LLMs can extract false memories. Mitigations:
 - blocking candidates in critical contexts;
 - internal citations.
 
-### 28.3 Domain mixing
+### 27.3 Domain mixing
 
 The most dangerous operational risk. Mitigations:
 
 - mandatory domain/persona/sensitivity;
-- privacy/governance before the LLM;
+- firewall before the LLM;
 - block logs;
 - explicit target_domain;
 - tested policies.
 
-### 28.4 Overengineering
+### 27.4 Overengineering
 
 The risk of trying to build the whole brain before the MVP. Mitigation:
 
@@ -1786,7 +1582,7 @@ The risk of trying to build the whole brain before the MVP. Mitigation:
 - use MCP;
 - measure real usefulness.
 
-### 28.5 Vendor dependency
+### 27.5 Vendor dependency
 
 Mitigation:
 
@@ -1798,7 +1594,7 @@ Mitigation:
 
 ---
 
-## 29. Practical philosophy of the project
+## 28. Practical philosophy of the project
 
 `twin` must follow these principles:
 
@@ -1809,7 +1605,7 @@ explicit judgment > implicit imitation
 temporal graph > infinite markdown
 vectors as index > vectors as truth
 MCP > mandatory own UI
-privacy and governance before the LLM > trusting the LLM
+firewall before the LLM > trusting the LLM
 selective review > total manual curation
 mandatory evidence > sourceless memory
 exportability > lock-in
@@ -1817,7 +1613,7 @@ exportability > lock-in
 
 ---
 
-## 30. Final definition
+## 29. Final definition
 
 `twin` is a personal, local-first, interoperable and temporal layer of memory, judgment, privacy and context.
 
