@@ -193,7 +193,7 @@ Cognitive psychology and neuroscience distinguish multiple memory systems. This 
 | Semantic memory | facts, concepts, consolidated relationships | `fact`, entities, relations, graph |
 | Procedural memory | ways of doing, habits, workflows | `procedure`, playbooks, scripts |
 | Working memory | current task focus | current query, observer, context pack |
-| Executive control | selection, inhibition, judgment | Domain Firewall, policies, evolving judgment model |
+| Executive control | selection, inhibition, judgment | Privacy/Governance, domain isolation, evolving Judgment |
 
 The hippocampus inspires the episodic capture and temporal consolidation layer. The associative cortex inspires semantic memory. The prefrontal cortex inspires the judgment, inhibition and context selection layer.
 
@@ -203,9 +203,9 @@ The hippocampus inspires the episodic capture and temporal consolidation layer. 
 
 | Brain concept | Purpose | `twin` abstraction |
 |---|---|---|
-| Hippocampus | Episodic encoding | Universal Events + episodic records |
+| Hippocampus | Episodic encoding | Percepts + Events |
 | Cortex | Semantic consolidation | Knowledge Graph |
-| Prefrontal Cortex | Executive control | Judgment + Domain Firewall |
+| Prefrontal Cortex | Executive control | Judgment + Privacy/Governance |
 | Basal Ganglia | Action selection | Action Policy (future) |
 | Amygdala | Salience/Risk | Sensitivity + Priority |
 | Working Memory | Current reasoning | Context Pack |
@@ -457,7 +457,7 @@ type
 + evidence
 ```
 
-The Domain Firewall decides whether a memory may enter a given context.
+The Domain Firewall decides whether a memory may cross a domain boundary. Since v0.5, it operates as one domain-isolation signal inside the broader Privacy and Governance Policy Engine, which also evaluates identity, purpose, audience, capabilities, grants, consent, ownership and redaction.
 
 Example:
 
@@ -495,7 +495,7 @@ candidate memories ──► dedupe ──► selective review queue
 store (Postgres+pgvector primary | SQLite dev): memories + entities + relations + evidence + embeddings + FTS
         │
         ▼
-hybrid search ──► Domain Firewall ──► compact context pack
+hybrid search ──► Privacy/Governance ──► applicable Judgment ──► compact context pack
         │                                    ▲
         ▼                                    │
 MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
@@ -504,93 +504,186 @@ MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
 ---
 
 
-## 8. Integration architecture
+## 8. Integration architecture — target model
 
-`twin` is a **Cognitive Operating System**: one cognitive core available through multiple surfaces. Applications are sources of observation and destinations for assistance, never separate brains or proprietary memory silos.
+This section describes the **target integration architecture**, not the current implementation in its entirety. It expands the existing cognitive architecture; it does not replace it.
+
+| Status | Capabilities |
+|---|---|
+| Implemented | MCP, HTTP API and CLI; Percepts and evidence lineage; sessions; retrieval and Context Packs; Judgment; privacy/governance; current sensors and ingestion |
+| Partial | source normalization, Observer coordination and authenticated clients with authorization capabilities |
+| Planned | native adapters; versioned Universal Events; an event plane; host-affordance negotiation; Effector Intents and result events |
+| Future fallback | OS-level observation or automation for closed applications |
 
 > **Native where possible. MCP everywhere. One cognitive core. No proprietary memory silos.**
 
 > **Application-specific ingestion. Application-agnostic cognition.**
 
-Acquisition and delivery differ between applications; cognition does not. Every integration converges on Universal Events and abstract Effectors.
+Applications are sources and destinations, not separate cognitive cores. Protocol and transport details remain in integrations; semantic source context crosses the boundary as normalized metadata.
+
+### 8.1 Two integration planes
 
 ```text
-Applications
+Observation / event plane (planned)
+
+hooks / sensors / connectors
         ↓
 Application Adapters
         ↓
-Universal Events
+Universal Events → Event Bus
         ↓
-Event Bus
-        ↓
-Memory Observer
-        ↓
-Working Memory (Context Pack)
-        ↓
-Judgment + Cognitive Core
-        ↓
-Effectors
-        ↓
-Applications
+Percept creation + Observer coordination
 ```
-
-Applications exist only at the integration boundary. Adding a client requires an adapter, not a Cognitive Core change.
-
-### 8.1 Native and MCP Integration
-
-**Native Integration** is preferred when a host exposes APIs, hooks or protocols. Codex App-Server and Claude Code Hooks are examples. It can support real-time observation, proactive retrieval, context insertion, steering or interruption when host capabilities permit.
-
-**MCP Integration** is the universal, interoperable interface and remains available even when a native adapter exists. Its tools expose memory, judgment, context, provenance and sessions; skills teach agents when to use them. Native is the richest experience; MCP is the portable contract. Both share exactly the same core.
-
-### 8.2 Application Adapters
-
-Adapters own application-specific APIs, authentication, callbacks, WebSockets, formats, events and streaming. Examples include Codex App-Server, Claude Code Hooks, Slack, Gmail, WhatsApp, Cursor, VS Code, Browser, Voice, OCR and Screen. All specificity ends here.
-
-### 8.3 Universal Events and Event Bus
-
-Adapters produce events such as `ConversationStarted`, `ConversationEnded`, `MessageSent`, `MessageReceived`, `FileOpened`, `FileChanged`, `ToolStarted`, `ToolFinished`, `VoiceInput` and `SearchExecuted`.
-
-Normalization preserves origin application, workspace, channel, thread, participants, timestamps, identifiers and conversational context. Origin is semantic: the core does not implement Slack or WhatsApp, but source and social setting affect interpretation, governance and memory.
-
-Every event enters an internal Event Bus. Cognitive modules consume the bus; integrations never call the core directly. This enables independent evolution, replay and auditing.
-
-### 8.4 Memory Observer and Working Memory
-
-The **Memory Observer** remains one subsystem responsible for intention detection, entity extraction, attention, memory retrieval, relevance ranking, applicable Judgment, Domain Firewall, Context Pack composition and supported intervention. Attention is internal to the Observer, not an independent component.
-
-The **Context Pack is the computational abstraction of Working Memory**:
 
 ```text
-Universal Events
+Query / control plane (implemented)
+
+MCP / HTTP API / CLI
         ↓
-Memory Observer
+authenticated command or query
         ↓
-Working Memory (Context Pack)
+cognitive services
         ↓
-Main LLM
+Context Pack / session / review / provenance
 ```
 
-### 8.5 Effectors
+Both planes converge on the same services, governance, Judgment and stores. Synchronous commands need not become artificial events. Native observation uses the event plane when available; MCP remains the universal query and control contract.
 
-Adapters represent input; **Effectors** represent output. The core emits abstract intentions such as `Suggest`, `Draft`, `Highlight`, `Interrupt`, `Notify`, `RequestConfirmation` and `CreateReminder`; it never performs platform-specific operations directly. Integrations map supported intentions safely without bypassing authorization, firewall or confirmation.
+### 8.2 Native, MCP and adapters
 
-### 8.6 Capability Registry
+**Native Integration** is preferred when a host exposes APIs, hooks or streams. Codex App-Server and Claude Code Hooks are target examples. It may support real-time observation, proactive context, steering or interruption, subject to host support and authorization.
 
-Each adapter declares capabilities: observing messages, streams and tools; inserting context; steering; interruption; read-only operation; or MCP-only access. The core adapts automatically. Missing capabilities degrade behavior, never cognitive semantics.
+**MCP Integration** is implemented and remains the universal interface even when a native adapter exists. Skills teach agents when to consult memory, Judgment, context, provenance and sessions. Native is the richest target experience; MCP is the portable contract. Both share the same core.
 
-### 8.7 Integration strategies
+Planned Application Adapters own application-specific APIs, authentication, callbacks, WebSockets, formats and streaming. Target adapters include Codex App-Server, Claude Code Hooks, Slack, Gmail, WhatsApp, Cursor, VS Code, Browser, Voice, OCR and Screen. Adding a supported application should require an adapter that emits Universal Events and consumes authorized Effector Intents, not a Cognitive Core change. Application **protocol and transport specificity** ends in the adapter. Source application, workspace, channel, thread, participants, ownership, confidentiality, transport trust, artifact type and social setting cross the boundary because they affect interpretation and governance.
 
-| Strategy | Advantages | Limitations | Best fit |
+### 8.3 Universal Event envelope
+
+A Universal Event is a planned, versioned envelope describing an observed occurrence. It is not a Memory and may reference rather than copy a large Artifact.
+
+Minimum target fields include:
+
+- `event_id`, `event_type`, `schema_version`;
+- source adapter and identity; actor and participants;
+- `occurred_at`, `observed_at`;
+- workspace, channel, thread and session;
+- artifact references;
+- `causation_id`, `correlation_id`, deduplication key;
+- confidentiality and ownership hints;
+- raw metadata or an external raw-payload reference.
+
+Events support idempotency, replay, schema evolution, provenance, correlation and partial—not global—ordering. Origin is never discarded. Prefer observable facts such as `MessageObserved` with `author_id`, `direction_relative_to_user` and `participant_role` over application-relative `MessageSent` and `MessageReceived`.
+
+```json
+{
+  "event_id": "evt_...",
+  "event_type": "message.observed",
+  "schema_version": 1,
+  "source": {"adapter": "slack", "workspace_id": "...", "thread_id": "..."},
+  "actor": {"id": "...", "participant_role": "coworker"},
+  "direction_relative_to_user": "inbound",
+  "artifact_ref": "art_...",
+  "occurred_at": "...",
+  "observed_at": "...",
+  "correlation_id": "...",
+  "deduplication_key": "..."
+}
+```
+
+### 8.4 Artifact → Event → Percept → Memory
+
+`Percept` is an **existing Twin concept**, not a future abstraction:
+
+```text
+External occurrence
+        ↓
+Universal Event (planned metadata envelope)
+        ↓
+Artifact reference/content (optional durable source object)
+        ↓
+Percept (existing sealed observation)
+        ↓
+Memory candidate → confirmed Memory
+```
+
+An Artifact is external content. A Universal Event describes what occurred and may reference an Artifact. A Percept is the normalized observation accepted by Twin's existing ingestion, evidence and provenance lifecycle. A Memory is consolidated temporal knowledge. Judgment is an approved decision rule. An Effector Intent is a proposed abstract output, not an executed action.
+
+Existing sensors may produce Percepts directly. Planned adapters should emit Universal Events that are converted into Percepts while preserving existing identifiers and lineage. The explicit conversion boundary is future architecture; Percepts themselves are implemented today.
+
+### 8.5 Observer orchestration
+
+The **Memory Observer coordinates** attention and interpretation and requests services from retrieval, privacy/governance, Judgment applicability and Context Pack composition. Those remain independent modules with their own policies, tests, stores and lifecycle.
+
+```text
+Observer
+├── intention/context interpretation
+├── attention policy
+├── retrieval request
+├── governance request
+├── Judgment applicability request
+└── intervention recommendation
+```
+
+The Observer does not own the privacy engine, Judgment store, retrieval engine or Context Pack builder. Attention remains internal to the Observer.
+
+### 8.6 Working Memory and Context Packs
+
+Working Memory is transient state: current input, session, inferred intention, attention, task profile, retrieved candidates, applicable Judgment, governance decisions and integration state.
+
+A **Context Pack is the authorized, consumer-specific serialization of Twin's Working Memory for a particular request or session**. Projections may differ by principal, persona, purpose, audience, authorization, token budget, redaction and format.
+
+```text
+event or authenticated query
+        ↓
+Observer coordination + retrieval
+        ↓
+Privacy and Governance Policy Engine
+        ↓
+applicable Judgment
+        ↓
+Working Memory
+        ↓  authorized consumer-specific projection
+Context Pack → Host LLM
+```
+
+The original Domain Firewall remains a domain-isolation and compatibility signal inside the broader v0.5 governance layer. Governance and applicable Judgment are evaluated before protected material enters a Context Pack.
+
+### 8.7 Effector Intents
+
+Effectors are planned output architecture. The core proposes `Suggest`, `Draft`, `Highlight`, `Interrupt`, `Notify`, `RequestConfirmation` or `CreateReminder`; it does not execute platform commands directly.
+
+```text
+Effector Intent
+  → host-affordance check
+  → authorization + governance
+  → confirmation when required
+  → adapter command
+  → execution result
+  → Universal result event
+```
+
+Execution requires: host support **AND** principal authorization **AND** policy approval **AND** confirmation when required. Results such as `ReminderCreated` and `ReminderCreationFailed` return through the event plane for auditability.
+
+### 8.8 Host affordances vs authorization capabilities
+
+| Concept | Meaning | Examples |
+|---|---|---|
+| Integration affordances | What a host can technically do | `can_observe_messages`, `can_insert_context`, `can_interrupt` |
+| Authorization capabilities | What a principal may do | `read_context_pack`, `read:vault:vault_work`, `session:write`, `privacy:admin` |
+
+A future **Integration Affordance Registry** negotiates host affordances. The implemented governance layer evaluates authorization. Technical ability never grants permission.
+
+### 8.9 Strategies and migration
+
+| Strategy | Status | Advantages | Limitations |
 |---|---|---|---|
-| Native | Real-time, rich metadata, proactive context and intervention | Adapter and host API limits | Stable APIs or hooks |
-| MCP | Universal, explicit, interoperable and UI-independent | Usually request-driven | Any MCP-capable host |
-| OS-level fallback (future) | Reaches closed applications | Fragile semantics, weak provenance, higher privacy risk | No native or MCP surface |
+| Native | Planned per application | Real-time, rich metadata, proactive assistance | Adapter and host API limits |
+| MCP | Implemented | Universal, explicit, interoperable | Usually request-driven |
+| OS-level | Future fallback | Reaches closed applications | Fragile semantics, weak provenance, high privacy risk |
 
-Native is preferred, MCP remains universal, and OS-level integration is only a future fallback subject to the same privacy, provenance, confirmation and audit rules.
+The MVP does not require an Event Bus, public Universal Event model, Effector runtime or separate perception service. It validates memory, Judgment, retrieval, governance, Context Packs and interoperable access using existing Percepts and service interfaces.
 
-### 8.8 Future perception layer
-
-A future explicit perception layer may interpret Universal Events into cognitive **Percepts**, separating acquisition, normalization, perception and memory. This is direction, not MVP scope. The MVP sends consistent events to the Observer, which may interpret them internally without exposing Percepts publicly. A future **Unified Cognitive Perception** milestone may add that boundary after memory, judgment, retrieval and integration are validated.
+A later **Unified Cognitive Perception** milestone may add the versioned envelope and explicit `Universal Event → Percept` conversion. The migration must preserve Percept identifiers, evidence lineage, quarantine, deletion propagation and session/consolidation behavior.
 
 ---
 
@@ -622,7 +715,7 @@ A memory is worth keeping when it can change future action: a decision, constrai
 
 This principle changes the ingestion pipeline. The goal is not maximum capture. The goal is selective consolidation: preserve what has future cognitive value, keep evidence links for auditability and avoid turning the user's life into an indiscriminate archive.
 
-### 9.4 Artifact ≠ Observation ≠ Memory ≠ Judgment
+### 9.4 Artifact ≠ Percept ≠ Memory ≠ Judgment
 
 The backbone of the project is a pipeline from reality to action:
 
@@ -632,8 +725,8 @@ Reality
 Artifact
 (file, transcript, message, note, issue, commit)
     ↓
-Observation
-(normalized event interpretation)
+Percept
+(normalized, sealed observation)
     ↓
 Memory
 (consolidated knowledge with evidence and temporal validity)
@@ -645,9 +738,9 @@ Action
 (suggestion, draft, reminder, automation or silence)
 ```
 
-An artifact is a source object. An observation is what the MVP notices from that artifact or a Universal Event. A memory is a durable structured claim extracted from one or more observations. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
+An artifact is a source object. A Percept is the normalized, sealed observation Twin accepts from that artifact or from a future Universal Event. A memory is a durable structured claim extracted from one or more Percepts. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
 
-Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from an observation to action without evidence, firewall and judgment, it is unsafe.
+Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a Percept to action without evidence, governance and Judgment, it is unsafe.
 
 ### 9.5 The graph is truth; embeddings are indexes
 
@@ -681,13 +774,13 @@ This prevents the system from overreacting to isolated sentences. A single utter
 
 Session-based change also improves auditability. Instead of asking "why does the system believe this?", the user can inspect which session produced the candidate memory or judgment update, what evidence was present and whether the conclusion still holds.
 
-### 9.9 Firewall before reasoning
+### 9.9 Governance before reasoning
 
-Privacy and domain separation must happen before reasoning, not after. The main LLM should receive only the memories that are allowed for the current target domain, persona, sensitivity level and task.
+Privacy and contextual governance must happen before reasoning, not after. The main LLM receives only memories and applicable Judgment authorized for the current principal, client binding, persona, purpose, audience, tool, vault and policy revision.
 
-This is one of the project's hard safety boundaries. Once sensitive context enters a model prompt, the leak has already happened. Even if the model behaves well, the system has lost the ability to prove that forbidden content was not considered. A firewall is therefore not a formatting layer; it is an access-control layer.
+This is a hard safety boundary. Once sensitive context enters a model prompt, the leak has already happened. The v0.5 Privacy and Governance Policy Engine evaluates policies, grants, consent, capabilities and redaction before Context Pack assembly and records the resulting decisions for auditability.
 
-Features that bypass the firewall for convenience are architectural regressions. The right flow is retrieval, classification, filtering, logging and then context packing. The LLM reasons over the safe pack, not over the raw memory universe.
+The original Domain Firewall remains a domain-isolation and compatibility signal inside this broader governance layer. Features that bypass governance are architectural regressions: retrieval may produce candidates, but policy evaluation and redaction determine what can enter the consumer-specific Context Pack.
 
 ### 9.10 Judgment evolves independently
 
@@ -703,7 +796,7 @@ This independence makes the system safer and more explainable. Memory can be fre
 
 This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces. The goal is to make them better by giving them a portable, filtered and auditable cognitive substrate.
 
-A feature that only works in one UI is less valuable than a capability exposed through MCP, API and CLI. Interfaces may differ, but the same memory and firewall semantics should be available everywhere.
+A feature that only works in one UI is less valuable than a capability exposed through MCP, API and CLI. Interfaces may differ, but the same memory and governance semantics should be available everywhere.
 
 ### 9.12 Exportability over lock-in
 
@@ -845,7 +938,7 @@ Exposed tools:
 | `memory_observe` | memory observer for the current text/task |
 | `memory_quality` | quality analysis + review priority |
 | `memory_neighbors` | neighborhood for side-by-side review |
-| `memory_provenance` | memory → evidence → observation → artifact |
+| `memory_provenance` | memory → evidence → percept → artifact |
 | `review_queue` | priority-ordered review queue |
 | `review_suggest_action` | suggest curation without mutating |
 | `memory_confirm` / `memory_reject` / `memory_archive` / `memory_merge` / `memory_split` | gated mutations (`confirm=true`) |
@@ -1078,22 +1171,26 @@ Context packs receive an **applicable** judgment section (scoped by domain, pers
 
 ## 16. Memory Observer
 
-The Memory Observer follows Universal Events and assembles safe, relevant Working Memory. It detects intention and entities, allocates attention, retrieves and ranks memories, consults applicable Judgment, enforces the Domain Firewall, composes the Context Pack and selects an abstract intervention when supported. It does not replace the Main LLM or execute application-specific actions.
+The Memory Observer coordinates attention around the current task, text or session. Today it is reached through cognitive sessions and MCP/API/CLI service flows; planned native integrations may also drive it from Universal Events.
+
+The Observer interprets intention and context, applies attention policy and requests work from independent retrieval, privacy/governance, Judgment-applicability and Context Pack services. It does not own those modules, answer in place of the Host LLM or execute application-specific actions.
 
 Flow:
 
 ```text
-Universal Events
+current task / session / future Universal Event
         ↓
-intention + entities + attention
+Observer: intention + context + attention
         ↓
-memory retrieval + ranking + applicable Judgment
+retrieval candidates
         ↓
-Domain Firewall
+Privacy and Governance Policy Engine
         ↓
-Working Memory (Context Pack)
+applicable Judgment
         ↓
-Main LLM and, when appropriate, an abstract Effector
+Working Memory
+        ↓
+authorized consumer-specific Context Pack
 ```
 
 This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
@@ -1342,7 +1439,7 @@ Prove the system reduces re-explanation in technical work.
 
 Delivered:
 
-- local ingestion with normalized events and internal observations;
+- local ingestion with normalized Percepts;
 - local extraction through Ollama with an offline heuristic fallback;
 - selective review and confirmed-only context packs by default;
 - sectioned context packs with judgment, decisions, constraints, tasks, preferences, facts/events and evidence;
@@ -1363,12 +1460,12 @@ Delivered:
 
 - cognitive sessions with start, observe, complete and feedback over MCP, API and CLI;
 - task-aware context packs (coding, architecture, debugging, writing, planning, review, meeting prep);
-- first-class projects with repos, aliases, goals and session/event linkage;
+- first-class projects with repos, aliases, goals and session/Percept linkage;
 - product usefulness feedback and session/product metrics;
 - multi-stage retrieval with graph expansion, firewall and source-trust weighting;
 - fast and deep observer modes with domain/project/task uncertainty;
 - `twin doctor` and `twin setup` for ollama, postgres and MCP clients;
-- incremental developer sensors (Git, watch) preserving artifact ≠ observation ≠ memory.
+- incremental developer sensors (Git, watch) preserving artifact ≠ Percept ≠ memory.
 
 ### v0.3 — Memory Quality, Consolidation and Review at Scale
 
@@ -1379,7 +1476,7 @@ Delivered:
 - quality analyzer with neighborhood discovery, claim-aware findings and recomputable review priority (with conflict/privacy floors);
 - Review Workbench with priority queue, side-by-side diffs, keyboard shortcuts and batch preview/apply;
 - transactional merge and split with compatibility gates, evidence mapping on split, provenance and full undo;
-- artifact provenance chain via explicit artifact↔observation links (no content-hash cascade);
+- artifact provenance chain via explicit artifact↔Percept links (no content-hash cascade);
 - source×type calibration and soft confidence adjustment at extraction;
 - safe duplicate-group automation (single canonical survivor) and policy-gated task archival;
 - retention and deletion propagation with tombstones and dry-run;
@@ -1665,7 +1762,7 @@ LLMs can extract false memories. Mitigations:
 The most dangerous operational risk. Mitigations:
 
 - mandatory domain/persona/sensitivity;
-- firewall before the LLM;
+- privacy/governance before the LLM;
 - block logs;
 - explicit target_domain;
 - tested policies.
@@ -1703,7 +1800,7 @@ explicit judgment > implicit imitation
 temporal graph > infinite markdown
 vectors as index > vectors as truth
 MCP > mandatory own UI
-firewall before the LLM > trusting the LLM
+privacy and governance before the LLM > trusting the LLM
 selective review > total manual curation
 mandatory evidence > sourceless memory
 exportability > lock-in
