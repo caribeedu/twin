@@ -160,13 +160,23 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     assert "not found" in rejected["error"]
 
     # 10: another MCP client sees the confirmed context from this session
+    # (must declare client identity — omitting it is restricted mode)
     other = create_server(str(home))
     pack = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
+        "client": "cursor",
     })
     pack_ids = {s["memory_id"] for s in pack["sources"]}
     assert set(created) & pack_ids, f"expected one of {created} in pack {pack_ids}"
     assert pack["project_id"] == project.id
+
+    # omitting client identity must not inherit local-cli / must not leak
+    restricted = await _call(other, "memory_safe_context_pack", {
+        "query": "webhook retries backoff", "project": "Atlas",
+    })
+    assert restricted.get("privacy_meta", {}).get("execution_location") in (
+        "unknown", None,
+    ) or not (set(created) & {s["memory_id"] for s in restricted.get("sources") or []})
 
 
 @pytest.fixture

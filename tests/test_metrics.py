@@ -32,9 +32,9 @@ def test_session_and_product_metrics(store, cfg, embedder):
     )
 
     s1 = start_session(store, cfg, embedder, "escrever a rfc de arquitetura",
-                       domain="technical").session
+                       domain="technical", client="cli").session
     s2 = start_session(store, cfg, embedder, "investigate the bug stacktrace",
-                       domain="technical").session
+                       domain="technical", client="cli").session
     complete_session(store, cfg, embedder, s1.id,
                      summary="We decided to use RabbitMQ for the queue.")
     record_feedback(store, s1.id, "useful")
@@ -82,9 +82,9 @@ def test_memory_usage_rate_counts_session_memory_pairs(store, cfg, embedder):
                           embedder.embed("Use FastAPI Decision FastAPI webhooks"))
 
     s1 = start_session(store, cfg, embedder, "FastAPI webhooks decision",
-                       domain="technical").session
+                       domain="technical", client="cli").session
     s2 = start_session(store, cfg, embedder, "FastAPI webhooks decision",
-                       domain="technical").session
+                       domain="technical", client="cli").session
     assert mem.id in s1.supplied_memory_ids and mem.id in s2.supplied_memory_ids
     record_feedback(store, s1.id, "useful", memory_id=mem.id)
     # duplicate verdict in the same session must not double-count the pair

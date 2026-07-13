@@ -82,7 +82,7 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
                           embedder.embed("Webhook stack\nWebhooks run on FastAPI."))
 
     started = start_session(store, cfg, embedder,
-                            "aquilo de ontem, resolve pra mim")
+                            "aquilo de ontem, resolve pra mim", client="cli")
     assert started.session.domain == "unclassified"
     assert started.needs_domain_confirmation
     assert started.pack.sources == []
@@ -90,14 +90,14 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
     # explicit domain resolves it
     confirmed = start_session(store, cfg, embedder,
                               "aquilo de ontem, resolve pra mim",
-                              domain="technical")
+                              domain="technical", client="cli")
     assert not confirmed.needs_domain_confirmation
 
 
 def test_start_session_resolves_project_from_cwd(store, cfg, embedder):
     project = ensure_project(store, "Atlas", repos=["atlas-api"])
     started = start_session(store, cfg, embedder, "fix the flaky test",
-                            cwd="/home/edu/code/atlas-api")
+                            cwd="/home/edu/code/atlas-api", client="cli")
     assert started.session.project_id == project.id
 
 
@@ -105,7 +105,7 @@ def test_start_session_explicit_project_wins(store, cfg, embedder):
     ensure_project(store, "Atlas", repos=["atlas-api"])
     other = ensure_project(store, "Beacon")
     started = start_session(store, cfg, embedder, "trabalhar no atlas",
-                            project="Beacon", cwd="/repos/atlas-api")
+                            project="Beacon", cwd="/repos/atlas-api", client="cli")
     assert started.session.project_id == other.id
 
 
@@ -115,7 +115,7 @@ def test_start_session_unknown_explicit_project_raises(store, cfg, embedder):
     ensure_project(store, "Atlas", repos=["atlas-api"])
     with pytest.raises(ValueError, match="'payments' not found"):
         start_session(store, cfg, embedder, "task no atlas",
-                      project="payments", cwd="/repos/atlas-api")
+                      project="payments", cwd="/repos/atlas-api", client="cli")
     # nothing was persisted for the failed start
     assert store.list_sessions() == []
 
@@ -123,18 +123,18 @@ def test_start_session_unknown_explicit_project_raises(store, cfg, embedder):
 def test_start_session_explicit_alias_resolves(store, cfg, embedder):
     project = ensure_project(store, "Atlas Webhooks", aliases=["atlas"])
     started = start_session(store, cfg, embedder, "task", project="atlas",
-                            domain="technical")
+                            domain="technical", client="cli")
     assert started.session.project_id == project.id
 
 
 def test_start_session_infers_task_profile(store, cfg, embedder):
     started = start_session(store, cfg, embedder,
-                            "investigate the bug in the payment stacktrace error")
+                            "investigate the bug in the payment stacktrace error", client="cli")
     assert started.session.task_profile == "debugging"
 
 
 def test_observe_appends_timestamped_artifacts(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     observe_session(store, session.id, {"kind": "file", "ref": "api.py"})
     updated = observe_session(store, session.id, {"kind": "commit", "ref": "abc123"})
     assert len(updated.artifacts) == 2
@@ -146,7 +146,7 @@ def test_observe_is_append_only_no_lost_updates(store, cfg, embedder):
     """Two clients holding stale copies of the session cannot erase each
     other's artifacts — the classic read-modify-write race is structurally
     impossible because artifacts are appended rows, not a rewritten array."""
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     # both "clients" read the session before either writes
     stale_a = store.get_session(session.id)
     stale_b = store.get_session(session.id)
@@ -160,7 +160,7 @@ def test_observe_is_append_only_no_lost_updates(store, cfg, embedder):
 
 
 def test_feedback_is_append_only_no_lost_updates(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     stale_a = store.get_session(session.id)
     stale_b = store.get_session(session.id)
     record_feedback(store, stale_a.id, "useful")
@@ -172,7 +172,7 @@ def test_feedback_is_append_only_no_lost_updates(store, cfg, embedder):
 def test_observe_rejects_unknown_and_closed_sessions(store, cfg, embedder):
     with pytest.raises(ValueError, match="not found"):
         observe_session(store, "ses_missing", {"kind": "file"})
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     complete_session(store, cfg, embedder, session.id, abandoned=True)
     with pytest.raises(ValueError, match="not active"):
         observe_session(store, session.id, {"kind": "file"})
@@ -183,7 +183,7 @@ def test_observe_rejects_unknown_and_closed_sessions(store, cfg, embedder):
 def test_complete_session_turns_work_into_candidate_memories(store, cfg, embedder):
     project = ensure_project(store, "Atlas")
     session = start_session(store, cfg, embedder, "escolher fila de mensagens",
-                            domain="technical", project="Atlas").session
+                            domain="technical", project="Atlas", client="cli").session
     observe_session(store, session.id, {"kind": "doc", "note": "TODO: Edu escrever a RFC"})
     done = complete_session(
         store, cfg, embedder, session.id,
@@ -211,7 +211,7 @@ def test_summary_trust_depends_on_origin(store, cfg, embedder):
     """An LLM's unconfirmed account of its own work is NOT a high-trust
     first-person record."""
     def complete_with(origin, confirmed=False):
-        ses = start_session(store, cfg, embedder, "task", domain="technical").session
+        ses = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
         complete_session(store, cfg, embedder, ses.id,
                          summary=f"We decided to use RabbitMQ ({origin}).",
                          summary_origin=origin, user_confirmed=confirmed)
@@ -229,7 +229,7 @@ def test_summary_trust_depends_on_origin(store, cfg, embedder):
     # explicit human confirmation upgrades any origin
     assert complete_with("assistant", confirmed=True).source_trust == 0.9
 
-    ses = start_session(store, cfg, embedder, "task", domain="technical").session
+    ses = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     with pytest.raises(ValueError, match="summary_origin"):
         complete_session(store, cfg, embedder, ses.id, summary="x",
                          summary_origin="oracle")
@@ -238,7 +238,7 @@ def test_summary_trust_depends_on_origin(store, cfg, embedder):
 def test_consolidation_failure_is_diagnosable_and_retryable(store, cfg, embedder, monkeypatch):
     """Extraction failure must not lose the session or hide the error; the
     retry consolidates without duplicating percepts or memories."""
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
 
     import twin.cognition.sessions as sessions_mod
 
@@ -272,7 +272,7 @@ def test_consolidation_failure_is_diagnosable_and_retryable(store, cfg, embedder
 def test_completed_consolidation_is_idempotent_on_memories(store, cfg, embedder, monkeypatch):
     """Even if consolidation runs twice (retry after a late failure), the
     dedup key prevents duplicate memories."""
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
 
     import twin.cognition.sessions as sessions_mod
     real_extract = sessions_mod.extract_percept
@@ -301,7 +301,7 @@ def test_completed_consolidation_is_idempotent_on_memories(store, cfg, embedder,
 
 
 def test_abandoned_session_creates_nothing(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     done = complete_session(store, cfg, embedder, session.id,
                             summary="ignored", abandoned=True)
     assert done.status == SessionStatus.abandoned
@@ -311,7 +311,7 @@ def test_abandoned_session_creates_nothing(store, cfg, embedder):
 
 
 def test_complete_without_material_skips_consolidation(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     done = complete_session(store, cfg, embedder, session.id)
     assert done.status == SessionStatus.completed
     assert done.consolidation_status == ConsolidationStatus.skipped
@@ -321,7 +321,7 @@ def test_complete_without_material_skips_consolidation(store, cfg, embedder):
 def test_percept_backed_artifacts_are_not_duplicated_as_text(store, cfg, embedder):
     """An artifact that references an ingested percept must not have its
     note re-extracted — the percept is the source of truth."""
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     observe_session(store, session.id, {
         "kind": "commit", "ref": "abc123", "percept_id": "pct_existing",
         "note": "We decided to use RabbitMQ for the queue.",
@@ -334,14 +334,14 @@ def test_percept_backed_artifacts_are_not_duplicated_as_text(store, cfg, embedde
 
 
 def test_complete_is_not_reentrant(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     complete_session(store, cfg, embedder, session.id)
     with pytest.raises(ValueError, match="not completable"):
         complete_session(store, cfg, embedder, session.id)
 
 
 def test_record_feedback_validates_verdicts_and_scopes(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     record_feedback(store, session.id, "useful", note="pack had the decision")
     updated = record_feedback(store, session.id, "missing_context",
                               note="had to re-explain the queue choice",
@@ -373,7 +373,7 @@ def test_feedback_memory_must_belong_to_the_session(store, cfg, embedder):
     store.insert_memory(foreign)
 
     session = start_session(store, cfg, embedder, "FastAPI webhooks decision",
-                            domain="technical").session
+                            domain="technical", client="cli").session
     assert supplied.id in session.supplied_memory_ids
 
     updated = record_feedback(store, session.id, "useful", memory_id=supplied.id)
@@ -385,7 +385,7 @@ def test_feedback_memory_must_belong_to_the_session(store, cfg, embedder):
 
 
 def test_feedback_allowed_after_completion(store, cfg, embedder):
-    session = start_session(store, cfg, embedder, "task", domain="technical").session
+    session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
     complete_session(store, cfg, embedder, session.id)
     updated = record_feedback(store, session.id, "useful")
     assert updated.feedback
@@ -394,8 +394,8 @@ def test_feedback_allowed_after_completion(store, cfg, embedder):
 def test_list_sessions_filters(store, cfg, embedder):
     project = ensure_project(store, "Atlas")
     s1 = start_session(store, cfg, embedder, "a", domain="technical",
-                       project="Atlas").session
-    start_session(store, cfg, embedder, "b", domain="technical").session
+                       project="Atlas", client="cli").session
+    start_session(store, cfg, embedder, "b", domain="technical", client="cli").session
     complete_session(store, cfg, embedder, s1.id)
     assert len(store.list_sessions()) == 2
     assert [s.id for s in store.list_sessions(status="completed")] == [s1.id]
@@ -403,8 +403,8 @@ def test_list_sessions_filters(store, cfg, embedder):
 
 
 def test_stale_sessions_cleanup(store, cfg, embedder):
-    fresh = start_session(store, cfg, embedder, "a", domain="technical").session
-    old = start_session(store, cfg, embedder, "b", domain="technical").session
+    fresh = start_session(store, cfg, embedder, "a", domain="technical", client="cli").session
+    old = start_session(store, cfg, embedder, "b", domain="technical", client="cli").session
     # simulate a session idle since long ago
     stored = store.get_session(old.id)
     stored.last_activity_at = "2020-01-01T00:00:00+00:00"

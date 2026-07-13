@@ -13,16 +13,29 @@ from ..judgment.firewall import Firewall
 from ..memory.models import MemoryItem
 from ..memory.store.base import MemoryStore
 from .classify import classify_memory
-from .grants import consume_grant, find_applicable_grant
+from .grants import (
+    consume_grant,
+    find_applicable_grant,
+    grant_max_effect,
+    most_restrictive,
+)
+from .identity import (
+    active_consent_covers,
+    principal_has_capability,
+    resolve_execution_location,
+    restricted_access,
+    validate_vault_access,
+)
 from .models import (
     AccessRequest,
     PolicyEffect,
     PrivacyDecision,
     PrivacyPolicy,
+    Principal,
     ResourceClassification,
     ResourceDecision,
 )
-from .redact import apply_redaction_plan, plan_redaction
+from .redact import apply_redaction_plan, leakage_scan, plan_redaction
 from .yaml_io import load_governance_policies, resolve_tool
 
 
@@ -37,6 +50,8 @@ _EFFECT_RANK = {
     PolicyEffect.pseudonymize: 45,
     PolicyEffect.allow: 10,
 }
+
+ENGINE_VERSION = "privacy-engine-v1"
 
 
 def _wildcard_match(patterns: list[str], value: str) -> bool:
@@ -69,11 +84,8 @@ def policy_matches(
     res = policy.resources
     if res.domains and classification.domain not in res.domains and "*" not in res.domains:
         return False
-    if res.sensitivity and classification.sensitivity not in res.sensitivity:
-        # also match if field-level exceeds
-        field_sens = {f.sensitivity.value for f in classification.fields.values()}
-        if not (field_sens & set(res.sensitivity)):
-            return False
+    if res.sensitivity and classification.sensitivity not in res.sensitivity and "*" not in res.sensitivity:
+        return False
     if res.labels and not (set(res.labels) & set(classification.labels)):
         return False
     if res.source_owners and classification.source_owner not in res.source_owners:
@@ -96,10 +108,22 @@ def policy_matches(
     return True
 
 
-def _fingerprint(request: AccessRequest, resource_ids: list[str]) -> str:
+def _pick_best(matched: list[PrivacyPolicy]) -> PrivacyPolicy:
+    """Precedence: constitutional non-overrideable deny > non-overrideable deny > rank > priority."""
+    def sort_key(p: PrivacyPolicy) -> tuple:
+        const_deny = 1 if (p.constitutional and p.effect == PolicyEffect.deny) else 0
+        non_ov_deny = 1 if (not p.overrideable and p.effect == PolicyEffect.deny) else 0
+        return (const_deny, non_ov_deny, _EFFECT_RANK.get(p.effect, 0), p.priority)
+
+    return max(matched, key=sort_key)
+
+
+def _fingerprint(request: AccessRequest, resource_ids: list[str], policy_ids: list[str]) -> str:
     raw = json.dumps({
         "req": request.model_dump(),
         "resources": sorted(resource_ids),
+        "policies": sorted(policy_ids),
+        "engine": ENGINE_VERSION,
     }, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
@@ -115,25 +139,77 @@ def evaluate_resource(
     legacy_firewall: Optional[Firewall] = None,
     memory: Optional[MemoryItem] = None,
     target_domain: Optional[str] = None,
+    principal: Optional[Principal] = None,
 ) -> ResourceDecision:
     matched: list[PrivacyPolicy] = []
-    for p in sorted(policies, key=lambda x: (-x.priority, x.id)):
+    for p in policies:
         if policy_matches(p, request, classification, execution_location=execution_location):
             matched.append(p)
 
-    # Restricted mode: unknown purpose/audience/tool → default deny unless public
-    if request.is_restricted_mode and classification.sensitivity not in ("public",):
-        if not any(p.effect == PolicyEffect.allow and p.constitutional for p in matched):
+    # Vault persona gate
+    if not validate_vault_access(store, vault_id=classification.vault_id, persona=request.persona):  # type: ignore[arg-type]
+        return ResourceDecision(
+            resource_id=classification.resource_id,
+            effect=PolicyEffect.deny,
+            matched_policy_ids=["vault_persona_denied"],
+            reason=f"persona {request.persona} cannot access {classification.vault_id}",
+            sensitivity=classification.sensitivity,
+            labels=classification.labels,
+        )
+
+    # Capability gate for non-public
+    if principal and classification.sensitivity not in ("public",):
+        if not principal_has_capability(principal, "read_context_pack"):
             return ResourceDecision(
                 resource_id=classification.resource_id,
                 effect=PolicyEffect.deny,
-                matched_policy_ids=["restricted_mode_default_deny"],
-                reason="unknown purpose/audience/tool — restricted mode",
+                matched_policy_ids=["capability_denied"],
+                reason="principal lacks read_context_pack capability",
                 sensitivity=classification.sensitivity,
                 labels=classification.labels,
             )
 
-    # Legacy domain firewall as additional deny signal
+    # Third-party consent
+    if classification.third_party or "third_party" in classification.labels:
+        subjects = classification.subjects or ["unknown_third_party"]
+        if not active_consent_covers(
+            store,  # type: ignore[arg-type]
+            subject_ids=subjects,
+            purpose=request.purpose,
+            tool_id=request.tool_id,
+            categories=classification.labels,
+        ):
+            if request.audience in ("public", "client", "unknown") or execution_location == "cloud":
+                return ResourceDecision(
+                    resource_id=classification.resource_id,
+                    effect=PolicyEffect.deny,
+                    matched_policy_ids=["third_party_consent_required"],
+                    reason="third-party data requires active consent for this purpose/tool",
+                    sensitivity=classification.sensitivity,
+                    labels=classification.labels,
+                )
+
+    # Restricted mode
+    if request.is_restricted_mode and classification.sensitivity not in ("public",):
+        return ResourceDecision(
+            resource_id=classification.resource_id,
+            effect=PolicyEffect.deny,
+            matched_policy_ids=["restricted_mode_default_deny"],
+            reason="unknown purpose/audience/tool/persona — restricted mode",
+            sensitivity=classification.sensitivity,
+            labels=classification.labels,
+        )
+
+    if execution_location == "unknown" and classification.sensitivity not in ("public",):
+        return ResourceDecision(
+            resource_id=classification.resource_id,
+            effect=PolicyEffect.deny,
+            matched_policy_ids=["unknown_tool_default_deny"],
+            reason="unregistered tool — default deny for non-public data",
+            sensitivity=classification.sensitivity,
+            labels=classification.labels,
+        )
+
     if legacy_firewall is not None and memory is not None:
         domain = target_domain or (request.requested_domains[0] if request.requested_domains else memory.domain)
         verdict = legacy_firewall.evaluate(memory, domain)
@@ -148,15 +224,12 @@ def evaluate_resource(
             )
         if verdict.requires_permission:
             matched.append(PrivacyPolicy(
-                id=verdict.rule,
-                name=verdict.rule,
-                effect=PolicyEffect.require_grant,
-                priority=500,
-                reason=verdict.reason,
+                id=verdict.rule, name=verdict.rule,
+                effect=PolicyEffect.require_grant, priority=500,
+                reason=verdict.reason, overrideable=True,
             ))
 
     if not matched:
-        # default deny for cloud / cross-sensitive
         if execution_location == "cloud" and classification.sensitivity in (
             "restricted", "highly_restricted", "confidential",
         ):
@@ -177,17 +250,8 @@ def evaluate_resource(
             labels=classification.labels,
         )
 
-    # Precedence among matched: constitutional deny > deny > require_* > redact > allow
-    best = matched[0]
-    for p in matched[1:]:
-        if p.constitutional and p.effect == PolicyEffect.deny:
-            best = p
-            break
-        if _EFFECT_RANK.get(p.effect, 0) > _EFFECT_RANK.get(best.effect, 0):
-            best = p
-        elif _EFFECT_RANK.get(p.effect, 0) == _EFFECT_RANK.get(best.effect, 0) and p.priority > best.priority:
-            best = p
-
+    best = _pick_best(matched)
+    obligations = sorted({o for p in matched for o in (p.obligations or [])})
     decision = ResourceDecision(
         resource_id=classification.resource_id,
         effect=best.effect,
@@ -195,23 +259,31 @@ def evaluate_resource(
         reason=best.reason or best.name,
         sensitivity=classification.sensitivity,
         labels=classification.labels,
+        obligations=obligations,
     )
 
-    if best.effect in (PolicyEffect.require_grant, PolicyEffect.redact, PolicyEffect.generalize):
-        grant = find_applicable_grant(store, request, classification) if store else None
-        if grant is not None:
-            if consume_grants:
-                consume_grant(store, grant.id, expected_version=grant.version)  # type: ignore[arg-type]
-            decision.grant_id = grant.id
-            # Grant may authorize redacted read
-            if "read" in grant.allowed_effects:
-                decision.effect = PolicyEffect.allow
-                decision.reason = f"authorized by grant {grant.id}"
-            else:
-                decision.effect = PolicyEffect.redact
-                decision.reason = f"grant {grant.id} allows redacted read"
-        elif best.effect == PolicyEffect.require_grant:
-            decision.effect = PolicyEffect.require_grant
+    # Grants may only soften overrideable effects, never constitutional deny
+    if best.effect != PolicyEffect.deny or best.overrideable:
+        if best.effect in (
+            PolicyEffect.require_grant, PolicyEffect.redact, PolicyEffect.generalize,
+            PolicyEffect.aggregate, PolicyEffect.pseudonymize, PolicyEffect.deny,
+        ) and best.overrideable:
+            grant = find_applicable_grant(
+                store, request, classification,  # type: ignore[arg-type]
+                execution_location=execution_location,
+            ) if store else None
+            if grant is not None:
+                if consume_grants:
+                    consume_grant(store, grant.id, expected_version=grant.version)  # type: ignore[arg-type]
+                decision.grant_id = grant.id
+                decision.effect = most_restrictive(best.effect, grant_max_effect(grant))
+                if decision.effect == PolicyEffect.require_grant:
+                    decision.effect = grant_max_effect(grant)
+                decision.reason = f"authorized by grant {grant.id} → {decision.effect.value}"
+
+    if best.effect == PolicyEffect.deny and not best.overrideable:
+        decision.effect = PolicyEffect.deny
+        decision.grant_id = None
 
     return decision
 
@@ -228,13 +300,27 @@ def evaluate_access(
     legacy_firewall: Optional[Firewall] = None,
     target_domain: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Evaluate each memory; return decision + ephemeral allowed/redacted views."""
-    policies = policies or load_governance_policies(policies_path, store=store)
-    tool = resolve_tool(request.tool_id, store=store)
-    execution_location = (
-        request.execution_location
-        or (tool.execution_location if tool else "local")
+    """Evaluate each memory; return decision + ephemeral authorized views."""
+    # Never trust client-claimed execution_location
+    execution_location = resolve_execution_location(
+        request.tool_id, store=store, claimed=request.execution_location,
     )
+    request = request.model_copy(update={"execution_location": None})
+    request.metadata = {
+        **(request.metadata or {}),
+        "resolved_execution_location": execution_location,
+    }
+
+    policies = policies or load_governance_policies(policies_path, store=store)
+    # Snapshot of policies actually evaluated (payloads) for reproducibility
+    policy_snapshot = [p.model_dump(mode="json") for p in policies]
+    policy_revision_ids = [
+        f"{p.id}@v{p.version}" for p in policies
+    ]
+
+    principal = None
+    if hasattr(store, "get_principal"):
+        principal = store.get_principal(request.principal_id)
 
     resource_decisions: list[ResourceDecision] = []
     allowed_views: list[dict[str, Any]] = []
@@ -244,78 +330,111 @@ def evaluate_access(
     needs_confirm: list[dict[str, Any]] = []
     all_policy_ids: list[str] = []
     grant_ids: list[str] = []
-    obligations: list[str] = ["log_decision"]
+    obligations: set[str] = {"log_decision"}
 
-    for mem in memories:
-        classification = classify_memory(mem)
-        rd = evaluate_resource(
-            policies, request, classification,
-            execution_location=execution_location,
-            store=store,
-            consume_grants=consume_grants,
-            legacy_firewall=legacy_firewall,
-            memory=mem,
-            target_domain=target_domain,
+    def _run() -> PrivacyDecision:
+        nonlocal resource_decisions, allowed_views, denied, redacted
+        nonlocal needs_grant, needs_confirm, all_policy_ids, grant_ids, obligations
+        resource_decisions = []
+        allowed_views = []
+        denied = []
+        redacted = []
+        needs_grant = []
+        needs_confirm = []
+        all_policy_ids = []
+        grant_ids = []
+        obligations = {"log_decision"}
+
+        for mem in memories:
+            classification = classify_memory(mem)
+            rd = evaluate_resource(
+                policies, request, classification,
+                execution_location=execution_location,
+                store=store,
+                consume_grants=consume_grants,
+                legacy_firewall=legacy_firewall,
+                memory=mem,
+                target_domain=target_domain,
+                principal=principal,
+            )
+            resource_decisions.append(rd)
+            all_policy_ids.extend(rd.matched_policy_ids)
+            obligations.update(rd.obligations or [])
+            if rd.grant_id:
+                grant_ids.append(rd.grant_id)
+
+            if rd.effect == PolicyEffect.deny:
+                denied.append({"memory_id": mem.id, "reason": rd.reason,
+                               "rule": rd.matched_policy_ids[0] if rd.matched_policy_ids else ""})
+            elif rd.effect == PolicyEffect.require_grant:
+                needs_grant.append({"memory_id": mem.id, "reason": rd.reason})
+                denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_grant"})
+            elif rd.effect == PolicyEffect.require_confirmation:
+                needs_confirm.append({"memory_id": mem.id, "reason": rd.reason})
+                denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_confirmation"})
+            elif rd.effect in (
+                PolicyEffect.redact, PolicyEffect.generalize,
+                PolicyEffect.aggregate, PolicyEffect.pseudonymize,
+            ):
+                plan = plan_redaction(classification, rd, effect=rd.effect)
+                if persist and hasattr(store, "insert_redaction_plan"):
+                    store.insert_redaction_plan(plan)
+                rd.redaction_plan_id = plan.id
+                view = apply_redaction_plan(classification, plan)
+                view["effect"] = rd.effect.value
+                redacted.append(view)
+                allowed_views.append(view)
+            else:
+                allowed_views.append({
+                    "id": mem.id,
+                    "title": mem.title,
+                    "summary": mem.summary,
+                    "domain": mem.domain,
+                    "sensitivity": classification.sensitivity,
+                    "payload": dict(mem.payload or {}),
+                    "redacted": False,
+                    "effect": "allow",
+                })
+
+        overall = PolicyEffect.allow
+        for rd in resource_decisions:
+            if _EFFECT_RANK.get(rd.effect, 0) > _EFFECT_RANK.get(overall, 0):
+                overall = rd.effect
+
+        version = store.get_active_policy_set_version() if hasattr(store, "get_active_policy_set_version") else None
+        return PrivacyDecision(
+            id=ids.new_id("pdec"),
+            request_fingerprint=_fingerprint(
+                request, [m.id for m in memories], [p.id for p in policies],
+            ),
+            effect=overall,
+            matched_policy_ids=sorted(set(all_policy_ids)),
+            policy_revision_ids=policy_revision_ids,
+            resource_decisions=resource_decisions,
+            obligations=sorted(obligations),
+            policy_set_version_id=version.id if version else None,
+            grant_ids=sorted(set(grant_ids)),
+            access_request=request.model_dump(),
+            engine_version=ENGINE_VERSION,
+            created_at=now_iso(),
+            metadata={
+                "execution_location": execution_location,
+                "resources_considered": len(memories),
+                "resources_allowed": len(allowed_views),
+                "resources_redacted": len(redacted),
+                "resources_denied": len(denied),
+                "policy_snapshot": policy_snapshot,
+            },
         )
-        resource_decisions.append(rd)
-        all_policy_ids.extend(rd.matched_policy_ids)
-        if rd.grant_id:
-            grant_ids.append(rd.grant_id)
 
-        if rd.effect == PolicyEffect.deny:
-            denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": rd.matched_policy_ids[0] if rd.matched_policy_ids else ""})
-        elif rd.effect == PolicyEffect.require_grant:
-            needs_grant.append({"memory_id": mem.id, "reason": rd.reason})
-            denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_grant"})
-        elif rd.effect == PolicyEffect.require_confirmation:
-            needs_confirm.append({"memory_id": mem.id, "reason": rd.reason})
-            denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_confirmation"})
-        elif rd.effect in (PolicyEffect.redact, PolicyEffect.generalize, PolicyEffect.aggregate, PolicyEffect.pseudonymize):
-            plan = plan_redaction(classification, rd, effect=rd.effect)
-            view = apply_redaction_plan(classification, plan)
-            view["effect"] = rd.effect.value
-            redacted.append(view)
-            allowed_views.append(view)
-        else:
-            allowed_views.append({
-                "id": mem.id,
-                "title": mem.title,
-                "summary": mem.summary,
-                "domain": mem.domain,
-                "sensitivity": classification.sensitivity,
-                "payload": dict(mem.payload or {}),
-                "redacted": False,
-                "effect": "allow",
-            })
-
-    # Overall effect
-    overall = PolicyEffect.allow
-    for rd in resource_decisions:
-        if _EFFECT_RANK.get(rd.effect, 0) > _EFFECT_RANK.get(overall, 0):
-            overall = rd.effect
-
-    version = store.get_active_policy_set_version() if hasattr(store, "get_active_policy_set_version") else None
-    decision = PrivacyDecision(
-        id=ids.new_id("pdec"),
-        request_fingerprint=_fingerprint(request, [m.id for m in memories]),
-        effect=overall,
-        matched_policy_ids=sorted(set(all_policy_ids)),
-        resource_decisions=resource_decisions,
-        obligations=obligations,
-        policy_set_version_id=version.id if version else None,
-        grant_ids=sorted(set(grant_ids)),
-        access_request=request.model_dump(),
-        created_at=now_iso(),
-        metadata={
-            "execution_location": execution_location,
-            "resources_considered": len(memories),
-            "resources_allowed": len(allowed_views),
-            "resources_redacted": len(redacted),
-            "resources_denied": len(denied),
-        },
-    )
-    if persist and hasattr(store, "insert_privacy_decision"):
-        store.insert_privacy_decision(decision)
+    if persist and consume_grants and hasattr(store, "transaction"):
+        with store.transaction():
+            decision = _run()
+            store.insert_privacy_decision(decision)
+    else:
+        decision = _run()
+        if persist and hasattr(store, "insert_privacy_decision"):
+            store.insert_privacy_decision(decision)
 
     return {
         "decision": decision,
@@ -327,7 +446,52 @@ def evaluate_access(
         "needs_confirmation": needs_confirm,
         "policy_set_version_id": decision.policy_set_version_id,
         "execution_location": execution_location,
+        "obligations": decision.obligations,
     }
+
+
+def evaluate_judgment_items(
+    store: MemoryStore,
+    request: AccessRequest,
+    items: list[Any],
+    *,
+    policies_path: Optional[Path | str] = None,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """Run governance over judgment items (as classified resources)."""
+    from ..judgment.models import JudgmentItem
+
+    synthetic: list[MemoryItem] = []
+    for it in items:
+        if not isinstance(it, JudgmentItem):
+            continue
+        synthetic.append(MemoryItem(
+            id=it.id,
+            type="constraint" if it.kind.value == "constraint" else "belief",
+            title=it.statement[:80],
+            summary=it.statement,
+            domain=it.domain,
+            persona=it.persona,
+            sensitivity=(
+                "restricted" if it.stability.value == "constitutional"
+                else "internal"
+            ),
+            confidence=it.confidence,
+            status="confirmed",
+            payload={
+                "source_owner": (it.provenance.source if it.provenance else "user"),
+                "vault_id": "vault_work" if it.domain == "work" else "vault_general",
+                "privacy_labels": (
+                    ["employment_confidential"] if it.domain == "work" else []
+                ),
+                "judgment": True,
+                "kind": it.kind.value,
+            },
+        ))
+    return evaluate_access(
+        store, request, synthetic,
+        policies_path=policies_path, persist=persist, consume_grants=False,
+    )
 
 
 def explain_decision(store: MemoryStore, decision_id: str) -> dict[str, Any]:
@@ -342,17 +506,38 @@ def explain_decision(store: MemoryStore, decision_id: str) -> dict[str, Any]:
             "reason": rd.reason,
             "matched_policies": rd.matched_policy_ids,
             "redacted_fields": rd.redacted_fields,
-            # never include content
+            "redaction_plan_id": rd.redaction_plan_id,
         })
     return {
         "decision_id": d.id,
         "effect": d.effect.value,
+        "engine_version": d.engine_version,
         "policy_set_version_id": d.policy_set_version_id,
+        "policy_revision_ids": d.policy_revision_ids,
         "grant_ids": d.grant_ids,
+        "obligations": d.obligations,
         "access_request": {
             k: d.access_request.get(k)
             for k in ("persona", "purpose", "audience", "tool_id", "principal_id")
         },
         "resources": lines,
         "created_at": d.created_at,
+    }
+
+
+def validate_output(
+    output: str,
+    *,
+    access: AccessRequest,
+    decision: Optional[PrivacyDecision] = None,
+    forbidden_substrings: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """Scan generated/exported text before release to an external consumer."""
+    findings = leakage_scan(output, forbidden_substrings=forbidden_substrings)
+    blocked = bool(findings) or access.is_restricted_mode
+    return {
+        "allowed": not blocked,
+        "findings": findings,
+        "decision_id": decision.id if decision else None,
+        "action": "block" if blocked else "release",
     }

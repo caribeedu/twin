@@ -6,6 +6,7 @@ from twin.cognition.observer import infer_domain, observe
 from twin.judgment.firewall import Firewall
 from twin.memory.search import search
 from twin.sensory import sense_paths
+from twin.privacy.identity import resolve_access
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -52,7 +53,7 @@ def test_context_pack_respects_budget_and_includes_judgment(store, cfg, embedder
     # heuristic extraction yields candidates only → opt in explicitly
     pack = build_context_pack(store, cfg, embedder, "escrever RFC sobre webhooks do Atlas",
                               target_domain="technical", max_tokens=400,
-                              include_candidates=True)
+                              include_candidates=True, access=resolve_access(store, surface="cli"))
     assert pack.context_pack
     assert len(pack.context_pack) <= 400 * 4 + 200  # small tolerance
     assert "Judgment profile" in pack.context_pack
@@ -88,11 +89,11 @@ def _confirmed_mem(store, embedder, **kw):
 
 def test_pack_excludes_candidates_by_default(store, cfg, embedder):
     _populate(store, cfg, embedder)  # heuristic output → all candidates
-    pack = build_context_pack(store, cfg, embedder, "FastAPI webhooks Atlas")
+    pack = build_context_pack(store, cfg, embedder, "FastAPI webhooks Atlas", access=resolve_access(store, surface="cli"))
     assert pack.sources == []  # nothing confirmed yet
 
     pack_loose = build_context_pack(store, cfg, embedder, "FastAPI webhooks Atlas",
-                                    include_candidates=True)
+                                    include_candidates=True, access=resolve_access(store, surface="cli"))
     assert pack_loose.sources
     assert "[candidate]" in pack_loose.context_pack
 
@@ -101,7 +102,7 @@ def test_pack_includes_confirmed(store, cfg, embedder):
     _confirmed_mem(store, embedder, type="decision",
                    title="Usar FastAPI nos webhooks",
                    summary="Decisão: FastAPI no backend de webhooks.")
-    pack = build_context_pack(store, cfg, embedder, "FastAPI webhooks")
+    pack = build_context_pack(store, cfg, embedder, "FastAPI webhooks", access=resolve_access(store, surface="cli"))
     assert len(pack.sources) == 1
     assert pack.sources[0]["status"] == "confirmed"
 
@@ -117,7 +118,7 @@ def test_pack_is_sectioned_with_evidence(store, cfg, embedder):
     for mid in report.inserted:
         store.set_status(mid, MemoryStatus.confirmed)
     pack = build_context_pack(store, cfg, embedder,
-                              "FastAPI webhooks Atlas decisões tarefas", max_tokens=2000)
+                              "FastAPI webhooks Atlas decisões tarefas", max_tokens=2000, access=resolve_access(store, surface="cli"))
     assert "## Judgment profile" in pack.context_pack
     assert "## Decisions" in pack.context_pack
     assert "## Open tasks" in pack.context_pack
@@ -141,14 +142,14 @@ def test_pack_evidence_survives_tight_budgets(store, cfg, embedder):
 
     tight = build_context_pack(store, cfg, embedder,
                                "FastAPI webhooks Atlas decisões tarefas",
-                               max_tokens=400)
+                               max_tokens=400, access=resolve_access(store, surface="cli"))
     assert tight.sources  # memories still fit
     assert tight.evidence_included  # at least one quote made it in
     assert "## Evidence" in tight.context_pack
 
     roomy = build_context_pack(store, cfg, embedder,
                                "FastAPI webhooks Atlas decisões tarefas",
-                               max_tokens=4000)
+                               max_tokens=4000, access=resolve_access(store, surface="cli"))
     assert roomy.evidence_included
     assert not roomy.evidence_omitted_due_to_budget
 
@@ -164,7 +165,7 @@ def test_pack_unused_section_budget_is_redistributed(store, cfg, embedder):
     # 500 tokens → the facts section alone caps at ~4 entries; the rest of
     # the budget would previously go unused
     pack = build_context_pack(store, cfg, embedder, "webhook delivery retries",
-                              max_tokens=500, include_judgment=False)
+                              max_tokens=500, include_judgment=False, access=resolve_access(store, surface="cli"))
     assert "## Additional context" in pack.context_pack
     in_section = pack.context_pack.split("## Additional context")[0].count("- (")
     assert len(pack.sources) > in_section  # carry-over actually added hits

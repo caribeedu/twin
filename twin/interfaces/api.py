@@ -63,6 +63,11 @@ class PackRequest(BaseModel):
     include_candidates: bool = False  # packs are confirmed-only by default
     task_profile: TaskProfile = TaskProfile.general
     project: Optional[str] = None  # project name, alias or id
+    client: Optional[str] = None  # registered tool client; omit → restricted
+    persona: str = "individual"
+    purpose: str = "memory_retrieval"
+    audience: str = "self"
+    api_token: Optional[str] = None
 
     _domain = field_validator("target_domain")(_validate_domain)
 
@@ -212,6 +217,14 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/context_pack")
     def api_pack(req: PackRequest):
+        from ..privacy.identity import resolve_access
+        access = resolve_access(
+            ws.store, surface="api", client=req.client,
+            persona=req.persona, purpose=req.purpose, audience=req.audience,
+            project_id=_resolve_project_id(req.project),
+            requested_domains=[req.target_domain],
+            api_token=req.api_token,
+        )
         pack = build_context_pack(ws.store, ws.cfg, ws.embedder, req.query,
                                   target_domain=req.target_domain,
                                   max_tokens=req.max_tokens,
@@ -219,7 +232,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   include_candidates=req.include_candidates,
                                   task_profile=req.task_profile.value,
                                   project_id=_resolve_project_id(req.project),
-                                  firewall=ws.firewall)
+                                  firewall=ws.firewall,
+                                  access=access)
         return pack.__dict__
 
     # -- Cognitive sessions ------------------------------------------------

@@ -25,3 +25,13 @@ def store(cfg):
 @pytest.fixture()
 def embedder(cfg):
     return get_embedder(cfg.embedder, cfg.embedding_dim)
+
+
+@pytest.fixture()
+def local_access(store):
+    """Authenticated local CLI access for pack/session tests (not restricted)."""
+    from twin.privacy.identity import resolve_access
+    return resolve_access(
+        store, surface="cli", client="local-cli",
+        persona="individual", purpose="memory_retrieval", audience="self",
+    )

@@ -244,12 +244,20 @@ def cmd_search(args) -> None:
 
 def cmd_pack(args) -> None:
     from ..cognition.context_pack import build_context_pack
+    from ..privacy.identity import resolve_access
 
     ws = Workspace(args.home)
+    access = resolve_access(
+        ws.store, surface="cli", client="local-cli",
+        persona=getattr(args, "persona", None) or "individual",
+        purpose=getattr(args, "purpose", None) or "memory_retrieval",
+        audience=getattr(args, "audience", None) or "self",
+        requested_domains=[args.domain] if getattr(args, "domain", None) else [],
+    )
     pack = build_context_pack(ws.store, ws.cfg, ws.embedder, args.query,
                               target_domain=args.domain, max_tokens=args.max_tokens,
                               include_candidates=args.include_candidates,
-                              firewall=ws.firewall)
+                              firewall=ws.firewall, access=access)
     if args.json:
         _print(pack.__dict__)
     else:
@@ -451,7 +459,23 @@ def cmd_privacy(args) -> None:
             sel["source_account"] = args.source_account
         req = preview_deletion(ws.store, sel)
         print(req.id)
+        print(f"token={req.preview_token}")
         print(req.preview)
+    elif cmd == "delete-execute":
+        from ..privacy.deletion import execute_deletion
+        out = execute_deletion(
+            ws.store, args.deletion_id,
+            confirm=True, preview_token=args.token,
+        )
+        print(out.id, out.status.value, (out.preview or {}).get("deleted_count"))
+    elif cmd == "quarantine-release":
+        from ..privacy.quarantine import release_quarantine
+        out = release_quarantine(
+            ws.store, args.quarantine_id,
+            actor=args.actor, reason=args.reason,
+            mode=args.mode, confirm=True,
+        )
+        print(out.id, out.status.value)
     else:
         raise SystemExit(f"unknown privacy command: {cmd}")
 
@@ -820,8 +844,18 @@ def main(argv: list[str] | None = None) -> None:
     pgc.set_defaults(func=cmd_privacy)
     pgr = ps.add_parser("grant-revoke"); pgr.add_argument("grant_id"); pgr.set_defaults(func=cmd_privacy)
     pql = ps.add_parser("quarantine"); pql.add_argument("--status", default="quarantined"); pql.set_defaults(func=cmd_privacy)
+    pqr = ps.add_parser("quarantine-release")
+    pqr.add_argument("quarantine_id")
+    pqr.add_argument("--actor", required=True)
+    pqr.add_argument("--reason", required=True)
+    pqr.add_argument("--mode", default="release_as_safe",
+                     choices=["release_as_safe", "release_sanitized", "reject"])
+    pqr.set_defaults(func=cmd_privacy)
     pdp = ps.add_parser("delete-preview"); pdp.add_argument("--domain"); pdp.add_argument("--source-account")
     pdp.set_defaults(func=cmd_privacy)
+    pde = ps.add_parser("delete-execute")
+    pde.add_argument("deletion_id"); pde.add_argument("--token", required=True)
+    pde.set_defaults(func=cmd_privacy)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")

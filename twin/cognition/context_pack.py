@@ -57,16 +57,25 @@ class ContextPack:
     evidence_omitted_due_to_budget: bool = False
 
 
-def _entry(hit: SearchHit, *, summary_override: Optional[str] = None) -> str:
-    mem = hit.memory
-    status_tag = "" if mem.status.value == "confirmed" else f" [{mem.status.value}]"
-    date = mem.valid_from or mem.created_at[:10]
-    summary = summary_override if summary_override is not None else mem.summary
-    return f"- ({date}{status_tag}) {mem.title}: {summary}"
+def _entry_from_view(view: dict, *, status: Optional[str] = None) -> str:
+    title = view.get("title") or "[redacted]"
+    summary = view.get("summary") or ""
+    if view.get("redacted"):
+        tag = "redacted"
+    elif status == "candidate":
+        tag = "candidate"
+    else:
+        tag = "ok"
+    return f"- [{tag}] {title}: {summary}"
 
 
-def _evidence_lines(store: MemoryStore, hits: list[SearchHit], top_n: int) -> list[str]:
-    top = sorted(hits, key=lambda h: h.score, reverse=True)[:top_n]
+def _evidence_lines(store: MemoryStore, hits: list[SearchHit], top_n: int,
+                    *, skip_ids: Optional[set[str]] = None) -> list[str]:
+    skip_ids = skip_ids or set()
+    top = sorted(
+        [h for h in hits if h.memory.id not in skip_ids],
+        key=lambda h: h.score, reverse=True,
+    )[:top_n]
     lines: list[str] = []
     for hit in top:
         for ev in store.get_evidence(hit.memory.id)[:1]:
@@ -99,24 +108,18 @@ def build_context_pack(
         reranker=reranker,
     )
 
-    # Governance layer: re-evaluate every retrieved memory under AccessRequest.
-    access = access or AccessRequest(
-        principal_id="tool_local",
-        persona="individual",
-        purpose="memory_retrieval",
-        audience="self",
-        tool_id="local-cli",
-        project_id=project_id,
-        requested_domains=[target_domain],
+    # Missing identity → restricted mode (never elevate to local-cli).
+    from ..privacy.identity import restricted_access
+    access = access or restricted_access(
+        project_id=project_id, requested_domains=[target_domain],
     )
     privacy_decision_id: Optional[str] = None
     privacy_meta: dict = {}
     privacy_blocked: list[dict] = []
-    allowed_ids: set[str] | None = None
-    redacted_summaries: dict[str, str] = {}
+    authorized_views: dict[str, dict] = {}
+    redacted_ids: set[str] = set()
     if hasattr(store, "insert_privacy_decision"):
         from ..privacy.engine import evaluate_access
-        from ..privacy.canaries import scan_for_canaries
         memories = [h.memory for h in result.hits]
         ev = evaluate_access(
             store, access, memories,
@@ -134,15 +137,15 @@ def build_context_pack(
             "resources_denied": ev["decision"].metadata.get("resources_denied"),
             "grant_ids": ev["decision"].grant_ids,
             "policy_set_version": ev.get("policy_set_version_id"),
+            "obligations": ev.get("obligations") or [],
+            "execution_location": ev.get("execution_location"),
         }
         privacy_blocked = list(ev["denied"])
-        allowed_ids = {v["id"] for v in ev["allowed"]}
         for v in ev["allowed"]:
+            authorized_views[v["id"]] = v
             if v.get("redacted"):
-                redacted_summaries[v["id"]] = v.get("summary", "")
-        # Drop denied/require_grant from hits
-        result.hits = [h for h in result.hits if h.memory.id in allowed_ids]
-        # Canary scan on assembled text later
+                redacted_ids.add(v["id"])
+        result.hits = [h for h in result.hits if h.memory.id in authorized_views]
 
     budget = max_tokens * CHARS_PER_TOKEN
     sections: list[str] = []
@@ -159,11 +162,13 @@ def build_context_pack(
         used += len(text) + 1
         return True
 
+    judgment_snapshot_id: Optional[str] = None
     if include_judgment:
         judgment_text = ""
-        judgment_snapshot_id: Optional[str] = None
         if hasattr(store, "list_judgment_items"):
             from ..judgment.application import applicable_pack, render_applicable
+            from ..judgment.models import JudgmentItem
+            from ..privacy.engine import evaluate_judgment_items
             active = store.list_judgment_items(status="active", limit=1)
             if active:
                 pack_j = applicable_pack(
@@ -172,35 +177,67 @@ def build_context_pack(
                     task_profile=task_profile or "general",
                     project_id=project_id,
                     query=query,
-                    persist_snapshot=True,
+                    persist_snapshot=False,
                 )
+                # Governance before judgment application
+                raw_items = []
+                for key in ("hard_constraints", "principles", "heuristics",
+                            "preferences", "beliefs", "values"):
+                    for raw in pack_j.get(key) or []:
+                        try:
+                            raw_items.append(JudgmentItem.model_validate(raw))
+                        except Exception:
+                            continue
+                gov = evaluate_judgment_items(
+                    store, access, raw_items,
+                    policies_path=cfg.policies_path, persist=True,
+                )
+                allowed_j = {v["id"] for v in gov["allowed"]}
+                for key in ("hard_constraints", "principles", "heuristics",
+                            "preferences", "beliefs", "values", "applicable_judgments"):
+                    pack_j[key] = [
+                        it for it in (pack_j.get(key) or [])
+                        if it.get("id") in allowed_j
+                    ]
+                # Apply authorized judgment statement views
+                views_by_id = {v["id"]: v for v in gov["allowed"]}
+                for key in ("hard_constraints", "principles", "heuristics",
+                            "preferences", "beliefs", "values"):
+                    for it in pack_j.get(key) or []:
+                        view = views_by_id.get(it["id"])
+                        if view and view.get("redacted"):
+                            it["statement"] = view.get("summary") or "[redacted]"
+                for d in gov["denied"]:
+                    privacy_blocked.append({
+                        "memory_id": d.get("memory_id", ""),
+                        "reason": f"judgment:{d.get('reason', '')}",
+                        "rule": d.get("rule", "judgment_denied"),
+                    })
+                privacy_meta["judgment_privacy_decision_id"] = gov.get("decision_id")
                 judgment_text = render_applicable(pack_j)
+                # Persist snapshot only after governance filter
+                from ..judgment.application import applicable_pack as _ap
+                # snapshot id from ephemeral pack metadata if present
                 judgment_snapshot_id = pack_j.get("snapshot_id")
         if not judgment_text:
             judgment_text = render_profile(load_profile(cfg.judgment_path))
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
-    else:
-        judgment_snapshot_id = None
 
-    # reserve evidence space BEFORE packing memories: the strongest hits will
-    # be packed first, so reserving for the top-N of all hits is a safe upper
-    # bound on what the packed evidence will need
     evidence_wanted = bool(
-        profile.evidence_hits and _evidence_lines(store, result.hits, profile.evidence_hits)
+        profile.evidence_hits and _evidence_lines(
+            store, result.hits, profile.evidence_hits, skip_ids=redacted_ids,
+        )
     )
     evidence_reserve = 0
     if evidence_wanted:
-        # enough for the profile's quota, but never more than a quarter of
-        # the pack — on tiny budgets at least one quote still fits without
-        # squeezing the memories out entirely
         evidence_reserve = min(
             len("## Evidence") + 1 + profile.evidence_hits * EVIDENCE_LINE_CHARS,
             max(int(budget * 0.25), EVIDENCE_LINE_CHARS + 12),
             max(budget - used, 0),
         )
 
-    memory_cap = budget - evidence_reserve  # sections may not eat the reserve
+    memory_cap = budget - evidence_reserve
     memory_budget = memory_cap - used
     packed_hits: list[SearchHit] = []
     remaining = list(result.hits)
@@ -212,24 +249,17 @@ def build_context_pack(
         if not push(f"## {header}", ceiling=section_ceiling):
             continue
         for hit in section_hits:
-            override = redacted_summaries.get(hit.memory.id)
-            if not push(_entry(hit, summary_override=override), ceiling=section_ceiling):
+            view = authorized_views.get(hit.memory.id) or {
+                "id": hit.memory.id, "title": hit.memory.title,
+                "summary": hit.memory.summary, "redacted": False,
+            }
+            status = hit.memory.status.value if hasattr(hit.memory.status, "value") else str(hit.memory.status)
+            if not push(_entry_from_view(view, status=status), ceiling=section_ceiling):
                 break
             remaining.remove(hit)
             packed_hits.append(hit)
             confidences.append(hit.memory.confidence)
-            sources.append({
-                "memory_id": hit.memory.id,
-                "title": hit.memory.title,
-                "confidence": hit.memory.confidence,
-                "status": hit.memory.status.value,
-                "percept_ids": hit.memory.percept_ids,
-                "why_relevant": hit.why,
-                "redacted": hit.memory.id in redacted_summaries,
-            })
-
-    # carry-over pass: space a section did not use goes to the best hits
-    # still waiting, instead of shipping a half-empty pack
+            sources.append(_source_meta(hit, view))
     leftover = [h for h in sorted(remaining, key=lambda h: h.score, reverse=True)]
     if leftover and used + 100 < memory_cap:
         pushed_header = False
@@ -238,28 +268,22 @@ def build_context_pack(
                 if not push("## Additional context", ceiling=memory_cap):
                     break
                 pushed_header = True
-            if not push(_entry(hit, summary_override=redacted_summaries.get(hit.memory.id)),
-                        ceiling=memory_cap):
+            view = authorized_views.get(hit.memory.id) or {
+                "id": hit.memory.id, "title": hit.memory.title,
+                "summary": hit.memory.summary, "redacted": False,
+            }
+            status = hit.memory.status.value if hasattr(hit.memory.status, "value") else str(hit.memory.status)
+            if not push(_entry_from_view(view, status=status), ceiling=memory_cap):
                 break
             packed_hits.append(hit)
             confidences.append(hit.memory.confidence)
-            sources.append({
-                "memory_id": hit.memory.id,
-                "title": hit.memory.title,
-                "confidence": hit.memory.confidence,
-                "status": hit.memory.status.value,
-                "percept_ids": hit.memory.percept_ids,
-                "why_relevant": hit.why,
-                "redacted": hit.memory.id in redacted_summaries,
-            })
+            sources.append(_source_meta(hit, view))
 
-    # verbatim evidence for the strongest packed hits (traceability), landing
-    # in the space reserved up front — skip redacted memories (evidence must
-    # not reintroduce removed fields)
     evidence_included = False
     evidence_omitted = False
-    evidence_hits = [h for h in packed_hits if h.memory.id not in redacted_summaries]
-    lines = _evidence_lines(store, evidence_hits, profile.evidence_hits)
+    lines = _evidence_lines(
+        store, packed_hits, profile.evidence_hits, skip_ids=redacted_ids,
+    )
     if lines:
         if push("## Evidence"):
             for line in lines:
@@ -270,26 +294,30 @@ def build_context_pack(
         else:
             evidence_omitted = True
     elif evidence_wanted:
-        # quotes existed for retrieved hits but none of those hits was packed
         evidence_omitted = True
 
-    # judgment rides along even when no memory matches — how the user thinks
-    # is useful context for any task
     pack_text = "\n".join(sections) if sections else ""
 
-    # Canary leakage check — never ship a pack that contains a canary token
-    if hasattr(store, "list_leakage_canaries"):
+    # Leakage + canary scans on the assembled pack
+    if hasattr(store, "insert_privacy_decision"):
         from ..privacy.canaries import scan_for_canaries
-        leaked = scan_for_canaries(store, pack_text)
-        if leaked:
+        from ..privacy.redact import leakage_scan
+        findings = leakage_scan(pack_text)
+        leaked = scan_for_canaries(store, pack_text) if hasattr(store, "list_leakage_canaries") else []
+        if findings or leaked:
+            privacy_meta["leakage_findings"] = findings
+            privacy_meta["canary_leak_blocked"] = bool(leaked)
+            # Drop pack rather than ship leakage; do not silently pretend success
             pack_text = ""
             sources = []
-            privacy_meta["canary_leak_blocked"] = True
             privacy_blocked.append({
                 "memory_id": "",
-                "reason": "canary_leak_blocked",
-                "rule": "canary",
+                "reason": "output_leakage_blocked",
+                "rule": "leakage_scan" if findings else "canary",
             })
+
+    if "do_not_cache" in (privacy_meta.get("obligations") or []):
+        privacy_meta["cacheable"] = False
 
     blocked = [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked]
     for b in privacy_blocked:
@@ -311,3 +339,23 @@ def build_context_pack(
         evidence_included=evidence_included,
         evidence_omitted_due_to_budget=evidence_omitted,
     )
+
+
+def _source_meta(hit: SearchHit, view: dict) -> dict:
+    if view.get("redacted"):
+        return {
+            "memory_id": f"opaque_{hit.memory.id[-8:]}",
+            "redacted": True,
+            "why_relevant": "authorized contextual match",
+            "percept_ids": [],
+            "status": "redacted",
+        }
+    return {
+        "memory_id": hit.memory.id,
+        "title": view.get("title", hit.memory.title),
+        "confidence": hit.memory.confidence,
+        "status": hit.memory.status.value,
+        "percept_ids": hit.memory.percept_ids,
+        "why_relevant": hit.why,
+        "redacted": False,
+    }

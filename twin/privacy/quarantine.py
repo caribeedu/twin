@@ -47,7 +47,6 @@ def quarantine_content(
     if not patterns:
         return None
     fp = hashlib.sha256((text or "").encode()).hexdigest()[:24]
-    # Dedupe open quarantine for same fingerprint
     if hasattr(store, "find_quarantine_by_fingerprint"):
         existing = store.find_quarantine_by_fingerprint(fp)
         if existing and existing.status == QuarantineStatus.quarantined:
@@ -82,25 +81,63 @@ def is_quarantined(store: MemoryStore, *, artifact_id: Optional[str] = None,
     return False
 
 
-def release_quarantine(store: MemoryStore, quarantine_id: str) -> QuarantineRecord:
+def release_quarantine(
+    store: MemoryStore,
+    quarantine_id: str,
+    *,
+    actor: str,
+    reason: str,
+    mode: str = "release_as_safe",
+    confirm: bool = False,
+) -> QuarantineRecord:
+    """Release requires explicit actor/reason/confirm. Malicious content is not
+    re-ingested automatically — caller must choose sanitized vs reject."""
+    if not confirm:
+        raise ValueError("release_quarantine requires confirm=True")
+    if not actor or not reason:
+        raise ValueError("release_quarantine requires actor and reason")
+    if mode not in ("release_as_safe", "release_sanitized", "reject"):
+        raise ValueError("mode must be release_as_safe | release_sanitized | reject")
+
     rec = store.get_quarantine(quarantine_id)
     if rec is None:
         raise ValueError(f"quarantine {quarantine_id} not found")
+    if rec.status != QuarantineStatus.quarantined:
+        raise ValueError(f"quarantine is {rec.status.value}")
+
+    if mode == "reject":
+        status = QuarantineStatus.rejected
+    elif mode == "release_sanitized":
+        status = QuarantineStatus.released_sanitized
+    else:
+        status = QuarantineStatus.released
+
+    meta = dict(rec.metadata or {})
+    meta.update({
+        "release_actor": actor,
+        "release_reason": reason,
+        "release_mode": mode,
+        "released_at": now_iso(),
+        # Original malicious content must not re-enter pipeline by status flip alone
+        "reprocess": False if mode != "release_sanitized" else "requires_sanitization_plan",
+    })
     store.update_quarantine(
         quarantine_id,
-        status=QuarantineStatus.released.value,
+        status=status.value,
         resolved_at=now_iso(),
+        metadata=meta,
     )
     return store.get_quarantine(quarantine_id)  # type: ignore[return-value]
 
 
-def reject_quarantine(store: MemoryStore, quarantine_id: str) -> QuarantineRecord:
-    rec = store.get_quarantine(quarantine_id)
-    if rec is None:
-        raise ValueError(f"quarantine {quarantine_id} not found")
-    store.update_quarantine(
-        quarantine_id,
-        status=QuarantineStatus.rejected.value,
-        resolved_at=now_iso(),
+def reject_quarantine(
+    store: MemoryStore,
+    quarantine_id: str,
+    *,
+    actor: str = "user",
+    reason: str = "rejected",
+) -> QuarantineRecord:
+    return release_quarantine(
+        store, quarantine_id,
+        actor=actor, reason=reason, mode="reject", confirm=True,
     )
-    return store.get_quarantine(quarantine_id)  # type: ignore[return-value]

@@ -6,6 +6,7 @@ from twin import ids
 from twin.cognition.context_pack import build_context_pack
 from twin.judgment.profile import load_profile, promote_memory, render_profile
 from twin.memory.models import MemoryItem
+from twin.privacy.identity import resolve_access
 
 
 def _mem(store, embedder, **kw):
@@ -38,7 +39,7 @@ def test_promote_preference_to_judgment(store, cfg, embedder):
     promote_memory(cfg.judgment_path, mem)
     assert len(load_profile(cfg.judgment_path)["promoted_preferences"]) == 1
     # promoted content rides along in packs via the judgment section
-    pack = build_context_pack(store, cfg, embedder, "qualquer tarefa")
+    pack = build_context_pack(store, cfg, embedder, "qualquer tarefa", access=resolve_access(store, surface="cli"))
     assert "ADRs no próprio repositório" in pack.context_pack
 
 

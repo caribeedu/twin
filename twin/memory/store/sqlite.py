@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -525,6 +526,7 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._tx_depth = 0
+        self._lock = threading.RLock()
         self.conn.executescript(SCHEMA)
         self.conn.executescript(PRIVACY_SCHEMA)
         self._migrate()
@@ -1665,6 +1667,48 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
 
     def _j_exec(self, sql: str, params: tuple):
         return self.conn.execute(sql, params)
+
+    def _consume_grant_row(
+        self,
+        grant_id: str,
+        expected_version: int,
+        new_uses: int,
+        new_version: int,
+        new_status: str,
+        new_payload: dict,
+    ) -> bool:
+        import json
+        lock = getattr(self, "_lock", None)
+        if lock is not None:
+            lock.acquire()
+        try:
+            nested = getattr(self, "_tx_depth", 0) > 0
+            if not nested:
+                self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self.conn.execute(
+                    "UPDATE permission_grants SET uses = ?, version = ?, status = ?, payload = ?"
+                    " WHERE id = ? AND version = ? AND status = 'active'",
+                    (
+                        new_uses, new_version, new_status,
+                        json.dumps(new_payload, default=str),
+                        grant_id, expected_version,
+                    ),
+                )
+                ok = cur.rowcount == 1
+                if not nested:
+                    if ok:
+                        self.conn.commit()
+                    else:
+                        self.conn.rollback()
+                return ok
+            except Exception:
+                if not nested:
+                    self.conn.rollback()
+                raise
+        finally:
+            if lock is not None:
+                lock.release()
 
     def _j_fetchone(self, sql: str, params: tuple):
         return self.conn.execute(sql, params).fetchone()

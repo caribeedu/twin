@@ -49,6 +49,7 @@ class ConsentStatus(str, Enum):
 class QuarantineStatus(str, Enum):
     quarantined = "quarantined"
     released = "released"
+    released_sanitized = "released_sanitized"
     rejected = "rejected"
 
 
@@ -64,7 +65,9 @@ class DeletionStatus(str, Enum):
     approved = "approved"
     running = "running"
     completed = "completed"
+    completed_with_residuals = "completed_with_residuals"
     failed = "failed"
+    invalidated = "invalidated"
 
 
 class SensitivityClass(str, Enum):
@@ -122,12 +125,16 @@ class Vault(BaseModel):
 
 
 class AccessRequest(BaseModel):
-    """Common authorization context for every sensitive call."""
-    principal_id: str = "tool_unknown"
-    persona: str = "individual"
+    """Common authorization context for every sensitive call.
+
+    Defaults are restricted/unknown — never privileged local-cli.
+    Server surfaces must resolve identity via ``resolve_access``.
+    """
+    principal_id: str = "unknown"
+    persona: str = "unknown"
     purpose: str = "unknown"
-    audience: str = "self"
-    tool_id: str = "local-cli"
+    audience: str = "unknown"
+    tool_id: str = "unknown"
     project_id: Optional[str] = None
     session_id: Optional[str] = None
     requested_domains: list[str] = Field(default_factory=list)
@@ -143,6 +150,7 @@ class AccessRequest(BaseModel):
             or self.audience in ("", "unknown")
             or self.tool_id in ("", "unknown")
             or self.persona in ("", "unknown")
+            or self.principal_id in ("", "unknown")
         )
 
 
@@ -201,10 +209,12 @@ class ResourceDecision(BaseModel):
     effect: PolicyEffect
     matched_policy_ids: list[str] = Field(default_factory=list)
     redacted_fields: list[str] = Field(default_factory=list)
+    redaction_plan_id: Optional[str] = None
     reason: str = ""
     grant_id: Optional[str] = None
     labels: list[str] = Field(default_factory=list)
     sensitivity: Optional[str] = None
+    obligations: list[str] = Field(default_factory=list)
 
 
 class PrivacyDecision(BaseModel):
@@ -212,11 +222,13 @@ class PrivacyDecision(BaseModel):
     request_fingerprint: str = ""
     effect: PolicyEffect = PolicyEffect.allow
     matched_policy_ids: list[str] = Field(default_factory=list)
+    policy_revision_ids: list[str] = Field(default_factory=list)
     resource_decisions: list[ResourceDecision] = Field(default_factory=list)
     obligations: list[str] = Field(default_factory=list)
     policy_set_version_id: Optional[str] = None
     grant_ids: list[str] = Field(default_factory=list)
     access_request: dict[str, Any] = Field(default_factory=dict)
+    engine_version: str = "privacy-engine-v1"
     created_at: str = ""
     expires_at: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -228,6 +240,11 @@ class PermissionGrant(BaseModel):
     granted_by: str = "user"
     persona: str = "individual"
     purpose: str = ""
+    tool_ids: list[str] = Field(default_factory=list)
+    audiences: list[str] = Field(default_factory=list)
+    execution_locations: list[str] = Field(default_factory=list)
+    requested_actions: list[str] = Field(default_factory=lambda: ["read"])
+    session_id: Optional[str] = None
     resource_scope: dict[str, Any] = Field(default_factory=dict)
     allowed_effects: list[str] = Field(default_factory=lambda: ["read_redacted"])
     valid_from: str = ""
@@ -316,6 +333,9 @@ class DeletionRequest(BaseModel):
     reason: str = ""
     status: DeletionStatus = DeletionStatus.preview
     preview: dict[str, Any] = Field(default_factory=dict)
+    # Immutable execution plan (full ID set) — never truncated
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    preview_token: str = ""
     created_at: str = ""
     completed_at: Optional[str] = None
 

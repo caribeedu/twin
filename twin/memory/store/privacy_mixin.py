@@ -161,45 +161,54 @@ class PrivacyStoreMixin:
     def consume_permission_grant(
         self, grant_id: str, *, expected_version: Optional[int] = None,
     ) -> bool:
-        """Compare-and-set use increment. Returns False on conflict."""
-        g = self.get_permission_grant(grant_id)
-        if g is None:
-            return False
-        if expected_version is not None and g.version != expected_version:
-            return False
-        if g.status.value != "active":
-            return False
-        if g.max_uses is not None and g.uses >= g.max_uses:
-            return False
-        from twin.clock import now_iso
-        if g.valid_until and g.valid_until < now_iso():
-            self.update_permission_grant(grant_id, status="expired")
-            return False
-        new_uses = g.uses + 1
-        new_status = "exhausted" if (g.max_uses is not None and new_uses >= g.max_uses) else "active"
-        # Optimistic: update only if version still matches
-        cur = self._j_exec(
-            "UPDATE permission_grants SET uses = ?, version = ?, status = ?, payload = ?"
-            " WHERE id = ? AND version = ?",
-            (
-                new_uses, g.version + 1, new_status,
-                __import__("json").dumps({
-                    **g.model_dump(mode="json"),
-                    "uses": new_uses,
-                    "version": g.version + 1,
-                    "status": new_status,
-                }, default=str),
-                grant_id, g.version,
-            ),
-        )
-        self._j_commit()
-        # sqlite rowcount via cursor if available
-        rowcount = getattr(cur, "rowcount", None)
-        if rowcount is None:
-            # re-read
-            after = self.get_permission_grant(grant_id)
-            return after is not None and after.uses == new_uses
-        return rowcount > 0
+        """Compare-and-set use increment. Returns True only if THIS update won."""
+        lock = getattr(self, "_lock", None)
+        if lock is not None:
+            lock.acquire()
+        try:
+            g = self.get_permission_grant(grant_id)
+            if g is None:
+                return False
+            if expected_version is not None and g.version != expected_version:
+                return False
+            if g.status.value != "active":
+                return False
+            if g.max_uses is not None and g.uses >= g.max_uses:
+                return False
+            from twin.clock import now_iso
+            if g.valid_until and g.valid_until < now_iso():
+                self.update_permission_grant(grant_id, status="expired")
+                return False
+            new_uses = g.uses + 1
+            new_status = "exhausted" if (g.max_uses is not None and new_uses >= g.max_uses) else "active"
+            new_payload = {
+                **g.model_dump(mode="json"),
+                "uses": new_uses,
+                "version": g.version + 1,
+                "status": new_status,
+            }
+            if hasattr(self, "_consume_grant_row"):
+                return bool(self._consume_grant_row(  # type: ignore[attr-defined]
+                    grant_id, g.version, new_uses, g.version + 1, new_status, new_payload,
+                ))
+            cur = self._j_exec(
+                "UPDATE permission_grants SET uses = ?, version = ?, status = ?, payload = ?"
+                " WHERE id = ? AND version = ? AND status = 'active'",
+                (
+                    new_uses, g.version + 1, new_status,
+                    __import__("json").dumps(new_payload, default=str),
+                    grant_id, g.version,
+                ),
+            )
+            rowcount = getattr(cur, "rowcount", None)
+            if rowcount is None:
+                self._j_commit()
+                return False
+            self._j_commit()
+            return rowcount == 1
+        finally:
+            if lock is not None:
+                lock.release()
 
     # -- consent / quarantine / canary / deletion / export ----------------
 

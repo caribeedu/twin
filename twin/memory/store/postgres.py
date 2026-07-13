@@ -1312,8 +1312,37 @@ class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
     def _j_sql(self, sql: str) -> str:
         return sql.replace("?", "%s")
 
-    def _j_exec(self, sql: str, params: tuple) -> None:
-        self._exec(self._j_sql(sql), params)
+    def _j_exec(self, sql: str, params: tuple):
+        # Return a lightweight object with rowcount for CAS callers
+        with self._lock, self.conn.cursor() as cur:
+            cur.execute(self._j_sql(sql), params)
+            class _Result:
+                rowcount = cur.rowcount
+            return _Result()
+
+    def _consume_grant_row(
+        self,
+        grant_id: str,
+        expected_version: int,
+        new_uses: int,
+        new_version: int,
+        new_status: str,
+        new_payload: dict,
+    ) -> bool:
+        import json
+        with self._lock, self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE permission_grants SET uses = %s, version = %s, status = %s, payload = %s"
+                " WHERE id = %s AND version = %s AND status = 'active'"
+                " RETURNING id",
+                (
+                    new_uses, new_version, new_status,
+                    json.dumps(new_payload, default=str),
+                    grant_id, expected_version,
+                ),
+            )
+            row = cur.fetchone()
+            return row is not None
 
     def _j_fetchone(self, sql: str, params: tuple):
         rows = self._exec(self._j_sql(sql), params)

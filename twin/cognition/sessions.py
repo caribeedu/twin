@@ -112,14 +112,23 @@ def start_session(
     needs_confirmation = session_domain == UNCLASSIFIED_DOMAIN
 
     started_at = now_iso()
-    # Never treat the placeholder client name "unknown" as a tool identity —
-    # that would trip restricted-mode default-deny.
-    if tool_id:
-        tool = tool_id
-    elif client and client not in ("unknown", ""):
-        tool = client
-    else:
-        tool = "local-cli"
+    from ..privacy.identity import resolve_access
+    # Surface identity is resolved server-side. Missing/unknown client →
+    # restricted mode — never silently elevate to local-cli.
+    surface = "cli" if client in ("cli", "local-cli", "twin-cli") else "mcp"
+    if client in ("unknown", "", None) and not tool_id:
+        surface = "unknown"
+    access = resolve_access(
+        store,
+        surface=surface,
+        client=client if client not in ("unknown", "") else None,
+        tool_id=tool_id,
+        persona=persona,
+        purpose=purpose,
+        audience=audience,
+        project_id=project_id,
+        requested_domains=[session_domain] if session_domain else [],
+    )
     session = CognitiveSession(
         id=ids.session_id(),
         client=client,
@@ -129,23 +138,13 @@ def start_session(
         initial_query=query,
         started_at=started_at,
         last_activity_at=started_at,
-        principal_id=f"tool_{tool}",
-        persona=persona,
-        purpose=purpose,
-        audience=audience,
-        tool_id=tool,
+        principal_id=access.principal_id,
+        persona=access.persona,
+        purpose=access.purpose,
+        audience=access.audience,
+        tool_id=access.tool_id,
     )
-    from ..privacy.models import AccessRequest
-    access = AccessRequest(
-        principal_id=session.principal_id or f"tool_{tool}",
-        persona=persona,
-        purpose=purpose,
-        audience=audience,
-        tool_id=tool,
-        project_id=project_id,
-        session_id=session.id,
-        requested_domains=[session_domain],
-    )
+    access = access.model_copy(update={"session_id": session.id})
     pack = build_context_pack(
         store, cfg, embedder, query,
         target_domain=session.domain, max_tokens=max_tokens,

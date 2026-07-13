@@ -5,6 +5,7 @@ import pytest
 from twin import ids
 from twin.clock import now_iso
 from twin.cognition.context_pack import build_context_pack
+from twin.privacy.identity import resolve_access
 from twin.judgment.application import applicable_pack
 from twin.judgment.conflicts import (
     detect_behavior_conflicts,
@@ -36,6 +37,7 @@ from twin.judgment.simulate import counterfactual, evaluate, simulate
 from twin.judgment.versions import active_items, create_version, restore_version
 from twin.judgment.yaml_io import apply_yaml_import, preview_yaml_import
 from twin.memory.models import MemoryItem
+from twin.privacy.identity import resolve_access
 
 
 def _mem(store, embedder, **kw):
@@ -566,6 +568,7 @@ def test_context_pack_structured(store, cfg, embedder):
     pack = build_context_pack(
         store, cfg, embedder, "architecture choice",
         target_domain="technical", task_profile="architecture",
+        access=resolve_access(store, surface="cli"),
     )
     assert "Judgment" in pack.context_pack
 

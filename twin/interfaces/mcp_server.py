@@ -175,6 +175,10 @@ def create_server(home: Optional[str] = None):
         include_candidates: bool = False,
         task_profile: str = "general",
         project: Optional[str] = None,
+        client: Optional[str] = None,
+        persona: str = "individual",
+        purpose: str = "memory_retrieval",
+        audience: str = "self",
     ) -> str:
         """Returns a compact, privacy-filtered context pack (judgment profile
         + relevant memories, organized in sections: decisions, constraints,
@@ -186,7 +190,16 @@ def create_server(home: Optional[str] = None):
         `query` should describe the task you are about to do; `task_profile`
         (general, coding, architecture, debugging, writing, planning, review,
         meeting_prep) reorders sections for that kind of task; `project` is
-        an optional project name/alias to boost project-linked memories."""
+        an optional project name/alias to boost project-linked memories.
+        Identity: pass `client` (cursor, claude-desktop, …). Omitting identity
+        activates restricted mode — MCP never inherits local-cli privileges."""
+        from ..privacy.identity import resolve_access
+        access = resolve_access(
+            ws.store, surface="mcp", client=client,
+            persona=persona, purpose=purpose, audience=audience,
+            project_id=_resolve_project_id(project),
+            requested_domains=[target_domain],
+        )
         pack = build_context_pack(
             ws.store, ws.cfg, ws.embedder, query,
             target_domain=target_domain, max_tokens=max_tokens,
@@ -195,6 +208,7 @@ def create_server(home: Optional[str] = None):
             task_profile=task_profile,
             project_id=_resolve_project_id(project),
             firewall=ws.firewall,
+            access=access,
         )
         return json.dumps({
             "context_pack": pack.context_pack,
@@ -203,6 +217,8 @@ def create_server(home: Optional[str] = None):
             "blocked": pack.blocked,
             "task_profile": pack.task_profile,
             "project_id": pack.project_id,
+            "privacy_decision_id": pack.privacy_decision_id,
+            "privacy_meta": pack.privacy_meta,
             "evidence_included": pack.evidence_included,
             "evidence_omitted_due_to_budget": pack.evidence_omitted_due_to_budget,
         }, ensure_ascii=False)
@@ -577,6 +593,62 @@ def create_server(home: Optional[str] = None):
     def judgment_version() -> str:
         v = ws.store.get_active_judgment_version()
         return json.dumps(v.model_dump(mode="json") if v else None, ensure_ascii=False)
+
+    @mcp.tool()
+    def privacy_evaluate(
+        memory_ids: Optional[list[str]] = None,
+        client: Optional[str] = None,
+        persona: str = "individual",
+        purpose: str = "memory_retrieval",
+        audience: str = "self",
+    ) -> str:
+        """Evaluate privacy policies for memories under a resolved client identity.
+        Omitting `client` activates restricted mode (never local-cli)."""
+        from ..privacy.engine import evaluate_access
+        from ..privacy.identity import resolve_access
+        from ..privacy.yaml_io import bootstrap_policy_set
+        bootstrap_policy_set(ws.store)
+        access = resolve_access(
+            ws.store, surface="mcp", client=client,
+            persona=persona, purpose=purpose, audience=audience,
+        )
+        memories = []
+        for mid in memory_ids or []:
+            m = ws.store.get_memory(mid)
+            if m:
+                memories.append(m)
+        if not memories:
+            memories = ws.store.list_memories(status="confirmed", limit=20)
+        result = evaluate_access(ws.store, access, memories, persist=True)
+        d = result["decision"]
+        return json.dumps({
+            "decision_id": d.id,
+            "effect": d.effect.value,
+            "execution_location": result.get("execution_location"),
+            "tool_id": access.tool_id,
+            "restricted": access.is_restricted_mode,
+            "resources": [
+                {"id": rd.resource_id, "effect": rd.effect.value, "reason": rd.reason}
+                for rd in d.resource_decisions
+            ],
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def privacy_explain(decision_id: str) -> str:
+        """Explain a privacy decision without exposing blocked content."""
+        from ..privacy.engine import explain_decision
+        try:
+            return json.dumps(explain_decision(ws.store, decision_id), ensure_ascii=False)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool()
+    def privacy_validate_output(text: str, client: Optional[str] = None) -> str:
+        """Scan generated/exported text before release."""
+        from ..privacy.engine import validate_output
+        from ..privacy.identity import resolve_access
+        access = resolve_access(ws.store, surface="mcp", client=client)
+        return json.dumps(validate_output(text, access=access), ensure_ascii=False)
 
     return mcp
 
