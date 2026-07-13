@@ -80,6 +80,10 @@ def start_session(
     task_profile: Optional[str] = None,
     max_tokens: int = 1200,
     include_candidates: bool = False,
+    persona: str = "individual",
+    purpose: str = "task_execution",
+    audience: str = "self",
+    tool_id: Optional[str] = None,
 ) -> SessionStart:
     """Identify project/domain/task profile (unless given explicitly), build
     a task-aware pack and open the session that records what was supplied.
@@ -108,6 +112,14 @@ def start_session(
     needs_confirmation = session_domain == UNCLASSIFIED_DOMAIN
 
     started_at = now_iso()
+    # Never treat the placeholder client name "unknown" as a tool identity —
+    # that would trip restricted-mode default-deny.
+    if tool_id:
+        tool = tool_id
+    elif client and client not in ("unknown", ""):
+        tool = client
+    else:
+        tool = "local-cli"
     session = CognitiveSession(
         id=ids.session_id(),
         client=client,
@@ -117,6 +129,22 @@ def start_session(
         initial_query=query,
         started_at=started_at,
         last_activity_at=started_at,
+        principal_id=f"tool_{tool}",
+        persona=persona,
+        purpose=purpose,
+        audience=audience,
+        tool_id=tool,
+    )
+    from ..privacy.models import AccessRequest
+    access = AccessRequest(
+        principal_id=session.principal_id or f"tool_{tool}",
+        persona=persona,
+        purpose=purpose,
+        audience=audience,
+        tool_id=tool,
+        project_id=project_id,
+        session_id=session.id,
+        requested_domains=[session_domain],
     )
     pack = build_context_pack(
         store, cfg, embedder, query,
@@ -125,10 +153,16 @@ def start_session(
         # an unconfirmed domain gets nothing, not even the judgment profile
         include_judgment=not needs_confirmation,
         task_profile=session.task_profile, project_id=project_id,
+        access=access,
     )
     session.supplied_memory_ids = [s["memory_id"] for s in pack.sources]
     session.pack_chars = len(pack.context_pack)
     session.judgment_snapshot_id = pack.judgment_snapshot_id
+    session.privacy_decision_ids = (
+        [pack.privacy_decision_id] if pack.privacy_decision_id else []
+    )
+    session.grant_ids = list((pack.privacy_meta or {}).get("grant_ids") or [])
+    session.policy_snapshot_id = (pack.privacy_meta or {}).get("policy_set_version")
     store.insert_session(session)
     return SessionStart(
         session=session, pack=pack,

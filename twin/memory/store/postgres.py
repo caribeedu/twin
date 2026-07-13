@@ -24,6 +24,7 @@ from ..models import (
 )
 from .base import MemoryStore, now_iso
 from .judgment_mixin import JudgmentStoreMixin
+from .privacy_mixin import PrivacyStoreMixin
 
 _SCHEMA_BASE = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -395,6 +396,108 @@ CREATE TABLE IF NOT EXISTS judgment_traces (
     created_at TEXT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'
 );
+
+CREATE TABLE IF NOT EXISTS privacy_policies (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    effect TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 100,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    overrideable INTEGER NOT NULL DEFAULT 1,
+    constitutional INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS privacy_policy_sets (
+    id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    policy_ids TEXT NOT NULL DEFAULT '[]',
+    active INTEGER NOT NULL DEFAULT 1,
+    actor TEXT NOT NULL DEFAULT 'user',
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS privacy_decisions (
+    id TEXT PRIMARY KEY,
+    request_fingerprint TEXT NOT NULL DEFAULT '',
+    effect TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    policy_set_version_id TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS permission_grants (
+    id TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL,
+    persona TEXT NOT NULL DEFAULT 'individual',
+    purpose TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    uses INTEGER NOT NULL DEFAULT 0,
+    max_uses INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    valid_from TEXT NOT NULL DEFAULT '',
+    valid_until TEXT,
+    revoked_at TEXT,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS consent_records (
+    id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS quarantine_records (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT,
+    percept_id TEXT,
+    status TEXT NOT NULL DEFAULT 'quarantined',
+    content_fingerprint TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_quarantine_fp ON quarantine_records(content_fingerprint);
+CREATE TABLE IF NOT EXISTS leakage_canaries (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    vault_id TEXT NOT NULL DEFAULT 'vault_general',
+    active INTEGER NOT NULL DEFAULT 1,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS deletion_requests (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'preview',
+    mode TEXT NOT NULL DEFAULT 'delete',
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS export_records (
+    id TEXT PRIMARY KEY,
+    purpose TEXT NOT NULL DEFAULT 'backup',
+    destination TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS redaction_plans (
+    id TEXT PRIMARY KEY,
+    resource_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS privacy_principals (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS privacy_tools (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS privacy_vaults (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
 """
 
 _EMBEDDINGS_PGVECTOR = """
@@ -424,7 +527,7 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
 
 
-class PostgresStore(JudgmentStoreMixin, MemoryStore):
+class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
         from psycopg.rows import dict_row
