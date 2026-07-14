@@ -124,6 +124,24 @@ class ProjectUpdateRequest(BaseModel):
     metadata: Optional[dict[str, Any]] = None
 
 
+class ConnectorAddRequest(BaseModel):
+    connector_type: str = Field(min_length=1, max_length=100)
+    source_owner: Literal["personal", "employer", "client", "opensource", "shared", "unknown"]
+    vault_id: Optional[str] = None
+    org_key: Optional[str] = None
+    persona: str = "individual"
+    default_domain: str = "work"
+    display_name: str = ""
+    external_account_id: str = ""
+    secret: Optional[str] = None  # write-only; never returned
+    configuration: Optional[dict[str, Any]] = None
+
+
+class ConnectorSyncRequest(BaseModel):
+    stream: Optional[str] = None
+    emit_percepts: bool = True
+
+
 def _mem_dict(mem) -> dict[str, Any]:
     data = mem.model_dump()
     data["type"] = mem.type.value
@@ -722,6 +740,138 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             ws.store, req.query, domain=req.domain, task_profile=req.task_profile,
             project_id=req.project_id, options=req.options,
         )
+
+    # -- connectors (v0.6) ------------------------------------------------
+    from ..connectors import build_credential_store as _bcs
+    from ..connectors import (
+        add_connector_instance,
+        connector_health,
+        pause_connector,
+        register_source_account,
+        resume_connector,
+        revoke_connector,
+        sync_connector,
+        validate_connector,
+    )
+    _conn_creds = _bcs(ws.cfg.home)
+
+    def _instance_dict(inst) -> dict[str, Any]:
+        acc = ws.store.get_source_account(inst.account_id)
+        return {
+            "connector_id": inst.id,
+            "connector_type": inst.connector_type,
+            "status": inst.status,
+            "account_id": inst.account_id,
+            "has_credential": bool(inst.credential_ref),  # never the secret itself
+            "source_owner": acc.source_owner if acc else None,
+            "vault_id": acc.vault_id if acc else None,
+            "configuration": inst.configuration,
+        }
+
+    @app.post("/api/connectors")
+    def api_connector_add(req: ConnectorAddRequest):
+        try:
+            acc = register_source_account(
+                ws.store, connector_type=req.connector_type,
+                source_owner=req.source_owner, vault_id=req.vault_id,
+                org_key=req.org_key, persona=req.persona,
+                default_domain=req.default_domain, display_name=req.display_name,
+                external_account_id=req.external_account_id,
+            )
+            inst = add_connector_instance(
+                ws.store, _conn_creds, account_id=acc.id, secret=req.secret,
+                configuration=req.configuration,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return _instance_dict(inst)
+
+    @app.get("/api/connectors")
+    def api_connectors():
+        return [_instance_dict(i) for i in ws.store.list_connector_instances()]
+
+    @app.get("/api/connectors/{connector_id}")
+    def api_connector(connector_id: str):
+        inst = ws.store.get_connector_instance(connector_id)
+        if inst is None:
+            raise HTTPException(status_code=404, detail="connector not found")
+        return {**_instance_dict(inst), "health": connector_health(ws.store, connector_id)}
+
+    @app.post("/api/connectors/{connector_id}/validate")
+    def api_connector_validate(connector_id: str):
+        try:
+            health = validate_connector(ws.store, _conn_creds, connector_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return {"status": health.status.value, "detail": health.detail}
+
+    @app.post("/api/connectors/{connector_id}/sync")
+    def api_connector_sync(connector_id: str, req: ConnectorSyncRequest):
+        try:
+            result = sync_connector(
+                ws.store, _conn_creds, connector_id,
+                streams=[req.stream] if req.stream else None,
+                emit_percepts=req.emit_percepts,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return {
+            "health": result.health.value,
+            "percepts": result.percepts,
+            "streams": [
+                {"stream": s.stream, "committed": s.committed, "raw": s.raw,
+                 "normalized": s.normalized, "deduplicated": s.deduplicated,
+                 "quarantined": s.quarantined, "percepts": s.percepts,
+                 "failed": s.failed}
+                for s in result.streams
+            ],
+        }
+
+    @app.post("/api/connectors/{connector_id}/pause")
+    def api_connector_pause(connector_id: str):
+        return {"status": pause_connector(ws.store, connector_id).status}
+
+    @app.post("/api/connectors/{connector_id}/resume")
+    def api_connector_resume(connector_id: str):
+        return {"status": resume_connector(ws.store, connector_id).status}
+
+    @app.post("/api/connectors/{connector_id}/revoke")
+    def api_connector_revoke(connector_id: str):
+        try:
+            return {"status": revoke_connector(ws.store, _conn_creds, connector_id).status}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+    @app.get("/api/connectors/{connector_id}/health")
+    def api_connector_health(connector_id: str):
+        return connector_health(ws.store, connector_id)
+
+    @app.get("/api/connectors/{connector_id}/checkpoints")
+    def api_connector_checkpoints(connector_id: str):
+        return [
+            {"stream": c.stream, "cursor": c.cursor,
+             "committed_batch_id": c.committed_batch_id}
+            for c in ws.store.list_connector_checkpoints(connector_id)
+        ]
+
+    @app.get("/api/connectors/{connector_id}/batches")
+    def api_connector_batches(connector_id: str):
+        return [
+            {"id": b.id, "stream": b.stream, "status": b.status,
+             "raw": b.raw_count, "normalized": b.normalized_count,
+             "quarantined": b.quarantined_count, "percepts": b.percept_count,
+             "failed": b.failed_count}
+            for b in ws.store.list_connector_batches(connector_id)
+        ]
+
+    @app.get("/api/connectors/{connector_id}/dead-letters")
+    def api_connector_dead_letters(connector_id: str):
+        return [
+            {"id": d.id, "failure_class": d.failure_class, "status": d.status,
+             "external_type": d.external_type, "external_id": d.external_id,
+             "last_error": d.last_error}
+            for d in ws.store.list_connector_dead_letters(connector_id)
+        ]
 
     @app.get("/api/judgment/conflicts")
     def api_judgment_conflicts(status: str = "open"):

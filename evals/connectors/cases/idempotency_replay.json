@@ -1,0 +1,23 @@
+{
+  "id": "idempotency_replay",
+  "connector_type": "fake",
+  "source_owner": "personal",
+  "fixtures": {
+    "issues": [
+      {
+        "external_id": "1",
+        "external_revision": "1",
+        "seq": 1,
+        "content": "Issue #1: replay me twice, stay a single record."
+      }
+    ],
+    "pull_requests": []
+  },
+  "replays": 2,
+  "expected": {
+    "records": 1,
+    "percepts": 1,
+    "second_pass_new_percepts": 0,
+    "checkpoint_advances": true
+  }
+}

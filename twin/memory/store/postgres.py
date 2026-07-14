@@ -23,6 +23,7 @@ from ..models import (
     Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
+from .connector_mixin import ConnectorStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
 
@@ -514,6 +515,81 @@ CREATE TABLE IF NOT EXISTS privacy_policy_revisions (
 );
 """
 
+_CONNECTOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS connector_source_accounts (
+    id TEXT PRIMARY KEY,
+    connector_type TEXT NOT NULL,
+    source_owner TEXT NOT NULL DEFAULT 'unknown',
+    vault_id TEXT NOT NULL DEFAULT 'vault_general',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS connector_instances (
+    id TEXT PRIMARY KEY,
+    connector_type TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    credential_ref TEXT,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS connector_credential_refs (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'encrypted_file',
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS connector_checkpoints (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    UNIQUE(connector_id, stream)
+);
+CREATE TABLE IF NOT EXISTS connector_batches (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'planned',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cbatch_conn ON connector_batches(connector_id);
+CREATE TABLE IF NOT EXISTS connector_raw_items (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_craw_conn ON connector_raw_items(connector_id);
+CREATE TABLE IF NOT EXISTS connector_records (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    external_type TEXT NOT NULL DEFAULT '',
+    external_id TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    percept_id TEXT,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_crec_conn ON connector_records(connector_id);
+CREATE TABLE IF NOT EXISTS connector_dead_letters (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    external_id TEXT NOT NULL DEFAULT '',
+    failure_class TEXT NOT NULL DEFAULT 'normalization',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cdlq_conn ON connector_dead_letters(connector_id);
+CREATE TABLE IF NOT EXISTS connector_sync_state (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'healthy',
+    next_run_at TEXT,
+    payload TEXT NOT NULL
+);
+"""
+
 _EMBEDDINGS_PGVECTOR = """
 CREATE TABLE IF NOT EXISTS embeddings (
     ref_id TEXT NOT NULL,
@@ -541,7 +617,7 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
 
 
-class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
+class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, MemoryStore):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
         from psycopg.rows import dict_row
@@ -559,6 +635,7 @@ class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
             except psycopg.Error:
                 self.has_pgvector = False
             cur.execute(_SCHEMA_BASE)
+            cur.execute(_CONNECTOR_SCHEMA)
             cur.execute(_EMBEDDINGS_PGVECTOR if self.has_pgvector else _EMBEDDINGS_FALLBACK)
 
     def _begin_transaction(self) -> None:

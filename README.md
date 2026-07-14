@@ -1355,6 +1355,17 @@ Prioritize:
 
 Each connector must preserve authorization, source ownership, incremental checkpoints, provenance, confidentiality and deletion behavior. Employer data should remain physically and cryptographically separable from personal data when policy requires it.
 
+Phase 1 — Connector Framework (in progress):
+
+- shared `ProfessionalConnector` contract + adapter manifest/registry; no real providers yet;
+- `SourceAccount` / `ConnectorInstance` with declared ownership (`personal | employer | client | opensource | shared | unknown`) and per-organization work vaults (`ensure_org_vault`);
+- `CredentialStore` (encrypted file default) — the DB keeps only a `credential_ref`, never the secret; `revoke` destroys secret material and stops sync;
+- idempotent ingest spine: `RawConnectorItem` → `ConnectorRecord` → quarantine gate → `Percept`, keyed by `connector:account:type:id:revision`;
+- checkpoints advance only on committed batches (never gap-advance); dead-letter queue, backoff and derived health;
+- edits (new revision, old retained), deletions (tombstone, no percept), auth-expiry and rate-limit handling;
+- `FakeConnector` proving the full path; CLI (`twin connector …`), REST (`/api/connectors`) and MCP admin/read tools;
+- `tests/test_connectors.py` contract suite + `evals/connectors/` skeleton. Connectors capture evidence; cognition still creates understanding — no connector path writes confirmed Memory or Judgment.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.

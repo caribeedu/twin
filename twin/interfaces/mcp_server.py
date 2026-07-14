@@ -659,6 +659,82 @@ def create_server(home: Optional[str] = None):
         )
         return json.dumps(validate_output(text, access=access, store=ws.store), ensure_ascii=False)
 
+    # -- connectors (v0.6) — admin/read only; never exposes raw payloads ---
+
+    @mcp.tool()
+    def connector_list() -> str:
+        """List connector instances (type, status, ownership). No secrets."""
+        from ..connectors import connector_health
+        out = []
+        for inst in ws.store.list_connector_instances():
+            acc = ws.store.get_source_account(inst.account_id)
+            out.append({
+                "connector_id": inst.id,
+                "connector_type": inst.connector_type,
+                "status": inst.status,
+                "source_owner": acc.source_owner if acc else None,
+                "vault_id": acc.vault_id if acc else None,
+                "health": connector_health(ws.store, inst.id).get("health"),
+            })
+        return json.dumps(out, ensure_ascii=False)
+
+    @mcp.tool()
+    def connector_status(connector_id: str) -> str:
+        """Health, last batch, checkpoints and dead-letter depth for a connector."""
+        from ..connectors import connector_health
+        return json.dumps(connector_health(ws.store, connector_id), ensure_ascii=False)
+
+    @mcp.tool()
+    def connector_health_all() -> str:
+        """Aggregate health across every connector instance."""
+        from ..connectors import connector_health
+        return json.dumps(
+            [connector_health(ws.store, i.id) for i in ws.store.list_connector_instances()],
+            ensure_ascii=False,
+        )
+
+    @mcp.tool()
+    def connector_sync(
+        connector_id: str,
+        confirm: bool = False,
+        client: Optional[str] = None,
+        client_token: Optional[str] = None,
+    ) -> str:
+        """Trigger one sync pass (mutating). Requires a resolved, non-restricted
+        client identity and `confirm=true`. Never returns raw payloads."""
+        from ..connectors import build_credential_store, sync_connector
+        from ..privacy.identity import resolve_access
+        access = resolve_access(
+            ws.store, surface="mcp", client=client, api_token=client_token,
+        )
+        if access.is_restricted_mode:
+            return json.dumps({
+                "error": "restricted_mode",
+                "reason": "connector_sync requires a registered client identity",
+            })
+        if not confirm:
+            return json.dumps({
+                "requires_confirmation": True,
+                "action": "connector_sync",
+                "connector_id": connector_id,
+                "tool_id": access.tool_id,
+            })
+        creds = build_credential_store(ws.cfg.home)
+        try:
+            result = sync_connector(ws.store, creds, connector_id)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        return json.dumps({
+            "health": result.health.value,
+            "percepts": result.percepts,
+            "streams": [
+                {"stream": s.stream, "committed": s.committed,
+                 "normalized": s.normalized, "quarantined": s.quarantined,
+                 "percepts": s.percepts, "failed": s.failed}
+                for s in result.streams
+            ],
+        }, ensure_ascii=False)
+
     return mcp
 
 

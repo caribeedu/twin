@@ -483,6 +483,96 @@ def cmd_privacy(args) -> None:
         raise SystemExit(f"unknown privacy command: {cmd}")
 
 
+def cmd_connector(args) -> None:
+    import json as _json
+
+    from ..connectors import (
+        add_connector_instance,
+        build_credential_store,
+        connector_health,
+        list_adapters,
+        pause_connector,
+        register_source_account,
+        resume_connector,
+        revoke_connector,
+        sync_connector,
+        validate_connector,
+    )
+
+    ws = Workspace(args.home)
+    creds = build_credential_store(ws.cfg.home)
+    cmd = args.connector_command
+
+    if cmd == "adapters":
+        for name in list_adapters():
+            print(name)
+    elif cmd == "list":
+        for inst in ws.store.list_connector_instances():
+            acc = ws.store.get_source_account(inst.account_id)
+            owner = acc.source_owner if acc else "?"
+            vault = acc.vault_id if acc else "?"
+            print(f"{inst.id}  {inst.connector_type:8}  {inst.status:12}  "
+                  f"owner={owner}  vault={vault}  account={inst.account_id}")
+    elif cmd == "add":
+        acc = register_source_account(
+            ws.store,
+            connector_type=args.connector_type,
+            source_owner=args.source_owner,
+            vault_id=args.vault_id,
+            org_key=args.org_key,
+            persona=args.persona,
+            default_domain=args.domain,
+            display_name=args.name or "",
+            external_account_id=args.external_id or "",
+        )
+        inst = add_connector_instance(
+            ws.store, creds, account_id=acc.id, secret=args.secret,
+            configuration=_json.loads(args.config) if args.config else None,
+        )
+        print(f"account {acc.id}  vault={acc.vault_id}")
+        print(f"connector {inst.id}  status={inst.status}")
+    elif cmd == "configure":
+        if args.config:
+            ws.store.update_connector_instance(
+                args.connector_id, configuration=_json.loads(args.config))
+        if args.secret:
+            from ..connectors import set_credential
+            set_credential(ws.store, creds, args.connector_id, args.secret)
+        inst = ws.store.get_connector_instance(args.connector_id)
+        print(f"{inst.id}  status={inst.status}  credential={'set' if inst.credential_ref else 'none'}")
+    elif cmd in ("auth", "test"):
+        health = validate_connector(ws.store, creds, args.connector_id)
+        print(f"{args.connector_id}  {health.status.value}  {health.detail}")
+    elif cmd == "sync":
+        result = sync_connector(
+            ws.store, creds, args.connector_id,
+            streams=[args.stream] if args.stream else None,
+            emit_percepts=not args.no_percepts,
+        )
+        print(f"health={result.health.value}  percepts={result.percepts}")
+        for s in result.streams:
+            print(f"  {s.stream:16}  committed={s.committed}  raw={s.raw}  "
+                  f"normalized={s.normalized}  dedup={s.deduplicated}  "
+                  f"quarantined={s.quarantined}  percepts={s.percepts}  failed={s.failed}")
+    elif cmd == "pause":
+        print(pause_connector(ws.store, args.connector_id).status)
+    elif cmd == "resume":
+        print(resume_connector(ws.store, args.connector_id).status)
+    elif cmd == "revoke":
+        print(revoke_connector(ws.store, creds, args.connector_id).status)
+    elif cmd == "status":
+        print(_json.dumps(connector_health(ws.store, args.connector_id), indent=2))
+    elif cmd == "checkpoint":
+        for c in ws.store.list_connector_checkpoints(args.connector_id):
+            print(f"{c.stream:16}  cursor={c.cursor}  batch={c.committed_batch_id}")
+    elif cmd == "dead-letters":
+        for d in ws.store.list_connector_dead_letters(args.connector_id):
+            print(f"{d.id}  {d.failure_class:14}  {d.status:10}  "
+                  f"{d.external_type}:{d.external_id}  {d.last_error[:60]}")
+    else:
+        raise SystemExit(f"unknown connector command: {cmd}")
+
+
 def cmd_supersede(args) -> None:
     from ..memory.lifecycle import supersede
 
@@ -859,6 +949,42 @@ def main(argv: list[str] | None = None) -> None:
     pde = ps.add_parser("delete-execute")
     pde.add_argument("deletion_id"); pde.add_argument("--token", required=True)
     pde.set_defaults(func=cmd_privacy)
+
+    p = sub.add_parser("connector", help="professional connectors (v0.6)")
+    cs = p.add_subparsers(dest="connector_command", required=True)
+    cs.add_parser("adapters", help="list registered adapter types").set_defaults(func=cmd_connector)
+    cs.add_parser("list", help="list connector instances").set_defaults(func=cmd_connector)
+    cadd = cs.add_parser("add", help="register an account + connector instance")
+    cadd.add_argument("connector_type")
+    cadd.add_argument("--source-owner", required=True,
+                      choices=["personal", "employer", "client", "opensource", "shared", "unknown"])
+    cadd.add_argument("--vault-id", default=None)
+    cadd.add_argument("--org-key", default=None)
+    cadd.add_argument("--persona", default="individual")
+    cadd.add_argument("--domain", default="work")
+    cadd.add_argument("--name", default=None)
+    cadd.add_argument("--external-id", default=None)
+    cadd.add_argument("--secret", default=None)
+    cadd.add_argument("--config", default=None, help="JSON instance configuration")
+    cadd.set_defaults(func=cmd_connector)
+    ccfg = cs.add_parser("configure", help="rotate credential / set configuration")
+    ccfg.add_argument("connector_id")
+    ccfg.add_argument("--secret", default=None)
+    ccfg.add_argument("--config", default=None, help="JSON instance configuration")
+    ccfg.set_defaults(func=cmd_connector)
+    for name in ("auth", "test"):
+        cx = cs.add_parser(name, help="validate stored credentials")
+        cx.add_argument("connector_id")
+        cx.set_defaults(func=cmd_connector)
+    csync = cs.add_parser("sync", help="run one sync pass")
+    csync.add_argument("connector_id")
+    csync.add_argument("--stream", default=None)
+    csync.add_argument("--no-percepts", action="store_true")
+    csync.set_defaults(func=cmd_connector)
+    for name in ("pause", "resume", "revoke", "status", "checkpoint", "dead-letters"):
+        cx = cs.add_parser(name)
+        cx.add_argument("connector_id")
+        cx.set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")
