@@ -64,6 +64,11 @@ class CheckpointConflict(RuntimeError):
     """The checkpoint moved underneath this batch — abort, never regress."""
 
 
+class LeaseLost(RuntimeError):
+    """This worker no longer holds the stream lease (fencing token stale) —
+    it must stop publishing results, even mid-flight."""
+
+
 @dataclass
 class StreamResult:
     stream: str
@@ -173,15 +178,19 @@ def build_percept(
 #
 # Fetch and normalization run OUTSIDE any transaction and produce a plan of
 # what would be persisted. Nothing cognitive is written until the batch can
-# commit as a whole.
+# commit as a whole. A batch must be idempotent even within itself: the
+# staged indexes dedupe (and collision-check) duplicates the provider sends
+# twice in the same page or across pages of one fetch.
 
 
 @dataclass
 class _Staged:
     new_raw_items: list[RawConnectorItem] = field(default_factory=list)
     records: list[ConnectorRecord] = field(default_factory=list)
-    deletions: list[ConnectorDeletionEvent] = field(default_factory=list)
     dead_letters: list[ConnectorDeadLetter] = field(default_factory=list)
+    # in-batch idempotency: everything seen in THIS batch, keyed like the store
+    raw_by_key: dict[str, RawConnectorItem] = field(default_factory=dict)
+    record_by_key: dict[str, ConnectorRecord] = field(default_factory=dict)
 
 
 def _stage_dlq(
@@ -203,41 +212,34 @@ def _stage_dlq(
     ))
 
 
-def _stage_deletion(
-    store, staged: _Staged, instance: ConnectorInstance, account: SourceAccount,
-    rec: ConnectorRecord,
-) -> None:
-    """Tombstone → lineage impact. Prior revisions and their Percepts are
-    located now; the decision (detach/delete/preserve/review) belongs to the
-    deletion planner, never to the connector."""
-    prior = store.list_connector_records_for_object(
-        instance.id, rec.external_type, rec.external_id,
-    )
-    prior = [p for p in prior if not p.deleted]
-    staged.deletions.append(ConnectorDeletionEvent(
-        connector_id=instance.id,
-        source_account_id=account.id,
-        external_type=rec.external_type,
-        external_id=rec.external_id,
-        tombstone_revision=rec.external_revision,
-        prior_record_ids=[p.id for p in prior],
-        affected_percept_ids=[p.percept_id for p in prior if p.percept_id],
-        vault_id=account.vault_id,
-    ))
-
-
 def stage_raw_fetch_item(
     store, adapter, instance: ConnectorInstance, account: SourceAccount,
     batch: ConnectorBatch, staged: _Staged, raw: RawFetchItem,
 ) -> None:
-    """Stage one raw object: dedupe, collision-check, normalize — in memory."""
+    """Stage one raw object: dedupe (store AND in-batch), collision-check,
+    normalize — all in memory."""
     ct = instance.connector_type
     key = idempotency_key(
         ct, account.id, raw.external_type, raw.external_id, raw.external_revision
     )
     content_hash = _raw_hash(raw.payload, raw.deleted)
-    existing_raw = store.find_raw_item_by_key(key)
 
+    staged_raw = staged.raw_by_key.get(key)
+    if staged_raw is not None:
+        if staged_raw.content_hash == content_hash:
+            batch.deduplicated_count += 1  # provider sent the item twice
+        else:
+            _stage_dlq(
+                staged, batch, instance,
+                external_id=raw.external_id, external_type=raw.external_type,
+                failure_class=FailureClass.revision_collision,
+                exc=(f"provider returned two different payloads for revision "
+                     f"{raw.external_revision} within one batch"),
+                raw_item_id=staged_raw.id,
+            )
+        return
+
+    existing_raw = store.find_raw_item_by_key(key)
     if existing_raw is not None and existing_raw.content_hash != content_hash:
         # same external revision, different content: contract violation —
         # the stored evidence is NEVER overwritten
@@ -267,6 +269,7 @@ def stage_raw_fetch_item(
             metadata={"occurred_at": raw.occurred_at},
         )
         staged.new_raw_items.append(item)
+    staged.raw_by_key[key] = item
     batch.raw_count += 1
 
     try:
@@ -289,6 +292,21 @@ def stage_raw_fetch_item(
         rec.ownership = rec.ownership or _ownership(account, instance)
         rec.confidentiality = rec.confidentiality or _confidentiality(account)
 
+        staged_rec = staged.record_by_key.get(rec.idempotency_key)
+        if staged_rec is not None:
+            if staged_rec.content_hash == rec.content_hash:
+                batch.deduplicated_count += 1
+            else:
+                _stage_dlq(
+                    staged, batch, instance,
+                    external_id=rec.external_id, external_type=rec.external_type,
+                    failure_class=FailureClass.revision_collision,
+                    exc=("two different normalizations for revision "
+                         f"{rec.external_revision} within one batch"),
+                    raw_item_id=item.id,
+                )
+            continue
+
         existing_rec = store.find_record_by_key(rec.idempotency_key)
         if existing_rec is not None:
             if existing_rec.content_hash == rec.content_hash:
@@ -307,9 +325,8 @@ def stage_raw_fetch_item(
             continue
 
         staged.records.append(rec)
+        staged.record_by_key[rec.idempotency_key] = rec
         batch.normalized_count += 1
-        if rec.deleted:
-            _stage_deletion(store, staged, instance, account, rec)
 
 
 def _persist_partial(store, batch: ConnectorBatch, staged: _Staged) -> None:
@@ -358,24 +375,55 @@ def _finalize_committed(
     store, instance: ConnectorInstance, account: SourceAccount,
     batch: ConnectorBatch, staged: _Staged, *,
     cursor_after: dict[str, Any], plan, expected_version: int,
-    emit_percepts: bool,
-) -> None:
+    emit_percepts: bool, lease_owner: str, fencing_token: int,
+) -> int:
     """The single transaction that makes a stream's evidence visible:
 
-        raw + records + percepts + deletion events
+        lease fence check
+        + raw + records + percepts + deletion events
         + batch committed
         + checkpoint CAS
 
-    All of it or none of it. ``batch committed ⇔ checkpoint references it``.
-    """
+    All of it or none of it. ``batch committed ⇔ checkpoint references it``,
+    and only the worker that still holds the lease (same fencing token) may
+    publish. Returns the number of deletion events filed."""
+    deletion_events = 0
     with store.transaction():
+        # fencing write: a worker whose lease expired (or was taken over)
+        # cannot publish, even though it is still running
+        if not store.renew_stream_lease(instance.id, batch.stream, lease_owner,
+                                        fencing_token,
+                                        ttl_seconds=LEASE_TTL_SECONDS):
+            raise LeaseLost(
+                f"lease for {instance.id}/{batch.stream} no longer held "
+                f"(fencing token {fencing_token})"
+            )
         for item in staged.new_raw_items:
             store.insert_connector_raw_item(item)
         for rec in staged.records:
             persist_committed_record(store, account, instance, rec, batch,
                                      emit_percepts=emit_percepts)
-        for deletion in staged.deletions:
-            store.insert_connector_deletion_event(deletion)
+        # deletion events resolve AFTER records/percepts persisted, so a
+        # revision created earlier in this same batch is part of the lineage
+        for rec in staged.records:
+            if not rec.deleted:
+                continue
+            prior = [
+                p for p in store.list_connector_records_for_object(
+                    instance.id, rec.external_type, rec.external_id)
+                if not p.deleted and p.id != rec.id
+            ]
+            store.insert_connector_deletion_event(ConnectorDeletionEvent(
+                connector_id=instance.id,
+                source_account_id=account.id,
+                external_type=rec.external_type,
+                external_id=rec.external_id,
+                tombstone_revision=rec.external_revision,
+                prior_record_ids=[p.id for p in prior],
+                affected_percept_ids=[p.percept_id for p in prior if p.percept_id],
+                vault_id=account.vault_id,
+            ))
+            deletion_events += 1
         batch.status = BatchStatus.committed
         batch.completed_at = now_iso()
         batch.cursor_after_proposed = cursor_after or {}
@@ -399,6 +447,7 @@ def _finalize_committed(
                 f"checkpoint for {instance.id}/{batch.stream} moved "
                 f"(expected version {expected_version})"
             )
+    return deletion_events
 
 
 def run_sync(
@@ -457,20 +506,45 @@ def _sync_stream(
     store, adapter, instance: ConnectorInstance, account: SourceAccount,
     stream: str, *, emit_percepts: bool, lease_owner: str,
 ) -> StreamResult:
-    if not store.acquire_stream_lease(instance.id, stream, lease_owner,
-                                      ttl_seconds=LEASE_TTL_SECONDS):
+    fencing_token = store.acquire_stream_lease(instance.id, stream, lease_owner,
+                                               ttl_seconds=LEASE_TTL_SECONDS)
+    if fencing_token is None:
         logger.info("stream %s/%s already leased; skipping", instance.id, stream)
         return StreamResult(stream=stream, skipped="already_running")
     try:
         return _sync_stream_leased(store, adapter, instance, account, stream,
-                                   emit_percepts=emit_percepts)
+                                   emit_percepts=emit_percepts,
+                                   lease_owner=lease_owner,
+                                   fencing_token=fencing_token)
     finally:
         store.release_stream_lease(instance.id, stream, lease_owner)
 
 
+def _abort_batch(store, batch: ConnectorBatch, sr: StreamResult,
+                 exc: BaseException) -> None:
+    """A finalize that failed for ANY reason leaves the batch in a terminal,
+    diagnosable state — never dangling in `fetching` — with the previous
+    checkpoint intact and nothing cognitive persisted (the transaction
+    rolled back)."""
+    logger.warning("aborting batch %s: %s", batch.id, sanitize_error(exc))
+    batch.status = BatchStatus.aborted
+    if batch.failure_class is None:
+        batch.failure_class = FailureClass.storage
+    batch.error = sanitize_error(exc)
+    batch.completed_at = now_iso()
+    # counters describe what was staged, but nothing cognitive persisted
+    batch.percept_count = 0
+    batch.quarantined_count = 0
+    try:
+        store.update_connector_batch(batch)
+    except Exception:  # even this failing must not mask the original error
+        logger.exception("could not persist aborted state for batch %s", batch.id)
+    _fill_stream(sr, batch)
+
+
 def _sync_stream_leased(
     store, adapter, instance: ConnectorInstance, account: SourceAccount,
-    stream: str, *, emit_percepts: bool,
+    stream: str, *, emit_percepts: bool, lease_owner: str, fencing_token: int,
 ) -> StreamResult:
     checkpoint = store.get_connector_checkpoint(instance.id, stream)
     expected_version = checkpoint.version if checkpoint else 0
@@ -486,7 +560,9 @@ def _sync_stream_leased(
     cursor: Optional[dict[str, Any]] = plan.cursor_before or None
     last_page: Optional[FetchPage] = None
     try:
-        # 1. fetch + stage — outside any transaction, nothing persisted yet
+        # 1. fetch + stage — outside any transaction, nothing persisted yet.
+        # The lease is renewed after every page so a slow provider or a long
+        # backfill never outlives its authority silently.
         while True:
             page = adapter.fetch_batch(plan, cursor)
             for raw in page.raw_items:
@@ -494,8 +570,18 @@ def _sync_stream_leased(
                                      batch, staged, raw)
             last_page = page
             cursor = page.cursor_after
+            if not store.renew_stream_lease(instance.id, stream, lease_owner,
+                                            fencing_token,
+                                            ttl_seconds=LEASE_TTL_SECONDS):
+                raise LeaseLost(
+                    f"lease for {instance.id}/{stream} lost mid-fetch "
+                    f"(fencing token {fencing_token})"
+                )
             if page.done:
                 break
+    except LeaseLost as exc:
+        _abort_batch(store, batch, sr, exc)
+        return sr  # another worker owns the stream now; publish nothing
     except ConnectorError as exc:
         batch.status = BatchStatus.failed
         batch.failure_class = exc.failure_class
@@ -523,26 +609,24 @@ def _sync_stream_leased(
         _fill_stream(sr, batch)
         return sr
 
-    # 2b. full success → single atomic finalize
+    # 2b. full success → single atomic finalize (fenced)
     cursor_after = adapter.acknowledge(plan, last_page or FetchPage())
     try:
-        _finalize_committed(
+        sr.deletion_events = _finalize_committed(
             store, instance, account, batch, staged,
             cursor_after=cursor_after or {}, plan=plan,
             expected_version=expected_version, emit_percepts=emit_percepts,
+            lease_owner=lease_owner, fencing_token=fencing_token,
         )
-    except CheckpointConflict as exc:
-        logger.warning("aborting batch %s: %s", batch.id, exc)
-        batch.status = BatchStatus.aborted
-        batch.failure_class = FailureClass.storage
-        batch.error = sanitize_error(exc)
-        batch.completed_at = now_iso()
-        # counters describe what was staged, but nothing cognitive persisted
-        batch.percept_count = 0
-        batch.quarantined_count = 0
-        store.update_connector_batch(batch)
-        _fill_stream(sr, batch)
+    except (CheckpointConflict, LeaseLost) as exc:
+        _abort_batch(store, batch, sr, exc)
         return sr
+    except Exception as exc:
+        # unexpected storage/normalization failure inside the transaction:
+        # terminal aborted state, checkpoint preserved — then re-raise, a
+        # framework bug must stay visible
+        _abort_batch(store, batch, sr, exc)
+        raise
 
     sr.committed = True
     sr.cursor_after = cursor_after or {}

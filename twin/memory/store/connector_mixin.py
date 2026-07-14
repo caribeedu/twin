@@ -225,33 +225,57 @@ class ConnectorStoreMixin:
         self._j_commit()
         return getattr(cur, "rowcount", 0) > 0
 
-    # -- stream leases (one worker per connector+stream) -------------------
+    # -- stream leases (one worker per connector+stream, fenced) ------------
+    #
+    # The lease version doubles as a monotonic FENCING TOKEN: it increments
+    # every time ownership is granted (fresh acquire or takeover) and stays
+    # constant across renewals by the same owner. A worker that lost its
+    # lease holds a stale token and can no longer renew — and therefore can
+    # no longer publish results, even if it is still running.
+
+    def _lease_expiry(self, ttl_seconds: int) -> str:
+        # same timespec as now_iso() so lexicographic comparison is sound
+        return (datetime.now(timezone.utc)
+                + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
 
     def acquire_stream_lease(
         self, connector_id: str, stream: str, owner: str, *,
         ttl_seconds: int = 600,
-    ) -> bool:
+    ) -> Optional[int]:
+        """Acquire (or re-enter) the lease. Returns the fencing token, or
+        None when another worker actively holds the stream."""
         now = now_iso()
-        # same timespec as now_iso() so lexicographic comparison is sound
-        expires = (datetime.now(timezone.utc)
-                   + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
+        expires = self._lease_expiry(ttl_seconds)
+        # 1. takeover of an expired lease (ownership change → token bumps)
         cur = self._j_exec(
             "UPDATE connector_stream_leases SET lease_owner = ?,"
             " lease_expires_at = ?, version = version + 1"
             " WHERE connector_id = ? AND stream = ?"
-            " AND (lease_owner = ? OR lease_expires_at <= ?)",
+            " AND lease_owner != ? AND lease_expires_at <= ?",
             (owner, expires, connector_id, stream, owner, now),
         )
+        if getattr(cur, "rowcount", 0) == 0:
+            # 2. re-entrant acquire by the current owner (token unchanged)
+            cur = self._j_exec(
+                "UPDATE connector_stream_leases SET lease_expires_at = ?"
+                " WHERE connector_id = ? AND stream = ? AND lease_owner = ?",
+                (expires, connector_id, stream, owner),
+            )
         if getattr(cur, "rowcount", 0) > 0:
             self._j_commit()
-            return True
+            row = self._j_fetchone(
+                "SELECT version FROM connector_stream_leases"
+                " WHERE connector_id = ? AND stream = ? AND lease_owner = ?",
+                (connector_id, stream, owner),
+            )
+            return int(row["version"]) if row else None
         row = self._j_fetchone(
             "SELECT lease_owner FROM connector_stream_leases"
             " WHERE connector_id = ? AND stream = ?",
             (connector_id, stream),
         )
         if row is not None:
-            return False  # actively held by another worker
+            return None  # actively held by another worker
         try:
             self._j_exec(
                 "INSERT INTO connector_stream_leases"
@@ -260,9 +284,26 @@ class ConnectorStoreMixin:
                 (connector_id, stream, owner, expires),
             )
             self._j_commit()
-            return True
+            return 1
         except Exception:  # insert race — the other worker holds it
-            return False
+            return None
+
+    def renew_stream_lease(
+        self, connector_id: str, stream: str, owner: str, fencing_token: int, *,
+        ttl_seconds: int = 600,
+    ) -> bool:
+        """Extend the lease IF this worker still owns it under the same
+        fencing token. False means authority was lost — the caller must stop
+        publishing results for this stream."""
+        cur = self._j_exec(
+            "UPDATE connector_stream_leases SET lease_expires_at = ?"
+            " WHERE connector_id = ? AND stream = ?"
+            " AND lease_owner = ? AND version = ?",
+            (self._lease_expiry(ttl_seconds), connector_id, stream,
+             owner, fencing_token),
+        )
+        self._j_commit()
+        return getattr(cur, "rowcount", 0) > 0
 
     def release_stream_lease(self, connector_id: str, stream: str, owner: str) -> None:
         self._j_exec(
@@ -456,11 +497,25 @@ class ConnectorStoreMixin:
     def upsert_connector_sync_state(
         self, state: ConnectorSyncState,
     ) -> ConnectorSyncState:
-        existing = self.get_connector_sync_state(state.id)
-        if existing is None:
-            self._c_insert("connector_sync_state", sync_state_to_row(state))
-        else:
-            self._c_update("connector_sync_state", state.id, sync_state_to_row(state))
+        # update-first, insert-on-miss, update-on-race: safe when two workers
+        # snapshot health for the same connector concurrently
+        row = sync_state_to_row(state)
+        cols = [c for c in row if c != "id"]
+        sets = ", ".join(f"{c} = ?" for c in cols)
+        cur = self._j_exec(
+            f"UPDATE connector_sync_state SET {sets} WHERE id = ?",
+            tuple(row[c] for c in cols) + (state.id,),
+        )
+        if getattr(cur, "rowcount", 0) == 0:
+            try:
+                self._c_insert("connector_sync_state", row)
+                return state
+            except Exception:  # insert race — the other writer created it
+                self._j_exec(
+                    f"UPDATE connector_sync_state SET {sets} WHERE id = ?",
+                    tuple(row[c] for c in cols) + (state.id,),
+                )
+        self._j_commit()
         return state
 
     def get_connector_sync_state(

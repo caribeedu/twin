@@ -72,6 +72,9 @@ class FakeConnector:
         self.fail_mode: Optional[str] = cfg.get("fail_mode")
         self.normalize_fail_ids: set[str] = set(cfg.get("normalize_fail_ids", []))
         self.incremental: bool = bool(cfg.get("incremental", False))
+        # 0 = everything in one page; >0 exercises multi-page fetch (and the
+        # per-page lease renewal path in the runtime)
+        self.page_size: int = int(cfg.get("page_size", 0))
 
     # -- manifest ---------------------------------------------------------
 
@@ -126,12 +129,20 @@ class FakeConnector:
             )
         items = self.fixtures.get(plan.stream, [])
         last_seq = int((cursor or {}).get("seq", 0)) if self.incremental else 0
+        eligible = [it for it in items
+                    if not (self.incremental and int(it.get("seq", 0)) <= last_seq)]
+        offset = int((cursor or {}).get("offset", 0))
+        if self.page_size > 0:
+            window = eligible[offset:offset + self.page_size]
+            next_offset = offset + self.page_size
+            done = next_offset >= len(eligible)
+        else:
+            window, next_offset, done = eligible, len(eligible), True
+
         raw_items: list[RawFetchItem] = []
-        max_seq = last_seq
-        for it in items:
+        max_seq = int((cursor or {}).get("seq", last_seq))
+        for it in window:
             seq = int(it.get("seq", 0))
-            if self.incremental and seq <= last_seq:
-                continue
             max_seq = max(max_seq, seq)
             ext_type = "issue" if plan.stream == "issues" else "pull_request"
             raw_items.append(RawFetchItem(
@@ -147,7 +158,9 @@ class FakeConnector:
                 deleted=bool(it.get("deleted", False)),
             ))
         self._last_cursor = {"seq": max_seq, "synced": len(items)}
-        return FetchPage(raw_items=raw_items, cursor_after=self._last_cursor, done=True)
+        cursor_after = (self._last_cursor if done
+                        else {"seq": last_seq, "offset": next_offset})
+        return FetchPage(raw_items=raw_items, cursor_after=cursor_after, done=done)
 
     def normalize(self, raw_item: RawConnectorItem) -> list[ConnectorRecord]:
         if raw_item.external_id in self.normalize_fail_ids:

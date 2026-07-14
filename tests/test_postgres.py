@@ -256,10 +256,15 @@ def test_connector_framework_on_postgres(pg_store, tmp_path):
     assert pg_store.cas_connector_checkpoint(stale, expected_version=0) is False
 
     # lease exclusion
-    assert pg_store.acquire_stream_lease(inst.id, "issues", "w1") is True
-    assert pg_store.acquire_stream_lease(inst.id, "issues", "w2") is False
+    token_w1 = pg_store.acquire_stream_lease(inst.id, "issues", "w1")
+    assert token_w1 is not None
+    assert pg_store.acquire_stream_lease(inst.id, "issues", "w2") is None
+    # fencing: w1 renews under its token; a stale/foreign token cannot
+    assert pg_store.renew_stream_lease(inst.id, "issues", "w1", token_w1) is True
+    assert pg_store.renew_stream_lease(inst.id, "issues", "w2", token_w1) is False
     pg_store.release_stream_lease(inst.id, "issues", "w1")
-    assert pg_store.acquire_stream_lease(inst.id, "issues", "w2") is True
+    token_w2 = pg_store.acquire_stream_lease(inst.id, "issues", "w2")
+    assert token_w2 is not None and token_w2 > token_w1  # monotonic fencing
     pg_store.release_stream_lease(inst.id, "issues", "w2")
 
     # partial failure persists nothing cognitive and keeps the checkpoint

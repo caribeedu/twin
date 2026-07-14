@@ -4,15 +4,25 @@ Default backend is an encrypted file under ``$TWIN_HOME/secrets/``. The DB only
 ever holds a ``credential_ref`` plus non-sensitive metadata (provider, scopes,
 expiry). Tokens are generated with high entropy; human passwords are refused.
 
-Security posture is fail-closed: if no real encryption backend is available
-(``cryptography`` missing), the store refuses to exist — a connector cannot be
-configured. There is no reversible-obfuscation fallback; a silent downgrade
-would turn "credentials encrypted at rest" into a false claim.
+Security posture is fail-closed on every axis:
 
-Concurrency/durability: every mutation takes an exclusive file lock, writes to
-a temp file, fsyncs, atomically replaces the target and fsyncs the directory.
-The previous version is kept as ``credentials.enc.bak`` so an interrupted or
-corrupted write never loses the earlier secrets.
+- no real encryption backend (``cryptography`` missing) → the store refuses
+  to exist and a connector cannot be configured;
+- credential files exist but none is readable/decryptable → operations raise
+  ``CredentialStoreCorrupted`` instead of silently reinitializing an empty
+  map (which would erase every stored secret on the next ``put``).
+
+Concurrency/durability (twin is local-first and must behave on Windows too):
+
+- every mutation holds an exclusive cross-platform file lock — ``fcntl`` on
+  POSIX, ``msvcrt.locking`` on Windows; if neither exists the store refuses
+  to operate rather than running lockless;
+- writes go to a temp file unique per PID/UUID (two writers can never clobber
+  each other's temp), are fsynced, validated (JSON *and* decryptability),
+  and atomically replace the target; the directory is fsynced after;
+- the last known-good file is preserved as ``credentials.enc.bak`` and is
+  only ever overwritten by a file that was itself loaded as valid — a
+  corrupted main file is never copied over a healthy backup.
 """
 
 from __future__ import annotations
@@ -21,6 +31,7 @@ import json
 import os
 import secrets
 import shutil
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Protocol
@@ -35,7 +46,12 @@ class CredentialStore(Protocol):
 
 
 class CredentialBackendUnavailable(RuntimeError):
-    """No real encryption backend — connectors cannot be configured."""
+    """No real encryption/locking backend — connectors cannot be configured."""
+
+
+class CredentialStoreCorrupted(RuntimeError):
+    """Credential files exist but none is valid. Refusing to reinitialize —
+    a fresh empty map would silently erase every stored secret."""
 
 
 def generate_token(nbytes: int = 32) -> str:
@@ -63,39 +79,90 @@ def _build_fernet(key_path: Path):
     return Fernet(key_path.read_bytes())
 
 
+# -- cross-platform advisory file lock ------------------------------------------
+
+
+def _lock_fd(fd: int) -> str:
+    """Acquire an exclusive lock on ``fd``. POSIX uses fcntl; Windows uses
+    msvcrt. No silent lockless mode: if neither backend exists, refuse."""
+    try:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return "fcntl"
+    except ImportError:
+        pass
+    try:
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        # blocking exclusive lock over one byte of the dedicated lockfile
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                return "msvcrt"
+            except OSError:
+                continue  # LK_LOCK retries ~10s then raises; keep waiting
+    except ImportError:
+        raise CredentialBackendUnavailable(
+            "no file-locking backend available (fcntl/msvcrt); refusing to "
+            "run the credential store without mutual exclusion"
+        )
+
+
+def _unlock_fd(fd: int, backend: str) -> None:
+    if backend == "fcntl":
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    elif backend == "msvcrt":
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
 @contextmanager
 def _file_lock(lock_path: Path):
-    """Exclusive advisory lock so concurrent writers serialize, not clobber."""
+    """Exclusive advisory lock so concurrent writers serialize, not clobber.
+    Works across processes on POSIX and Windows."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:  # msvcrt locks a byte range — make sure byte 0 exists
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+            os.lseek(fd, 0, os.SEEK_SET)
+    except OSError:
+        pass
+    backend = None
     try:
-        try:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        except ImportError:  # non-POSIX: fall back to O_CREAT lock semantics
-            pass
+        backend = _lock_fd(fd)
         yield
     finally:
-        try:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except ImportError:
-            pass
+        if backend:
+            try:
+                _unlock_fd(fd, backend)
+            except OSError:
+                pass
         os.close(fd)
 
 
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(text)
-        fh.flush()
-        os.fsync(fh.fileno())
+def _atomic_write(path: Path, text: str) -> Path:
+    """Write to a temp file unique per PID/UUID, fsync, atomically replace,
+    fsync the directory. Returns the final path."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    os.replace(tmp, path)
-    # fsync the directory so the rename itself is durable
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():  # failed before replace — never leave secrets around
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     try:
         dfd = os.open(str(path.parent), os.O_RDONLY)
         try:
@@ -104,6 +171,7 @@ def _atomic_write(path: Path, text: str) -> None:
             os.close(dfd)
     except OSError:
         pass
+    return path
 
 
 class EncryptedFileCredentialStore:
@@ -125,47 +193,86 @@ class EncryptedFileCredentialStore:
     def _dec(self, token: str) -> str:
         return self._fernet.decrypt(token.encode("ascii")).decode("utf-8")
 
-    def _load(self) -> dict[str, str]:
-        for candidate in (self._path, self._bak):
-            if not candidate.exists():
-                continue
-            try:
-                data = json.loads(candidate.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    return data
-            except (json.JSONDecodeError, OSError):
-                # corrupted main file → previous version stays recoverable
-                continue
-        return {}
+    def _try_read(self, path: Path) -> Optional[dict[str, str]]:
+        """A file only counts as valid when it parses AND every stored
+        ciphertext decrypts — truncated JSON and corrupted tokens are both
+        detected, never half-trusted."""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return None
+            for value in data.values():
+                self._dec(value)
+            return data
+        except Exception:
+            return None
 
-    def _save(self, data: dict[str, str]) -> None:
+    def _load(self) -> tuple[dict[str, str], str]:
+        """Returns (data, source) with source in {"main", "backup", "empty"}.
+
+        Raises CredentialStoreCorrupted when files exist but none is valid —
+        an empty map is only ever the state of a store that never had one."""
+        main_exists = self._path.exists()
+        bak_exists = self._bak.exists()
+        if main_exists:
+            data = self._try_read(self._path)
+            if data is not None:
+                return data, "main"
+        if bak_exists:
+            data = self._try_read(self._bak)
+            if data is not None:
+                return data, "backup"
+        if main_exists or bak_exists:
+            raise CredentialStoreCorrupted(
+                f"credential files at {self._dir} exist but none is readable/"
+                "decryptable; refusing to reinitialize an empty store — "
+                "restore credentials.enc(.bak) from a backup or remove them "
+                "explicitly after rotating every connector credential"
+            )
+        return {}, "empty"
+
+    def _save(self, data: dict[str, str], loaded_from: str) -> None:
+        """Persist, preserving the last known-good file.
+
+        Only a main file that was itself loaded as valid may become the
+        backup. When recovery came from the backup, the corrupted main is
+        NEVER copied over it — the healthy backup survives until a new valid
+        main has been written."""
         self._dir.mkdir(parents=True, exist_ok=True)
-        if self._path.exists():
+        if loaded_from == "main" and self._path.exists():
             try:
                 shutil.copy2(self._path, self._bak)
                 os.chmod(self._bak, 0o600)
             except OSError:
                 pass
-        _atomic_write(self._path, json.dumps(data))
+        text = json.dumps(data)
+        final = _atomic_write(self._path, text)
+        # paranoia: the file we just wrote must itself load as valid
+        if self._try_read(final) is None:
+            raise CredentialStoreCorrupted(
+                "freshly written credential file failed validation; the "
+                "previous known-good state was preserved"
+            )
 
     def put(self, credential_ref: str, secret: str) -> None:
         if not secret:
             raise ValueError("refusing to store an empty credential")
         with _file_lock(self._lockfile):
-            data = self._load()
+            data, source = self._load()
             data[credential_ref] = self._enc(secret)
-            self._save(data)
+            self._save(data, source)
 
     def get(self, credential_ref: str) -> Optional[str]:
         with _file_lock(self._lockfile):
-            token = self._load().get(credential_ref)
+            data, _source = self._load()
+            token = data.get(credential_ref)
         return self._dec(token) if token is not None else None
 
     def delete(self, credential_ref: str) -> None:
         with _file_lock(self._lockfile):
-            data = self._load()
+            data, source = self._load()
             if data.pop(credential_ref, None) is not None:
-                self._save(data)
+                self._save(data, source)
 
 
 def build_credential_store(home: Path) -> CredentialStore:

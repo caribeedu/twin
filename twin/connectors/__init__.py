@@ -22,6 +22,7 @@ from .authz import (
 from .credentials import (
     CredentialBackendUnavailable,
     CredentialStore,
+    CredentialStoreCorrupted,
     build_credential_store,
     generate_token,
 )
@@ -61,7 +62,7 @@ from .registry import (
     register_adapter,
 )
 from .models import ConnectorDeletionEvent, StreamLease  # noqa: F401
-from .runtime import SyncResult, build_percept, run_sync
+from .runtime import CheckpointConflict, LeaseLost, SyncResult, build_percept, run_sync
 from .service import (
     add_connector_instance,
     discard_dead_letter,
@@ -112,8 +113,11 @@ __all__ = [
     "SyncMode",
     "SyncPlan",
     "SyncResult",
+    "CheckpointConflict",
     "ConnectorDeletionEvent",
     "CredentialBackendUnavailable",
+    "CredentialStoreCorrupted",
+    "LeaseLost",
     "StreamLease",
     "add_connector_instance",
     "authorize_connector",

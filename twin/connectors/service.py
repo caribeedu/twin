@@ -108,6 +108,23 @@ def register_source_account(
     return account
 
 
+def _reclassify_fingerprint(account, proposed: dict[str, Any],
+                            actor_principal_id: str) -> str:
+    """Covers the account's CURRENT classification state and the exact
+    proposal + actor: any drift (ownership, vault, org, prior
+    reclassification) between preview and apply changes the token."""
+    basis = json.dumps({
+        "account_id": account.id,
+        "current": {"source_owner": account.source_owner.value,
+                    "org_key": account.org_key, "vault_id": account.vault_id},
+        "reclassifications": len((account.metadata or {}).get(
+            "reclassifications", [])),
+        "proposed": proposed,
+        "actor": actor_principal_id,
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
+
 def reclassify_source_account(
     store,
     account_id: str,
@@ -117,11 +134,16 @@ def reclassify_source_account(
     org_key: Optional[str] = None,
     vault_id: Optional[str] = None,
     apply: bool = False,
+    confirm_token: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Ownership/vault reclassification is preview-first and audited.
+    """Ownership/vault reclassification is preview-first, STATE-AWARE and
+    audited.
 
-    Returns the preview (current vs proposed + policy impact); nothing
-    changes until ``apply=True`` repeats the same proposal."""
+    The preview returns a ``confirm_token`` fingerprinting the account's
+    current classification plus the exact proposal and actor. ``apply=True``
+    only executes with a matching token — if the account changed between
+    preview and apply (ownership, vault, org, another reclassification), the
+    token no longer matches and a fresh preview is required."""
     account = store.get_source_account(account_id)
     if account is None:
         raise ValueError(f"source account {account_id} not found")
@@ -133,21 +155,29 @@ def reclassify_source_account(
     new_vault = vault_id or default_vault_for(new_owner, new_org)
     validate_account_vault(new_owner, new_vault)
 
+    proposed = {"source_owner": new_owner, "org_key": new_org,
+                "vault_id": new_vault}
+    fingerprint = _reclassify_fingerprint(account, proposed, actor_principal_id)
     preview = {
         "account_id": account_id,
         "current": {"source_owner": account.source_owner.value,
                     "org_key": account.org_key, "vault_id": account.vault_id},
-        "proposed": {"source_owner": new_owner, "org_key": new_org,
-                     "vault_id": new_vault},
+        "proposed": proposed,
         "vault_changes": account.vault_id != new_vault,
         "policy_impact": (
             "existing artifacts keep their original vault lineage; only "
             "newly ingested items land in the proposed vault"
         ),
+        "confirm_token": fingerprint,
         "applied": False,
     }
     if not apply:
         return preview
+    if confirm_token != fingerprint:
+        raise ValueError(
+            "stale or missing confirm_token — the account changed since the "
+            "preview (or none was requested); request a fresh preview"
+        )
 
     ensure_vault_for_account(store, new_owner, new_vault, new_org)
     audit = dict(account.metadata or {})
