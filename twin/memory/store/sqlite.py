@@ -1759,7 +1759,8 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, Me
     # -- judgment mixin hooks -----------------------------------------------
 
     def _j_exec(self, sql: str, params: tuple):
-        return self.conn.execute(sql, params)
+        with self._lock:
+            return self.conn.execute(sql, params)
 
     def _consume_grant_row(
         self,
@@ -1805,10 +1806,13 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, Me
                 lock.release()
 
     def _j_fetchone(self, sql: str, params: tuple):
-        return self.conn.execute(sql, params).fetchone()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchone()
 
     def _j_fetchall(self, sql: str, params: tuple) -> list:
-        return list(self.conn.execute(sql, params).fetchall())
+        with self._lock:
+            return list(self.conn.execute(sql, params).fetchall())
 
     def _j_commit(self) -> None:
-        self._maybe_commit()
+        with self._lock:
+            self._maybe_commit()
