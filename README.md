@@ -607,13 +607,13 @@ A new memory can be added without changing judgment. Conversely, judgment can ev
 
 This independence makes the system safer and more explainable. Memory can be frequent; judgment should be conservative because it changes how future tools act on behalf of the user.
 
-### 8.11 MCP before UI
+### 8.11 Native integration where possible, MCP everywhere
 
-`twin` should be useful from many tools, not trapped inside a custom interface. MCP is the primary interface because it lets IDEs, desktop assistants, coding agents and future tools safely request memory, context and judgment through explicit capabilities.
+`twin` should integrate directly into a host application's UI when the host provides supported APIs, hooks or protocols. Native integration offers the best experience because it can surface memory and context within the tool the user is already using.
 
-This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces. The goal is to make them better by giving them a portable, filtered and auditable cognitive substrate.
+When native integration is not available, MCP remains the universal and interoperable interface for safely requesting memory, context and judgment. The two modes share the same cognitive core and data; native integration must not create a proprietary memory silo.
 
-A feature that only works in one UI is less valuable than a capability exposed through MCP, API and CLI. Interfaces may differ, but the same memory and firewall semantics should be available everywhere.
+This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces, but to improve them through native integration where possible and MCP everywhere else.
 
 ### 8.12 Exportability over lock-in
 
