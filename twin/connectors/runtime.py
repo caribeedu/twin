@@ -1,24 +1,47 @@
-"""The sync runtime: fetch → raw → normalize → quarantine → percept → checkpoint.
+"""The sync runtime: fetch → stage → quarantine → atomic commit → checkpoint.
 
-Invariant: connectors capture evidence; cognition creates understanding. This
-module writes Raw items, Records and Percepts — never confirmed Memory or
-Judgment. The checkpoint advances only when a batch fully commits.
+Invariants this module enforces:
+
+- **Nothing becomes cognitively visible before a consistent commit.** Records
+  and Percepts are staged in memory and persisted only inside the single
+  transaction that also marks the batch committed and CAS-advances the
+  checkpoint. A partially failed batch persists raw items (source cache, for
+  DLQ replay) and dead letters — never Records or Percepts.
+- **batch committed ⇔ checkpoint references that batch.** Both happen in one
+  transaction; a failure between them is impossible by construction, and a
+  checkpoint CAS conflict aborts the batch instead of committing it.
+- **One worker per (connector, stream).** A stream lease is acquired before
+  planning and released after; a concurrent sync observes ``already_running``.
+- **External revisions are immutable.** The same idempotency key with a
+  different content hash is a provider contract violation → dead letter with
+  ``revision_collision``; existing evidence is never overwritten.
+- **Deletions resolve lineage.** A tombstone locates every prior revision and
+  its Percepts and files a ``ConnectorDeletionEvent`` for the deletion
+  planner — it never cascades deletes or creates new content by itself.
+
+This module writes Raw items, Records and Percepts — never confirmed Memory
+or Judgment.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ..clock import now_iso
 from ..sensory.percept import Percept
+from .errors import sanitize_error
 from .models import (
+    SYNCABLE_STATUSES,
     BatchStatus,
     ConnectorBatch,
     ConnectorCheckpoint,
     ConnectorDeadLetter,
+    ConnectorDeletionEvent,
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,
@@ -29,20 +52,30 @@ from .models import (
     SourceAccount,
     idempotency_key,
 )
-from .protocol import ConnectorError, FetchPage
+from .protocol import ConnectorError, FetchPage, RawFetchItem
 from .quarantine import screen_record
+
+logger = logging.getLogger("twin.connectors.runtime")
+
+LEASE_TTL_SECONDS = 600
+
+
+class CheckpointConflict(RuntimeError):
+    """The checkpoint moved underneath this batch — abort, never regress."""
 
 
 @dataclass
 class StreamResult:
     stream: str
     committed: bool = False
+    skipped: Optional[str] = None      # e.g. "already_running"
     raw: int = 0
     normalized: int = 0
     deduplicated: int = 0
     quarantined: int = 0
     percepts: int = 0
     failed: int = 0
+    deletion_events: int = 0
     failure_class: Optional[str] = None
     batch_id: Optional[str] = None
     cursor_after: dict[str, Any] = field(default_factory=dict)
@@ -74,7 +107,7 @@ def _raw_hash(payload: dict[str, Any], deleted: bool) -> str:
 def _ownership(account: SourceAccount, instance: ConnectorInstance) -> dict[str, Any]:
     return {
         "source_account_id": account.id,
-        "source_owner": account.source_owner,
+        "source_owner": account.source_owner.value,
         "vault_id": account.vault_id,
         "org_key": account.org_key,
         "connector_id": instance.id,
@@ -127,7 +160,7 @@ def build_percept(
             "domain_hint": account.default_domain,
             "sensitivity_hint": conf.get("confidentiality", "internal"),
             "vault_id": account.vault_id,
-            "source_owner": account.source_owner,
+            "source_owner": account.source_owner.value,
         },
         metadata=metadata,
         source_trust=float(conf.get("source_trust", account.source_trust)),
@@ -136,36 +169,91 @@ def build_percept(
     )
 
 
-def _dlq(store, instance: ConnectorInstance, stream: str, *,
-         external_id: str, external_type: str, failure_class: FailureClass,
-         error: str, raw_item_id: Optional[str] = None) -> None:
-    store.insert_connector_dead_letter(ConnectorDeadLetter(
+# -- staging ------------------------------------------------------------------
+#
+# Fetch and normalization run OUTSIDE any transaction and produce a plan of
+# what would be persisted. Nothing cognitive is written until the batch can
+# commit as a whole.
+
+
+@dataclass
+class _Staged:
+    new_raw_items: list[RawConnectorItem] = field(default_factory=list)
+    records: list[ConnectorRecord] = field(default_factory=list)
+    deletions: list[ConnectorDeletionEvent] = field(default_factory=list)
+    dead_letters: list[ConnectorDeadLetter] = field(default_factory=list)
+
+
+def _stage_dlq(
+    staged: _Staged, batch: ConnectorBatch, instance: ConnectorInstance, *,
+    external_id: str, external_type: str, failure_class: FailureClass,
+    exc: BaseException | str, raw_item_id: Optional[str] = None,
+) -> None:
+    batch.failed_count += 1
+    batch.failure_class = failure_class
+    staged.dead_letters.append(ConnectorDeadLetter(
         connector_id=instance.id,
-        stream=stream,
+        stream=batch.stream,
         external_id=external_id,
         external_type=external_type,
-        failure_class=failure_class.value,
-        last_error=error[:500],
+        failure_class=failure_class,
+        last_error=sanitize_error(exc),
         raw_item_id=raw_item_id,
-        status=DeadLetterStatus.open.value,
+        status=DeadLetterStatus.open,
     ))
 
 
-def _process_page(
-    store, adapter, instance: ConnectorInstance, account: SourceAccount,
-    batch: ConnectorBatch, page: FetchPage, *, emit_percepts: bool,
+def _stage_deletion(
+    store, staged: _Staged, instance: ConnectorInstance, account: SourceAccount,
+    rec: ConnectorRecord,
 ) -> None:
-    ct = instance.connector_type
-    for raw in page.raw_items:
-        key = idempotency_key(
-            ct, account.id, raw.external_type, raw.external_id, raw.external_revision
-        )
-        content_hash = _raw_hash(raw.payload, raw.deleted)
-        existing_raw = store.find_raw_item_by_key(key)
-        if existing_raw is not None and existing_raw.content_hash == content_hash:
-            batch.deduplicated_count += 1
-            continue  # idempotent: same object, same revision, already captured
+    """Tombstone → lineage impact. Prior revisions and their Percepts are
+    located now; the decision (detach/delete/preserve/review) belongs to the
+    deletion planner, never to the connector."""
+    prior = store.list_connector_records_for_object(
+        instance.id, rec.external_type, rec.external_id,
+    )
+    prior = [p for p in prior if not p.deleted]
+    staged.deletions.append(ConnectorDeletionEvent(
+        connector_id=instance.id,
+        source_account_id=account.id,
+        external_type=rec.external_type,
+        external_id=rec.external_id,
+        tombstone_revision=rec.external_revision,
+        prior_record_ids=[p.id for p in prior],
+        affected_percept_ids=[p.percept_id for p in prior if p.percept_id],
+        vault_id=account.vault_id,
+    ))
 
+
+def stage_raw_fetch_item(
+    store, adapter, instance: ConnectorInstance, account: SourceAccount,
+    batch: ConnectorBatch, staged: _Staged, raw: RawFetchItem,
+) -> None:
+    """Stage one raw object: dedupe, collision-check, normalize — in memory."""
+    ct = instance.connector_type
+    key = idempotency_key(
+        ct, account.id, raw.external_type, raw.external_id, raw.external_revision
+    )
+    content_hash = _raw_hash(raw.payload, raw.deleted)
+    existing_raw = store.find_raw_item_by_key(key)
+
+    if existing_raw is not None and existing_raw.content_hash != content_hash:
+        # same external revision, different content: contract violation —
+        # the stored evidence is NEVER overwritten
+        _stage_dlq(
+            staged, batch, instance,
+            external_id=raw.external_id, external_type=raw.external_type,
+            failure_class=FailureClass.revision_collision,
+            exc=(f"provider returned different content for already-observed "
+                 f"revision {raw.external_revision}"),
+            raw_item_id=existing_raw.id,
+        )
+        return
+
+    if existing_raw is not None:
+        item = existing_raw  # same revision, same content — already captured
+    else:
         item = RawConnectorItem(
             connector_id=instance.id,
             source_account_id=account.id,
@@ -178,90 +266,157 @@ def _process_page(
             deleted=raw.deleted,
             metadata={"occurred_at": raw.occurred_at},
         )
-        if existing_raw is None:
-            store.insert_connector_raw_item(item)
-        else:
-            item.id = existing_raw.id
-        batch.raw_count += 1
+        staged.new_raw_items.append(item)
+    batch.raw_count += 1
 
-        try:
-            records = adapter.normalize(item)
-        except ConnectorError as exc:
-            batch.failed_count += 1
-            batch.failure_class = exc.failure_class.value
-            _dlq(store, instance, batch.stream, external_id=raw.external_id,
-                 external_type=raw.external_type, failure_class=exc.failure_class,
-                 error=str(exc), raw_item_id=item.id)
-            continue
-        except Exception as exc:  # normalization bug → dead-letter, keep syncing
-            batch.failed_count += 1
-            batch.failure_class = FailureClass.normalization.value
-            _dlq(store, instance, batch.stream, external_id=raw.external_id,
-                 external_type=raw.external_type,
-                 failure_class=FailureClass.normalization,
-                 error=repr(exc), raw_item_id=item.id)
-            continue
+    try:
+        records = adapter.normalize(item)
+    except ConnectorError as exc:
+        _stage_dlq(staged, batch, instance, external_id=raw.external_id,
+                   external_type=raw.external_type, failure_class=exc.failure_class,
+                   exc=exc, raw_item_id=item.id)
+        return
+    except Exception as exc:  # normalization bug → dead-letter, keep staging
+        _stage_dlq(staged, batch, instance, external_id=raw.external_id,
+                   external_type=raw.external_type,
+                   failure_class=FailureClass.normalization,
+                   exc=exc, raw_item_id=item.id)
+        return
 
-        for rec in records:
-            rec.idempotency_key = rec.idempotency_key or key
-            rec.content_hash = rec.content_hash or _hash(rec.content)
-            rec.ownership = rec.ownership or _ownership(account, instance)
-            rec.confidentiality = rec.confidentiality or _confidentiality(account)
+    for rec in records:
+        rec.idempotency_key = rec.idempotency_key or key
+        rec.content_hash = rec.content_hash or _hash(rec.content)
+        rec.ownership = rec.ownership or _ownership(account, instance)
+        rec.confidentiality = rec.confidentiality or _confidentiality(account)
 
-            existing_rec = store.find_record_by_key(rec.idempotency_key)
-            if existing_rec is not None and existing_rec.content_hash == rec.content_hash:
+        existing_rec = store.find_record_by_key(rec.idempotency_key)
+        if existing_rec is not None:
+            if existing_rec.content_hash == rec.content_hash:
                 batch.deduplicated_count += 1
                 continue
+            # persisted records are immutable per revision — a different
+            # normalization under the same key is a collision, not an update
+            _stage_dlq(
+                staged, batch, instance,
+                external_id=rec.external_id, external_type=rec.external_type,
+                failure_class=FailureClass.revision_collision,
+                exc=("normalized content changed for already-persisted "
+                     f"revision {rec.external_revision}"),
+                raw_item_id=item.id,
+            )
+            continue
 
-            if rec.deleted:
-                rec.percept_id = None
-                if existing_rec is None:
-                    store.insert_connector_record(rec)
-                else:
-                    rec.id = existing_rec.id
-                    store.update_connector_record(rec)
-                batch.normalized_count += 1
-                continue
+        staged.records.append(rec)
+        batch.normalized_count += 1
+        if rec.deleted:
+            _stage_deletion(store, staged, instance, account, rec)
 
-            quar = screen_record(store, rec)
-            if quar is not None:
-                rec.quarantined = True
-                rec.percept_id = None
-                if existing_rec is None:
-                    store.insert_connector_record(rec)
-                else:
-                    rec.id = existing_rec.id
-                    store.update_connector_record(rec)
-                batch.quarantined_count += 1
-                continue
 
-            if existing_rec is None:
-                store.insert_connector_record(rec)
-            else:
-                rec.id = existing_rec.id
-                store.update_connector_record(rec)
-            batch.normalized_count += 1
+def _persist_partial(store, batch: ConnectorBatch, staged: _Staged) -> None:
+    """A failed batch persists ONLY non-cognitive material: raw items (source
+    cache, needed for DLQ replay) and dead letters. No Records, no Percepts —
+    nothing from an uncommitted stream is visible to extraction."""
+    with store.transaction():
+        for item in staged.new_raw_items:
+            store.insert_connector_raw_item(item)
+        for dlq in staged.dead_letters:
+            store.insert_connector_dead_letter(dlq)
+        batch.status = BatchStatus.partially_failed
+        batch.completed_at = now_iso()
+        store.update_connector_batch(batch)
 
-            if emit_percepts:
-                percept = build_percept(account, instance, rec)
-                pid = store.insert_percept(percept)
-                if pid is not None:
-                    rec.percept_id = pid
-                    store.update_connector_record(rec)
-                    batch.percept_count += 1
+
+def persist_committed_record(
+    store, account: SourceAccount, instance: ConnectorInstance,
+    rec: ConnectorRecord, batch: ConnectorBatch, *, emit_percepts: bool,
+) -> None:
+    """Persist one staged record inside the commit transaction: quarantine
+    screen → immutable record row → optional Percept → processing state."""
+    if rec.deleted:
+        rec.percept_id = None
+        store.insert_connector_record(rec)
+        return
+    quar = screen_record(store, rec)
+    if quar is not None:
+        rec.quarantined = True
+        rec.percept_id = None
+        store.insert_connector_record(rec)
+        batch.quarantined_count += 1
+        return
+    store.insert_connector_record(rec)
+    if emit_percepts:
+        percept = build_percept(account, instance, rec)
+        pid = store.insert_percept(percept)
+        if pid is not None:
+            rec.percept_id = pid
+            # processing state only — the canonical payload is never rewritten
+            store.set_connector_record_state(rec.id, percept_id=pid)
+            batch.percept_count += 1
+
+
+def _finalize_committed(
+    store, instance: ConnectorInstance, account: SourceAccount,
+    batch: ConnectorBatch, staged: _Staged, *,
+    cursor_after: dict[str, Any], plan, expected_version: int,
+    emit_percepts: bool,
+) -> None:
+    """The single transaction that makes a stream's evidence visible:
+
+        raw + records + percepts + deletion events
+        + batch committed
+        + checkpoint CAS
+
+    All of it or none of it. ``batch committed ⇔ checkpoint references it``.
+    """
+    with store.transaction():
+        for item in staged.new_raw_items:
+            store.insert_connector_raw_item(item)
+        for rec in staged.records:
+            persist_committed_record(store, account, instance, rec, batch,
+                                     emit_percepts=emit_percepts)
+        for deletion in staged.deletions:
+            store.insert_connector_deletion_event(deletion)
+        batch.status = BatchStatus.committed
+        batch.completed_at = now_iso()
+        batch.cursor_after_proposed = cursor_after or {}
+        store.update_connector_batch(batch)
+        ok = store.cas_connector_checkpoint(
+            ConnectorCheckpoint(
+                connector_id=instance.id,
+                stream=batch.stream,
+                cursor=cursor_after or {},
+                lookback_seconds=plan.lookback_seconds,
+                committed_batch_id=batch.id,
+                adapter_version=instance.adapter_version,
+                updated_at=now_iso(),
+            ),
+            expected_version=expected_version,
+        )
+        if not ok:
+            # someone advanced the stream while we ran without a valid lease
+            # window — abort the whole transaction rather than regress
+            raise CheckpointConflict(
+                f"checkpoint for {instance.id}/{batch.stream} moved "
+                f"(expected version {expected_version})"
+            )
 
 
 def run_sync(
     store, adapter, instance: ConnectorInstance, account: SourceAccount, *,
     streams: Optional[list[str]] = None, emit_percepts: bool = True,
+    lease_owner: Optional[str] = None,
 ) -> SyncResult:
     result = SyncResult(connector_id=instance.id)
 
-    if instance.status in (ConnectorStatus.revoked.value, ConnectorStatus.paused.value):
-        result.health = (
-            HealthStatus.revoked if instance.status == ConnectorStatus.revoked.value
-            else HealthStatus.paused
-        )
+    if instance.status not in SYNCABLE_STATUSES:
+        if instance.status in (ConnectorStatus.revoked,
+                               ConnectorStatus.revoking,
+                               ConnectorStatus.revoked_with_residual_secret):
+            result.health = HealthStatus.revoked
+        elif instance.status == ConnectorStatus.paused:
+            result.health = HealthStatus.paused
+        else:  # provisioning / awaiting_auth / failed …
+            result.health = HealthStatus.unauthorized
         _persist_health(store, instance, result)
         return result
 
@@ -277,12 +432,15 @@ def run_sync(
 
     manifest = adapter.adapter_manifest()
     target_streams = streams or manifest.streams or ["default"]
+    owner = lease_owner or f"worker_{uuid.uuid4().hex[:12]}"
 
     worst = HealthStatus.healthy
     for stream in target_streams:
         sr = _sync_stream(store, adapter, instance, account, stream,
-                          emit_percepts=emit_percepts)
+                          emit_percepts=emit_percepts, lease_owner=owner)
         result.streams.append(sr)
+        if sr.skipped:
+            continue  # another worker owns the stream — not a health problem
         if sr.failure_class in (
             FailureClass.authentication.value, FailureClass.authorization.value
         ):
@@ -297,64 +455,95 @@ def run_sync(
 
 def _sync_stream(
     store, adapter, instance: ConnectorInstance, account: SourceAccount,
+    stream: str, *, emit_percepts: bool, lease_owner: str,
+) -> StreamResult:
+    if not store.acquire_stream_lease(instance.id, stream, lease_owner,
+                                      ttl_seconds=LEASE_TTL_SECONDS):
+        logger.info("stream %s/%s already leased; skipping", instance.id, stream)
+        return StreamResult(stream=stream, skipped="already_running")
+    try:
+        return _sync_stream_leased(store, adapter, instance, account, stream,
+                                   emit_percepts=emit_percepts)
+    finally:
+        store.release_stream_lease(instance.id, stream, lease_owner)
+
+
+def _sync_stream_leased(
+    store, adapter, instance: ConnectorInstance, account: SourceAccount,
     stream: str, *, emit_percepts: bool,
 ) -> StreamResult:
     checkpoint = store.get_connector_checkpoint(instance.id, stream)
+    expected_version = checkpoint.version if checkpoint else 0
     plan = adapter.plan_sync(account, checkpoint, stream=stream)
     batch = ConnectorBatch(
         connector_id=instance.id, stream=stream,
-        status=BatchStatus.fetching.value, cursor_before=plan.cursor_before,
+        status=BatchStatus.fetching, cursor_before=plan.cursor_before,
     )
     store.insert_connector_batch(batch)
 
     sr = StreamResult(stream=stream, batch_id=batch.id)
+    staged = _Staged()
     cursor: Optional[dict[str, Any]] = plan.cursor_before or None
     last_page: Optional[FetchPage] = None
     try:
+        # 1. fetch + stage — outside any transaction, nothing persisted yet
         while True:
             page = adapter.fetch_batch(plan, cursor)
-            _process_page(store, adapter, instance, account, batch, page,
-                          emit_percepts=emit_percepts)
+            for raw in page.raw_items:
+                stage_raw_fetch_item(store, adapter, instance, account,
+                                     batch, staged, raw)
             last_page = page
             cursor = page.cursor_after
             if page.done:
                 break
     except ConnectorError as exc:
-        batch.status = BatchStatus.failed.value
-        batch.failure_class = exc.failure_class.value
-        batch.error = str(exc)
+        batch.status = BatchStatus.failed
+        batch.failure_class = exc.failure_class
+        batch.error = sanitize_error(exc)
         batch.completed_at = now_iso()
-        store.update_connector_batch(batch)
-        if not exc.retryable:
-            _dlq(store, instance, stream, external_id=exc.external_id,
-                 external_type=exc.external_type, failure_class=exc.failure_class,
-                 error=str(exc))
+        with store.transaction():
+            for item in staged.new_raw_items:
+                store.insert_connector_raw_item(item)
+            for dlq in staged.dead_letters:
+                store.insert_connector_dead_letter(dlq)
+            if not exc.retryable:
+                store.insert_connector_dead_letter(ConnectorDeadLetter(
+                    connector_id=instance.id, stream=stream,
+                    external_id=exc.external_id, external_type=exc.external_type,
+                    failure_class=exc.failure_class,
+                    last_error=sanitize_error(exc),
+                ))
+            store.update_connector_batch(batch)
         _fill_stream(sr, batch)
         return sr  # checkpoint NOT advanced
 
-    # Never gap-advance: any item failure keeps the watermark where it was.
+    # 2a. any item failure → nothing cognitive persists, watermark stays put
     if batch.failed_count > 0:
-        batch.status = BatchStatus.partially_failed.value
+        _persist_partial(store, batch, staged)
+        _fill_stream(sr, batch)
+        return sr
+
+    # 2b. full success → single atomic finalize
+    cursor_after = adapter.acknowledge(plan, last_page or FetchPage())
+    try:
+        _finalize_committed(
+            store, instance, account, batch, staged,
+            cursor_after=cursor_after or {}, plan=plan,
+            expected_version=expected_version, emit_percepts=emit_percepts,
+        )
+    except CheckpointConflict as exc:
+        logger.warning("aborting batch %s: %s", batch.id, exc)
+        batch.status = BatchStatus.aborted
+        batch.failure_class = FailureClass.storage
+        batch.error = sanitize_error(exc)
         batch.completed_at = now_iso()
+        # counters describe what was staged, but nothing cognitive persisted
+        batch.percept_count = 0
+        batch.quarantined_count = 0
         store.update_connector_batch(batch)
         _fill_stream(sr, batch)
         return sr
 
-    cursor_after = adapter.acknowledge(plan, last_page or FetchPage())
-    batch.cursor_after_proposed = cursor_after or {}
-    batch.status = BatchStatus.committed.value
-    batch.completed_at = now_iso()
-    store.update_connector_batch(batch)
-
-    store.upsert_connector_checkpoint(ConnectorCheckpoint(
-        connector_id=instance.id,
-        stream=stream,
-        cursor=cursor_after or {},
-        lookback_seconds=plan.lookback_seconds,
-        committed_batch_id=batch.id,
-        adapter_version=instance.adapter_version,
-        updated_at=now_iso(),
-    ))
     sr.committed = True
     sr.cursor_after = cursor_after or {}
     _fill_stream(sr, batch)
@@ -368,7 +557,7 @@ def _fill_stream(sr: StreamResult, batch: ConnectorBatch) -> None:
     sr.quarantined = batch.quarantined_count
     sr.percepts = batch.percept_count
     sr.failed = batch.failed_count
-    sr.failure_class = batch.failure_class
+    sr.failure_class = batch.failure_class.value if batch.failure_class else None
 
 
 def _persist_health(store, instance: ConnectorInstance, result: SyncResult) -> None:

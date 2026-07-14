@@ -3,18 +3,37 @@
 Registration enforces explicit ownership + vault at configure time; credentials
 are stored only via the CredentialStore; sync builds the adapter from the
 registry and delegates to the runtime.
+
+Lifecycle rules:
+
+- provisioning is *compensable*: an instance starts as ``provisioning`` and
+  only becomes ``active``/``awaiting_auth`` when every step succeeded; any
+  failure rolls back what was written (no orphan secret, no orphan ref, no
+  usable half-configured connector);
+- revocation is *resumable*: ``revoking`` → delete secret → verify absent →
+  clear ref → ``revoked``; residual secret material is reported as
+  ``revoked_with_residual_secret``, never claimed clean;
+- only adapters that declare ``auth_mode=generated_local_token`` may receive
+  a framework-generated secret — an external provider without a credential is
+  ``awaiting_auth``, not active with a fake token.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from typing import Any, Optional
 
 from ..clock import now_iso
 from .credentials import CredentialStore, generate_token
+from .errors import sanitize_error
 from .models import (
+    ConnectorDeadLetter,
     ConnectorInstance,
     ConnectorStatus,
     CredentialRef,
+    DeadLetterStatus,
     HealthStatus,
     OwnershipClass,
     SourceAccount,
@@ -26,7 +45,9 @@ from .ownership import (
     validate_account_vault,
 )
 from .registry import build_adapter, get_manifest
-from .runtime import SyncResult, run_sync
+from .runtime import SyncResult, persist_committed_record, run_sync
+
+logger = logging.getLogger("twin.connectors.service")
 
 
 def register_source_account(
@@ -34,9 +55,9 @@ def register_source_account(
     *,
     connector_type: str,
     source_owner: str,
+    owner_principal_id: str,
     vault_id: Optional[str] = None,
     org_key: Optional[str] = None,
-    owner_principal_id: str = "principal_local_cli",
     persona: str = "individual",
     default_domain: str = "work",
     confidentiality: str = "internal",
@@ -47,7 +68,19 @@ def register_source_account(
     display_name: str = "",
     metadata: Optional[dict[str, Any]] = None,
 ) -> SourceAccount:
-    """Create an account with declared ownership. Fails closed on bad ownership."""
+    """Create an account with declared ownership. Fails closed on bad ownership.
+
+    ``owner_principal_id`` is mandatory and comes from the resolved caller —
+    a missing principal fails instead of defaulting to a privileged one.
+    Employer/client ownership requires an ``org_key`` (the organization or
+    client identifier) even when a vault is passed explicitly."""
+    if not owner_principal_id:
+        raise ValueError("owner_principal_id is required — accounts never "
+                         "default to a privileged principal")
+    if source_owner in (OwnershipClass.employer.value, OwnershipClass.client.value) \
+            and not org_key:
+        raise ValueError(f"{source_owner} account requires an org_key "
+                         "(organization/client identifier)")
     if vault_id is None:
         vault_id = default_vault_for(source_owner, org_key)
     validate_account_vault(source_owner, vault_id)
@@ -67,10 +100,67 @@ def register_source_account(
         source_scope=source_scope,
         source_trust=source_trust,
         sync_mode=sync_mode,
-        metadata=metadata or {},
+        metadata={**(metadata or {}),
+                  "classified_by": owner_principal_id,
+                  "classified_at": now_iso()},
     )
     store.insert_source_account(account)
     return account
+
+
+def reclassify_source_account(
+    store,
+    account_id: str,
+    *,
+    actor_principal_id: str,
+    source_owner: Optional[str] = None,
+    org_key: Optional[str] = None,
+    vault_id: Optional[str] = None,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Ownership/vault reclassification is preview-first and audited.
+
+    Returns the preview (current vs proposed + policy impact); nothing
+    changes until ``apply=True`` repeats the same proposal."""
+    account = store.get_source_account(account_id)
+    if account is None:
+        raise ValueError(f"source account {account_id} not found")
+    new_owner = source_owner or account.source_owner.value
+    new_org = org_key if org_key is not None else account.org_key
+    if new_owner in (OwnershipClass.employer.value, OwnershipClass.client.value) \
+            and not new_org:
+        raise ValueError(f"{new_owner} account requires an org_key")
+    new_vault = vault_id or default_vault_for(new_owner, new_org)
+    validate_account_vault(new_owner, new_vault)
+
+    preview = {
+        "account_id": account_id,
+        "current": {"source_owner": account.source_owner.value,
+                    "org_key": account.org_key, "vault_id": account.vault_id},
+        "proposed": {"source_owner": new_owner, "org_key": new_org,
+                     "vault_id": new_vault},
+        "vault_changes": account.vault_id != new_vault,
+        "policy_impact": (
+            "existing artifacts keep their original vault lineage; only "
+            "newly ingested items land in the proposed vault"
+        ),
+        "applied": False,
+    }
+    if not apply:
+        return preview
+
+    ensure_vault_for_account(store, new_owner, new_vault, new_org)
+    audit = dict(account.metadata or {})
+    audit.setdefault("reclassifications", []).append({
+        "at": now_iso(), "actor": actor_principal_id,
+        "from": preview["current"], "to": preview["proposed"],
+    })
+    store.update_source_account(
+        account_id, source_owner=new_owner, org_key=new_org,
+        vault_id=new_vault, metadata=audit,
+    )
+    preview["applied"] = True
+    return preview
 
 
 def set_credential(
@@ -81,22 +171,56 @@ def set_credential(
     *,
     scopes: Optional[list[str]] = None,
     expires_at: Optional[str] = None,
-) -> str:
-    """Store a secret via the CredentialStore; DB keeps only the ref + metadata."""
+) -> Optional[str]:
+    """Store a secret via the CredentialStore; DB keeps only the ref + metadata.
+
+    Without a secret: adapters that declare ``generated_local_token`` get a
+    generated one; every other provider stays ``awaiting_auth`` — a random
+    token pretending to be a GitHub/Slack/Gmail credential is worse than no
+    credential."""
     instance = store.get_connector_instance(connector_id)
     if instance is None:
         raise ValueError(f"connector {connector_id} not found")
+    manifest = get_manifest(instance.connector_type)
+
+    if not secret:
+        if manifest.auth_mode == "generated_local_token":
+            secret = generate_token()
+        elif manifest.auth_mode == "none":
+            store.update_connector_instance(
+                connector_id, status=ConnectorStatus.active.value)
+            return None
+        else:
+            store.update_connector_instance(
+                connector_id, status=ConnectorStatus.awaiting_auth.value)
+            return None
+
     ref = CredentialRef(
         provider=getattr(credentials, "provider", "encrypted_file"),
-        scopes=scopes or get_manifest(instance.connector_type).default_scopes,
+        scopes=scopes or manifest.default_scopes,
         expires_at=expires_at,
     )
     store.insert_credential_ref(ref)
-    credentials.put(ref.id, secret or generate_token())
-    store.update_connector_instance(
-        connector_id, credential_ref=ref.id,
-        status=ConnectorStatus.active.value,
-    )
+    secret_written = False
+    try:
+        credentials.put(ref.id, secret)
+        secret_written = True
+        store.update_connector_instance(
+            connector_id, credential_ref=ref.id,
+            status=ConnectorStatus.active.value,
+        )
+    except Exception:
+        # compensate: no orphan secret, no orphan ref
+        if secret_written:
+            try:
+                credentials.delete(ref.id)
+            except Exception:
+                logger.warning("compensation could not remove secret %s", ref.id)
+        try:
+            store.delete_credential_ref(ref.id)
+        except Exception:
+            logger.warning("compensation could not remove credential ref %s", ref.id)
+        raise
     return ref.id
 
 
@@ -110,6 +234,9 @@ def add_connector_instance(
     configuration: Optional[dict[str, Any]] = None,
     adapter_version: str = "1.0",
 ) -> ConnectorInstance:
+    """Compensable provisioning: the instance is usable only after every step
+    succeeded. On failure it is marked ``provisioning_failed`` and any secret
+    or credential ref already written is removed."""
     account = store.get_source_account(account_id)
     if account is None:
         raise ValueError(f"source account {account_id} not found")
@@ -118,9 +245,18 @@ def add_connector_instance(
         account_id=account_id,
         adapter_version=adapter_version,
         configuration=configuration or {},
+        status=ConnectorStatus.provisioning,
     )
     store.insert_connector_instance(instance)
-    set_credential(store, credentials, instance.id, secret, scopes=scopes)
+    try:
+        set_credential(store, credentials, instance.id, secret, scopes=scopes)
+    except Exception:
+        try:
+            store.update_connector_instance(
+                instance.id, status=ConnectorStatus.provisioning_failed.value)
+        except Exception:
+            logger.warning("could not mark %s provisioning_failed", instance.id)
+        raise
     return store.get_connector_instance(instance.id)  # reload with credential_ref
 
 
@@ -161,6 +297,38 @@ def sync_connector(
     )
 
 
+def sync_fingerprint(
+    store, connector_id: str, *, principal_id: str,
+    streams: Optional[list[str]] = None, emit_percepts: bool = True,
+) -> str:
+    """State fingerprint for preview→confirm: covers the connector, its
+    account/vault/ownership, configuration, adapter version, checkpoints and
+    the requesting principal. Any drift between preview and apply changes the
+    token and forces a fresh preview."""
+    instance = store.get_connector_instance(connector_id)
+    if instance is None:
+        raise ValueError(f"connector {connector_id} not found")
+    account = store.get_source_account(instance.account_id)
+    checkpoints = {
+        c.stream: {"cursor": c.cursor, "version": c.version}
+        for c in store.list_connector_checkpoints(connector_id)
+    }
+    basis = json.dumps({
+        "connector_id": instance.id,
+        "status": instance.status.value,
+        "account_id": instance.account_id,
+        "source_owner": account.source_owner.value if account else None,
+        "vault_id": account.vault_id if account else None,
+        "configuration": instance.configuration,
+        "adapter_version": instance.adapter_version,
+        "checkpoints": checkpoints,
+        "streams": sorted(streams or []),
+        "emit_percepts": emit_percepts,
+        "principal": principal_id,
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
+
 def pause_connector(store, connector_id: str) -> ConnectorInstance:
     return store.update_connector_instance(
         connector_id, status=ConnectorStatus.paused.value
@@ -168,6 +336,12 @@ def pause_connector(store, connector_id: str) -> ConnectorInstance:
 
 
 def resume_connector(store, connector_id: str) -> ConnectorInstance:
+    instance = store.get_connector_instance(connector_id)
+    if instance is None:
+        raise ValueError(f"connector {connector_id} not found")
+    if instance.status != ConnectorStatus.paused:
+        raise ValueError(f"connector {connector_id} is {instance.status.value}, "
+                         "not paused — only paused connectors resume")
     return store.update_connector_instance(
         connector_id, status=ConnectorStatus.active.value
     )
@@ -176,24 +350,131 @@ def resume_connector(store, connector_id: str) -> ConnectorInstance:
 def revoke_connector(
     store, credentials: CredentialStore, connector_id: str,
 ) -> ConnectorInstance:
-    """Remove secret material and stop the connector permanently."""
+    """Resumable, verifiable revocation. Never claims a clean revocation
+    while secret material may still exist:
+
+        revoking → stop scheduler → delete secret → verify absent
+                 → clear ref → revoked
+
+    A failure leaves ``revoking`` (retryable) or
+    ``revoked_with_residual_secret`` (sync stopped, cleanup owed)."""
     instance = store.get_connector_instance(connector_id)
     if instance is None:
         raise ValueError(f"connector {connector_id} not found")
-    if instance.credential_ref:
-        credentials.delete(instance.credential_ref)
-        store.delete_credential_ref(instance.credential_ref)
-    updated = store.update_connector_instance(
-        connector_id,
-        status=ConnectorStatus.revoked.value,
-        credential_ref=None,
-        revoked_at=now_iso(),
-    )
+
+    # 1. stop everything first — whatever happens next, no more fetches
+    store.update_connector_instance(
+        connector_id, status=ConnectorStatus.revoking.value)
     state = store.get_connector_sync_state(connector_id)
     if state is None:
         from .models import ConnectorSyncState
         state = ConnectorSyncState(id=connector_id)
     state.paused = True
-    state.status = HealthStatus.revoked.value
+    state.status = HealthStatus.revoked
     store.upsert_connector_sync_state(state)
-    return updated
+
+    # 2. destroy + verify secret material
+    residual = False
+    if instance.credential_ref:
+        try:
+            credentials.delete(instance.credential_ref)
+        except Exception as exc:
+            logger.warning("secret deletion failed for %s: %s",
+                           connector_id, sanitize_error(exc))
+            residual = True
+        if not residual:
+            try:
+                residual = credentials.get(instance.credential_ref) is not None
+            except Exception:
+                residual = True  # cannot verify → do not claim clean
+        if not residual:
+            try:
+                store.delete_credential_ref(instance.credential_ref)
+            except Exception as exc:
+                logger.warning("credential ref cleanup failed for %s: %s",
+                               connector_id, sanitize_error(exc))
+
+    if residual:
+        # keep the ref so a later revoke retry can still find and destroy the
+        # secret; never report this as a clean revocation
+        return store.update_connector_instance(
+            connector_id,
+            status=ConnectorStatus.revoked_with_residual_secret.value,
+            revoked_at=now_iso(),
+        )
+    return store.update_connector_instance(
+        connector_id,
+        status=ConnectorStatus.revoked.value,
+        credential_ref=None,
+        revoked_at=now_iso(),
+    )
+
+
+# -- dead-letter operations -----------------------------------------------------
+
+
+def retry_dead_letter(
+    store, credentials: CredentialStore, dlq_id: str, *,
+    emit_percepts: bool = True,
+) -> ConnectorDeadLetter:
+    """Reprocess one dead letter from its raw item: normalize again and, on
+    success, persist record/Percept idempotently and resolve the entry."""
+    dlq = store.get_connector_dead_letter(dlq_id)
+    if dlq is None:
+        raise ValueError(f"dead letter {dlq_id} not found")
+    if dlq.status in (DeadLetterStatus.resolved, DeadLetterStatus.discarded):
+        return dlq
+    if not dlq.raw_item_id:
+        raise ValueError(f"dead letter {dlq_id} has no raw item to replay")
+    raw = store.get_connector_raw_item(dlq.raw_item_id)
+    if raw is None:
+        raise ValueError(f"raw item {dlq.raw_item_id} not found")
+
+    adapter, instance, account = _load_adapter(store, credentials, dlq.connector_id)
+    dlq.attempts += 1
+    dlq.status = DeadLetterStatus.retrying
+    dlq.updated_at = now_iso()
+    store.update_connector_dead_letter(dlq)
+
+    from .models import ConnectorBatch  # counters only; not persisted
+    scratch = ConnectorBatch(connector_id=instance.id, stream=dlq.stream)
+    try:
+        records = adapter.normalize(raw)
+        with store.transaction():
+            for rec in records:
+                rec.idempotency_key = rec.idempotency_key or raw.idempotency_key
+                rec.content_hash = rec.content_hash or hashlib.sha256(
+                    rec.content.encode("utf-8")).hexdigest()
+                existing = store.find_record_by_key(rec.idempotency_key)
+                if existing is not None:
+                    continue  # idempotent — already landed via another path
+                persist_committed_record(store, account, instance, rec, scratch,
+                                         emit_percepts=emit_percepts)
+        dlq.status = DeadLetterStatus.resolved
+        dlq.last_error = ""
+    except Exception as exc:
+        dlq.status = DeadLetterStatus.open
+        dlq.last_error = sanitize_error(exc)
+    dlq.updated_at = now_iso()
+    store.update_connector_dead_letter(dlq)
+    return dlq
+
+
+def discard_dead_letter(store, dlq_id: str) -> ConnectorDeadLetter:
+    dlq = store.get_connector_dead_letter(dlq_id)
+    if dlq is None:
+        raise ValueError(f"dead letter {dlq_id} not found")
+    dlq.status = DeadLetterStatus.discarded
+    dlq.updated_at = now_iso()
+    store.update_connector_dead_letter(dlq)
+    return dlq
+
+
+def resolve_dead_letter(store, dlq_id: str) -> ConnectorDeadLetter:
+    dlq = store.get_connector_dead_letter(dlq_id)
+    if dlq is None:
+        raise ValueError(f"dead letter {dlq_id} not found")
+    dlq.status = DeadLetterStatus.resolved
+    dlq.updated_at = now_iso()
+    store.update_connector_dead_letter(dlq)
+    return dlq

@@ -8,12 +8,15 @@ normalized content are encrypted at rest via ``self.codec``.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from twin.clock import now_iso
 from twin.connectors.models import (
     ConnectorBatch,
     ConnectorCheckpoint,
     ConnectorDeadLetter,
+    ConnectorDeletionEvent,
     ConnectorInstance,
     ConnectorRecord,
     ConnectorSyncState,
@@ -27,6 +30,7 @@ from twin.connectors.persistence import (
     checkpoint_to_row,
     credential_ref_to_row,
     dead_letter_to_row,
+    deletion_event_to_row,
     instance_to_row,
     raw_item_to_row,
     record_to_row,
@@ -35,6 +39,7 @@ from twin.connectors.persistence import (
     row_to_checkpoint,
     row_to_credential_ref,
     row_to_dead_letter,
+    row_to_deletion_event,
     row_to_instance,
     row_to_sync_state,
     sync_state_to_row,
@@ -167,7 +172,7 @@ class ConnectorStoreMixin:
         )
         self._j_commit()
 
-    # -- checkpoints (advance only on commit) -----------------------------
+    # -- checkpoints (advance only on commit, guarded by CAS) --------------
 
     def get_connector_checkpoint(
         self, connector_id: str, stream: str,
@@ -185,18 +190,87 @@ class ConnectorStoreMixin:
         )
         return [row_to_checkpoint(r) for r in rows]
 
-    def upsert_connector_checkpoint(
-        self, checkpoint: ConnectorCheckpoint,
-    ) -> ConnectorCheckpoint:
+    def cas_connector_checkpoint(
+        self, checkpoint: ConnectorCheckpoint, expected_version: int,
+    ) -> bool:
+        """Compare-and-set: the checkpoint advances only from the exact
+        version the batch started from. A stale worker (or an out-of-order
+        retry) gets False and must abort — a newer cursor is never
+        overwritten by an older one."""
         existing = self.get_connector_checkpoint(
             checkpoint.connector_id, checkpoint.stream
         )
         if existing is None:
-            self._c_insert("connector_checkpoints", checkpoint_to_row(checkpoint))
-            return checkpoint
-        merged = checkpoint.model_copy(update={"id": existing.id})
-        self._c_update("connector_checkpoints", existing.id, checkpoint_to_row(merged))
-        return merged
+            if expected_version != 0:
+                return False
+            fresh = checkpoint.model_copy(update={"version": 1})
+            try:
+                self._c_insert("connector_checkpoints", checkpoint_to_row(fresh))
+            except Exception:  # unique(connector,stream) race — someone else won
+                return False
+            return True
+        if existing.version != expected_version:
+            return False
+        merged = checkpoint.model_copy(
+            update={"id": existing.id, "version": expected_version + 1,
+                    "created_at": existing.created_at}
+        )
+        row = checkpoint_to_row(merged)
+        cols = [c for c in row if c != "id"]
+        sets = ", ".join(f"{c} = ?" for c in cols)
+        cur = self._j_exec(
+            f"UPDATE connector_checkpoints SET {sets} WHERE id = ? AND version = ?",
+            tuple(row[c] for c in cols) + (existing.id, expected_version),
+        )
+        self._j_commit()
+        return getattr(cur, "rowcount", 0) > 0
+
+    # -- stream leases (one worker per connector+stream) -------------------
+
+    def acquire_stream_lease(
+        self, connector_id: str, stream: str, owner: str, *,
+        ttl_seconds: int = 600,
+    ) -> bool:
+        now = now_iso()
+        # same timespec as now_iso() so lexicographic comparison is sound
+        expires = (datetime.now(timezone.utc)
+                   + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
+        cur = self._j_exec(
+            "UPDATE connector_stream_leases SET lease_owner = ?,"
+            " lease_expires_at = ?, version = version + 1"
+            " WHERE connector_id = ? AND stream = ?"
+            " AND (lease_owner = ? OR lease_expires_at <= ?)",
+            (owner, expires, connector_id, stream, owner, now),
+        )
+        if getattr(cur, "rowcount", 0) > 0:
+            self._j_commit()
+            return True
+        row = self._j_fetchone(
+            "SELECT lease_owner FROM connector_stream_leases"
+            " WHERE connector_id = ? AND stream = ?",
+            (connector_id, stream),
+        )
+        if row is not None:
+            return False  # actively held by another worker
+        try:
+            self._j_exec(
+                "INSERT INTO connector_stream_leases"
+                " (connector_id, stream, lease_owner, lease_expires_at, version)"
+                " VALUES (?,?,?,?,1)",
+                (connector_id, stream, owner, expires),
+            )
+            self._j_commit()
+            return True
+        except Exception:  # insert race — the other worker holds it
+            return False
+
+    def release_stream_lease(self, connector_id: str, stream: str, owner: str) -> None:
+        self._j_exec(
+            "UPDATE connector_stream_leases SET lease_expires_at = ?"
+            " WHERE connector_id = ? AND stream = ? AND lease_owner = ?",
+            ("1970-01-01T00:00:00+00:00", connector_id, stream, owner),
+        )
+        self._j_commit()
 
     # -- batches ----------------------------------------------------------
 
@@ -262,9 +336,13 @@ class ConnectorStoreMixin:
         return record.id
 
     def _decode_record(self, row: Any) -> ConnectorRecord:
-        return ConnectorRecord.model_validate(
+        record = ConnectorRecord.model_validate(
             json.loads(self.codec.decrypt(row["payload"]))
         )
+        # processing state lives in columns, never in the immutable payload
+        record.percept_id = row["percept_id"]
+        record.quarantined = bool(row["quarantined"])
+        return record
 
     def get_connector_record(self, record_id: str) -> Optional[ConnectorRecord]:
         row = self._j_fetchone(
@@ -285,16 +363,73 @@ class ConnectorStoreMixin:
         )
         return [self._decode_record(r) for r in rows]
 
-    def update_connector_record(self, record: ConnectorRecord) -> None:
-        self._c_update(
-            "connector_records", record.id, record_to_row(record, self._enc(record))
+    def list_connector_records_for_object(
+        self, connector_id: str, external_type: str, external_id: str,
+    ) -> list[ConnectorRecord]:
+        """Every observed revision of one external object (lineage lookup)."""
+        rows = self._j_fetchall(
+            "SELECT * FROM connector_records WHERE connector_id = ?"
+            " AND external_type = ? AND external_id = ? ORDER BY id",
+            (connector_id, external_type, external_id),
         )
+        return [self._decode_record(r) for r in rows]
+
+    def set_connector_record_state(
+        self, record_id: str, *, percept_id: Optional[str] = None,
+        quarantined: Optional[bool] = None,
+    ) -> None:
+        """Processing state only. The canonical (encrypted) payload of a
+        persisted record is immutable — there is deliberately no method that
+        rewrites it."""
+        sets, params = [], []
+        if percept_id is not None:
+            sets.append("percept_id = ?")
+            params.append(percept_id)
+        if quarantined is not None:
+            sets.append("quarantined = ?")
+            params.append(1 if quarantined else 0)
+        if not sets:
+            return
+        self._j_exec(
+            f"UPDATE connector_records SET {', '.join(sets)} WHERE id = ?",
+            tuple(params) + (record_id,),
+        )
+        self._j_commit()
+
+    # -- deletion events (tombstone → lineage impact) -----------------------
+
+    def insert_connector_deletion_event(self, event: ConnectorDeletionEvent) -> str:
+        self._c_insert("connector_deletion_events", deletion_event_to_row(event))
+        return event.id
+
+    def list_connector_deletion_events(
+        self, connector_id: str, status: Optional[str] = None,
+    ) -> list[ConnectorDeletionEvent]:
+        if status:
+            rows = self._j_fetchall(
+                "SELECT * FROM connector_deletion_events WHERE connector_id = ?"
+                " AND status = ? ORDER BY created_at DESC",
+                (connector_id, status),
+            )
+        else:
+            rows = self._j_fetchall(
+                "SELECT * FROM connector_deletion_events WHERE connector_id = ?"
+                " ORDER BY created_at DESC",
+                (connector_id,),
+            )
+        return [row_to_deletion_event(r) for r in rows]
 
     # -- dead letters -----------------------------------------------------
 
     def insert_connector_dead_letter(self, dlq: ConnectorDeadLetter) -> str:
         self._c_insert("connector_dead_letters", dead_letter_to_row(dlq))
         return dlq.id
+
+    def get_connector_dead_letter(self, dlq_id: str) -> Optional[ConnectorDeadLetter]:
+        row = self._j_fetchone(
+            "SELECT * FROM connector_dead_letters WHERE id = ?", (dlq_id,)
+        )
+        return row_to_dead_letter(row) if row else None
 
     def list_connector_dead_letters(
         self, connector_id: str, status: Optional[str] = None,

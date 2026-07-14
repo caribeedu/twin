@@ -1,0 +1,21 @@
+{
+  "id": "revision_collision_never_overwrites",
+  "scenario": "revision_collision",
+  "connector_type": "fake",
+  "source_owner": "personal",
+  "fixtures": {
+    "issues": [
+      {"external_id": "1", "external_revision": "1", "seq": 1,
+       "content": "Original content for revision 1."}
+    ],
+    "pull_requests": []
+  },
+  "collision_fixtures": {
+    "issues": [
+      {"external_id": "1", "external_revision": "1", "seq": 1,
+       "content": "DIFFERENT content under the same revision — contract violation."}
+    ],
+    "pull_requests": []
+  },
+  "expected": {}
+}

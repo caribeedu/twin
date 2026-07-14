@@ -19,7 +19,7 @@ from .models import (
 
 def snapshot_health(store, connector_id: str, status: HealthStatus) -> ConnectorSyncState:
     state = store.get_connector_sync_state(connector_id) or ConnectorSyncState(id=connector_id)
-    state.status = status.value
+    state.status = status
     state.updated_at = now_iso()
     dead = store.list_connector_dead_letters(connector_id, status="open")
     state.dead_letters = len(dead)
@@ -47,8 +47,9 @@ def connector_health(store, connector_id: str) -> dict[str, Any]:
     return {
         "connector_id": connector_id,
         "connector_type": instance.connector_type,
-        "instance_status": instance.status,
-        "health": (state.status if state else HealthStatus.healthy.value),
+        "instance_status": instance.status.value,
+        "health": (getattr(state.status, "value", state.status) if state
+                   else HealthStatus.healthy.value),
         "last_success_at": state.last_success_at if state else None,
         "last_failure_at": state.last_failure_at if state else None,
         "dead_letters": len(dead),

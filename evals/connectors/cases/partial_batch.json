@@ -1,0 +1,19 @@
+{
+  "id": "partial_batch_invisible",
+  "scenario": "partial_batch",
+  "connector_type": "fake",
+  "source_owner": "personal",
+  "configuration": {"normalize_fail_ids": ["2"]},
+  "fixtures": {
+    "issues": [
+      {"external_id": "1", "external_revision": "1", "seq": 1,
+       "content": "Issue #1: fine on its own."},
+      {"external_id": "2", "external_revision": "1", "seq": 2,
+       "content": "Issue #2: fails normalization on the first pass."}
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "percepts_after_retry": 2
+  }
+}

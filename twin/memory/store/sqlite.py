@@ -552,6 +552,7 @@ CREATE TABLE IF NOT EXISTS connector_checkpoints (
     id TEXT PRIMARY KEY,
     connector_id TEXT NOT NULL,
     stream TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL,
     UNIQUE(connector_id, stream)
 );
@@ -580,9 +581,11 @@ CREATE TABLE IF NOT EXISTS connector_records (
     external_id TEXT NOT NULL DEFAULT '',
     deleted INTEGER NOT NULL DEFAULT 0,
     percept_id TEXT,
+    quarantined INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_crec_conn ON connector_records(connector_id);
+CREATE INDEX IF NOT EXISTS idx_crec_object ON connector_records(connector_id, external_type, external_id);
 CREATE TABLE IF NOT EXISTS connector_dead_letters (
     id TEXT PRIMARY KEY,
     connector_id TEXT NOT NULL,
@@ -599,6 +602,26 @@ CREATE TABLE IF NOT EXISTS connector_sync_state (
     next_run_at TEXT,
     payload TEXT NOT NULL
 );
+-- one worker per (connector, stream); leases expire so crashes cannot wedge a stream
+CREATE TABLE IF NOT EXISTS connector_stream_leases (
+    connector_id TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    lease_owner TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (connector_id, stream)
+);
+-- provider tombstones resolved against prior lineage, awaiting the deletion planner
+CREATE TABLE IF NOT EXISTS connector_deletion_events (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    external_type TEXT NOT NULL DEFAULT '',
+    external_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cdel_conn ON connector_deletion_events(connector_id);
 """
 
 

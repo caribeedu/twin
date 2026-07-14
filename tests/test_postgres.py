@@ -217,3 +217,78 @@ def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
     assert pg_store.get_memory(b_id).status != MemoryStatus.merged
     after_ids = {m.id for m in pg_store.list_memories(limit=1000)}
     assert after_ids == before_ids
+
+
+def test_connector_framework_on_postgres(pg_store, tmp_path):
+    """The connector spine holds the same invariants on Postgres: atomic
+    finalize, lease exclusion, CAS checkpoints, collision handling and
+    partial batches that expose nothing cognitive."""
+    from twin.connectors import (
+        add_connector_instance,
+        build_credential_store,
+        register_source_account,
+        sync_connector,
+    )
+    from twin.connectors.models import ConnectorCheckpoint
+
+    creds = build_credential_store(tmp_path / "pg-creds")
+    acc = register_source_account(
+        pg_store, connector_type="fake", source_owner="employer",
+        org_key="acme", owner_principal_id="principal_pg_test",
+    )
+    inst = add_connector_instance(pg_store, creds, account_id=acc.id,
+                                  secret="tok-pg")
+
+    # commit + checkpoint in one transaction
+    result = sync_connector(pg_store, creds, inst.id)
+    assert result.health.value == "healthy"
+    assert result.percepts == 3
+    ckpt = pg_store.get_connector_checkpoint(inst.id, "issues")
+    assert ckpt is not None and ckpt.version == 1
+    assert len(pg_store.list_connector_records(inst.id)) == 3
+
+    # idempotent replay
+    assert sync_connector(pg_store, creds, inst.id).percepts == 0
+
+    # CAS refuses a stale version
+    stale = ConnectorCheckpoint(connector_id=inst.id, stream="issues",
+                                cursor={"seq": 0})
+    assert pg_store.cas_connector_checkpoint(stale, expected_version=0) is False
+
+    # lease exclusion
+    assert pg_store.acquire_stream_lease(inst.id, "issues", "w1") is True
+    assert pg_store.acquire_stream_lease(inst.id, "issues", "w2") is False
+    pg_store.release_stream_lease(inst.id, "issues", "w1")
+    assert pg_store.acquire_stream_lease(inst.id, "issues", "w2") is True
+    pg_store.release_stream_lease(inst.id, "issues", "w2")
+
+    # partial failure persists nothing cognitive and keeps the checkpoint
+    fx = {"issues": [
+        {"external_id": "50", "external_revision": "1", "seq": 50,
+         "content": "good item"},
+        {"external_id": "51", "external_revision": "1", "seq": 51,
+         "content": "bad item"},
+    ], "pull_requests": []}
+    pg_store.update_connector_instance(
+        inst.id, configuration={"fixtures": fx, "normalize_fail_ids": ["51"],
+                                "incremental": True})
+    before = len(pg_store.list_percepts())
+    version_before = pg_store.get_connector_checkpoint(inst.id, "issues").version
+    partial = sync_connector(pg_store, creds, inst.id)
+    issues = next(s for s in partial.streams if s.stream == "issues")
+    assert issues.committed is False
+    assert len(pg_store.list_percepts()) == before
+    assert pg_store.get_connector_checkpoint(inst.id, "issues").version == version_before
+    assert pg_store.list_connector_dead_letters(inst.id)
+
+    # tombstone → deletion event with prior lineage
+    fx2 = {"issues": [
+        {"external_id": "1", "external_revision": "2", "seq": 60,
+         "content": "", "deleted": True},
+    ], "pull_requests": []}
+    pg_store.update_connector_instance(
+        inst.id, configuration={"fixtures": fx2, "incremental": True})
+    sync_connector(pg_store, creds, inst.id)
+    events = pg_store.list_connector_deletion_events(inst.id)
+    assert events and events[0].external_id == "1"
+    assert events[0].affected_percept_ids

@@ -1357,14 +1357,14 @@ Each connector must preserve authorization, source ownership, incremental checkp
 
 Phase 1 — Connector Framework (in progress):
 
-- shared `ProfessionalConnector` contract + adapter manifest/registry; no real providers yet;
-- `SourceAccount` / `ConnectorInstance` with declared ownership (`personal | employer | client | opensource | shared | unknown`) and per-organization work vaults (`ensure_org_vault`);
-- `CredentialStore` (encrypted file default) — the DB keeps only a `credential_ref`, never the secret; `revoke` destroys secret material and stops sync;
-- idempotent ingest spine: `RawConnectorItem` → `ConnectorRecord` → quarantine gate → `Percept`, keyed by `connector:account:type:id:revision`;
-- checkpoints advance only on committed batches (never gap-advance); dead-letter queue, backoff and derived health;
-- edits (new revision, old retained), deletions (tombstone, no percept), auth-expiry and rate-limit handling;
-- `FakeConnector` proving the full path; CLI (`twin connector …`), REST (`/api/connectors`) and MCP admin/read tools;
-- `tests/test_connectors.py` contract suite + `evals/connectors/` skeleton. Connectors capture evidence; cognition still creates understanding — no connector path writes confirmed Memory or Judgment.
+- shared `ProfessionalConnector` contract + adapter manifest/registry (with declared `auth_mode`); no real providers yet;
+- `SourceAccount` / `ConnectorInstance` with declared ownership (`personal | employer | client | opensource | shared | unknown`), a mandatory owner principal, per-organization work vaults (`ensure_org_vault`) and preview-first, audited reclassification;
+- `CredentialStore` (encrypted file, fail-closed — no crypto backend means no connector) with locked atomic writes and backup recovery; the DB keeps only a `credential_ref`, never the secret; provisioning is compensable and `revoke` is resumable (`revoked_with_residual_secret` is reported, never claimed clean);
+- idempotent ingest spine: `RawConnectorItem` → staged `ConnectorRecord` → quarantine gate → `Percept`, keyed by `connector:account:type:id:revision`; the same revision with different content is a `revision_collision` dead letter, never an overwrite, and persisted records are immutable (processing state lives in columns);
+- nothing becomes cognitively visible before a consistent commit: records, percepts, the committed batch and the CAS-versioned checkpoint land in one transaction; partial batches persist only raw items + dead letters; per-(connector, stream) leases keep concurrent workers out;
+- edits (new revision, old retained); deletions resolve prior lineage into a `ConnectorDeletionEvent` for the deletion planner; auth-expiry and rate-limit handling; sanitized persisted errors; dead-letter retry/replay from raw items;
+- `FakeConnector` proving the full path; CLI (`twin connector …`), REST (`/api/connectors`) and MCP tools, all gated by `connector:*` capabilities (state-fingerprinted confirm tokens for mutations);
+- `tests/test_connectors.py` + `tests/test_connector_authz.py` contract suites (SQLite and Postgres) + `evals/connectors/` scenarios (normalization, replay, partial batch, revision collision, checkpoint failure, quarantine, source deletion). Connectors capture evidence; cognition still creates understanding — no connector path writes confirmed Memory or Judgment.
 
 ### v0.7 — Personal Domains
 

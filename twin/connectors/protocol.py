@@ -53,6 +53,12 @@ class AdapterManifest:
     supported_external_types: list[str] = field(default_factory=list)
     streams: list[str] = field(default_factory=list)
     default_scopes: list[str] = field(default_factory=list)
+    # How this adapter authenticates. Only "generated_local_token" adapters
+    # may receive a framework-generated secret; external providers without a
+    # real credential stay in awaiting_auth — never active with a fake token.
+    # one of: none | generated_local_token | personal_access_token | oauth2 |
+    # app_installation
+    auth_mode: str = "personal_access_token"
 
 
 @dataclass

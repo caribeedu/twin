@@ -524,13 +524,16 @@ def cmd_connector(args) -> None:
             default_domain=args.domain,
             display_name=args.name or "",
             external_account_id=args.external_id or "",
+            # the local CLI is the explicitly trusted admin surface; every
+            # other surface must pass its resolved principal
+            owner_principal_id="principal_local_cli",
         )
         inst = add_connector_instance(
             ws.store, creds, account_id=acc.id, secret=args.secret,
             configuration=_json.loads(args.config) if args.config else None,
         )
         print(f"account {acc.id}  vault={acc.vault_id}")
-        print(f"connector {inst.id}  status={inst.status}")
+        print(f"connector {inst.id}  status={inst.status.value}")
     elif cmd == "configure":
         if args.config:
             ws.store.update_connector_instance(
@@ -539,7 +542,7 @@ def cmd_connector(args) -> None:
             from ..connectors import set_credential
             set_credential(ws.store, creds, args.connector_id, args.secret)
         inst = ws.store.get_connector_instance(args.connector_id)
-        print(f"{inst.id}  status={inst.status}  credential={'set' if inst.credential_ref else 'none'}")
+        print(f"{inst.id}  status={inst.status.value}  credential={'set' if inst.credential_ref else 'none'}")
     elif cmd in ("auth", "test"):
         health = validate_connector(ws.store, creds, args.connector_id)
         print(f"{args.connector_id}  {health.status.value}  {health.detail}")
@@ -551,24 +554,35 @@ def cmd_connector(args) -> None:
         )
         print(f"health={result.health.value}  percepts={result.percepts}")
         for s in result.streams:
-            print(f"  {s.stream:16}  committed={s.committed}  raw={s.raw}  "
+            state = "skipped:" + s.skipped if s.skipped else f"committed={s.committed}"
+            print(f"  {s.stream:16}  {state}  raw={s.raw}  "
                   f"normalized={s.normalized}  dedup={s.deduplicated}  "
                   f"quarantined={s.quarantined}  percepts={s.percepts}  failed={s.failed}")
     elif cmd == "pause":
-        print(pause_connector(ws.store, args.connector_id).status)
+        print(pause_connector(ws.store, args.connector_id).status.value)
     elif cmd == "resume":
-        print(resume_connector(ws.store, args.connector_id).status)
+        print(resume_connector(ws.store, args.connector_id).status.value)
     elif cmd == "revoke":
-        print(revoke_connector(ws.store, creds, args.connector_id).status)
+        print(revoke_connector(ws.store, creds, args.connector_id).status.value)
     elif cmd == "status":
         print(_json.dumps(connector_health(ws.store, args.connector_id), indent=2))
     elif cmd == "checkpoint":
         for c in ws.store.list_connector_checkpoints(args.connector_id):
-            print(f"{c.stream:16}  cursor={c.cursor}  batch={c.committed_batch_id}")
+            print(f"{c.stream:16}  v{c.version}  cursor={c.cursor}  batch={c.committed_batch_id}")
     elif cmd == "dead-letters":
         for d in ws.store.list_connector_dead_letters(args.connector_id):
-            print(f"{d.id}  {d.failure_class:14}  {d.status:10}  "
-                  f"{d.external_type}:{d.external_id}  {d.last_error[:60]}")
+            print(f"{d.id}  {d.failure_class.value:18}  {d.status.value:10}  "
+                  f"attempts={d.attempts}  {d.external_type}:{d.external_id}  "
+                  f"{d.last_error[:60]}")
+    elif cmd == "replay":
+        from ..connectors import retry_dead_letter
+        dlq = retry_dead_letter(ws.store, creds, args.dead_letter_id)
+        print(f"{dlq.id}  status={dlq.status.value}  attempts={dlq.attempts}"
+              + (f"  error={dlq.last_error}" if dlq.last_error else ""))
+    elif cmd == "deletion-events":
+        for e in ws.store.list_connector_deletion_events(args.connector_id):
+            print(f"{e.id}  {e.status.value:9}  {e.external_type}:{e.external_id}  "
+                  f"prior={len(e.prior_record_ids)}  percepts={len(e.affected_percept_ids)}")
     else:
         raise SystemExit(f"unknown connector command: {cmd}")
 
@@ -981,10 +995,14 @@ def main(argv: list[str] | None = None) -> None:
     csync.add_argument("--stream", default=None)
     csync.add_argument("--no-percepts", action="store_true")
     csync.set_defaults(func=cmd_connector)
-    for name in ("pause", "resume", "revoke", "status", "checkpoint", "dead-letters"):
+    for name in ("pause", "resume", "revoke", "status", "checkpoint",
+                 "dead-letters", "deletion-events"):
         cx = cs.add_parser(name)
         cx.add_argument("connector_id")
         cx.set_defaults(func=cmd_connector)
+    creplay = cs.add_parser("replay", help="retry one dead letter from its raw item")
+    creplay.add_argument("dead_letter_id")
+    creplay.set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")

@@ -660,64 +660,141 @@ def create_server(home: Optional[str] = None):
         return json.dumps(validate_output(text, access=access, store=ws.store), ensure_ascii=False)
 
     # -- connectors (v0.6) — admin/read only; never exposes raw payloads ---
+    #
+    # Every tool resolves the caller's identity and checks a connector:*
+    # capability. read_context_pack never implies connector:read, and
+    # connector:read never implies connector:sync.
+
+    def _connector_access(client: Optional[str], client_token: Optional[str]):
+        from ..privacy.identity import resolve_access
+        return resolve_access(
+            ws.store, surface="mcp", client=client, api_token=client_token,
+        )
+
+    def _connector_denied(auth) -> str:
+        return json.dumps({"error": "not_authorized", "reason": auth.reason})
 
     @mcp.tool()
-    def connector_list() -> str:
-        """List connector instances (type, status, ownership). No secrets."""
-        from ..connectors import connector_health
+    def connector_list(client: Optional[str] = None,
+                       client_token: Optional[str] = None) -> str:
+        """List connector instances (type, status, ownership) this client is
+        allowed to see. Requires capability connector:read. No secrets."""
+        from ..connectors import CAP_READ, authorize_connector, connector_health
+        from ..connectors import visible_connectors
+        access = _connector_access(client, client_token)
+        auth = authorize_connector(ws.store, access, CAP_READ)
+        if not auth.allowed:
+            return _connector_denied(auth)
         out = []
-        for inst in ws.store.list_connector_instances():
+        for inst in visible_connectors(ws.store, access):
             acc = ws.store.get_source_account(inst.account_id)
             out.append({
                 "connector_id": inst.id,
                 "connector_type": inst.connector_type,
-                "status": inst.status,
-                "source_owner": acc.source_owner if acc else None,
+                "status": inst.status.value,
+                "source_owner": acc.source_owner.value if acc else None,
                 "vault_id": acc.vault_id if acc else None,
                 "health": connector_health(ws.store, inst.id).get("health"),
             })
         return json.dumps(out, ensure_ascii=False)
 
     @mcp.tool()
-    def connector_status(connector_id: str) -> str:
-        """Health, last batch, checkpoints and dead-letter depth for a connector."""
-        from ..connectors import connector_health
+    def connector_status(connector_id: str, client: Optional[str] = None,
+                         client_token: Optional[str] = None) -> str:
+        """Health, last batch, checkpoints and dead-letter depth for a
+        connector. Requires capability connector:read on that connector."""
+        from ..connectors import CAP_READ, authorize_connector, connector_health
+        access = _connector_access(client, client_token)
+        auth = authorize_connector(ws.store, access, CAP_READ,
+                                   connector_id=connector_id)
+        if not auth.allowed:
+            return _connector_denied(auth)
         return json.dumps(connector_health(ws.store, connector_id), ensure_ascii=False)
 
     @mcp.tool()
-    def connector_health_all() -> str:
-        """Aggregate health across every connector instance."""
-        from ..connectors import connector_health
+    def connector_health_all(client: Optional[str] = None,
+                             client_token: Optional[str] = None) -> str:
+        """Aggregate health across the connectors this client may read.
+        Requires capability connector:read."""
+        from ..connectors import CAP_READ, authorize_connector, connector_health
+        from ..connectors import visible_connectors
+        access = _connector_access(client, client_token)
+        auth = authorize_connector(ws.store, access, CAP_READ)
+        if not auth.allowed:
+            return _connector_denied(auth)
         return json.dumps(
-            [connector_health(ws.store, i.id) for i in ws.store.list_connector_instances()],
+            [connector_health(ws.store, i.id)
+             for i in visible_connectors(ws.store, access)],
             ensure_ascii=False,
         )
+
+    @mcp.tool()
+    def connector_dead_letters(connector_id: str, client: Optional[str] = None,
+                               client_token: Optional[str] = None) -> str:
+        """Open dead letters for a connector (sanitized errors only).
+        Requires capability connector:read (or connector:read:errors)."""
+        from ..connectors import CAP_READ_ERRORS, authorize_connector
+        access = _connector_access(client, client_token)
+        auth = authorize_connector(ws.store, access, CAP_READ_ERRORS,
+                                   connector_id=connector_id)
+        if not auth.allowed:
+            return _connector_denied(auth)
+        return json.dumps([
+            {"id": d.id, "failure_class": d.failure_class.value,
+             "status": d.status.value, "attempts": d.attempts,
+             "external_type": d.external_type, "external_id": d.external_id,
+             "error": d.last_error}
+            for d in ws.store.list_connector_dead_letters(connector_id)
+        ], ensure_ascii=False)
 
     @mcp.tool()
     def connector_sync(
         connector_id: str,
         confirm: bool = False,
+        confirm_token: Optional[str] = None,
         client: Optional[str] = None,
         client_token: Optional[str] = None,
     ) -> str:
-        """Trigger one sync pass (mutating). Requires a resolved, non-restricted
-        client identity and `confirm=true`. Never returns raw payloads."""
-        from ..connectors import build_credential_store, sync_connector
-        from ..privacy.identity import resolve_access
-        access = resolve_access(
-            ws.store, surface="mcp", client=client, api_token=client_token,
+        """Trigger one sync pass (mutating). Requires capability
+        connector:sync on the connector's vault.
+
+        Two-step: call without confirm to receive a preview with a
+        `confirm_token` (a fingerprint of the connector's exact state —
+        account, vault, configuration, checkpoints, adapter version and your
+        identity). Then call again with confirm=true and that token; if the
+        connector changed in between, the token no longer matches and a fresh
+        preview is required. Never returns raw payloads."""
+        from ..connectors import (
+            CAP_SYNC,
+            authorize_connector,
+            build_credential_store,
+            sync_connector,
+            sync_fingerprint,
         )
-        if access.is_restricted_mode:
-            return json.dumps({
-                "error": "restricted_mode",
-                "reason": "connector_sync requires a registered client identity",
-            })
+        access = _connector_access(client, client_token)
+        auth = authorize_connector(ws.store, access, CAP_SYNC,
+                                   connector_id=connector_id)
+        if not auth.allowed:
+            return _connector_denied(auth)
+        try:
+            fingerprint = sync_fingerprint(
+                ws.store, connector_id, principal_id=access.principal_id,
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
         if not confirm:
             return json.dumps({
                 "requires_confirmation": True,
                 "action": "connector_sync",
                 "connector_id": connector_id,
                 "tool_id": access.tool_id,
+                "confirm_token": fingerprint,
+            })
+        if confirm_token != fingerprint:
+            return json.dumps({
+                "error": "stale_preview",
+                "reason": "connector state changed since the preview — "
+                          "request a new preview and confirm_token",
             })
         creds = build_credential_store(ws.cfg.home)
         try:
@@ -729,6 +806,7 @@ def create_server(home: Optional[str] = None):
             "percepts": result.percepts,
             "streams": [
                 {"stream": s.stream, "committed": s.committed,
+                 "skipped": s.skipped,
                  "normalized": s.normalized, "quarantined": s.quarantined,
                  "percepts": s.percepts, "failed": s.failed}
                 for s in result.streams

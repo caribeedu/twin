@@ -81,6 +81,7 @@ class FakeConnector:
             connector_type="fake",
             adapter_version="1.0",
             schema_version=1,
+            auth_mode="generated_local_token",  # only local adapters may auto-generate
             affordances={
                 "incremental": True, "edits": True, "deletions": True,
                 "backfill": True, "webhooks": False, "artifacts": False,
