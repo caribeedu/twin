@@ -27,10 +27,12 @@ Concurrency/durability (twin is local-first and must behave on Windows too):
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import secrets
 import shutil
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -47,6 +49,10 @@ class CredentialStore(Protocol):
 
 class CredentialBackendUnavailable(RuntimeError):
     """No real encryption/locking backend — connectors cannot be configured."""
+
+
+class CredentialLockTimeout(RuntimeError):
+    """Could not acquire the credential-store lock within the deadline."""
 
 
 class CredentialStoreCorrupted(RuntimeError):
@@ -81,10 +87,30 @@ def _build_fernet(key_path: Path):
 
 # -- cross-platform advisory file lock ------------------------------------------
 
+LOCK_TIMEOUT_SECONDS = 30.0
+_LOCK_POLL_SECONDS = 0.05
 
-def _lock_fd(fd: int) -> str:
-    """Acquire an exclusive lock on ``fd``. POSIX uses fcntl; Windows uses
-    msvcrt. No silent lockless mode: if neither backend exists, refuse."""
+# errno values Windows uses for "the region is locked by someone else" —
+# anything outside this set is a permanent failure (bad descriptor, denied
+# permission, I/O error, incompatible filesystem) and must raise, never spin
+_CONTENTION_ERRNOS = frozenset(
+    getattr(errno, name) for name in ("EACCES", "EAGAIN", "EDEADLK")
+    if hasattr(errno, name)
+)
+
+
+def _lock_fd(fd: int, timeout_seconds: Optional[float] = None) -> str:
+    """Acquire an exclusive lock on ``fd``. POSIX uses fcntl (blocking flock
+    is fine for a local store); Windows uses non-blocking msvcrt attempts
+    under an explicit deadline. No silent lockless mode: if neither backend
+    exists, refuse.
+
+    Contention waits (bounded by ``timeout_seconds``, default
+    LOCK_TIMEOUT_SECONDS → CredentialLockTimeout); any other OSError is a
+    permanent backend failure and raises immediately — it never turns into
+    an infinite retry loop."""
+    if timeout_seconds is None:
+        timeout_seconds = LOCK_TIMEOUT_SECONDS
     try:
         import fcntl
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -93,19 +119,30 @@ def _lock_fd(fd: int) -> str:
         pass
     try:
         import msvcrt
-        os.lseek(fd, 0, os.SEEK_SET)
-        # blocking exclusive lock over one byte of the dedicated lockfile
-        while True:
-            try:
-                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
-                return "msvcrt"
-            except OSError:
-                continue  # LK_LOCK retries ~10s then raises; keep waiting
     except ImportError:
         raise CredentialBackendUnavailable(
             "no file-locking backend available (fcntl/msvcrt); refusing to "
             "run the credential store without mutual exclusion"
         )
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            # non-blocking probe → the timeout is ours, not msvcrt's
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return "msvcrt"
+        except OSError as exc:
+            if exc.errno not in _CONTENTION_ERRNOS:
+                raise CredentialBackendUnavailable(
+                    f"credential lock failed permanently: "
+                    f"[errno {exc.errno}] {exc.strerror or exc}"
+                ) from exc
+            if time.monotonic() >= deadline:
+                raise CredentialLockTimeout(
+                    f"timed out after {timeout_seconds:.0f}s acquiring the "
+                    "credential store lock — another process is holding it"
+                ) from exc
+            time.sleep(_LOCK_POLL_SECONDS)
 
 
 def _unlock_fd(fd: int, backend: str) -> None:

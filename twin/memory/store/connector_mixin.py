@@ -243,23 +243,31 @@ class ConnectorStoreMixin:
         ttl_seconds: int = 600,
     ) -> Optional[int]:
         """Acquire (or re-enter) the lease. Returns the fencing token, or
-        None when another worker actively holds the stream."""
+        None when another worker actively holds the stream.
+
+        An EXPIRED lease is always a new grant — the token bumps even when
+        the owner string repeats (e.g. a fixed scheduler name), so a late
+        holder of the previous incarnation is fenced out of every lease
+        mutation, release included."""
         now = now_iso()
         expires = self._lease_expiry(ttl_seconds)
-        # 1. takeover of an expired lease (ownership change → token bumps)
+        # 1. takeover of an expired lease — ownership change → token bumps,
+        # regardless of whether the owner string happens to match
         cur = self._j_exec(
             "UPDATE connector_stream_leases SET lease_owner = ?,"
             " lease_expires_at = ?, version = version + 1"
             " WHERE connector_id = ? AND stream = ?"
-            " AND lease_owner != ? AND lease_expires_at <= ?",
-            (owner, expires, connector_id, stream, owner, now),
+            " AND lease_expires_at <= ?",
+            (owner, expires, connector_id, stream, now),
         )
         if getattr(cur, "rowcount", 0) == 0:
-            # 2. re-entrant acquire by the current owner (token unchanged)
+            # 2. re-entrant acquire by the current, still-valid owner
+            # (token unchanged)
             cur = self._j_exec(
                 "UPDATE connector_stream_leases SET lease_expires_at = ?"
-                " WHERE connector_id = ? AND stream = ? AND lease_owner = ?",
-                (expires, connector_id, stream, owner),
+                " WHERE connector_id = ? AND stream = ? AND lease_owner = ?"
+                " AND lease_expires_at > ?",
+                (expires, connector_id, stream, owner, now),
             )
         if getattr(cur, "rowcount", 0) > 0:
             self._j_commit()
@@ -305,11 +313,17 @@ class ConnectorStoreMixin:
         self._j_commit()
         return getattr(cur, "rowcount", 0) > 0
 
-    def release_stream_lease(self, connector_id: str, stream: str, owner: str) -> None:
+    def release_stream_lease(self, connector_id: str, stream: str, owner: str,
+                             fencing_token: int) -> None:
+        """EVERY lease mutation is fenced — release included. A late worker
+        holding a stale token (same owner string, previous incarnation)
+        cannot expire the lease a successor legitimately holds."""
         self._j_exec(
             "UPDATE connector_stream_leases SET lease_expires_at = ?"
-            " WHERE connector_id = ? AND stream = ? AND lease_owner = ?",
-            ("1970-01-01T00:00:00+00:00", connector_id, stream, owner),
+            " WHERE connector_id = ? AND stream = ?"
+            " AND lease_owner = ? AND version = ?",
+            ("1970-01-01T00:00:00+00:00", connector_id, stream,
+             owner, fencing_token),
         )
         self._j_commit()
 

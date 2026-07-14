@@ -234,7 +234,7 @@ def test_stream_lease_mutual_exclusion(store, creds):
     assert store.acquire_stream_lease(inst.id, "issues", "worker_b") is None
     # re-entrant acquire keeps the SAME fencing token
     assert store.acquire_stream_lease(inst.id, "issues", "worker_a") == token_a
-    store.release_stream_lease(inst.id, "issues", "worker_a")
+    store.release_stream_lease(inst.id, "issues", "worker_a", token_a)
     token_b = store.acquire_stream_lease(inst.id, "issues", "worker_b")
     assert token_b is not None and token_b > token_a  # monotonic on ownership change
 
@@ -256,12 +256,36 @@ def test_lease_renewal_and_fencing(store, creds):
     # the owner renews freely under its token
     assert store.renew_stream_lease(inst.id, "issues", "worker_a", token_a)
     # simulate expiry, then a takeover by B
-    store.release_stream_lease(inst.id, "issues", "worker_a")
+    store.release_stream_lease(inst.id, "issues", "worker_a", token_a)
     token_b = store.acquire_stream_lease(inst.id, "issues", "worker_b")
     assert token_b > token_a
     # A's token is fenced out; B's works
     assert store.renew_stream_lease(inst.id, "issues", "worker_a", token_a) is False
     assert store.renew_stream_lease(inst.id, "issues", "worker_b", token_b) is True
+
+
+def test_release_is_fenced_same_owner_string(store, creds):
+    """EVERY lease mutation is fenced, release included. A late finally from
+    a previous incarnation using the SAME owner string (e.g. a fixed
+    scheduler name) must not expire its successor's lease."""
+    _acc, inst = _make(store, creds)
+    # incarnation A of "scheduler-1": lease granted but immediately expired
+    token_a = store.acquire_stream_lease(inst.id, "issues", "scheduler-1",
+                                         ttl_seconds=0)
+    assert token_a is not None
+    # incarnation B of the SAME owner string takes over → new fencing token
+    token_b = store.acquire_stream_lease(inst.id, "issues", "scheduler-1",
+                                         ttl_seconds=600)
+    assert token_b == token_a + 1  # expired lease is always a NEW grant
+
+    # A's late release carries the stale token → B's lease is untouched
+    store.release_stream_lease(inst.id, "issues", "scheduler-1", token_a)
+    assert store.acquire_stream_lease(inst.id, "issues", "intruder") is None
+    assert store.renew_stream_lease(inst.id, "issues", "scheduler-1", token_b)
+
+    # B's release with the current token ends the lease normally
+    store.release_stream_lease(inst.id, "issues", "scheduler-1", token_b)
+    assert store.acquire_stream_lease(inst.id, "issues", "intruder") is not None
 
 
 def test_worker_that_lost_lease_cannot_publish(store, creds, monkeypatch):
@@ -798,13 +822,13 @@ def test_credential_writes_survive_concurrent_processes(tmp_path):
 
 
 def test_lock_routes_to_msvcrt_when_fcntl_missing(tmp_path, monkeypatch):
-    """Windows path: without fcntl the lock must go through msvcrt.locking —
-    never silently continue lockless."""
+    """Windows path: without fcntl the lock must go through non-blocking
+    msvcrt.locking — never silently continue lockless."""
     import types
 
     calls = []
     fake_msvcrt = types.SimpleNamespace(
-        LK_LOCK=0, LK_UNLCK=1,
+        LK_NBLCK=2, LK_UNLCK=1,
         locking=lambda fd, mode, n: calls.append(mode),
     )
     monkeypatch.setitem(sys.modules, "fcntl", None)   # import fcntl → ImportError
@@ -812,8 +836,67 @@ def test_lock_routes_to_msvcrt_when_fcntl_missing(tmp_path, monkeypatch):
     win_creds = build_credential_store(tmp_path / "win-home")
     win_creds.put("cred_w", "secret-w")
     assert win_creds.get("cred_w") == "secret-w"
-    assert fake_msvcrt.LK_LOCK in calls               # lock actually taken
+    assert fake_msvcrt.LK_NBLCK in calls              # lock actually taken
     assert fake_msvcrt.LK_UNLCK in calls              # and released
+
+
+def test_windows_lock_contention_respects_timeout(tmp_path, monkeypatch):
+    """A busy lock is retried with a pause, and a lock held past the
+    deadline raises CredentialLockTimeout — never an infinite spin."""
+    import types
+
+    from twin.connectors import CredentialLockTimeout
+    from twin.connectors import credentials as cred_mod
+
+    attempts = []
+
+    def always_busy(fd, mode, n):
+        if mode == 1:  # LK_UNLCK
+            return
+        attempts.append(mode)
+        raise OSError(errno_mod.EACCES, "resource in use")
+
+    import errno as errno_mod
+    fake_msvcrt = types.SimpleNamespace(LK_NBLCK=2, LK_UNLCK=1,
+                                        locking=always_busy)
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    monkeypatch.setattr(cred_mod, "LOCK_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(cred_mod, "_LOCK_POLL_SECONDS", 0.01)
+
+    busy_creds = build_credential_store(tmp_path / "busy-home")
+    with pytest.raises(CredentialLockTimeout):
+        busy_creds.put("cred_x", "secret-x")
+    assert 2 < len(attempts) < 100  # bounded retries with sleeps, no hot spin
+    # the store did not corrupt anything: with the lock free, writes work
+    fake_msvcrt.locking = lambda fd, mode, n: None
+    busy_creds.put("cred_x", "secret-x")
+    assert busy_creds.get("cred_x") == "secret-x"
+
+
+def test_windows_lock_permanent_error_never_loops(tmp_path, monkeypatch):
+    """A non-contention OSError (bad descriptor, permission, I/O) raises
+    immediately instead of being retried forever."""
+    import errno as errno_mod
+    import types
+
+    from twin.connectors import CredentialBackendUnavailable
+
+    attempts = []
+
+    def broken(fd, mode, n):
+        if mode == 1:
+            return
+        attempts.append(mode)
+        raise OSError(errno_mod.EBADF, "bad file descriptor")
+
+    fake_msvcrt = types.SimpleNamespace(LK_NBLCK=2, LK_UNLCK=1, locking=broken)
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    broken_creds = build_credential_store(tmp_path / "broken-home")
+    with pytest.raises(CredentialBackendUnavailable, match="permanently"):
+        broken_creds.put("cred_x", "secret-x")
+    assert len(attempts) == 1  # no retry loop for permanent failures
 
 
 def test_no_locking_backend_fails_closed(tmp_path, monkeypatch):

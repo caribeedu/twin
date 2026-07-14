@@ -517,7 +517,11 @@ def _sync_stream(
                                    lease_owner=lease_owner,
                                    fencing_token=fencing_token)
     finally:
-        store.release_stream_lease(instance.id, stream, lease_owner)
+        # fenced release: if the lease expired mid-run and someone else took
+        # it over (even under the same owner string), this stale token no
+        # longer matches and the successor's lease is left untouched
+        store.release_stream_lease(instance.id, stream, lease_owner,
+                                   fencing_token)
 
 
 def _abort_batch(store, batch: ConnectorBatch, sr: StreamResult,

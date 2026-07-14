@@ -646,6 +646,13 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, Me
         self._migrate()
 
     def _begin_transaction(self) -> None:
+        # Another thread may sit between its DML execute and its commit
+        # (both individually locked); its implicit transaction would make
+        # BEGIN fail. Flushing is safe: every non-transactional write path
+        # commits unconditionally right after executing, so this only fronts
+        # a commit that is already on its way.
+        if self.conn.in_transaction:
+            self.conn.commit()
         self.conn.execute("BEGIN IMMEDIATE")
 
     def _commit_transaction(self) -> None:

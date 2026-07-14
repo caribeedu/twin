@@ -21,6 +21,7 @@ from .authz import (
 )
 from .credentials import (
     CredentialBackendUnavailable,
+    CredentialLockTimeout,
     CredentialStore,
     CredentialStoreCorrupted,
     build_credential_store,
@@ -116,6 +117,7 @@ __all__ = [
     "CheckpointConflict",
     "ConnectorDeletionEvent",
     "CredentialBackendUnavailable",
+    "CredentialLockTimeout",
     "CredentialStoreCorrupted",
     "LeaseLost",
     "StreamLease",
