@@ -220,26 +220,37 @@ class MemoryStore(ABC):
 
         Nested calls reuse the outer transaction. Stores that auto-commit each
         write must suppress mid-block commits while the depth is > 0.
+
+        Thread-safe: the store's lock (when present) is held for the whole
+        block, so two threads sharing one connection serialize whole
+        transactions instead of interleaving BEGIN/COMMIT.
         """
         from contextlib import contextmanager
 
         @contextmanager
         def _tx():
-            depth = getattr(self, "_tx_depth", 0)
-            self._tx_depth = depth + 1
-            started = depth == 0
+            lock = getattr(self, "_lock", None)
+            if lock is not None:
+                lock.acquire()
             try:
-                if started:
-                    self._begin_transaction()
-                yield self
-                if started:
-                    self._commit_transaction()
-            except Exception:
-                if started:
-                    self._rollback_transaction()
-                raise
+                depth = getattr(self, "_tx_depth", 0)
+                self._tx_depth = depth + 1
+                started = depth == 0
+                try:
+                    if started:
+                        self._begin_transaction()
+                    yield self
+                    if started:
+                        self._commit_transaction()
+                except Exception:
+                    if started:
+                        self._rollback_transaction()
+                    raise
+                finally:
+                    self._tx_depth = depth
             finally:
-                self._tx_depth = depth
+                if lock is not None:
+                    lock.release()
 
         return _tx()
 

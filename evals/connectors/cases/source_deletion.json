@@ -1,0 +1,26 @@
+{
+  "id": "source_deletion_builds_lineage_impact",
+  "scenario": "source_deletion",
+  "connector_type": "fake",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "fixtures": {
+    "issues": [
+      {"external_id": "1", "external_revision": "1", "seq": 1,
+       "content": "Issue #1: will be deleted upstream later."}
+    ],
+    "pull_requests": []
+  },
+  "deletion_fixtures": {
+    "issues": [
+      {"external_id": "1", "external_revision": "2", "seq": 2,
+       "content": "", "deleted": true}
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "deletion_events": 1,
+    "prior_records": 1,
+    "affected_percepts": 1
+  }
+}

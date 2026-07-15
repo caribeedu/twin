@@ -1,0 +1,16 @@
+{
+  "id": "checkpoint_failure_never_diverges",
+  "scenario": "checkpoint_failure",
+  "connector_type": "fake",
+  "source_owner": "personal",
+  "fixtures": {
+    "issues": [
+      {"external_id": "1", "external_revision": "1", "seq": 1,
+       "content": "Issue #1: must not become visible without a checkpoint."}
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "percepts_after_retry": 1
+  }
+}

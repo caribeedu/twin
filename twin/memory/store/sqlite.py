@@ -17,6 +17,7 @@ from ..models import (
     Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
+from .connector_mixin import ConnectorStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
 
@@ -525,8 +526,106 @@ CREATE TABLE IF NOT EXISTS privacy_policy_revisions (
 );
 """
 
+CONNECTOR_SCHEMA = """
+CREATE TABLE IF NOT EXISTS connector_source_accounts (
+    id TEXT PRIMARY KEY,
+    connector_type TEXT NOT NULL,
+    source_owner TEXT NOT NULL DEFAULT 'unknown',
+    vault_id TEXT NOT NULL DEFAULT 'vault_general',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS connector_instances (
+    id TEXT PRIMARY KEY,
+    connector_type TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    credential_ref TEXT,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS connector_credential_refs (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'encrypted_file',
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS connector_checkpoints (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL,
+    UNIQUE(connector_id, stream)
+);
+CREATE TABLE IF NOT EXISTS connector_batches (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'planned',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cbatch_conn ON connector_batches(connector_id);
+CREATE TABLE IF NOT EXISTS connector_raw_items (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_craw_conn ON connector_raw_items(connector_id);
+CREATE TABLE IF NOT EXISTS connector_records (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    external_type TEXT NOT NULL DEFAULT '',
+    external_id TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    percept_id TEXT,
+    quarantined INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_crec_conn ON connector_records(connector_id);
+CREATE INDEX IF NOT EXISTS idx_crec_object ON connector_records(connector_id, external_type, external_id);
+CREATE TABLE IF NOT EXISTS connector_dead_letters (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    external_id TEXT NOT NULL DEFAULT '',
+    failure_class TEXT NOT NULL DEFAULT 'normalization',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cdlq_conn ON connector_dead_letters(connector_id);
+CREATE TABLE IF NOT EXISTS connector_sync_state (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'healthy',
+    next_run_at TEXT,
+    payload TEXT NOT NULL
+);
+-- one worker per (connector, stream); leases expire so crashes cannot wedge a stream
+CREATE TABLE IF NOT EXISTS connector_stream_leases (
+    connector_id TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    lease_owner TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (connector_id, stream)
+);
+-- provider tombstones resolved against prior lineage, awaiting the deletion planner
+CREATE TABLE IF NOT EXISTS connector_deletion_events (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    external_type TEXT NOT NULL DEFAULT '',
+    external_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cdel_conn ON connector_deletion_events(connector_id);
+"""
 
-class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
+
+class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, MemoryStore):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()
         self.path = Path(path)
@@ -543,9 +642,17 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
         self._lock = threading.RLock()
         self.conn.executescript(SCHEMA)
         self.conn.executescript(PRIVACY_SCHEMA)
+        self.conn.executescript(CONNECTOR_SCHEMA)
         self._migrate()
 
     def _begin_transaction(self) -> None:
+        # Another thread may sit between its DML execute and its commit
+        # (both individually locked); its implicit transaction would make
+        # BEGIN fail. Flushing is safe: every non-transactional write path
+        # commits unconditionally right after executing, so this only fronts
+        # a commit that is already on its way.
+        if self.conn.in_transaction:
+            self.conn.commit()
         self.conn.execute("BEGIN IMMEDIATE")
 
     def _commit_transaction(self) -> None:
@@ -691,6 +798,8 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
                     self.conn.execute(f"ALTER TABLE judgment_conflicts ADD COLUMN {name} {ddl}")
         # v0.5 privacy tables
         self.conn.executescript(PRIVACY_SCHEMA)
+        # v0.6 connector framework tables
+        self.conn.executescript(CONNECTOR_SCHEMA)
         self._maybe_commit()
 
     def close(self) -> None:
@@ -1680,7 +1789,8 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
     # -- judgment mixin hooks -----------------------------------------------
 
     def _j_exec(self, sql: str, params: tuple):
-        return self.conn.execute(sql, params)
+        with self._lock:
+            return self.conn.execute(sql, params)
 
     def _consume_grant_row(
         self,
@@ -1726,10 +1836,13 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, MemoryStore):
                 lock.release()
 
     def _j_fetchone(self, sql: str, params: tuple):
-        return self.conn.execute(sql, params).fetchone()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchone()
 
     def _j_fetchall(self, sql: str, params: tuple) -> list:
-        return list(self.conn.execute(sql, params).fetchall())
+        with self._lock:
+            return list(self.conn.execute(sql, params).fetchall())
 
     def _j_commit(self) -> None:
-        self._maybe_commit()
+        with self._lock:
+            self._maybe_commit()

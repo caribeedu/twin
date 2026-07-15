@@ -1,0 +1,60 @@
+# CI — the review gates for every PR:
+#   1. full suite on SQLite (Linux)
+#   2. full suite on PostgreSQL + pgvector (Linux)
+#   3. CredentialStore locking/durability on real Windows (msvcrt path)
+#   4. connector eval scenarios
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: sqlite + postgres (ubuntu)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: twin
+          POSTGRES_PASSWORD: twin
+          POSTGRES_DB: twin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U twin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Full suite (SQLite + PostgreSQL + pgvector)
+        env:
+          TWIN_TEST_PG_URL: postgresql://twin:twin@127.0.0.1:5432/twin
+        run: pytest -q
+      - name: Connector eval scenarios
+        run: python -m evals.connectors.run
+
+  windows-credentials:
+    name: credential store (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: CredentialStore locking + durability on real msvcrt
+        # the full suite runs on Linux; Windows validates the locking
+        # backend, atomic writes, backup recovery and fail-closed behavior
+        run: >-
+          pytest -q tests/test_connectors.py
+          -k "credential or lock or corrupted or backup or empty_map"

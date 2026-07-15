@@ -1,0 +1,34 @@
+{
+  "id": "normalization_basic",
+  "connector_type": "fake",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "fixtures": {
+    "issues": [
+      {
+        "external_id": "1",
+        "external_revision": "1",
+        "seq": 1,
+        "occurred_at": "2026-01-01T09:00:00Z",
+        "content": "Issue #1: define the connector checkpoint contract."
+      }
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "records": 1,
+    "percepts": 1,
+    "record": {
+      "external_type": "issue",
+      "external_id": "1",
+      "external_revision": "1",
+      "thread_key": "issue:1",
+      "quarantined": false,
+      "deleted": false
+    },
+    "percept_metadata": {
+      "source_owner": "employer",
+      "vault_id": "vault_work_acme"
+    }
+  }
+}
