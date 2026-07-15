@@ -562,3 +562,134 @@ def test_scheduler_consumes_webhook_targeted_streams(store, creds, gh, tmp_path)
     # …and the hint was consumed: the next cadence reconciles everything
     state = store.get_connector_sync_state(inst.id)
     assert "targeted_streams" not in (state.metadata or {})
+
+
+# -- PR #11 review fixes -----------------------------------------------------------
+
+
+def test_empty_repositories_await_configuration(store, creds, gh):
+    _acc, inst = _mk(store, creds, repos=())
+    result = sync_connector(store, creds, inst.id)
+    assert result.health.value == "awaiting_configuration"
+    assert result.streams == []
+    assert store.get_connector_checkpoint(inst.id, f"repo:{REPO}:issues") is None
+
+
+def test_max_pages_continuation_ingests_all_issues_without_starvation(store, creds, gh):
+    for n in range(1, 1002):
+        gh.add_issue(REPO, n, title=f"Issue {n}",
+                     updated_at=f"2026-01-01T{ (n % 24):02d}:00:00Z")
+    _acc, inst = _mk(store, creds, extra_config={"max_pages_per_stream": 10})
+    result = sync_connector(store, creds, inst.id,
+                            streams=[f"repo:{REPO}:issues"])
+    assert result.health.value == "healthy"
+    issues = _records_by_type(store, inst.id)["issue"]
+    assert len(issues) == 1001
+    ckpt = store.get_connector_checkpoint(inst.id, f"repo:{REPO}:issues")
+    assert ckpt.cursor["watermark"] is not None
+
+
+def test_paginated_pr_reviews_all_ingested(store, creds, gh):
+    gh.add_pull(REPO, 9, title="Big review thread",
+                updated_at="2026-01-01T10:00:00Z", head_sha="rv9")
+    for rid in range(1, 151):
+        gh.add_review(REPO, 9, rid, state="COMMENTED",
+                      body=f"review {rid}",
+                      submitted_at=f"2026-01-01T{ (rid % 24):02d}:00:00Z")
+    _acc, inst = _mk(store, creds, extra_config={"max_pages_per_stream": 2})
+    sync_connector(store, creds, inst.id)
+    reviews = _records_by_type(store, inst.id)["review"]
+    assert len(reviews) == 150
+
+
+def test_edited_release_creates_new_revision(store, creds, gh):
+    release = {
+        "id": 42, "tag_name": "v1.0.0", "name": "First",
+        "body": "initial notes", "draft": False, "prerelease": False,
+        "target_commitish": "main",
+        "published_at": "2026-01-01T10:00:00Z",
+        "created_at": "2026-01-01T10:00:00Z",
+        "author": _user("alice"),
+        "html_url": f"https://github.com/{REPO}/releases/tag/v1.0.0",
+    }
+    gh.repos[REPO]["releases"].append(release)
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+
+    release["body"] = "updated release notes after edit"
+    sync_connector(store, creds, inst.id)
+    releases = _records_by_type(store, inst.id)["release"]
+    assert len(releases) == 2
+    bodies = {r.content for r in releases}
+    assert any("initial notes" in b for b in bodies)
+    assert any("updated release notes" in b for b in bodies)
+
+
+def test_scheduler_preserves_webhook_hints_added_during_sync(store, creds, gh, tmp_path):
+    from twin.connectors.github.webhook import (
+        handle_github_webhook,
+        set_webhook_secret,
+    )
+    from twin.connectors import scheduler as sched
+
+    gh.add_issue(REPO, 1, title="One", updated_at="2026-01-01T10:00:00Z")
+    gh.add_issue(REPO, 2, title="Two", updated_at="2026-01-02T10:00:00Z")
+    _acc, inst = _mk(store, creds)
+    set_webhook_secret(store, creds, inst.id, "hook-secret")
+
+    body_a = _hook_body(issue={"number": 1})
+    handle_github_webhook(store, creds, inst.id, event="issues", body=body_a,
+                          signature=_hook_sig("hook-secret", body_a))
+
+    from twin.connectors.scheduler import sync_due
+
+    real_sync = sched.sync_connector
+
+    def sync_with_mid_hook(store_, creds_, connector_id, **kw):
+        import json
+        body_b = json.dumps({
+            "action": "opened",
+            "repository": {"full_name": REPO},
+            "issue": {"number": 2, "pull_request": {"url": "x"}},
+        }).encode()
+        handle_github_webhook(store_, creds_, connector_id, event="issue_comment",
+                              body=body_b, signature=_hook_sig("hook-secret", body_b))
+        return real_sync(store_, creds_, connector_id, **kw)
+
+    sched.sync_connector = sync_with_mid_hook
+    try:
+        sync_due(store, creds, tmp_path)
+    finally:
+        sched.sync_connector = real_sync
+
+    state = store.get_connector_sync_state(inst.id)
+    assert state.metadata.get("targeted_streams") == [f"repo:{REPO}:pulls"]
+
+
+def test_ingestion_policy_override_cannot_widen_github_allowlist():
+    from twin.cognition.source_policy import (
+        DEFAULT_SOURCE_POLICIES,
+        _from_config,
+        evaluate,
+        merge_policies,
+    )
+
+    default = DEFAULT_SOURCE_POLICIES["github"]
+    widen = merge_policies(
+        default,
+        _from_config({
+            "allow_memory_types": ["belief", "preference"],
+            "drop": [],
+            "require_review_for": [],
+        }),
+    )
+    assert evaluate(widen, "belief").action == "drop"
+    assert evaluate(widen, "preference").action == "drop"
+    assert evaluate(widen, "decision").action == "drop"
+
+    narrow = merge_policies(
+        default, _from_config({"allow_memory_types": ["decision"]}),
+    )
+    assert evaluate(narrow, "decision").action == "allow"
+    assert evaluate(narrow, "fact").action == "drop"
+

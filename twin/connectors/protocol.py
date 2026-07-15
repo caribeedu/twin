@@ -52,6 +52,9 @@ class AdapterManifest:
     affordances: dict[str, bool] = field(default_factory=dict)
     supported_external_types: list[str] = field(default_factory=list)
     streams: list[str] = field(default_factory=list)
+    # When true, an empty plan_streams() means "not configured yet" — the
+    # runtime must not fall back to manifest.streams or "default".
+    dynamic_streams: bool = False
     default_scopes: list[str] = field(default_factory=list)
     # How this adapter authenticates. Only "generated_local_token" adapters
     # may receive a framework-generated secret; external providers without a

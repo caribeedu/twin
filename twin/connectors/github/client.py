@@ -59,7 +59,10 @@ class GitHubClient:
     def get(self, path: str, *, params: Optional[dict[str, Any]] = None,
             allow_404: bool = False) -> tuple[Any, httpx.Headers]:
         try:
-            resp = self._http.get(path, params=params or {})
+            if params:
+                resp = self._http.get(path, params=params)
+            else:
+                resp = self._http.get(path)
         except httpx.HTTPError as exc:
             raise ConnectorError(
                 f"github network error: {type(exc).__name__}",
@@ -117,25 +120,60 @@ class GitHubClient:
                 failure_class=FailureClass.schema_change,
             ) from exc
 
-    def paginate(self, path: str, *, params: Optional[dict[str, Any]] = None,
-                 max_pages: int = 10) -> Iterator[list[Any]]:
-        """Yield one JSON list per page, following the Link rel=next header
-        up to ``max_pages`` — a single stream batch never tries to swallow a
-        huge repository in one go (backpressure §53)."""
-        query = {"per_page": PER_PAGE, **(params or {})}
-        url: Optional[str] = path
+    def fetch_page_batch(
+        self,
+        path: str,
+        *,
+        params: Optional[dict[str, Any]] = None,
+        start_url: Optional[str] = None,
+        max_pages: int = 1,
+    ) -> tuple[list[Any], Optional[str], int]:
+        """Fetch up to ``max_pages`` from a list endpoint.
+
+        Returns ``(items, next_url, pages_fetched)``. When ``next_url`` is
+        set the endpoint has more pages — callers must treat that as
+        continuation, not completion."""
+        items: list[Any] = []
+        url: Optional[str] = start_url or path
+        query: Optional[dict[str, Any]] = None if start_url else {
+            "per_page": PER_PAGE, **(params or {}),
+        }
         pages = 0
         while url is not None and pages < max_pages:
-            data, headers = self.get(url, params=query if pages == 0 else None)
+            data, headers = self.get(url, params=query)
             if not isinstance(data, list):
                 raise ConnectorError(
                     "github list endpoint returned a non-list payload",
                     failure_class=FailureClass.schema_change,
                 )
-            yield data
+            items.extend(data)
             pages += 1
             match = _LINK_NEXT.search(headers.get("Link", "") or "")
             url = match.group(1) if match else None
+            query = None
+        return items, url, pages
+
+    def paginate(self, path: str, *, params: Optional[dict[str, Any]] = None,
+                 max_pages: int = 10) -> Iterator[list[Any]]:
+        """Yield one JSON list per page, following the Link rel=next header
+        up to ``max_pages`` — a single stream batch never tries to swallow a
+        huge repository in one go (backpressure §53)."""
+        start_url: Optional[str] = None
+        query = {"per_page": PER_PAGE, **(params or {})}
+        pages = 0
+        while pages < max_pages:
+            data, next_url, fetched = self.fetch_page_batch(
+                path, params=query if pages == 0 and start_url is None else None,
+                start_url=start_url, max_pages=1,
+            )
+            if not data and fetched == 0:
+                break
+            yield data
+            pages += fetched
+            if next_url is None:
+                break
+            start_url = next_url
+            query = None
 
     def user(self) -> tuple[dict[str, Any], list[str]]:
         """Authenticated identity + granted scopes (classic PATs)."""

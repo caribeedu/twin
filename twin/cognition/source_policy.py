@@ -28,7 +28,7 @@ from ..sensory.percept import Percept
 
 @dataclass
 class SourcePolicy:
-    allow: frozenset[str] = frozenset()          # empty = no allowlist
+    allow: Optional[frozenset[str]] = None       # None = no allowlist
     require_review: frozenset[str] = frozenset()
     drop: frozenset[str] = frozenset()
 
@@ -39,8 +39,8 @@ class PolicyDecision:
     reason: Optional[str] = None
 
 
-# Initial calibration per connector type (v0.6 §70). Not universal truth —
-# instance configuration can override every field.
+# Initial calibration per connector type (v0.6 §70). Instance configuration
+# may only NARROW these defaults — never widen them.
 DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
     "github": SourcePolicy(
         allow=frozenset({"decision", "constraint", "procedure", "fact",
@@ -58,10 +58,28 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
 
 
 def _from_config(raw: dict[str, Any]) -> SourcePolicy:
+    allow_raw = raw.get("allow_memory_types")
     return SourcePolicy(
-        allow=frozenset(raw.get("allow_memory_types") or []),
+        allow=frozenset(allow_raw) if allow_raw else None,
         require_review=frozenset(raw.get("require_review_for") or []),
         drop=frozenset(raw.get("drop") or []),
+    )
+
+
+def merge_policies(default: SourcePolicy, override: SourcePolicy) -> SourcePolicy:
+    """Combine defaults with instance overrides restrictively.
+
+    Instances may remove allowlist entries, add drops, and add review
+    requirements — never the reverse."""
+    if override.allow is not None:
+        base = default.allow if default.allow is not None else frozenset()
+        effective_allow: Optional[frozenset[str]] = base & override.allow
+    else:
+        effective_allow = default.allow
+    return SourcePolicy(
+        allow=effective_allow,
+        require_review=default.require_review | override.require_review,
+        drop=default.drop | override.drop,
     )
 
 
@@ -71,10 +89,11 @@ def policy_for_percept(percept: Percept) -> Optional[SourcePolicy]:
     connector_type = (percept.metadata or {}).get("connector_type")
     if not connector_type:
         return None
+    default = DEFAULT_SOURCE_POLICIES.get(str(connector_type), SourcePolicy())
     override = (percept.metadata or {}).get("ingestion_policy")
     if isinstance(override, dict) and override:
-        return _from_config(override)
-    return DEFAULT_SOURCE_POLICIES.get(str(connector_type), SourcePolicy())
+        return merge_policies(default, _from_config(override))
+    return default
 
 
 def evaluate(policy: Optional[SourcePolicy], memory_type: str) -> PolicyDecision:
@@ -86,7 +105,7 @@ def evaluate(policy: Optional[SourcePolicy], memory_type: str) -> PolicyDecision
     if memory_type in policy.require_review:
         return PolicyDecision(
             "review", f"source policy requires review for '{memory_type}'")
-    if policy.allow and memory_type not in policy.allow:
+    if policy.allow is not None and memory_type not in policy.allow:
         return PolicyDecision(
             "drop", f"memory type '{memory_type}' outside the source allowlist")
     return PolicyDecision("allow")

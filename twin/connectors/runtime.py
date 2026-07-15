@@ -494,7 +494,12 @@ def run_sync(
         plan_streams = getattr(adapter, "plan_streams", None)
         if callable(plan_streams):
             target_streams = plan_streams(account)
-    target_streams = target_streams or manifest.streams or ["default"]
+    if not target_streams:
+        if manifest.dynamic_streams:
+            result.health = HealthStatus.awaiting_configuration
+            _persist_health(store, instance, result)
+            return result
+        target_streams = manifest.streams or ["default"]
     owner = lease_owner or f"worker_{uuid.uuid4().hex[:12]}"
 
     worst = HealthStatus.healthy

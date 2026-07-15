@@ -68,6 +68,7 @@ class BatchStatus(str, Enum):
 
 
 class FailureClass(str, Enum):
+    configuration = "configuration"
     authentication = "authentication"
     authorization = "authorization"
     rate_limit = "rate_limit"
@@ -87,6 +88,7 @@ class FailureClass(str, Enum):
 class HealthStatus(str, Enum):
     healthy = "healthy"
     degraded = "degraded"
+    awaiting_configuration = "awaiting_configuration"
     paused = "paused"
     unauthorized = "unauthorized"
     revoked = "revoked"

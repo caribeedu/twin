@@ -20,6 +20,7 @@ rely on:
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Optional
 
 from ..models import ConnectorRecord
@@ -232,8 +233,9 @@ def record_from_commit(connector_id: str, account_id: str, repo: str,
     sha = commit["sha"]
     inner = commit.get("commit") or {}
     author = inner.get("author") or {}
+    committer = inner.get("committer") or {}
     message = _clip(inner.get("message"))
-    return _record(
+    rec = _record(
         connector_id=connector_id, account_id=account_id,
         external_type="commit", external_id=sha,
         external_revision=sha,  # immutable by construction
@@ -244,6 +246,31 @@ def record_from_commit(connector_id: str, account_id: str, repo: str,
         payload=commit, repo=repo,
         actors=_actors(commit.get("author")),
     )
+    branch = commit.get("_branch_scope") or commit.get("branch_scope")
+    if branch:
+        rec.source_metadata["branch_scope"] = branch
+        rec.source_metadata["default_branch_at_observation"] = branch
+    if committer.get("date"):
+        rec.source_metadata["committer_date"] = committer.get("date")
+    if author.get("date"):
+        rec.source_metadata["author_date"] = author.get("date")
+    return rec
+
+
+def revision_for_release(release: dict[str, Any]) -> str:
+    """Releases can be edited after publish; hash relevant fields so edits
+    become a new revision instead of a collision or a silent miss."""
+    published = release.get("published_at") or release.get("created_at") or "0"
+    content_fields = {
+        "name": release.get("name"),
+        "body": release.get("body"),
+        "draft": release.get("draft"),
+        "prerelease": release.get("prerelease"),
+        "target_commitish": release.get("target_commitish"),
+        "tag_name": release.get("tag_name"),
+    }
+    canonical = json.dumps(content_fields, sort_keys=True, default=str)
+    return f"{published}.{_hash8(canonical)}"
 
 
 def record_from_release(connector_id: str, account_id: str, repo: str,
@@ -251,8 +278,7 @@ def record_from_release(connector_id: str, account_id: str, repo: str,
     return _record(
         connector_id=connector_id, account_id=account_id,
         external_type="release", external_id=str(release["id"]),
-        external_revision=release.get("published_at")
-        or release.get("created_at") or "0",
+        external_revision=revision_for_release(release),
         occurred_at=release.get("published_at") or release.get("created_at"),
         content=f"Release {release.get('tag_name', '?')} in {repo}: "
                 f"{release.get('name') or ''}\n{_clip(release.get('body'))}",

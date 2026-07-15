@@ -41,7 +41,8 @@ class FakeGitHubAPI:
             "meta": {"full_name": full_name, "private": private,
                      "default_branch": default_branch, "open_issues_count": 0,
                      "pushed_at": "2026-01-01T00:00:00Z", "size": 128,
-                     "owner": _user(full_name.split("/")[0])},
+                     "owner": _user(full_name.split("/")[0]),
+                     "permissions": {"pull": True, "push": False, "admin": False}},
             "issues": {},          # number → issue obj (PRs mirrored here too)
             "pulls": {},           # number → pull obj
             "issue_comments": [],
@@ -216,7 +217,9 @@ class FakeGitHubAPI:
             return self._json(pull) if pull else self._json({}, status=404)
         rv_match = re.match(r"^/pulls/(\d+)/reviews$", rest)
         if rv_match:
-            return self._json(data["reviews"].get(int(rv_match.group(1)), []))
+            pr = int(rv_match.group(1))
+            items = data["reviews"].get(pr, [])
+            return self._paged(items, request, params)
         if rest == "/commits":
             items = sorted(data["commits"],
                            key=lambda c: c["commit"]["author"]["date"])

@@ -28,6 +28,8 @@ def snapshot_health(store, connector_id: str, status: HealthStatus,
         state.last_success_at = now_iso()
         state.retry_count = 0
         state.backoff_seconds = 0
+    elif status == HealthStatus.awaiting_configuration:
+        pass  # configuration gap — not a provider failure, no backoff
     elif status in (HealthStatus.degraded, HealthStatus.failed, HealthStatus.unauthorized):
         state.last_failure_at = now_iso()
         state.retry_count += 1

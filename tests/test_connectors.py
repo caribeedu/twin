@@ -1167,7 +1167,7 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
 
 def test_source_policy_instance_override(store, cfg, embedder):
     """ingestion_policy on the percept metadata (from instance config)
-    overrides the connector-type default."""
+    narrows the connector-type default — never widens it."""
     from twin.cognition.pipeline import extract_percept
     from twin.sensory.percept import Percept
 

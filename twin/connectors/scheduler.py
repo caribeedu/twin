@@ -138,17 +138,23 @@ def sync_due(
         state = store.get_connector_sync_state(connector_id)
         targeted = list((state.metadata or {}).get("targeted_streams") or []) \
             if state else []
+        processed = set(targeted) if targeted else set()
         try:
             results.append(
                 sync_connector(store, credentials, connector_id,
                                streams=targeted or None,
                                emit_percepts=emit_percepts)
             )
-            if targeted:
+            if processed:
                 state = store.get_connector_sync_state(connector_id)
                 if state is not None:
                     meta = dict(state.metadata or {})
-                    meta.pop("targeted_streams", None)
+                    remaining = [s for s in (meta.get("targeted_streams") or [])
+                                 if s not in processed]
+                    if remaining:
+                        meta["targeted_streams"] = remaining
+                    else:
+                        meta.pop("targeted_streams", None)
                     state.metadata = meta
                     store.upsert_connector_sync_state(state)
         except Exception as exc:
