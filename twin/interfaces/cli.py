@@ -541,6 +541,10 @@ def cmd_connector(args) -> None:
         if args.secret:
             from ..connectors import set_credential
             set_credential(ws.store, creds, args.connector_id, args.secret)
+        if getattr(args, "webhook_secret", None):
+            from ..connectors.github.webhook import set_webhook_secret
+            set_webhook_secret(ws.store, creds, args.connector_id,
+                               args.webhook_secret)
         inst = ws.store.get_connector_instance(args.connector_id)
         print(f"{inst.id}  status={inst.status.value}  credential={'set' if inst.credential_ref else 'none'}")
     elif cmd in ("auth", "test"):
@@ -558,6 +562,32 @@ def cmd_connector(args) -> None:
             print(f"  {s.stream:16}  {state}  raw={s.raw}  "
                   f"normalized={s.normalized}  dedup={s.deduplicated}  "
                   f"quarantined={s.quarantined}  percepts={s.percepts}  failed={s.failed}")
+    elif cmd == "github":
+        if args.github_command == "repositories":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for repo in adapter.list_repositories():
+                print(f"{repo['full_name']:40}  "
+                      f"{'private' if repo.get('private') else 'public ':7}  "
+                      f"open_issues={repo.get('open_issues')}  "
+                      f"pushed={repo.get('pushed_at')}")
+        else:
+            raise SystemExit(f"unknown github command: {args.github_command}")
+    elif cmd == "backfill":
+        if not args.preview:
+            raise SystemExit(
+                "phase 2 backfill runs through 'twin connector sync' after "
+                "setting configuration.backfill_since — use --preview to "
+                "inspect the scope first (previewing never ingests)")
+        from ..connectors import backfill_preview
+        preview = backfill_preview(ws.store, creds, args.connector_id,
+                                   principal_id="principal_local_cli")
+        print(_json.dumps(preview, indent=2, ensure_ascii=False))
     elif cmd == "pause":
         print(pause_connector(ws.store, args.connector_id).status.value)
     elif cmd == "resume":
@@ -985,7 +1015,19 @@ def main(argv: list[str] | None = None) -> None:
     ccfg.add_argument("connector_id")
     ccfg.add_argument("--secret", default=None)
     ccfg.add_argument("--config", default=None, help="JSON instance configuration")
+    ccfg.add_argument("--webhook-secret", default=None,
+                      help="dedicated webhook HMAC secret (github)")
     ccfg.set_defaults(func=cmd_connector)
+    cgh = cs.add_parser("github", help="github-specific helpers")
+    cghs = cgh.add_subparsers(dest="github_command", required=True)
+    cghr = cghs.add_parser("repositories",
+                           help="repositories the token can reach")
+    cghr.add_argument("connector_id")
+    cghr.set_defaults(func=cmd_connector)
+    cbf = cs.add_parser("backfill", help="preview backfill scope (never ingests)")
+    cbf.add_argument("connector_id")
+    cbf.add_argument("--preview", action="store_true")
+    cbf.set_defaults(func=cmd_connector)
     for name in ("auth", "test"):
         cx = cs.add_parser(name, help="validate stored credentials")
         cx.add_argument("connector_id")

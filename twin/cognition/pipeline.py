@@ -36,6 +36,7 @@ class ExtractReport:
     duplicates: int = 0
     flagged_for_review: int = 0
     pii_findings: int = 0
+    policy_dropped: int = 0  # candidates blocked by the source policy (§70)
 
 
 def _choose_extractor(cfg: Config) -> str:
@@ -120,10 +121,20 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     report.pii_findings = pii_count
     artifact_id = ensure_artifact_from_percept(store, percept)
 
+    # v0.6: connector-fed percepts obey a per-source candidate policy —
+    # what a source may propose is a governance decision, not the adapter's
+    from .source_policy import evaluate as policy_evaluate
+    from .source_policy import policy_for_percept
+    source_policy = policy_for_percept(percept)
+
     for extracted in result.memories:
         extracted = _apply_source_qualification(
             extracted.normalized(), percept, extractor_name=result.extractor,
         )
+        policy_decision = policy_evaluate(source_policy, extracted.type)
+        if policy_decision.action == "drop":
+            report.policy_dropped += 1
+            continue  # stays searchable as raw/artifact, never becomes memory
         dedupe_text = f"{extracted.title}\n{extracted.summary}"
         verdict = dedupe_check(store, embedder, extracted.type, dedupe_text)
 
@@ -140,6 +151,8 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             continue
 
         review_reason = _needs_review(cfg, extracted, percept)
+        if policy_decision.action == "review":
+            review_reason = review_reason or policy_decision.reason
         if verdict.action == "review" and verdict.existing_id:
             review_reason = review_reason or (
                 f"similar to {verdict.existing_id} (cos={verdict.similarity:.2f}) — update or contradiction?"

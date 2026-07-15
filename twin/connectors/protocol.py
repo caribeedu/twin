@@ -112,6 +112,14 @@ class ProfessionalConnector(Protocol):
 
     def validate_credentials(self) -> ConnectorHealth: ...
 
+    def plan_streams(self, account: SourceAccount) -> list[str]:
+        """OPTIONAL (duck-typed): dynamic stream list derived from the
+        instance configuration — e.g. one stream per configured repository.
+        Adapters with a fixed topology may omit it; the runtime then falls
+        back to ``adapter_manifest().streams``. Each stream gets its own
+        checkpoint and its own fenced lease."""
+        ...
+
     def plan_sync(
         self,
         account: SourceAccount,

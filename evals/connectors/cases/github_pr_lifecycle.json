@@ -1,0 +1,17 @@
+{
+  "id": "github_pr_lifecycle",
+  "scenario": "github_pr_lifecycle",
+  "connector_type": "github",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "description": "PR opens proposing Redis, review rejects it, merge lands PostgreSQL advisory locks — the final merged state carries the highest trust, every lifecycle revision is retained, the whole lineage shares one thread_key, ownership is sealed on every percept, and extraction yields candidate decisions where the merged one outranks the rejected alternative without ever being auto-confirmed.",
+  "repo": "acme/atlas",
+  "pr_number": 3,
+  "expected": {
+    "pr_revisions": 3,
+    "final_trust": 0.95,
+    "early_trust": 0.8,
+    "thread_key": "github:acme/atlas#3",
+    "vault_id": "vault_work_acme"
+  }
+}

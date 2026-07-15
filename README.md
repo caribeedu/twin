@@ -1355,7 +1355,7 @@ Prioritize:
 
 Each connector must preserve authorization, source ownership, incremental checkpoints, provenance, confidentiality and deletion behavior. Employer data should remain physically and cryptographically separable from personal data when policy requires it.
 
-Phase 1 — Connector Framework (in progress):
+Phase 1 — Connector Framework (done):
 
 - shared `ProfessionalConnector` contract + adapter manifest/registry (with declared `auth_mode`); no real providers yet;
 - `SourceAccount` / `ConnectorInstance` with declared ownership (`personal | employer | client | opensource | shared | unknown`), a mandatory owner principal, per-organization work vaults (`ensure_org_vault`) and preview-first, audited reclassification;
@@ -1366,6 +1366,17 @@ Phase 1 — Connector Framework (in progress):
 - `FakeConnector` proving the full path; CLI (`twin connector …`), REST (`/api/connectors`) and MCP tools, all gated by `connector:*` capabilities. Confirmation model: the agent-facing MCP surface is preview/confirm with state-fingerprinted tokens (`connector_sync`), and ownership reclassification is state-fingerprinted on every surface; the authenticated HTTP API is otherwise a direct command surface for administrators — capability-gated, but without preview tokens;
 - per-(connector, stream) leases carry a monotonic fencing token, are renewed after every fetched page, and the finalize transaction re-asserts ownership — a worker that outlived its lease cannot publish results;
 - `tests/test_connectors.py` + `tests/test_connector_authz.py` contract suites (SQLite and Postgres) + `evals/connectors/` scenarios (normalization, replay, partial batch, revision collision, checkpoint failure, quarantine, source deletion). Connectors capture evidence; cognition still creates understanding — no connector path writes confirmed Memory or Judgment.
+
+Phase 2 — GitHub Connector (done):
+
+- REST v3 adapter (`twin/connectors/github/`) over the Phase 1 framework: `GitHubClient` (Link-header pagination, per-stream page budget, rate-limit → structured `retry_after` the scheduler respects), read-only PAT auth (`awaiting_auth` without a token; write scopes detected via `X-OAuth-Scopes` degrade health with a least-privilege warning);
+- dynamic streams per repository — `repo:{owner}/{name}:{issues|pulls|commits|releases}` from the new optional `plan_streams()` protocol method — each with its own checkpoint/lease; incremental cursor is the provider's `updated_at` watermark re-fetched with a lookback window and deduplicated by revision; PRs are detected via the `since`-capable issues listing, then re-fetched from `/pulls` as the authoritative object;
+- nine external types normalized to `ConnectorRecord`s (`repository`, `issue`, `issue_comment`, `pull_request`, `review`, `review_comment`, `commit`, `release`, `check_summary`) with `github:{login}` actor ids, a shared `thread_key`/`lineage_root` per issue/PR, and honest affordances (`deletions: false` — not observable via REST polling);
+- lifecycle-aware source trust (merged PR 0.95 > approved review 0.90 > commit 0.85 > body/release 0.80 > human comment 0.75 > check 0.70; bots 0.50 — below the review threshold, marked `derived=likely_notification`); every PR lifecycle revision is retained so the merged state wins without erasing rejected alternatives, and the heuristic extractor now captures "decided against / instead of X use Y" as decisions carrying `payload.rejected_alternative`;
+- per-source candidate policy at extraction (`twin/cognition/source_policy.py`): GitHub proposes decisions/constraints/procedures/facts/events/tasks, never preferences or beliefs; tasks are born needing review; instances can narrow the policy via `configuration.ingestion_policy`;
+- setup and backfill preview surfaces: `twin connector github repositories`, `twin connector backfill --preview` / `POST /api/connectors/{id}/backfill?preview=true` / MCP `connector_backfill_preview` (capability `connector:backfill`) — previews report scope, vault, policy and volume signals and never ingest; Phase 2 backfill itself is the first unwatermarked sync bounded by `configuration.backfill_since` (the partitionable BackfillJob is Phase 4);
+- optional webhook receiver `POST /api/webhooks/github/{connector_id}`: HMAC-authenticated (`X-Hub-Signature-256` against a dedicated secret in the CredentialStore, uniform 401 on every failure), it only marks the sync state due with a `targeted_streams` hint the scheduler consumes — the payload never becomes canonical state and polling remains the authoritative reconciliation;
+- `tests/test_github_connector.py` contract suite against an offline API double (`tests/github_mock.py`), a Postgres mirror test, and `evals/connectors/` scenarios `github_pr_lifecycle` and `github_bot_lineage`.
 
 ### v0.7 — Personal Domains
 

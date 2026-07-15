@@ -1,0 +1,14 @@
+{
+  "id": "github_bot_lineage",
+  "scenario": "github_bot_lineage",
+  "connector_type": "github",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "description": "A bot comment restating a human decision is a notification wearing a comment costume: trust 0.50 (below the low-trust threshold), marked derived=likely_notification with the lineage root of the object it references, and every memory extracted from it is born needing review.",
+  "repo": "acme/atlas",
+  "expected": {
+    "bot_trust": 0.5,
+    "derived": "likely_notification",
+    "lineage_root": "github:acme/atlas#1"
+  }
+}

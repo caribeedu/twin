@@ -132,11 +132,25 @@ def sync_due(
     intervals = load_schedule(home)  # raises ScheduleConfigError when invalid
     results: list[SyncResult] = []
     for connector_id in due_connectors(store, home):
+        # a webhook may have left a targeted-streams hint: honor it for this
+        # run, then clear it — the regular cadence remains the authoritative
+        # reconciliation over every stream
+        state = store.get_connector_sync_state(connector_id)
+        targeted = list((state.metadata or {}).get("targeted_streams") or []) \
+            if state else []
         try:
             results.append(
                 sync_connector(store, credentials, connector_id,
+                               streams=targeted or None,
                                emit_percepts=emit_percepts)
             )
+            if targeted:
+                state = store.get_connector_sync_state(connector_id)
+                if state is not None:
+                    meta = dict(state.metadata or {})
+                    meta.pop("targeted_streams", None)
+                    state.metadata = meta
+                    store.upsert_connector_sync_state(state)
         except Exception as exc:
             logger.warning("scheduled sync failed for %s: %s",
                            connector_id, sanitize_error(exc))

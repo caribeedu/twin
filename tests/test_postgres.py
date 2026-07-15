@@ -300,3 +300,78 @@ def test_connector_framework_on_postgres(pg_store, tmp_path):
     events = pg_store.list_connector_deletion_events(inst.id)
     assert events and events[0].external_id == "1"
     assert events[0].affected_percept_ids
+
+
+def test_github_connector_on_postgres(pg_store, tmp_path, monkeypatch):
+    """The real GitHub adapter path (dynamic streams, watermark cursor,
+    lifecycle trust, idempotent replay) holds on Postgres too."""
+    import httpx
+
+    from github_mock import FakeGitHubAPI
+    from twin.connectors import (
+        add_connector_instance,
+        build_credential_store,
+        register_source_account,
+        sync_connector,
+    )
+    from twin.connectors.github import client as ghclient
+
+    api = FakeGitHubAPI()
+    repo = "acme/atlas"
+    api.add_repo(repo)
+    real_build = ghclient._build_http
+
+    def fake_build(base_url, token):
+        original = real_build(base_url, token)
+        headers = dict(original.headers)
+        original.close()
+        return httpx.Client(transport=api.transport(),
+                            base_url="https://api.github.com", headers=headers)
+
+    monkeypatch.setattr(ghclient, "_build_http", fake_build)
+
+    api.add_issue(repo, 1, title="Choose the queue",
+                  body="We must pick a message queue.",
+                  updated_at="2026-01-01T10:00:00Z")
+    pr = api.add_pull(repo, 2, title="Use PostgreSQL queue",
+                      body="We decided to use PostgreSQL for the queue.",
+                      updated_at="2026-01-02T10:00:00Z", merged=True,
+                      head_sha="abc123")
+    api.add_review(repo, 2, 500, state="APPROVED", body="Ship it")
+
+    creds = build_credential_store(tmp_path / "pg-gh-creds")
+    acc = register_source_account(
+        pg_store, connector_type="github", source_owner="employer",
+        org_key="acme", owner_principal_id="principal_pg_test",
+    )
+    inst = add_connector_instance(
+        pg_store, creds, account_id=acc.id, secret="gh-test-token",
+        configuration={"repositories": [repo]},
+    )
+
+    result = sync_connector(pg_store, creds, inst.id)
+    assert result.health.value == "healthy"
+    ckpt = pg_store.get_connector_checkpoint(inst.id, f"repo:{repo}:issues")
+    assert ckpt is not None and ckpt.cursor["watermark"] == "2026-01-01T10:00:00Z"
+
+    records = pg_store.list_connector_records(inst.id)
+    prs = [r for r in records if r.external_type == "pull_request"]
+    assert prs and prs[0].confidentiality["source_trust"] == 0.95
+    assert prs[0].thread_key == f"github:{repo}#2"
+    reviews = [r for r in records if r.external_type == "review"]
+    assert reviews and reviews[0].confidentiality["source_trust"] == 0.90
+
+    percepts = pg_store.list_percepts()
+    assert percepts and all(p.metadata["vault_id"] == "vault_work_acme"
+                            for p in percepts)
+
+    # idempotent replay, then a new revision lands without erasing the old
+    assert sync_connector(pg_store, creds, inst.id).percepts == 0
+    pr["body"] = "We decided to use PostgreSQL advisory locks for the queue."
+    pr["updated_at"] = "2026-01-03T10:00:00Z"
+    sync_connector(pg_store, creds, inst.id)
+    prs = [r for r in pg_store.list_connector_records(inst.id)
+           if r.external_type == "pull_request"]
+    assert len(prs) == 2
+    assert {r.external_revision for r in prs} == {
+        "2026-01-02T10:00:00Z", "2026-01-03T10:00:00Z"}
