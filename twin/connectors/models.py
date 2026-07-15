@@ -318,7 +318,11 @@ class ConnectorDeadLetter(BaseModel):
 
 
 class ConnectorSyncState(BaseModel):
-    """Scheduler bookkeeping + last known health snapshot."""
+    """Scheduler bookkeeping + last known health snapshot.
+
+    ``version`` is a compare-and-set token so concurrent webhook hints and
+    scheduler consumption never silently overwrite each other.
+    """
     id: str                                    # == connector_id
     status: HealthStatus = HealthStatus.healthy
     interval_seconds: int = Field(default=300, ge=1)
@@ -332,5 +336,6 @@ class ConnectorSyncState(BaseModel):
     lag_seconds: int = Field(default=0, ge=0)
     pending_items: int = Field(default=0, ge=0)
     dead_letters: int = Field(default=0, ge=0)
+    version: int = Field(default=0, ge=0)
     updated_at: str = Field(default_factory=now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)

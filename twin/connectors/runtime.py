@@ -502,23 +502,42 @@ def run_sync(
         target_streams = manifest.streams or ["default"]
     owner = lease_owner or f"worker_{uuid.uuid4().hex[:12]}"
 
+    # Cap how many durable continuation batches one sync call may commit per
+    # stream. 0 / missing = keep going until the window finishes (or fails).
+    max_batches = int((instance.configuration or {})
+                      .get("max_batches_per_stream") or 0)
+
     worst = HealthStatus.healthy
     for stream in target_streams:
-        sr = _sync_stream(store, adapter, instance, account, stream,
-                          emit_percepts=emit_percepts, lease_owner=owner)
-        result.streams.append(sr)
-        if sr.skipped:
-            continue  # another worker owns the stream — not a health problem
-        if sr.failure_class in (
-            FailureClass.authentication.value, FailureClass.authorization.value
-        ):
-            worst = HealthStatus.unauthorized
-        elif not sr.committed and worst == HealthStatus.healthy:
-            worst = HealthStatus.degraded
+        batches = 0
+        while True:
+            sr = _sync_stream(store, adapter, instance, account, stream,
+                              emit_percepts=emit_percepts, lease_owner=owner)
+            result.streams.append(sr)
+            batches += 1
+            if sr.skipped:
+                break  # another worker owns the stream — not a health problem
+            if sr.failure_class in (
+                FailureClass.authentication.value, FailureClass.authorization.value
+            ):
+                worst = HealthStatus.unauthorized
+            elif not sr.committed and worst == HealthStatus.healthy:
+                worst = HealthStatus.degraded
+            if not sr.committed:
+                break
+            if not _window_incomplete(sr.cursor_after):
+                break
+            if max_batches and batches >= max_batches:
+                break
 
     result.health = worst
     _persist_health(store, instance, result)
     return result
+
+
+def _window_incomplete(cursor: Optional[dict[str, Any]]) -> bool:
+    """Durable continuation cursor: watermark not yet promoted."""
+    return bool(cursor and cursor.get("substream") and "progress" in cursor)
 
 
 def _sync_stream(

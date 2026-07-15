@@ -439,13 +439,11 @@ def revoke_connector(
     # 1. stop everything first — whatever happens next, no more fetches
     store.update_connector_instance(
         connector_id, status=ConnectorStatus.revoking.value)
-    state = store.get_connector_sync_state(connector_id)
-    if state is None:
-        from .models import ConnectorSyncState
-        state = ConnectorSyncState(id=connector_id)
-    state.paused = True
-    state.status = HealthStatus.revoked
-    store.upsert_connector_sync_state(state)
+    def _pause(state) -> None:
+        state.paused = True
+        state.status = HealthStatus.revoked
+
+    store.apply_connector_sync_state(connector_id, _pause)
 
     # 2. destroy + verify secret material
     residual = False

@@ -1,8 +1,11 @@
 """Incremental sync cursor helpers for the GitHub adapter.
 
-Invariant: page budget exhausted ≠ stream fully consumed. A committed
-``watermark`` advances only after every substream in the family finishes
-the current lookback window.
+Invariant: page budget exhausted ≠ stream fully consumed.
+
+A durable batch may commit a *continuation* cursor (``substream`` +
+``progress`` / ``next_url``) without promoting ``watermark``. The
+watermark advances only after every substream finishes the lookback
+window (``finalize_cursor``).
 """
 
 from __future__ import annotations

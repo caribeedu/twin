@@ -305,6 +305,10 @@ class GithubConnector:
         items: list[RawFetchItem] = []
         pages_budget = self.max_pages
 
+        # One page budget = one durable batch. Always return done=True so the
+        # runtime commits the continuation cursor (or promoted watermark);
+        # page-budget exhaustion must never be confused with "keep fetching
+        # in memory until the window ends".
         while pages_budget > 0:
             sub = cur["substream"]
             batch_items, pages_used, sub_done = self._fetch_substream(
@@ -312,8 +316,11 @@ class GithubConnector:
             )
             items.extend(batch_items)
             pages_budget -= pages_used
+            if pages_used == 0 and not sub_done:
+                # defensive: avoid spinning if a substream made no progress
+                return FetchPage(raw_items=items, cursor_after=cur, done=True)
             if not sub_done:
-                return FetchPage(raw_items=items, cursor_after=cur, done=False)
+                return FetchPage(raw_items=items, cursor_after=cur, done=True)
             nxt = ss.next_substream(family, sub)
             if nxt:
                 cur["substream"] = nxt
@@ -323,7 +330,7 @@ class GithubConnector:
                     cursor_after=ss.finalize_cursor(cur),
                     done=True,
                 )
-        return FetchPage(raw_items=items, cursor_after=cur, done=False)
+        return FetchPage(raw_items=items, cursor_after=cur, done=True)
 
     def _fetch_substream(
         self,

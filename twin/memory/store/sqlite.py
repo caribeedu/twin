@@ -600,6 +600,7 @@ CREATE TABLE IF NOT EXISTS connector_sync_state (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'healthy',
     next_run_at TEXT,
+    version INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
 );
 -- one worker per (connector, stream); leases expire so crashes cannot wedge a stream
@@ -800,6 +801,13 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, Me
         self.conn.executescript(PRIVACY_SCHEMA)
         # v0.6 connector framework tables
         self.conn.executescript(CONNECTOR_SCHEMA)
+        css_cols = {r[1] for r in self.conn.execute(
+            "PRAGMA table_info(connector_sync_state)")}
+        if css_cols and "version" not in css_cols:
+            self.conn.execute(
+                "ALTER TABLE connector_sync_state "
+                "ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
+            )
         self._maybe_commit()
 
     def close(self) -> None:

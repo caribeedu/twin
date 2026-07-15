@@ -20,9 +20,6 @@ import hmac
 import json
 from typing import Any, Optional
 
-from ...clock import now_iso
-from ..models import ConnectorSyncState
-
 # GitHub event name → stream family the poller should visit.
 EVENT_FAMILIES = {
     "issues": "issues",
@@ -144,14 +141,6 @@ def handle_github_webhook(
     if not streams:
         return {"scheduled": [], "detail": "event not mapped to a configured stream"}
 
-    state = store.get_connector_sync_state(connector_id) \
-        or ConnectorSyncState(id=connector_id)
-    state.next_run_at = now_iso()
-    meta = dict(state.metadata or {})
-    hinted = set(meta.get("targeted_streams") or [])
-    meta["targeted_streams"] = sorted(hinted | set(streams))
-    meta["last_webhook_event"] = event  # the event NAME only, never the payload
-    state.metadata = meta
-    state.updated_at = now_iso()
-    store.upsert_connector_sync_state(state)
+    from ..sync_state_cas import add_targeted_streams
+    add_targeted_streams(store, connector_id, streams, event=event)
     return {"scheduled": streams}

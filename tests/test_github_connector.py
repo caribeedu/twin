@@ -583,10 +583,64 @@ def test_max_pages_continuation_ingests_all_issues_without_starvation(store, cre
     result = sync_connector(store, creds, inst.id,
                             streams=[f"repo:{REPO}:issues"])
     assert result.health.value == "healthy"
+    # page budget forces multiple durable batches inside one sync call
+    issue_batches = [s for s in result.streams if s.stream.endswith(":issues")]
+    assert len(issue_batches) > 1
     issues = _records_by_type(store, inst.id)["issue"]
     assert len(issues) == 1001
     ckpt = store.get_connector_checkpoint(inst.id, f"repo:{REPO}:issues")
-    assert ckpt.cursor["watermark"] is not None
+    assert ckpt.cursor.get("watermark") is not None
+    assert "progress" not in ckpt.cursor  # window fully promoted
+
+
+def test_durable_continuation_survives_restart_between_batches(store, creds, gh):
+    """Crash mid-window: next sync resumes from persisted next_url, does not
+    re-fetch the prefix, and only promotes watermark at the end."""
+    for n in range(1, 251):
+        gh.add_issue(REPO, n, title=f"Issue {n}",
+                     updated_at=f"2026-02-01T{(n % 24):02d}:{(n % 60):02d}:00Z")
+    _acc, inst = _mk(store, creds, extra_config={
+        "max_pages_per_stream": 1,
+        "max_batches_per_stream": 1,
+    })
+    stream = f"repo:{REPO}:issues"
+    first = sync_connector(store, creds, inst.id, streams=[stream])
+    assert first.health.value == "healthy"
+    assert first.streams[0].committed
+    ckpt = store.get_connector_checkpoint(inst.id, stream)
+    assert ckpt is not None
+    assert ckpt.cursor.get("substream") == "issues"
+    assert ckpt.cursor.get("progress", {}).get("issues", {}).get("next_url")
+    # watermark stays at the pre-window value (None) until the window ends
+    assert ckpt.cursor.get("watermark") is None
+    after_first = len(_records_by_type(store, inst.id).get("issue", []))
+    assert 0 < after_first < 250
+
+    # simulate process restart: new sync resumes the durable continuation
+    mid_batches = store.list_connector_batches(inst.id)
+    second = sync_connector(store, creds, inst.id, streams=[stream])
+    assert second.streams[0].committed
+    ckpt2 = store.get_connector_checkpoint(inst.id, stream)
+    assert ckpt2.version > ckpt.version
+    # still in the same window or further — never wiped back to a bare start
+    assert "progress" in ckpt2.cursor or ckpt2.cursor.get("watermark")
+
+    # finish the window
+    for _ in range(40):
+        ckpt = store.get_connector_checkpoint(inst.id, stream)
+        if ckpt and "progress" not in (ckpt.cursor or {}):
+            break
+        sync_connector(store, creds, inst.id, streams=[stream])
+    issues = _records_by_type(store, inst.id)["issue"]
+    assert len(issues) == 250
+    final = store.get_connector_checkpoint(inst.id, stream)
+    assert final.cursor.get("watermark")
+    assert "progress" not in final.cursor
+    # more than one committed batch for this stream
+    committed = [b for b in store.list_connector_batches(inst.id)
+                 if b.stream == stream
+                 and getattr(b.status, "value", b.status) == "committed"]
+    assert len(committed) >= 2
 
 
 def test_paginated_pr_reviews_all_ingested(store, creds, gh):
@@ -595,7 +649,7 @@ def test_paginated_pr_reviews_all_ingested(store, creds, gh):
     for rid in range(1, 151):
         gh.add_review(REPO, 9, rid, state="COMMENTED",
                       body=f"review {rid}",
-                      submitted_at=f"2026-01-01T{ (rid % 24):02d}:00:00Z")
+                      submitted_at=f"2026-01-01T{(rid % 24):02d}:00:00Z")
     _acc, inst = _mk(store, creds, extra_config={"max_pages_per_stream": 2})
     sync_connector(store, creds, inst.id)
     reviews = _records_by_type(store, inst.id)["review"]
@@ -692,4 +746,56 @@ def test_ingestion_policy_override_cannot_widen_github_allowlist():
     )
     assert evaluate(narrow, "decision").action == "allow"
     assert evaluate(narrow, "fact").action == "drop"
+
+
+def test_webhook_hint_cas_preserves_concurrent_delivery(store, creds, gh):
+    """Hint C arriving between scheduler reload and upsert must survive CAS."""
+    from twin.connectors.github.webhook import set_webhook_secret
+    from twin.connectors.sync_state_cas import (
+        add_targeted_streams,
+        consume_targeted_streams,
+    )
+
+    _acc, inst = _mk(store, creds)
+    set_webhook_secret(store, creds, inst.id, "hook-secret")
+    add_targeted_streams(store, inst.id, [f"repo:{REPO}:issues"], event="issues")
+    add_targeted_streams(store, inst.id, [f"repo:{REPO}:pulls"], event="pull_request")
+
+    state = store.get_connector_sync_state(inst.id)
+    processed = set(state.metadata["targeted_streams"])  # [issues, pulls]
+    assert processed == {f"repo:{REPO}:issues", f"repo:{REPO}:pulls"}
+
+    # simulate: scheduler holds `processed`, then webhook C lands, then consume
+    add_targeted_streams(store, inst.id, [f"repo:{REPO}:commits"], event="push")
+    consume_targeted_streams(store, inst.id, processed)
+
+    state = store.get_connector_sync_state(inst.id)
+    assert state.metadata.get("targeted_streams") == [f"repo:{REPO}:commits"]
+
+
+def test_sync_failure_does_not_consume_webhook_hints(store, creds, gh, tmp_path):
+    from twin.connectors.github.webhook import (
+        handle_github_webhook,
+        set_webhook_secret,
+    )
+    from twin.connectors import scheduler as sched
+
+    _acc, inst = _mk(store, creds)
+    set_webhook_secret(store, creds, inst.id, "hook-secret")
+    body = _hook_body(issue={"number": 1})
+    handle_github_webhook(store, creds, inst.id, event="issues", body=body,
+                          signature=_hook_sig("hook-secret", body))
+
+    def boom(*_a, **_k):
+        raise RuntimeError("sync exploded")
+
+    real = sched.sync_connector
+    sched.sync_connector = boom
+    try:
+        sched.sync_due(store, creds, tmp_path)
+    finally:
+        sched.sync_connector = real
+
+    state = store.get_connector_sync_state(inst.id)
+    assert state.metadata.get("targeted_streams") == [f"repo:{REPO}:issues"]
 

@@ -11,7 +11,9 @@ Robustness rules:
 - one failing connector never interrupts the others — each run is isolated,
   the failure is recorded on its sync state with backoff;
 - stream-level mutual exclusion comes from the runtime's leases, so two
-  schedulers racing the same connector degrade to one no-op, not duplicates.
+  schedulers racing the same connector degrade to one no-op, not duplicates;
+- webhook ``targeted_streams`` hints are consumed via CAS so concurrent
+  deliveries are never lost.
 """
 
 from __future__ import annotations
@@ -24,9 +26,10 @@ from typing import Optional
 from ..clock import now_iso
 from .credentials import CredentialStore
 from .errors import sanitize_error
-from .models import ConnectorStatus, ConnectorSyncState, HealthStatus, SYNCABLE_STATUSES
+from .models import ConnectorSyncState, HealthStatus, SYNCABLE_STATUSES
 from .runtime import SyncResult
 from .service import sync_connector
+from .sync_state_cas import consume_targeted_streams
 
 logger = logging.getLogger("twin.connectors.scheduler")
 
@@ -75,6 +78,15 @@ def _parse(ts: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _window_in_progress(store, connector_id: str) -> bool:
+    """True when any stream checkpoint holds a durable continuation cursor."""
+    for ckpt in store.list_connector_checkpoints(connector_id):
+        cur = ckpt.cursor or {}
+        if cur.get("substream") and "progress" in cur:
+            return True
+    return False
+
+
 def due_connectors(store, home: Path, *, at: Optional[datetime] = None) -> list[str]:
     at = at or _now()
     due: list[str] = []
@@ -100,21 +112,31 @@ def schedule_next(store, connector_id: str, home: Path,
     inst = store.get_connector_instance(connector_id)
     intervals = intervals if intervals is not None else load_schedule(home)
     interval = intervals.get(inst.connector_type if inst else "", 300)
-    state = store.get_connector_sync_state(connector_id) or ConnectorSyncState(id=connector_id)
-    delay = interval + max(0, state.backoff_seconds)
-    state.interval_seconds = interval
-    state.next_run_at = (at + timedelta(seconds=delay)).isoformat()
-    return store.upsert_connector_sync_state(state)
+    # unfinished windows must continue immediately — waiting a full cadence
+    # would stall large backfills behind an arbitrary page budget
+    immediate = _window_in_progress(store, connector_id)
+
+    def _apply(state: ConnectorSyncState) -> None:
+        delay = 0 if immediate else interval + max(0, state.backoff_seconds)
+        state.interval_seconds = interval
+        state.next_run_at = (at + timedelta(seconds=delay)).isoformat()
+
+    return store.apply_connector_sync_state(connector_id, _apply)
 
 
 def _record_failure(store, connector_id: str, exc: Exception) -> None:
-    state = store.get_connector_sync_state(connector_id) or ConnectorSyncState(id=connector_id)
-    state.status = HealthStatus.failed
-    state.last_failure_at = now_iso()
-    state.retry_count += 1
-    state.backoff_seconds = min(3600, max(60, state.backoff_seconds * 2 or 60))
-    state.metadata = {**(state.metadata or {}), "last_error": sanitize_error(exc)}
-    store.upsert_connector_sync_state(state)
+    err = sanitize_error(exc)
+
+    def _apply(state: ConnectorSyncState) -> None:
+        state.status = HealthStatus.failed
+        state.last_failure_at = now_iso()
+        state.retry_count += 1
+        state.backoff_seconds = min(3600, max(60, state.backoff_seconds * 2 or 60))
+        meta = dict(state.metadata or {})
+        meta["last_error"] = err
+        state.metadata = meta
+
+    store.apply_connector_sync_state(connector_id, _apply)
 
 
 def sync_due(
@@ -133,30 +155,20 @@ def sync_due(
     results: list[SyncResult] = []
     for connector_id in due_connectors(store, home):
         # a webhook may have left a targeted-streams hint: honor it for this
-        # run, then clear it — the regular cadence remains the authoritative
-        # reconciliation over every stream
+        # run, then clear only what we observed — CAS keeps concurrent hints
         state = store.get_connector_sync_state(connector_id)
         targeted = list((state.metadata or {}).get("targeted_streams") or []) \
             if state else []
         processed = set(targeted) if targeted else set()
         try:
-            results.append(
-                sync_connector(store, credentials, connector_id,
-                               streams=targeted or None,
-                               emit_percepts=emit_percepts)
-            )
-            if processed:
-                state = store.get_connector_sync_state(connector_id)
-                if state is not None:
-                    meta = dict(state.metadata or {})
-                    remaining = [s for s in (meta.get("targeted_streams") or [])
-                                 if s not in processed]
-                    if remaining:
-                        meta["targeted_streams"] = remaining
-                    else:
-                        meta.pop("targeted_streams", None)
-                    state.metadata = meta
-                    store.upsert_connector_sync_state(state)
+            result = sync_connector(store, credentials, connector_id,
+                                    streams=targeted or None,
+                                    emit_percepts=emit_percepts)
+            results.append(result)
+            # only consume hints after a sync that actually ran; a raised
+            # failure leaves them for retry. degraded/healthy both ran.
+            if processed and result.ok:
+                consume_targeted_streams(store, connector_id, processed)
         except Exception as exc:
             logger.warning("scheduled sync failed for %s: %s",
                            connector_id, sanitize_error(exc))

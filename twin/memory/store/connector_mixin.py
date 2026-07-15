@@ -508,29 +508,70 @@ class ConnectorStoreMixin:
 
     # -- sync state -------------------------------------------------------
 
-    def upsert_connector_sync_state(
-        self, state: ConnectorSyncState,
-    ) -> ConnectorSyncState:
-        # update-first, insert-on-miss, update-on-race: safe when two workers
-        # snapshot health for the same connector concurrently
-        row = sync_state_to_row(state)
+    def cas_connector_sync_state(
+        self, state: ConnectorSyncState, expected_version: int,
+    ) -> bool:
+        """Compare-and-set on sync-state version. Used so webhook hints and
+        scheduler consumption cannot silently clobber each other."""
+        existing = self.get_connector_sync_state(state.id)
+        if existing is None:
+            if expected_version != 0:
+                return False
+            fresh = state.model_copy(update={"version": 1})
+            try:
+                self._c_insert("connector_sync_state", sync_state_to_row(fresh))
+            except Exception:  # insert race — someone else created it
+                return False
+            return True
+        if existing.version != expected_version:
+            return False
+        merged = state.model_copy(update={"version": expected_version + 1})
+        row = sync_state_to_row(merged)
         cols = [c for c in row if c != "id"]
         sets = ", ".join(f"{c} = ?" for c in cols)
         cur = self._j_exec(
-            f"UPDATE connector_sync_state SET {sets} WHERE id = ?",
-            tuple(row[c] for c in cols) + (state.id,),
+            f"UPDATE connector_sync_state SET {sets}"
+            " WHERE id = ? AND version = ?",
+            tuple(row[c] for c in cols) + (state.id, expected_version),
         )
-        if getattr(cur, "rowcount", 0) == 0:
-            try:
-                self._c_insert("connector_sync_state", row)
-                return state
-            except Exception:  # insert race — the other writer created it
-                self._j_exec(
-                    f"UPDATE connector_sync_state SET {sets} WHERE id = ?",
-                    tuple(row[c] for c in cols) + (state.id,),
-                )
         self._j_commit()
-        return state
+        return getattr(cur, "rowcount", 0) > 0
+
+    def apply_connector_sync_state(
+        self, connector_id: str, apply_fn, *, retries: int = 10,
+    ) -> ConnectorSyncState:
+        """Load → mutate → CAS, retrying on concurrent writers."""
+        last: Optional[ConnectorSyncState] = None
+        for _ in range(retries):
+            state = (self.get_connector_sync_state(connector_id)
+                     or ConnectorSyncState(id=connector_id))
+            expected = state.version
+            apply_fn(state)
+            if self.cas_connector_sync_state(state, expected_version=expected):
+                return self.get_connector_sync_state(connector_id) or state
+            last = state
+        raise RuntimeError(
+            f"CAS exhausted for connector_sync_state {connector_id}"
+            + (f" (last version {last.version})" if last else "")
+        )
+
+    def upsert_connector_sync_state(
+        self, state: ConnectorSyncState,
+    ) -> ConnectorSyncState:
+        """Compatibility wrapper: CAS-apply scalar fields only.
+
+        ``metadata`` is intentionally left alone — concurrent webhook hints
+        live there. Prefer ``apply_connector_sync_state`` / sync_state_cas
+        helpers for metadata mutations."""
+        snapshot = state.model_dump(mode="json")
+
+        def _apply(current: ConnectorSyncState) -> None:
+            for key, value in snapshot.items():
+                if key in ("id", "version", "metadata"):
+                    continue
+                setattr(current, key, value)
+
+        return self.apply_connector_sync_state(state.id, _apply)
 
     def get_connector_sync_state(
         self, connector_id: str,
