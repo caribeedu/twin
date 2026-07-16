@@ -1,8 +1,15 @@
 """Incremental sync cursor helpers for the Slack adapter.
 
 Invariant: page budget exhausted ≠ stream fully consumed. A committed
-``watermark`` (Slack message ts) advances only after history and pending
-thread replies for the current window finish.
+``watermark`` advances only after history and pending thread replies for
+the current window finish.
+
+Watermark semantics: maximum observed Slack event ``ts`` across history
+roots *and* thread replies in the completed window. It is not a pure
+channel-history cursor. Activity on roots older than
+``watermark - lookback`` must be recovered via durable Events API hints
+(``pending_threads`` / ``pending_message_refreshes`` / tombstones), not
+by assuming history alone will surface them.
 """
 
 from __future__ import annotations

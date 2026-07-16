@@ -154,6 +154,13 @@ class SlackClient:
         next_cur = (data.get("response_metadata") or {}).get("next_cursor") or None
         return list(data.get("messages") or []), next_cur or None
 
+    def conversations_info(self, channel: str) -> Optional[dict[str, Any]]:
+        data = self.call("conversations.info", params={"channel": channel},
+                         allow_not_found=True)
+        if not data.get("ok"):
+            return None
+        return data.get("channel")
+
     def users_info(self, user: str) -> Optional[dict[str, Any]]:
         data = self.call("users.info", params={"user": user}, allow_not_found=True)
         if not data.get("ok"):

@@ -32,10 +32,12 @@ class FakeSlackAPI:
         self.requests: list[str] = []
 
     def add_channel(self, channel_id: str, *, name: str,
-                    private: bool = False) -> dict[str, Any]:
+                    private: bool = False, im: bool = False,
+                    mpim: bool = False) -> dict[str, Any]:
         ch = {
             "id": channel_id, "name": name, "is_private": private,
-            "is_im": False, "is_mpim": False, "is_channel": not private,
+            "is_im": im, "is_mpim": mpim,
+            "is_channel": (not private and not im and not mpim),
             "num_members": 3, "created": 1700000000,
         }
         self.channels[channel_id] = ch
@@ -89,6 +91,12 @@ class FakeSlackAPI:
         if method == "conversations.list":
             return self._ok({"channels": list(self.channels.values()),
                              "response_metadata": {"next_cursor": ""}})
+        if method == "conversations.info":
+            ch = self.channels.get(params.get("channel", ""))
+            if not ch:
+                return self._ok({"ok": False, "error": "channel_not_found"},
+                                force_ok=False)
+            return self._ok({"channel": ch})
         if method == "conversations.history":
             return self._history(params)
         if method == "conversations.replies":

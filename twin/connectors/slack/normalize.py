@@ -2,13 +2,15 @@
 
 One record per message (root or reply). Conventions:
 
-- ``actor_ids``: ``slack:{user_id}`` — stable keys for identity resolution;
-- ``thread_key``: ``slack:{channel}:{thread_ts}`` shared by a root and its
-  replies — cross-source correlation anchors here;
+- ``actor_ids``: ``slack:{team_id}:{user_id}`` — workspace-qualified;
+- ``thread_key``: ``slack:{team_id}:{channel}:{thread_ts}`` shared by a
+  root and its replies — cross-source correlation anchors here;
 - ``source_metadata.lineage_root``: informational root for the thread;
 - ``external_revision``: ``edited.ts`` when present, else message ``ts`` —
   an edit becomes a NEW revision, never a silent overwrite;
-- bots / notification-like posts carry ``derived=likely_notification``.
+- bots / notification-like posts carry ``derived=likely_notification``;
+- file attachments appear as ``artifact_refs`` with ``download_status=
+  metadata_only`` (Phase 3 does not fetch file bytes).
 """
 
 from __future__ import annotations
@@ -49,10 +51,24 @@ def revision_for_deletion(ts: str) -> str:
     return f"{ts}.deleted"
 
 
-def _actor(user: Optional[str]) -> Optional[str]:
+def actor_id(team_id: Optional[str], user: Optional[str]) -> Optional[str]:
     if not user:
         return None
+    if team_id:
+        return f"slack:{team_id}:{user}"
     return f"slack:{user}"
+
+
+def bot_actor_id(team_id: Optional[str], bot_id: str) -> str:
+    if team_id:
+        return f"slack:{team_id}:bot:{bot_id}"
+    return f"slack:bot:{bot_id}"
+
+
+def thread_key(team_id: Optional[str], channel: str, thread_ts: str) -> str:
+    if team_id:
+        return f"slack:{team_id}:{channel}:{thread_ts}"
+    return f"slack:{channel}:{thread_ts}"
 
 
 def _clip(text: Optional[str]) -> str:
@@ -87,12 +103,50 @@ def _github_refs(text: str) -> list[dict[str, str]]:
                 _add(repo, number)
     return refs
 
+
+def _file_artifact_refs(message: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for f in message.get("files") or []:
+        if not isinstance(f, dict):
+            continue
+        refs.append({
+            "kind": "slack_file",
+            "external_id": f.get("id"),
+            "name": f.get("name") or f.get("title"),
+            "mimetype": f.get("mimetype"),
+            "size": f.get("size"),
+            "mode": f.get("mode"),
+            "permalink": f.get("permalink"),
+            "download_status": "metadata_only",
+        })
+    return refs
+
+
+def channel_kind_from_meta(channel: dict[str, Any]) -> str:
+    """Fail closed: ``public`` only with positive confirmation."""
+    if channel.get("is_im"):
+        return "im"
+    if channel.get("is_mpim"):
+        return "mpim"
+    if channel.get("is_private"):
+        return "private"
+    if channel.get("is_channel") is True and not channel.get("is_private"):
+        return "public"
+    if ("is_private" in channel and channel.get("is_private") is False
+            and not channel.get("is_im") and not channel.get("is_mpim")):
+        return "public"
+    return "unknown"
+
+
 def _record(
     *, connector_id: str, account_id: str, external_type: str,
     external_id: str, external_revision: str, occurred_at: Optional[str],
     content: str, payload: dict[str, Any], channel: str,
-    thread_key: Optional[str] = None, actors: Optional[list[str]] = None,
+    thread_key_value: Optional[str] = None,
+    actors: Optional[list[str]] = None,
     lineage_root: Optional[str] = None, channel_kind: Optional[str] = None,
+    team_id: Optional[str] = None,
+    artifact_refs: Optional[list[dict[str, Any]]] = None,
 ) -> ConnectorRecord:
     trust, kind = trust_for(external_type, payload)
     source_metadata: dict[str, Any] = {
@@ -101,6 +155,9 @@ def _record(
         "ts": payload.get("ts"),
         "thread_ts": payload.get("thread_ts") or payload.get("ts"),
     }
+    if team_id:
+        source_metadata["team_id"] = team_id
+        source_metadata["workspace_id"] = team_id
     if channel_kind:
         source_metadata["channel_kind"] = channel_kind
     if lineage_root:
@@ -110,6 +167,10 @@ def _record(
     refs = _github_refs(payload.get("text") or "")
     if refs:
         source_metadata["github_refs"] = refs
+    arts = list(artifact_refs or [])
+    if not arts:
+        arts = [{"kind": external_type, "channel": channel,
+                 "ts": payload.get("ts")}]
     return ConnectorRecord(
         connector_id=connector_id,
         source_account_id=account_id,
@@ -120,9 +181,8 @@ def _record(
         actor_ids=actors or [],
         participant_ids=actors or [],
         project_hint=channel,
-        thread_key=thread_key,
-        artifact_refs=[{"kind": external_type, "channel": channel,
-                        "ts": payload.get("ts")}],
+        thread_key=thread_key_value,
+        artifact_refs=arts,
         content=content,
         source_metadata=source_metadata,
         confidentiality={"source_trust": trust},
@@ -130,13 +190,11 @@ def _record(
 
 
 def record_from_channel(connector_id: str, account_id: str,
-                        channel: dict[str, Any]) -> ConnectorRecord:
+                        channel: dict[str, Any], *,
+                        team_id: Optional[str] = None) -> ConnectorRecord:
     cid = channel.get("id") or "?"
     name = channel.get("name") or cid
-    kind = ("private" if channel.get("is_private")
-            else "im" if channel.get("is_im")
-            else "mpim" if channel.get("is_mpim")
-            else "public")
+    kind = channel_kind_from_meta(channel)
     return _record(
         connector_id=connector_id, account_id=account_id,
         external_type="channel", external_id=str(cid),
@@ -144,29 +202,32 @@ def record_from_channel(connector_id: str, account_id: str,
                               or "0"),
         occurred_at=None,
         content=f"Slack channel #{name} ({kind})",
-        payload=channel, channel=str(cid), channel_kind=kind,
+        payload=channel, channel=str(cid), channel_kind=kind, team_id=team_id,
     )
 
 
 def record_from_message(connector_id: str, account_id: str, channel: str,
                         message: dict[str, Any], *,
                         channel_kind: Optional[str] = None,
-                        is_reply: bool = False) -> ConnectorRecord:
+                        is_reply: bool = False,
+                        team_id: Optional[str] = None) -> ConnectorRecord:
     ts = str(message.get("ts") or "0")
     thread_ts = str(message.get("thread_ts") or ts)
-    thread_key = f"slack:{channel}:{thread_ts}"
+    tkey = thread_key(team_id, channel, thread_ts)
     user = message.get("user") or (message.get("bot_profile") or {}).get("name")
-    actor = _actor(message.get("user"))
+    actor = actor_id(team_id, message.get("user"))
     if not actor and message.get("bot_id"):
-        actor = f"slack:bot:{message['bot_id']}"
+        actor = bot_actor_id(team_id, message["bot_id"])
     ext_type = "thread_reply" if is_reply else "message"
-    if message.get("files") and not (message.get("text") or "").strip():
-        ext_type = "file_share"
     header = (f"Slack {'reply' if is_reply else 'message'} in {channel}"
               f" by {user or '?'}")
     body = _clip(message.get("text"))
     if message.get("subtype") == "message_deleted" or message.get("deleted"):
         body = body or "[deleted]"
+    file_refs = _file_artifact_refs(message)
+    artifact_refs = (
+        [{"kind": ext_type, "channel": channel, "ts": ts}] + file_refs
+    )
     return _record(
         connector_id=connector_id, account_id=account_id,
         external_type=ext_type,
@@ -174,9 +235,10 @@ def record_from_message(connector_id: str, account_id: str, channel: str,
         external_revision=revision_for_message(message),
         occurred_at=_ts_to_iso(ts),
         content=f"{header}:\n{body}",
-        payload=message, channel=channel, thread_key=thread_key,
+        payload=message, channel=channel, thread_key_value=tkey,
         actors=[actor] if actor else [],
-        lineage_root=thread_key, channel_kind=channel_kind,
+        lineage_root=tkey, channel_kind=channel_kind, team_id=team_id,
+        artifact_refs=artifact_refs,
     )
 
 

@@ -1,10 +1,15 @@
 """Slack Events API receiver support (v0.6 §24 / Phase 3).
 
-A delivery is a *hint*, never a source of truth: the only effects of a
-valid event are (1) nudging the scheduler with ``targeted_streams`` and
-(2) recording pending tombstones for ``message_deleted`` so the next
-poll can emit a durable deletion. The payload is never normalized into
-canonical records.
+A delivery is a *hint*, never a source of truth. Valid events may:
+
+1. nudge the scheduler with ``targeted_streams``;
+2. record ``pending_tombstones`` for ``message_deleted``;
+3. record ``pending_threads`` for replies on (possibly old) roots;
+4. record ``pending_message_refreshes`` for ``message_changed``.
+
+The payload is never normalized into canonical records. Polling fetches
+the authoritative object. Hint consumption is at-least-once: adapters
+remove entries only inside the durable finalize transaction.
 
 Authentication is HMAC (``X-Slack-Signature``) against a dedicated
 signing secret in the CredentialStore — never the bot token — with a
@@ -21,13 +26,7 @@ from typing import Any, Optional
 
 from ..sync_state_cas import add_targeted_streams, apply_sync_state
 
-EVENT_TYPES_MESSAGE = {
-    "message",
-    "message.channels",
-    "message.groups",
-    "message.im",
-    "message.mpim",
-}
+SEEN_EVENT_IDS_CAP = 200
 
 
 class WebhookRejected(Exception):
@@ -61,12 +60,35 @@ def targeted_streams(event: dict[str, Any],
     """Map one event to streams the poller should visit. A webhook can
     never widen the allowlist."""
     channel = (event.get("channel")
-               or (event.get("item") or {}).get("channel"))
+               or (event.get("item") or {}).get("channel")
+               or (event.get("message") or {}).get("channel"))
     if isinstance(channel, dict):
         channel = channel.get("id")
     if not channel or channel not in configured_channels:
         return []
     return [f"channel:{channel}"]
+
+
+def infer_message_external_type(
+    *, ts: str, thread_ts: Optional[str],
+) -> str:
+    if thread_ts and str(thread_ts) != str(ts):
+        return "thread_reply"
+    return "message"
+
+
+def resolve_tombstone_type_from_store(
+    store, connector_id: str, channel: str, ts: str,
+) -> Optional[str]:
+    """Fallback when the Events payload lacks previous_message threading."""
+    external_id = f"{channel}:{ts}"
+    for ext_type in ("thread_reply", "message"):
+        prior = store.list_connector_records_for_object(
+            connector_id, ext_type, external_id,
+        )
+        if prior:
+            return ext_type
+    return None
 
 
 def set_webhook_secret(store, credentials, connector_id: str,
@@ -104,6 +126,25 @@ def set_webhook_secret(store, credentials, connector_id: str,
     return ref.id
 
 
+def _append_unique(pending: list[dict[str, Any]], entry: dict[str, Any],
+                   *, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    identity = tuple(entry.get(k) for k in keys)
+    for existing in pending:
+        if tuple(existing.get(k) for k in keys) == identity:
+            return pending
+    pending.append(entry)
+    return pending
+
+
+def _remember_event_id(meta: dict[str, Any], event_id: Optional[str]) -> None:
+    if not event_id:
+        return
+    seen = list(meta.get("seen_event_ids") or [])
+    if event_id not in seen:
+        seen.append(event_id)
+    meta["seen_event_ids"] = seen[-SEEN_EVENT_IDS_CAP:]
+
+
 def handle_slack_webhook(
     store, credentials, connector_id: str, *,
     body: bytes, timestamp: Optional[str], signature: Optional[str],
@@ -134,6 +175,7 @@ def handle_slack_webhook(
     if payload.get("type") == "url_verification":
         return {"challenge": payload.get("challenge")}
 
+    event_id = payload.get("event_id")
     inner = payload.get("event") if payload.get("type") == "event_callback" \
         else payload
     if not isinstance(inner, dict):
@@ -144,24 +186,92 @@ def handle_slack_webhook(
     event_type = inner.get("type") or ""
     subtype = inner.get("subtype") or ""
 
-    if subtype == "message_deleted" or event_type == "message_deleted":
-        deleted_ts = (inner.get("deleted_ts") or inner.get("ts")
-                      or (inner.get("previous_message") or {}).get("ts"))
-        channel = inner.get("channel")
-        if channel in channels and deleted_ts:
-            def _apply(state) -> None:
-                meta = dict(state.metadata or {})
-                pending = list(meta.get("pending_tombstones") or [])
-                entry = {"channel": channel, "ts": str(deleted_ts)}
-                if entry not in pending:
-                    pending.append(entry)
-                meta["pending_tombstones"] = pending
-                meta["last_webhook_event"] = "message_deleted"
-                state.metadata = meta
+    prior = store.get_connector_sync_state(connector_id)
+    seen = list((prior.metadata or {}).get("seen_event_ids") or []) if prior else []
+    if event_id and event_id in seen:
+        return {"scheduled": [], "detail": "duplicate event_id"}
 
-            apply_sync_state(store, connector_id, _apply)
-            if not streams:
-                streams = [f"channel:{channel}"]
+    def _apply_hints(state) -> None:
+        meta = dict(state.metadata or {})
+        _remember_event_id(meta, event_id)
+
+        if subtype == "message_deleted" or event_type == "message_deleted":
+            prev = inner.get("previous_message") or {}
+            deleted_ts = (inner.get("deleted_ts") or inner.get("ts")
+                          or prev.get("ts"))
+            channel = inner.get("channel")
+            if channel in channels and deleted_ts:
+                thread_ts = prev.get("thread_ts") or inner.get("thread_ts")
+                ext_type = infer_message_external_type(
+                    ts=str(deleted_ts), thread_ts=thread_ts,
+                )
+                if thread_ts is None:
+                    resolved = resolve_tombstone_type_from_store(
+                        store, connector_id, channel, str(deleted_ts),
+                    )
+                    if resolved:
+                        ext_type = resolved
+                entry = {
+                    "channel": channel,
+                    "ts": str(deleted_ts),
+                    "thread_ts": str(thread_ts) if thread_ts else None,
+                    "external_type": ext_type,
+                }
+                pending = list(meta.get("pending_tombstones") or [])
+                meta["pending_tombstones"] = _append_unique(
+                    pending, entry, keys=("channel", "ts"),
+                )
+                meta["last_webhook_event"] = "message_deleted"
+
+        elif subtype == "message_changed" or event_type == "message_changed":
+            message = inner.get("message") or {}
+            channel = inner.get("channel") or message.get("channel")
+            ts = message.get("ts") or inner.get("ts")
+            if channel in channels and ts:
+                thread_ts = message.get("thread_ts") or ts
+                entry = {
+                    "channel": channel,
+                    "ts": str(ts),
+                    "thread_ts": str(thread_ts),
+                }
+                pending = list(meta.get("pending_message_refreshes") or [])
+                meta["pending_message_refreshes"] = _append_unique(
+                    pending, entry, keys=("channel", "ts"),
+                )
+                meta["last_webhook_event"] = "message_changed"
+
+        elif event_type == "message" and subtype not in (
+            "message_deleted", "message_changed", "message_replied",
+        ):
+            # New message or reply — schedule a targeted thread fetch when
+            # this is a reply so roots outside the history lookback are not
+            # missed.
+            channel = inner.get("channel")
+            ts = inner.get("ts")
+            thread_ts = inner.get("thread_ts")
+            if (channel in channels and ts and thread_ts
+                    and str(thread_ts) != str(ts)):
+                entry = {
+                    "channel": channel,
+                    "thread_ts": str(thread_ts),
+                    "event_ts": str(ts),
+                }
+                pending = list(meta.get("pending_threads") or [])
+                meta["pending_threads"] = _append_unique(
+                    pending, entry, keys=("channel", "thread_ts"),
+                )
+                meta["last_webhook_event"] = "message_reply"
+            elif channel in channels:
+                meta["last_webhook_event"] = "message"
+
+        state.metadata = meta
+
+    apply_sync_state(store, connector_id, _apply_hints)
+
+    if subtype == "message_deleted" or event_type == "message_deleted":
+        channel = inner.get("channel")
+        if channel in channels and not streams:
+            streams = [f"channel:{channel}"]
 
     if not streams:
         return {"scheduled": [], "detail": "event not mapped to a configured stream"}

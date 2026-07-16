@@ -101,9 +101,11 @@ def test_thread_shares_lineage_and_bot_is_derived(store, creds, slack):
     root = next(r for r in by_type["message"]
                 if "Should we use Redis" in r.content)
     reply = by_type["thread_reply"][0]
-    assert root.thread_key == reply.thread_key == f"slack:{CHANNEL}:1700000001.000100"
+    assert root.thread_key == reply.thread_key == (
+        f"slack:T1:{CHANNEL}:1700000001.000100"
+    )
     assert reply.source_metadata["lineage_root"] == root.thread_key
-    assert root.actor_ids == ["slack:U_ALICE"]
+    assert root.actor_ids == ["slack:T1:U_ALICE"]
 
     bot = next(r for r in by_type["message"] if "PR #8" in r.content)
     assert bot.confidentiality["source_trust"] == 0.45
@@ -297,3 +299,238 @@ def test_backfill_preview_never_ingests(store, creds, slack):
     assert preview["started"] is False
     assert {s["stream"] for s in preview["streams"]} == {f"channel:{CHANNEL}"}
     assert store.list_connector_records(inst.id) == []
+
+
+def _sign(body: bytes, secret: str = "slack-signing") -> tuple[str, str]:
+    ts = str(int(time.time()))
+    sig = "v0=" + hmac.new(
+        secret.encode(), f"v0:{ts}:".encode() + body, hashlib.sha256,
+    ).hexdigest()
+    return ts, sig
+
+
+def test_finalize_failure_keeps_pending_tombstone(store, creds, slack, monkeypatch):
+    from twin.connectors import runtime as rt
+    from twin.connectors.slack.webhook import (
+        handle_slack_webhook, set_webhook_secret,
+    )
+
+    slack.add_message(CHANNEL, "1700000001.000100", text="ephemeral")
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    set_webhook_secret(store, creds, inst.id, "slack-signing")
+    slack.messages[CHANNEL] = []
+    body = json.dumps({
+        "type": "event_callback", "event_id": "Ev_DEL_1",
+        "event": {
+            "type": "message", "subtype": "message_deleted",
+            "channel": CHANNEL, "deleted_ts": "1700000001.000100",
+            "previous_message": {"ts": "1700000001.000100", "text": "ephemeral"},
+        },
+    }).encode()
+    ts, sig = _sign(body)
+    handle_slack_webhook(store, creds, inst.id, body=body,
+                         timestamp=ts, signature=sig)
+    state = store.get_connector_sync_state(inst.id)
+    assert state.metadata.get("pending_tombstones")
+
+    real_finalize = rt._finalize_committed
+
+    def boom(*args, **kwargs):
+        raise rt.CheckpointConflict("injected finalize failure")
+
+    monkeypatch.setattr(rt, "_finalize_committed", boom)
+    result = sync_connector(store, creds, inst.id)
+    assert not any(s.committed for s in result.streams)
+    state = store.get_connector_sync_state(inst.id)
+    assert state.metadata.get("pending_tombstones"), \
+        "tombstone must survive failed finalize"
+    assert store.list_connector_deletion_events(inst.id) == []
+
+    monkeypatch.setattr(rt, "_finalize_committed", real_finalize)
+    sync_connector(store, creds, inst.id)
+    deletions = store.list_connector_deletion_events(inst.id)
+    assert deletions
+    assert deletions[0].prior_record_ids
+    state = store.get_connector_sync_state(inst.id)
+    assert not state.metadata.get("pending_tombstones")
+
+
+def test_reply_deletion_finds_thread_reply_prior(store, creds, slack):
+    from twin.connectors.slack.webhook import (
+        handle_slack_webhook, set_webhook_secret,
+    )
+
+    slack.add_message(CHANNEL, "1700000001.000100", text="root", reply_count=1)
+    slack.add_reply(CHANNEL, "1700000001.000100", "1700000001.000200",
+                    text="reply to delete")
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    reply = next(r for r in store.list_connector_records(inst.id)
+                 if r.external_type == "thread_reply")
+    assert reply.percept_id
+
+    set_webhook_secret(store, creds, inst.id, "slack-signing")
+    slack.replies[f"{CHANNEL}:1700000001.000100"] = []
+    body = json.dumps({
+        "type": "event_callback", "event_id": "Ev_DEL_REPLY",
+        "event": {
+            "type": "message", "subtype": "message_deleted",
+            "channel": CHANNEL, "deleted_ts": "1700000001.000200",
+            "previous_message": {
+                "ts": "1700000001.000200",
+                "thread_ts": "1700000001.000100",
+                "text": "reply to delete",
+            },
+        },
+    }).encode()
+    ts, sig = _sign(body)
+    handle_slack_webhook(store, creds, inst.id, body=body,
+                         timestamp=ts, signature=sig)
+    sync_connector(store, creds, inst.id)
+    [event] = store.list_connector_deletion_events(inst.id)
+    assert event.external_type == "thread_reply"
+    assert event.external_id == f"{CHANNEL}:1700000001.000200"
+    assert event.prior_record_ids == [reply.id]
+    assert event.affected_percept_ids == [reply.percept_id]
+
+
+def test_reply_on_old_root_via_pending_thread_hint(store, creds, slack):
+    from twin.connectors.slack.webhook import (
+        handle_slack_webhook, set_webhook_secret,
+    )
+
+    # Old root outside a 1-day lookback window relative to a high watermark.
+    old_ts = "1600000001.000100"
+    new_reply = "1700000100.000200"
+    slack.add_message(CHANNEL, old_ts, text="ancient root", reply_count=0)
+    _acc, inst = _mk(store, creds, extra_config={"lookback_seconds": 86400})
+    sync_connector(store, creds, inst.id)
+    # Advance watermark far into the future so history lookback misses the root.
+    ckpt = store.get_connector_checkpoint(inst.id, f"channel:{CHANNEL}")
+    assert store.cas_connector_checkpoint(
+        ckpt.model_copy(update={"cursor": {"watermark": "1700000000.000000"}}),
+        expected_version=ckpt.version,
+    )
+
+    slack.add_reply(CHANNEL, old_ts, new_reply, text="late reply on old root")
+    # Root must not appear in history(oldest=watermark-lookback).
+    set_webhook_secret(store, creds, inst.id, "slack-signing")
+    body = json.dumps({
+        "type": "event_callback", "event_id": "Ev_REPLY_OLD",
+        "event": {
+            "type": "message", "channel": CHANNEL,
+            "ts": new_reply, "thread_ts": old_ts,
+            "text": "late reply on old root", "user": "U_EDU",
+        },
+    }).encode()
+    ts, sig = _sign(body)
+    handle_slack_webhook(store, creds, inst.id, body=body,
+                         timestamp=ts, signature=sig)
+    state = store.get_connector_sync_state(inst.id)
+    assert state.metadata.get("pending_threads")
+
+    sync_connector(store, creds, inst.id)
+    replies = [r for r in store.list_connector_records(inst.id)
+               if r.external_type == "thread_reply"]
+    assert any(new_reply in r.external_id for r in replies)
+    state = store.get_connector_sync_state(inst.id)
+    assert not state.metadata.get("pending_threads")
+
+
+def test_edit_outside_lookback_via_pending_refresh(store, creds, slack):
+    from twin.connectors.slack.webhook import (
+        handle_slack_webhook, set_webhook_secret,
+    )
+
+    old_ts = "1600000001.000100"
+    msg = slack.add_message(CHANNEL, old_ts, text="v1 ancient")
+    _acc, inst = _mk(store, creds, extra_config={"lookback_seconds": 86400})
+    sync_connector(store, creds, inst.id)
+    ckpt = store.get_connector_checkpoint(inst.id, f"channel:{CHANNEL}")
+    assert store.cas_connector_checkpoint(
+        ckpt.model_copy(update={"cursor": {"watermark": "1700000000.000000"}}),
+        expected_version=ckpt.version,
+    )
+
+    msg["text"] = "v2 edited ancient"
+    msg["edited"] = {"ts": "1700000200.000000", "user": "U_ALICE"}
+    set_webhook_secret(store, creds, inst.id, "slack-signing")
+    body = json.dumps({
+        "type": "event_callback", "event_id": "Ev_EDIT_OLD",
+        "event": {
+            "type": "message", "subtype": "message_changed",
+            "channel": CHANNEL,
+            "message": {
+                "ts": old_ts, "thread_ts": old_ts,
+                "text": "v2 edited ancient",
+                "edited": {"ts": "1700000200.000000"},
+                "user": "U_ALICE",
+            },
+        },
+    }).encode()
+    ts, sig = _sign(body)
+    handle_slack_webhook(store, creds, inst.id, body=body,
+                         timestamp=ts, signature=sig)
+    # Webhook must not be the canonical content source — API fetch is.
+    sync_connector(store, creds, inst.id)
+    messages = [r for r in store.list_connector_records(inst.id)
+                if r.external_type == "message"
+                and r.external_id.endswith(old_ts)]
+    assert len(messages) == 2
+    assert any("v1" in m.content for m in messages)
+    assert any("v2" in m.content for m in messages)
+
+
+def test_private_channel_never_defaults_public(store, creds, slack):
+    priv = "C_PRIV"
+    slack.add_channel(priv, name="team-private", private=True)
+    slack.add_message(priv, "1700000001.000100", text="secret decision")
+    _acc, inst = _mk(store, creds, channels=(priv,), extra_config={
+        "include_private_channels": True,
+    })
+    sync_connector(store, creds, inst.id)
+    rec = next(r for r in store.list_connector_records(inst.id)
+               if r.external_type == "message")
+    assert rec.source_metadata["channel_kind"] == "private"
+
+
+def test_dm_blocked_when_include_direct_messages_false(store, creds, slack):
+    dm = "D123"
+    slack.add_channel(dm, name="alice-dm", im=True)
+    slack.add_message(dm, "1700000001.000100", text="private dm")
+    _acc, inst = _mk(store, creds, channels=(dm,), extra_config={
+        "include_direct_messages": False,
+    })
+    result = sync_connector(store, creds, inst.id)
+    assert result.health.value in ("degraded", "failed") or any(
+        s.failed for s in result.streams
+    )
+    assert store.list_connector_records(inst.id) == []
+
+
+def test_private_blocked_when_include_private_false(store, creds, slack):
+    priv = "C_PRIV2"
+    slack.add_channel(priv, name="hidden", private=True)
+    slack.add_message(priv, "1700000001.000100", text="nope")
+    _acc, inst = _mk(store, creds, channels=(priv,), extra_config={
+        "include_private_channels": False,
+    })
+    sync_connector(store, creds, inst.id)
+    assert store.list_connector_records(inst.id) == []
+
+
+def test_workspace_namespaces_actors_and_threads(store, creds, slack):
+    slack.add_message(CHANNEL, "1700000001.000100", text="hello")
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    rec = next(r for r in store.list_connector_records(inst.id)
+               if r.external_type == "message")
+    assert rec.actor_ids == ["slack:T1:U_ALICE"]
+    assert rec.thread_key.startswith("slack:T1:")
+    assert store.get_connector_instance(inst.id).configuration.get("team_id") == "T1"
+
+
+def test_auth_mode_is_slack_bot_token():
+    from twin.connectors.slack.adapter import SlackConnector
+    assert SlackConnector.adapter_manifest().auth_mode == "slack_bot_token"

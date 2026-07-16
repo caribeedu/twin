@@ -6,7 +6,7 @@
   "org_key": "acme",
   "channel": "C_ENG",
   "expected": {
-    "thread_key": "slack:C_ENG:1700000001.000100",
+    "thread_key": "slack:T1:C_ENG:1700000001.000100",
     "bot_trust": 0.45,
     "derived": "likely_notification",
     "vault_id": "vault_work_acme"

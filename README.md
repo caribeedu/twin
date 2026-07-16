@@ -1380,12 +1380,13 @@ Phase 2 — GitHub Connector (done):
 
 Phase 3 — Slack Connector (done):
 
-- Web API adapter (`twin/connectors/slack/`) over the Phase 1 framework: `SlackClient` (cursor pagination, per-stream page budget, rate-limit → structured `retry_after`), bot-token auth with honest "privilege unverified via auth.test" health detail; read-only operation (no chat:write);
-- dynamic streams per allowlisted channel — `channel:{id}` from `plan_streams()` — each with its own checkpoint/lease; incremental cursor is the Slack message `ts` watermark with lookback; substreams `history` then `threads` (conversations.replies for parents with `reply_count > 0`); durable continuation when the page budget is exhausted;
-- four external types normalized to `ConnectorRecord`s (`channel`, `message`, `thread_reply`, `file_share`) with `slack:{user}` actor ids, shared `thread_key`/`lineage_root` per thread, edit revisions via `edited.ts`+content hash, and `deletions: true` via Events API tombstone hints (`pending_tombstones` on sync-state, consumed during fetch);
-- conservative source trust (human root 0.70 / reply 0.65 / file 0.60; bots 0.45 marked `derived=likely_notification`, with GitHub-ref extraction for cross-source lineage); channel kind (`public|private|im|mpim`) recorded in metadata;
-- per-source candidate policy: Slack may propose decision/constraint/task/event/fact, all born needing review; drops preference/belief/relationship/procedure; instance overrides can only narrow;
-- setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification challenge, targeted-stream hints + deletion tombstones — payload never canonical);
+- Web API adapter (`twin/connectors/slack/`) over the Phase 1 framework: `SlackClient` (cursor pagination, per-stream page budget, rate-limit → structured `retry_after`), `auth_mode=slack_bot_token` with honest "privilege unverified via auth.test" health detail; read-only operation (no chat:write);
+- dynamic streams per allowlisted channel — `channel:{id}` from `plan_streams()` — each with its own checkpoint/lease; incremental cursor is the maximum observed Slack event `ts` across history roots and thread replies (not a pure history cursor) plus lookback; substreams `history` then `threads`; durable continuation when the page budget is exhausted;
+- activity on roots older than the lookback window is recovered via durable Events API hints (`pending_threads`, `pending_message_refreshes`, `pending_tombstones`) — the webhook never becomes canonical content; hints are consumed only inside the finalize transaction (at-least-once: finalize failure keeps the hint);
+- external types `channel` / `message` / `thread_reply` with workspace-qualified ids (`slack:{team_id}:{user}`, `thread_key=slack:{team_id}:{channel}:{thread_ts}`); edit revisions via `edited.ts`+content hash; reply deletions preserve `external_type=thread_reply` for lineage; file bytes are not fetched — messages may carry `slack_file` artifact refs with `download_status=metadata_only`;
+- channel metadata resolved via `conversations.info` before sync and persisted; `channel_kind` fails closed (`unknown` / refuse, never default `public`); `include_private_channels` / `include_direct_messages` enforced at sync time, not only in `list_channels`;
+- conservative source trust (human root 0.70 / reply 0.65; bots 0.45 marked `derived=likely_notification`, with GitHub-ref extraction); Slack source policy requires review for every allowed candidate type;
+- setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification, `event_id` dedupe);
 - `tests/test_slack_connector.py` against `tests/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
 
 ### v0.7 — Personal Domains
