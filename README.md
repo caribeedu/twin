@@ -1389,6 +1389,15 @@ Phase 3 — Slack Connector (done):
 - setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification, `event_id` dedupe);
 - `tests/test_slack_connector.py` against `tests/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
 
+Phase 4 — Professional Email (done):
+
+- shared cognitive mail layer (`twin/connectors/mail/`): MIME split (authored/quoted/signature), HTML kept only as `body_html_untrusted_stub` (never safe-to-render), source-heuristic classification, conservative trust, and one `ConnectorRecord` normalizer (`actor_ids` = sender only; `participant_ids` = sender+to+cc; `thread_key=mail:{provider}:{account}:{thread_id}`); attachment mode is explicit (`metadata_only` / discovery — bytes not downloaded by default);
+- Gmail adapter (`gmail.readonly`): bootstrap captures `bootstrap_history_id` *before* the time-range scan, then History catch-up seals `history_id` (no gap for concurrent arrivals); label removal tombs only when no allowlisted label remains; tombstones resolve `thread_message` vs `message`;
+- Outlook/Graph adapter (`Mail.Read`): continuous sync bootstraps via delta enumeration (all `value`s processed, never discarded); `@removed`/`changed` resolves current folder membership before global tombstone; attachment discovery + shared nextLink/deltaLink error decoder;
+- partitionable `BackfillJob`: `SyncExecutionContext` bounds; namespaced streams; per-stream partition progress; claim CAS + finalize fence + heartbeat renew (stale workers cannot publish); completes only when every stream is `done`;
+- email source policy stricter than Slack; notifications marked `derived=likely_notification`;
+- `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` and eval `gmail_thread_lineage`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.

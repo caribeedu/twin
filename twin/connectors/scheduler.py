@@ -33,7 +33,14 @@ from .sync_state_cas import consume_targeted_streams
 
 logger = logging.getLogger("twin.connectors.scheduler")
 
-_DEFAULT_INTERVALS = {"fake": 60, "github": 300, "slack": 120, "email": 300}
+_DEFAULT_INTERVALS = {
+    "fake": 60,
+    "github": 300,
+    "slack": 120,
+    "email": 600,
+    "gmail": 600,
+    "outlook": 600,
+}
 
 
 class ScheduleConfigError(ValueError):

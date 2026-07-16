@@ -1010,20 +1010,35 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/connectors/{connector_id}/backfill")
     def api_connector_backfill(
         connector_id: str, preview: bool = True,
+        create: bool = False, job_id: Optional[str] = None,
         x_twin_client: Optional[str] = Header(default=None),
         x_twin_token: Optional[str] = Header(default=None),
     ):
         access = _connector_access(x_twin_client, x_twin_token, CAP_BACKFILL,
                                    connector_id)
-        if not preview:
-            # Phase 2 backfill IS the first sync of an unwatermarked stream,
-            # bounded by configuration.backfill_since — execute it through
-            # /sync (capability connector:sync). This endpoint only previews.
-            raise HTTPException(
-                status_code=400,
-                detail="only preview=true is supported: set "
-                       "configuration.backfill_since and run /sync to ingest")
         try:
+            if job_id:
+                from ..connectors import run_backfill_partition
+                return run_backfill_partition(
+                    ws.store, _conn_creds(), job_id)
+            if create:
+                from ..connectors import create_backfill_job
+                job = create_backfill_job(
+                    ws.store, _conn_creds(), connector_id)
+                return {
+                    "job_id": job.id,
+                    "status": job.status.value,
+                    "total_partitions": (job.progress or {}).get(
+                        "total_partitions"),
+                    "started": False,
+                }
+            if not preview:
+                # Continuous/first-sync backfill still goes through /sync;
+                # partition jobs use create=true / job_id=.
+                raise HTTPException(
+                    status_code=400,
+                    detail="use preview=true, create=true, or job_id=…; "
+                           "or set configuration.backfill_since and /sync")
             return backfill_preview(ws.store, _conn_creds(), connector_id,
                                     principal_id=access.principal_id)
         except ValueError as exc:

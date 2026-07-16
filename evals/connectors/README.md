@@ -36,7 +36,11 @@ evals/connectors/
     checkpoint_failure.json     # finalize fault → consistent state
     quarantine.json             # injection content never reaches extraction
     source_deletion.json        # tombstone → lineage impact event
-  run.py                        # tiny runner over the FakeConnector
+    github_pr_lifecycle.json    # Phase 2 PR revisions + merged wins
+    github_bot_lineage.json     # Phase 2 bot trust / review
+    slack_thread_bot_lineage.json  # Phase 3 thread + bot
+    gmail_thread_lineage.json   # Phase 4 thread + notification
+  run.py                        # tiny runner over Fake + real adapters
 ```
 
 ## Run

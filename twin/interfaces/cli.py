@@ -598,12 +598,66 @@ def cmd_connector(args) -> None:
                       f"{kind:8}  members={ch.get('num_members')}")
         else:
             raise SystemExit(f"unknown slack command: {args.slack_command}")
+    elif cmd == "gmail":
+        if args.gmail_command == "labels":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for lab in adapter.list_labels():
+                print(f"{lab['id']:24}  {lab.get('name') or '?':32}  "
+                      f"type={lab.get('type')}  "
+                      f"messages={lab.get('messages_total')}")
+        else:
+            raise SystemExit(f"unknown gmail command: {args.gmail_command}")
+    elif cmd == "outlook":
+        if args.outlook_command == "folders":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for folder in adapter.list_folders():
+                print(f"{folder['id']:36}  {folder.get('name') or '?':32}  "
+                      f"items={folder.get('total_item_count')}")
+        else:
+            raise SystemExit(f"unknown outlook command: {args.outlook_command}")
     elif cmd == "backfill":
+        if getattr(args, "run_partition", False):
+            if not args.job_id:
+                raise SystemExit("--run-partition requires --job-id")
+            from ..connectors import run_backfill_partition
+            out = run_backfill_partition(
+                ws.store, creds, args.job_id,
+                emit_percepts=not getattr(args, "no_percepts", False),
+            )
+            print(_json.dumps(out, indent=2, default=str))
+            return
+        if not args.connector_id:
+            raise SystemExit("connector_id required")
+        if getattr(args, "create", False):
+            from ..connectors import create_backfill_job
+            job = create_backfill_job(ws.store, creds, args.connector_id)
+            print(f"job {job.id}  status={job.status.value}  "
+                  f"partitions={(job.progress or {}).get('total_partitions')}")
+            return
+        if getattr(args, "jobs", False):
+            for job in ws.store.list_backfill_jobs(args.connector_id):
+                prog = job.progress or {}
+                print(f"{job.id}  {job.status.value:10}  "
+                      f"{prog.get('completed_partitions', 0)}/"
+                      f"{prog.get('total_partitions', 0)} partitions")
+            return
         if not args.preview:
             raise SystemExit(
-                "phase 2 backfill runs through 'twin connector sync' after "
-                "setting configuration.backfill_since — use --preview to "
-                "inspect the scope first (previewing never ingests)")
+                "use --preview to inspect scope, --create to open a "
+                "BackfillJob, --jobs to list, or --run-partition --job-id ID "
+                "to advance one month (previewing never ingests)")
         from ..connectors import backfill_preview
         preview = backfill_preview(ws.store, creds, args.connector_id,
                                    principal_id="principal_local_cli")
@@ -1050,9 +1104,29 @@ def main(argv: list[str] | None = None) -> None:
                            help="channels the token can see")
     cslc.add_argument("connector_id")
     cslc.set_defaults(func=cmd_connector)
-    cbf = cs.add_parser("backfill", help="preview backfill scope (never ingests)")
-    cbf.add_argument("connector_id")
+    cgm = cs.add_parser("gmail", help="gmail-specific helpers")
+    cgms = cgm.add_subparsers(dest="gmail_command", required=True)
+    cgml = cgms.add_parser("labels", help="labels the token can see")
+    cgml.add_argument("connector_id")
+    cgml.set_defaults(func=cmd_connector)
+    cout = cs.add_parser("outlook", help="outlook-specific helpers")
+    couts = cout.add_subparsers(dest="outlook_command", required=True)
+    coutf = couts.add_parser("folders", help="mail folders the token can see")
+    coutf.add_argument("connector_id")
+    coutf.set_defaults(func=cmd_connector)
+    cbf = cs.add_parser("backfill",
+                        help="preview / create / advance partitionable BackfillJob")
+    cbf.add_argument("connector_id", nargs="?", default=None)
     cbf.add_argument("--preview", action="store_true")
+    cbf.add_argument("--create", action="store_true",
+                     help="create a year-month BackfillJob (no ingest)")
+    cbf.add_argument("--jobs", action="store_true",
+                     help="list BackfillJobs for the connector")
+    cbf.add_argument("--run-partition", dest="run_partition",
+                     action="store_true",
+                     help="advance one partition; requires --job-id")
+    cbf.add_argument("--job-id", dest="job_id", default=None)
+    cbf.add_argument("--no-percepts", action="store_true")
     cbf.set_defaults(func=cmd_connector)
     for name in ("auth", "test"):
         cx = cs.add_parser(name, help="validate stored credentials")

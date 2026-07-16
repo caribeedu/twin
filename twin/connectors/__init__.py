@@ -30,6 +30,8 @@ from .credentials import (
 from .errors import sanitize_error
 from .health import connector_health, snapshot_health
 from .models import (
+    BackfillJob,
+    BackfillJobStatus,
     ConnectorBatch,
     ConnectorCheckpoint,
     ConnectorDeadLetter,
@@ -42,6 +44,7 @@ from .models import (
     OwnershipClass,
     RawConnectorItem,
     SourceAccount,
+    SyncExecutionContext,
     SyncMode,
     idempotency_key,
 )
@@ -63,10 +66,18 @@ from .registry import (
     register_adapter,
 )
 from .models import ConnectorDeletionEvent, StreamLease  # noqa: F401
-from .runtime import CheckpointConflict, LeaseLost, SyncResult, build_percept, run_sync
+from .runtime import (
+    BackfillClaimLost,
+    CheckpointConflict,
+    LeaseLost,
+    SyncResult,
+    build_percept,
+    run_sync,
+)
 from .service import (
     add_connector_instance,
     backfill_preview,
+    create_backfill_job,
     discard_dead_letter,
     pause_connector,
     reclassify_source_account,
@@ -75,19 +86,23 @@ from .service import (
     resume_connector,
     retry_dead_letter,
     revoke_connector,
+    run_backfill_partition,
     set_credential,
     sync_connector,
     sync_fingerprint,
     validate_connector,
 )
-
 # Import adapters for their registration side effects.
 from . import fake  # noqa: E402,F401
 from . import github  # noqa: E402,F401
 from . import slack  # noqa: E402,F401
+from . import gmail  # noqa: E402,F401
+from . import outlook  # noqa: E402,F401
 
 __all__ = [
     "AdapterManifest",
+    "BackfillJob",
+    "BackfillJobStatus",
     "CAP_BACKFILL",
     "CAP_CONFIGURE",
     "CAP_CREDENTIALS",
@@ -114,9 +129,11 @@ __all__ = [
     "RawConnectorItem",
     "RawFetchItem",
     "SourceAccount",
+    "SyncExecutionContext",
     "SyncMode",
     "SyncPlan",
     "SyncResult",
+    "BackfillClaimLost",
     "CheckpointConflict",
     "ConnectorDeletionEvent",
     "CredentialBackendUnavailable",
@@ -131,6 +148,7 @@ __all__ = [
     "build_credential_store",
     "build_percept",
     "connector_health",
+    "create_backfill_job",
     "default_vault_for",
     "discard_dead_letter",
     "ensure_org_vault",
@@ -147,6 +165,7 @@ __all__ = [
     "resume_connector",
     "retry_dead_letter",
     "revoke_connector",
+    "run_backfill_partition",
     "run_sync",
     "sanitize_error",
     "set_credential",
