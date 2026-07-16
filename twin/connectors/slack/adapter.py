@@ -49,6 +49,7 @@ from . import sync_state as ss
 
 DEFAULT_LOOKBACK_SECONDS = 86400
 DEFAULT_MAX_PAGES = 10
+DEFAULT_CHANNEL_METADATA_TTL_SECONDS = 3600
 
 
 def _parse_stream(stream: str) -> str:
@@ -102,6 +103,10 @@ class SlackConnector:
         self.api_base_url: str = cfg.get("api_base_url", SLACK_API)
         self.include_dms = bool(cfg.get("include_direct_messages", False))
         self.include_private = bool(cfg.get("include_private_channels", False))
+        self.channel_metadata_ttl_seconds = int(
+            cfg.get("channel_metadata_ttl_seconds",
+                    DEFAULT_CHANNEL_METADATA_TTL_SECONDS)
+        )
         self.team_id: Optional[str] = cfg.get("team_id")
         self._client: Optional[SlackClient] = None
         self._channel_meta: dict[str, dict[str, Any]] = {}
@@ -110,7 +115,10 @@ class SlackConnector:
             self._channel_meta.update(persisted)
         self._store = None
         self._pending_hint_consumptions: list[dict[str, Any]] = []
-        self._threads_awaiting_hint_ack: set[str] = set()
+        # thread_ts → hint generations snapshotted before conversations.replies
+        self._threads_awaiting_hint_ack: dict[str, list[dict[str, Any]]] = {}
+        # Channels refreshed via conversations.info during this adapter life
+        self._channel_meta_fresh: set[str] = set()
 
     def attach_sync_hints(self, store) -> None:
         """Optional framework hook: read CAS-guarded sync-state hints."""
@@ -120,47 +128,22 @@ class SlackConnector:
         return list(self._pending_hint_consumptions)
 
     def consume_sync_hints(self, store, hints: list[dict[str, Any]]) -> None:
-        """Remove processed hints. Called inside finalize's transaction."""
+        """Remove processed hint generations inside finalize's transaction.
+
+        Uses a commit-free CAS so a conflict aborts the whole finalize
+        instead of leaving evidence committed with hints still pending —
+        or worse, committing hints out-of-band.
+        """
         if not hints:
             return
-        from ..sync_state_cas import apply_sync_state
+        from ..runtime import SyncHintConflict
 
-        tombs = {(h.get("channel"), str(h.get("ts") or "0"))
-                 for h in hints if h.get("kind") == "tombstone"}
-        threads = {(h.get("channel"), str(h.get("thread_ts") or ""))
-                   for h in hints if h.get("kind") == "pending_thread"}
-        refreshes = {(h.get("channel"), str(h.get("ts") or "0"))
-                     for h in hints if h.get("kind") == "pending_message_refresh"}
-
-        def _apply(state) -> None:
-            meta = dict(state.metadata or {})
-            if tombs:
-                meta["pending_tombstones"] = [
-                    t for t in (meta.get("pending_tombstones") or [])
-                    if (t.get("channel"), str(t.get("ts") or "0")) not in tombs
-                ] or None
-                if meta.get("pending_tombstones") is None:
-                    meta.pop("pending_tombstones", None)
-            if threads:
-                meta["pending_threads"] = [
-                    t for t in (meta.get("pending_threads") or [])
-                    if (t.get("channel"), str(t.get("thread_ts") or ""))
-                    not in threads
-                ] or None
-                if meta.get("pending_threads") is None:
-                    meta.pop("pending_threads", None)
-            if refreshes:
-                meta["pending_message_refreshes"] = [
-                    t for t in (meta.get("pending_message_refreshes") or [])
-                    if (t.get("channel"), str(t.get("ts") or "0")) not in refreshes
-                ] or None
-                if meta.get("pending_message_refreshes") is None:
-                    meta.pop("pending_message_refreshes", None)
-            state.metadata = meta
-
-        apply_sync_state(store, self.instance.id, _apply)
+        ok = store.consume_connector_sync_hints_cas(self.instance.id, hints)
+        if not ok:
+            raise SyncHintConflict(
+                f"sync-state hint CAS lost for connector {self.instance.id}"
+            )
         self._pending_hint_consumptions = []
-
     @property
     def client(self) -> SlackClient:
         if self._client is None:
@@ -248,17 +231,53 @@ class SlackConnector:
                 self.instance.configuration = cfg
         return self.team_id
 
+    def _metadata_stale(self, meta: dict[str, Any]) -> bool:
+        validated_at = meta.get("validated_at")
+        if not validated_at:
+            return True
+        try:
+            dt = datetime.fromisoformat(str(validated_at).replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        age = (datetime.now(timezone.utc) - dt).total_seconds()
+        return age > self.channel_metadata_ttl_seconds
+
     def _resolve_channel(self, channel_id: str) -> dict[str, Any]:
-        if channel_id in self._channel_meta:
+        """Refresh channel kind via conversations.info before authorization.
+
+        Persisted metadata is a cache with TTL, never an indefinite grant of
+        ``public``. A failed refresh with stale/missing metadata fails closed.
+        """
+        if channel_id in self._channel_meta_fresh:
             return self._channel_meta[channel_id]
-        info = self.client.conversations_info(channel_id)
+
+        cached = self._channel_meta.get(channel_id)
+        try:
+            info = self.client.conversations_info(channel_id)
+        except ConnectorError as exc:
+            if (cached and not self._metadata_stale(cached)
+                    and norm.channel_kind_from_meta(cached) != "unknown"):
+                # Non-expired verified metadata may bridge a transient outage.
+                return cached
+            raise ConnectorError(
+                f"cannot refresh metadata for channel {channel_id}: "
+                f"{exc.failure_class.value}; refusing stale authorization",
+                failure_class=FailureClass.authorization,
+                human_action_required=True,
+                retryable=exc.retryable,
+            ) from exc
+
         if not info:
+            if (cached and not self._metadata_stale(cached)
+                    and norm.channel_kind_from_meta(cached) != "unknown"):
+                return cached
             raise ConnectorError(
                 f"slack channel {channel_id} not found or inaccessible",
                 failure_class=FailureClass.authorization,
                 human_action_required=True,
             )
         self._persist_channel_meta(channel_id, info)
+        self._channel_meta_fresh.add(channel_id)
         return info
 
     def _assert_channel_authorized(self, channel_id: str) -> str:
@@ -418,7 +437,9 @@ class SlackConnector:
         self._ensure_team_id()
         self._assert_channel_authorized(channel)
         self._pending_hint_consumptions = []
-        self._threads_awaiting_hint_ack = set()
+        self._threads_awaiting_hint_ack = {}
+        # Force a fresh conversations.info for this stream's channel.
+        self._channel_meta_fresh.discard(channel)
 
         base = cursor or plan.cursor_before or {}
         window_oldest = (
@@ -504,11 +525,21 @@ class SlackConnector:
             tts = str(hint.get("thread_ts") or "")
             if not tts:
                 continue
+            hint_id = hint.get("id") or (
+                f"thread:{channel}:{tts}:{hint.get('event_ts') or ''}"
+            )
+            # Snapshot generations observed *before* replies fetch so a
+            # concurrent webhook for the same thread is not consumed here.
+            self._threads_awaiting_hint_ack.setdefault(tts, []).append({
+                "id": hint_id,
+                "channel": channel,
+                "thread_ts": tts,
+                "event_ts": hint.get("event_ts"),
+            })
             # Force re-fetch even if previously seen — new replies may exist.
             seen.discard(tts)
             if tts not in queue:
                 queue.append(tts)
-            self._threads_awaiting_hint_ack.add(tts)
         thread_state["seen"] = sorted(seen)
         thread_state["queue"] = queue
 
@@ -521,6 +552,9 @@ class SlackConnector:
                 continue
             target_ts = str(hint.get("ts") or "0")
             thread_ts = str(hint.get("thread_ts") or target_ts)
+            hint_id = hint.get("id") or (
+                f"edit:{channel}:{target_ts}:{hint.get('edited_ts') or target_ts}"
+            )
             try:
                 messages, _ = self.client.conversations_replies(
                     channel, thread_ts,
@@ -530,7 +564,9 @@ class SlackConnector:
                 continue
             self._mark_hint(
                 "pending_message_refresh",
-                {"channel": channel, "ts": target_ts, "thread_ts": thread_ts},
+                {"id": hint_id, "channel": channel, "ts": target_ts,
+                 "thread_ts": thread_ts,
+                 "edited_ts": hint.get("edited_ts")},
             )
             for msg in messages:
                 if str(msg.get("ts") or "") != target_ts:
@@ -546,7 +582,6 @@ class SlackConnector:
                     # Activity time, not the original message ts.
                     ss.bump_window_max(cursor, str(edited))
         return items
-
     def _fetch_substream(
         self, channel: str, substream: str, cursor: dict[str, Any],
         pages_budget: int,
@@ -635,12 +670,8 @@ class SlackConnector:
                 state["idx"] = idx
                 return items, pages_used, False
             state.pop("reply_cursor", None)
-            if thread_ts in self._threads_awaiting_hint_ack:
-                self._mark_hint(
-                    "pending_thread",
-                    {"channel": channel, "thread_ts": thread_ts},
-                )
-                self._threads_awaiting_hint_ack.discard(thread_ts)
+            for entry in self._threads_awaiting_hint_ack.pop(thread_ts, []):
+                self._mark_hint("pending_thread", entry)
             idx += 1
             state["idx"] = idx
         return items, pages_used, idx >= len(queue)

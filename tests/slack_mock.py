@@ -29,6 +29,7 @@ class FakeSlackAPI:
             "U_BOT": _user("U_BOT", name="github-bot", bot=True),
         }
         self.rate_limited = False
+        self.info_fails = False
         self.requests: list[str] = []
 
     def add_channel(self, channel_id: str, *, name: str,
@@ -92,6 +93,9 @@ class FakeSlackAPI:
             return self._ok({"channels": list(self.channels.values()),
                              "response_metadata": {"next_cursor": ""}})
         if method == "conversations.info":
+            if self.info_fails:
+                return self._ok({"ok": False, "error": "fatal_error"},
+                                force_ok=False)
             ch = self.channels.get(params.get("channel", ""))
             if not ch:
                 return self._ok({"ok": False, "error": "channel_not_found"},

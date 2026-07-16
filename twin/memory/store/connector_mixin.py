@@ -537,6 +537,81 @@ class ConnectorStoreMixin:
         self._j_commit()
         return getattr(cur, "rowcount", 0) > 0
 
+    def consume_connector_sync_hints_cas(
+        self, connector_id: str, consumed_hints: list[dict[str, Any]],
+    ) -> bool:
+        """Remove specific hint generations inside an outer transaction.
+
+        Does **not** call ``_j_commit`` — durability is owned by the caller's
+        ``store.transaction()`` (connector finalize). Returns False when the
+        sync-state version moved; the caller must abort the whole finalize
+        so evidence/checkpoint/hints stay consistent.
+        """
+        if not consumed_hints:
+            return True
+        state = self.get_connector_sync_state(connector_id)
+        if state is None:
+            return True
+        expected = state.version
+        meta = dict(state.metadata or {})
+
+        tomb_keys = {
+            (h.get("channel"), str(h.get("ts") or "0"))
+            for h in consumed_hints if h.get("kind") == "tombstone"
+        }
+        thread_ids = {
+            h.get("id") for h in consumed_hints
+            if h.get("kind") == "pending_thread" and h.get("id")
+        }
+        refresh_ids = {
+            h.get("id") for h in consumed_hints
+            if h.get("kind") == "pending_message_refresh" and h.get("id")
+        }
+
+        if tomb_keys:
+            kept = [
+                t for t in (meta.get("pending_tombstones") or [])
+                if (t.get("channel"), str(t.get("ts") or "0")) not in tomb_keys
+            ]
+            if kept:
+                meta["pending_tombstones"] = kept
+            else:
+                meta.pop("pending_tombstones", None)
+        if thread_ids:
+            kept = [
+                t for t in (meta.get("pending_threads") or [])
+                if t.get("id") not in thread_ids
+            ]
+            if kept:
+                meta["pending_threads"] = kept
+            else:
+                meta.pop("pending_threads", None)
+        if refresh_ids:
+            kept = [
+                t for t in (meta.get("pending_message_refreshes") or [])
+                if t.get("id") not in refresh_ids
+            ]
+            if kept:
+                meta["pending_message_refreshes"] = kept
+            else:
+                meta.pop("pending_message_refreshes", None)
+
+        merged = state.model_copy(update={
+            "version": expected + 1,
+            "metadata": meta,
+            "updated_at": now_iso(),
+        })
+        row = sync_state_to_row(merged)
+        cols = [c for c in row if c != "id"]
+        sets = ", ".join(f"{c} = ?" for c in cols)
+        cur = self._j_exec(
+            f"UPDATE connector_sync_state SET {sets}"
+            " WHERE id = ? AND version = ?",
+            tuple(row[c] for c in cols) + (connector_id, expected),
+        )
+        # No _j_commit here — finalize's transaction commits or rolls back.
+        return getattr(cur, "rowcount", 0) > 0
+
     def apply_connector_sync_state(
         self, connector_id: str, apply_fn, *, retries: int = 10,
     ) -> ConnectorSyncState:

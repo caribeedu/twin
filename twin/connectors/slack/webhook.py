@@ -212,12 +212,15 @@ def handle_slack_webhook(
                     if resolved:
                         ext_type = resolved
                 entry = {
+                    "id": (event_id
+                           or f"del:{channel}:{deleted_ts}"),
                     "channel": channel,
                     "ts": str(deleted_ts),
                     "thread_ts": str(thread_ts) if thread_ts else None,
                     "external_type": ext_type,
                 }
                 pending = list(meta.get("pending_tombstones") or [])
+                # Same object deletion is idempotent — key by channel+ts.
                 meta["pending_tombstones"] = _append_unique(
                     pending, entry, keys=("channel", "ts"),
                 )
@@ -229,14 +232,21 @@ def handle_slack_webhook(
             ts = message.get("ts") or inner.get("ts")
             if channel in channels and ts:
                 thread_ts = message.get("thread_ts") or ts
+                edited_ts = ((message.get("edited") or {}).get("ts")
+                             or ts)
                 entry = {
+                    "id": (event_id
+                           or f"edit:{channel}:{ts}:{edited_ts}"),
                     "channel": channel,
                     "ts": str(ts),
                     "thread_ts": str(thread_ts),
+                    "edited_ts": str(edited_ts),
                 }
                 pending = list(meta.get("pending_message_refreshes") or [])
+                # Generations are unique — a later edit must not collapse into
+                # an earlier refresh for the same message.
                 meta["pending_message_refreshes"] = _append_unique(
-                    pending, entry, keys=("channel", "ts"),
+                    pending, entry, keys=("id",),
                 )
                 meta["last_webhook_event"] = "message_changed"
 
@@ -252,13 +262,18 @@ def handle_slack_webhook(
             if (channel in channels and ts and thread_ts
                     and str(thread_ts) != str(ts)):
                 entry = {
+                    "id": (event_id
+                           or f"thread:{channel}:{thread_ts}:{ts}"),
                     "channel": channel,
                     "thread_ts": str(thread_ts),
                     "event_ts": str(ts),
                 }
                 pending = list(meta.get("pending_threads") or [])
+                # One generation per event — a later reply on the same thread
+                # keeps its own hint so it cannot be consumed by an earlier
+                # fetch that never observed it.
                 meta["pending_threads"] = _append_unique(
-                    pending, entry, keys=("channel", "thread_ts"),
+                    pending, entry, keys=("id",),
                 )
                 meta["last_webhook_event"] = "message_reply"
             elif channel in channels:

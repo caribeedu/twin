@@ -64,6 +64,10 @@ class CheckpointConflict(RuntimeError):
     """The checkpoint moved underneath this batch — abort, never regress."""
 
 
+class SyncHintConflict(RuntimeError):
+    """Sync-state hint CAS lost the race inside finalize — abort the batch."""
+
+
 class LeaseLost(RuntimeError):
     """This worker no longer holds the stream lease (fencing token stale) —
     it must stop publishing results, even mid-flight."""
@@ -464,8 +468,8 @@ def _finalize_committed(
                 f"checkpoint for {instance.id}/{batch.stream} moved "
                 f"(expected version {expected_version})"
             )
-        # Sync-state hint consumption participates in the same transaction:
-        # a rolled-back finalize leaves pending tombstones/refreshes intact.
+        # Sync-state hint consumption participates in the same transaction
+        # via a commit-free CAS. Failure must abort the whole finalize.
         consume = getattr(adapter, "consume_sync_hints", None) if adapter else None
         if callable(consume) and staged.consumed_sync_hints:
             consume(store, staged.consumed_sync_hints)
@@ -673,7 +677,7 @@ def _sync_stream_leased(
             lease_owner=lease_owner, fencing_token=fencing_token,
             adapter=adapter,
         )
-    except (CheckpointConflict, LeaseLost) as exc:
+    except (CheckpointConflict, SyncHintConflict, LeaseLost) as exc:
         _abort_batch(store, batch, sr, exc)
         return sr
     except Exception as exc:
