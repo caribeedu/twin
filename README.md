@@ -1398,6 +1398,15 @@ Phase 4 — Professional Email (done):
 - email source policy stricter than Slack; notifications marked `derived=likely_notification`;
 - `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` and eval `gmail_thread_lineage`.
 
+Phase 5 — Calendar and meetings (done):
+
+- shared meeting cognitive layer (`twin/connectors/meeting/`): provider-agnostic `MeetingRecord` / `TranscriptSegment` / `SpeakerIdentity`; speaker mapping with explicit confidence (never auto-merge `Speaker N`); calendar↔meeting correlation via `calendar_event_id` / `iCalUID` / `conference_url` / `correlation_fingerprint` on metadata + artifact_refs (no WorkEpisode yet);
+- Calendar adapter (Google Calendar v3 shape, read-only): explicit calendar allowlist (empty → `awaiting_configuration`); `updated` watermark + lookback; cancelled → tombstone; optional `freebusy_only` detail level; trust calibration for events vs free/busy;
+- Fireflies adapter: stream `meetings`; transcript = primary evidence (trust 0.75); provider summary = derived (trust 0.45, `derived=provider_summary`); speakers attached with unresolved labels listed for review;
+- source policies require review for every allowed candidate type; scheduler intervals `calendar: 15m`, `fireflies: 30m`;
+- setup helpers: `twin connector calendar calendars`, `twin connector fireflies meetings`;
+- `tests/test_calendar_connector.py` + `tests/test_fireflies_connector.py` + `tests/test_meeting_normalize.py` and eval `calendar_meeting_correlation`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.

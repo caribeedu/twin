@@ -1,0 +1,16 @@
+{
+  "id": "calendar_meeting_correlation",
+  "scenario": "calendar_meeting_correlation",
+  "description": "Calendar event and Fireflies transcript share correlation fingerprint; summary is derived/low-trust; Speaker 1 stays unresolved.",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "expected": {
+    "fingerprint_prefix": "calmeet:",
+    "calendar_event_id": "evt_arch_1",
+    "transcript_trust": 0.75,
+    "summary_trust": 0.45,
+    "derived": "provider_summary",
+    "vault_id": "vault_work_acme",
+    "unresolved_speaker": "Speaker 1"
+  }
+}

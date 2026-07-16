@@ -40,6 +40,7 @@ evals/connectors/
     github_bot_lineage.json     # Phase 2 bot trust / review
     slack_thread_bot_lineage.json  # Phase 3 thread + bot
     gmail_thread_lineage.json   # Phase 4 thread + notification
+    calendar_meeting_correlation.json  # Phase 5 calendar↔meeting fingerprint
   run.py                        # tiny runner over Fake + real adapters
 ```
 

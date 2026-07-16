@@ -474,6 +474,152 @@ def _gmail_env():
     return api, (lambda: setattr(gclient, "_build_http", real_build))
 
 
+def _calendar_env():
+    import httpx
+    from calendar_mock import FakeCalendarAPI
+    from twin.connectors.calendar import client as cclient
+
+    api = FakeCalendarAPI()
+    real_build = cclient._build_http
+
+    def fake_build(base_url, token):
+        original = real_build(base_url, token)
+        headers = dict(original.headers)
+        original.close()
+        return httpx.Client(
+            transport=api.transport(),
+            base_url="https://www.googleapis.com/calendar/v3/",
+            headers=headers,
+        )
+
+    cclient._build_http = fake_build
+    return api, (lambda: setattr(cclient, "_build_http", real_build))
+
+
+def _fireflies_env():
+    import httpx
+    from fireflies_mock import FakeFirefliesAPI
+    from twin.connectors.fireflies import client as fclient
+
+    api = FakeFirefliesAPI()
+    real_build = fclient._build_http
+
+    def fake_build(base_url, token):
+        original = real_build(base_url, token)
+        headers = dict(original.headers)
+        original.close()
+        return httpx.Client(
+            transport=api.transport(),
+            base_url="https://api.fireflies.ai/v2/",
+            headers=headers,
+        )
+
+    fclient._build_http = fake_build
+    return api, (lambda: setattr(fclient, "_build_http", real_build))
+
+
+def _run_calendar_meeting_correlation(case: dict) -> tuple[bool, str]:
+    """Calendar + Fireflies share fingerprint; summary derived; speaker unresolved."""
+    import sys
+    tests_dir = Path(__file__).resolve().parents[2] / "tests"
+    if str(tests_dir) not in sys.path:
+        sys.path.insert(0, str(tests_dir))
+
+    cal_api, restore_cal = _calendar_env()
+    ff_api, restore_ff = _fireflies_env()
+    exp = case["expected"]
+    try:
+        with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+            store = SqliteStore(":memory:")
+            creds = build_credential_store(Path(tmp))
+            cal_acc = register_source_account(
+                store, connector_type="calendar",
+                source_owner=case["source_owner"],
+                org_key=case.get("org_key"),
+                owner_principal_id="principal_eval",
+                external_account_id="edu@acme.com",
+            )
+            cal_inst = add_connector_instance(
+                store, creds, account_id=cal_acc.id, secret="ya29.cal-test-token",
+                configuration={"calendars": ["primary"]},
+            )
+            cal_api.add_event(
+                "evt_arch_1",
+                summary="Architecture sync",
+                start="2026-07-15T15:00:00Z",
+                hangout_link="https://meet.google.com/abc-defg",
+                ical_uid="evt_arch_1@google.com",
+            )
+            sync_connector(store, creds, cal_inst.id)
+
+            ff_acc = register_source_account(
+                store, connector_type="fireflies",
+                source_owner=case["source_owner"],
+                org_key=case.get("org_key"),
+                owner_principal_id="principal_eval",
+                external_account_id="edu@acme.com",
+            )
+            ff_inst = add_connector_instance(
+                store, creds, account_id=ff_acc.id, secret="ff-test-token",
+            )
+            ff_api.add_transcript(
+                "mtg_1",
+                title="Architecture sync",
+                date="2026-07-15T15:00:00Z",
+                calendar_event_id="evt_arch_1",
+                sentences=[
+                    {"speaker_name": "Speaker 1", "text": "Hello?"},
+                    {"speaker_name": "Alice",
+                     "text": "Prefer PostgreSQL advisory locks."},
+                ],
+                speakers=[{"name": "Alice", "email": "alice@acme.com", "id": "a"}],
+                participants=[{"name": "Alice", "email": "alice@acme.com"}],
+            )
+            sync_connector(store, creds, ff_inst.id)
+
+            cal_recs = store.list_connector_records(cal_inst.id)
+            if not cal_recs:
+                return False, "calendar record missing"
+            cal = cal_recs[0]
+            ff_recs = store.list_connector_records(ff_inst.id)
+            transcripts = [r for r in ff_recs
+                           if r.external_type == "meeting_transcript"]
+            summaries = [r for r in ff_recs
+                         if r.external_type == "meeting_summary"]
+            if not transcripts or not summaries:
+                return False, "expected transcript + summary"
+            tr, sm = transcripts[0], summaries[0]
+            fp_cal = cal.source_metadata.get("correlation_fingerprint")
+            fp_tr = tr.source_metadata.get("correlation_fingerprint")
+            if not fp_cal or not str(fp_cal).startswith(exp["fingerprint_prefix"]):
+                return False, f"bad calendar fingerprint: {fp_cal}"
+            if fp_cal != fp_tr:
+                return False, f"fingerprint mismatch cal={fp_cal} meet={fp_tr}"
+            if cal.source_metadata.get("calendar_event_id") != exp["calendar_event_id"]:
+                return False, "calendar_event_id missing on calendar"
+            if tr.source_metadata.get("calendar_event_id") != exp["calendar_event_id"]:
+                return False, "calendar_event_id missing on meeting"
+            if tr.confidentiality.get("source_trust") != exp["transcript_trust"]:
+                return False, "transcript trust wrong"
+            if sm.confidentiality.get("source_trust") != exp["summary_trust"]:
+                return False, "summary trust wrong"
+            if sm.source_metadata.get("derived") != exp["derived"]:
+                return False, "summary not marked derived"
+            if exp["unresolved_speaker"] not in (
+                tr.source_metadata.get("unresolved_speakers") or []
+            ):
+                return False, "Speaker 1 should stay unresolved"
+            percepts = store.list_percepts()
+            if not percepts or any(
+                p.metadata.get("vault_id") != exp["vault_id"] for p in percepts
+            ):
+                return False, "ownership not sealed on every percept"
+        return True, "ok"
+    finally:
+        restore_cal()
+        restore_ff()
+
+
 def _run_gmail_thread_lineage(case: dict) -> tuple[bool, str]:
     api, restore = _gmail_env()
     label = case["label"]
@@ -555,6 +701,7 @@ _SCENARIOS = {
     "github_bot_lineage": _run_github_bot_lineage,
     "slack_thread_bot_lineage": _run_slack_thread_bot_lineage,
     "gmail_thread_lineage": _run_gmail_thread_lineage,
+    "calendar_meeting_correlation": _run_calendar_meeting_correlation,
 }
 
 

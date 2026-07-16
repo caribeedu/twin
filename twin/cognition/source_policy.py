@@ -71,6 +71,20 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
         drop=frozenset({"preference", "belief", "relationship",
                         "procedure", "event"}),
     ),
+    # Calendar: temporal context + commitments; every candidate needs review.
+    "calendar": SourcePolicy(
+        allow=frozenset({"event", "task", "fact"}),
+        require_review=frozenset({"event", "task", "fact"}),
+        drop=frozenset({"preference", "belief", "relationship",
+                        "procedure", "decision"}),
+    ),
+    # Fireflies / meeting transcripts: decisions & tasks possible, always review.
+    "fireflies": SourcePolicy(
+        allow=frozenset({"decision", "constraint", "task", "fact", "event"}),
+        require_review=frozenset({"decision", "constraint", "task",
+                                  "fact", "event"}),
+        drop=frozenset({"preference", "belief", "relationship", "procedure"}),
+    ),
     # exercised by the contract suite; mirrors github's posture
     "fake": SourcePolicy(
         allow=frozenset({"decision", "constraint", "procedure", "fact",
