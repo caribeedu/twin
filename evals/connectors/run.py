@@ -510,7 +510,7 @@ def _fireflies_env():
         original.close()
         return httpx.Client(
             transport=api.transport(),
-            base_url="https://api.fireflies.ai/v2/",
+            base_url="https://api.fireflies.ai/graphql",
             headers=headers,
         )
 
@@ -566,14 +566,16 @@ def _run_calendar_meeting_correlation(case: dict) -> tuple[bool, str]:
                 "mtg_1",
                 title="Architecture sync",
                 date="2026-07-15T15:00:00Z",
-                calendar_event_id="evt_arch_1",
+                cal_id="evt_arch_1",
+                calendar_id="evt_arch_1",
                 sentences=[
-                    {"speaker_name": "Speaker 1", "text": "Hello?"},
-                    {"speaker_name": "Alice",
+                    {"index": 0, "speaker_name": "Speaker 1", "text": "Hello?"},
+                    {"index": 1, "speaker_name": "Alice", "speaker_id": "a",
                      "text": "Prefer PostgreSQL advisory locks."},
                 ],
                 speakers=[{"name": "Alice", "email": "alice@acme.com", "id": "a"}],
-                participants=[{"name": "Alice", "email": "alice@acme.com"}],
+                participants=["alice@acme.com"],
+                meeting_attendees=[{"name": "Alice", "email": "alice@acme.com"}],
             )
             sync_connector(store, creds, ff_inst.id)
 
@@ -583,11 +585,11 @@ def _run_calendar_meeting_correlation(case: dict) -> tuple[bool, str]:
             cal = cal_recs[0]
             ff_recs = store.list_connector_records(ff_inst.id)
             transcripts = [r for r in ff_recs
-                           if r.external_type == "meeting_transcript"]
+                           if r.external_type == "meeting_transcript_chunk"]
             summaries = [r for r in ff_recs
                          if r.external_type == "meeting_summary"]
             if not transcripts or not summaries:
-                return False, "expected transcript + summary"
+                return False, "expected transcript chunk + summary"
             tr, sm = transcripts[0], summaries[0]
             fp_cal = cal.source_metadata.get("correlation_fingerprint")
             fp_tr = tr.source_metadata.get("correlation_fingerprint")
@@ -609,6 +611,8 @@ def _run_calendar_meeting_correlation(case: dict) -> tuple[bool, str]:
                 tr.source_metadata.get("unresolved_speakers") or []
             ):
                 return False, "Speaker 1 should stay unresolved"
+            if cal.external_id != "google_calendar:primary:evt_arch_1":
+                return False, f"calendar id not qualified: {cal.external_id}"
             percepts = store.list_percepts()
             if not percepts or any(
                 p.metadata.get("vault_id") != exp["vault_id"] for p in percepts

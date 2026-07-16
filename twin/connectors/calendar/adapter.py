@@ -5,7 +5,8 @@ Streams (explicit allowlist only):
     calendar:{calendar_id}
 
 Continuous sync uses ``updated`` watermark + lookback. Cancelled events
-become tombstones. Free/busy detail level is honored when configured.
+become tombstones. ``freebusy_only`` redacts the persisted raw payload.
+Event ids are calendar-qualified to avoid cross-calendar collisions.
 """
 
 from __future__ import annotations
@@ -93,7 +94,7 @@ class CalendarConnector:
     def adapter_manifest() -> AdapterManifest:
         return AdapterManifest(
             connector_type="calendar",
-            adapter_version="1.0",
+            adapter_version="1.1",
             schema_version=1,
             auth_mode="oauth2",
             affordances={
@@ -115,13 +116,32 @@ class CalendarConnector:
         return [self.account]
 
     def list_calendars(self) -> list[dict[str, Any]]:
-        out = []
-        for cal in self.client.list_calendars():
+        """Paginate calendarList; surface truncation if a hard cap is hit."""
+        out: list[dict[str, Any]] = []
+        page_token = None
+        pages = 0
+        truncated = False
+        while True:
+            items, page_token = self.client.list_calendars(page_token=page_token)
+            pages += 1
+            for cal in items:
+                out.append({
+                    "id": cal.get("id"),
+                    "summary": cal.get("summary") or cal.get("id"),
+                    "primary": bool(cal.get("primary")),
+                    "access_role": cal.get("accessRole"),
+                })
+            if not page_token:
+                break
+            if pages >= 50:
+                truncated = True
+                break
+        if truncated:
             out.append({
-                "id": cal.get("id"),
-                "summary": cal.get("summary") or cal.get("id"),
-                "primary": bool(cal.get("primary")),
-                "access_role": cal.get("accessRole"),
+                "id": "__truncated__",
+                "summary": f"(truncated after {len(out)} calendars)",
+                "primary": False,
+                "access_role": "none",
             })
         return out
 
@@ -130,7 +150,7 @@ class CalendarConnector:
             return ConnectorHealth(status=HealthStatus.unauthorized,
                                    detail="no credential configured")
         try:
-            cals = self.client.list_calendars()
+            cals, _ = self.client.list_calendars()
         except ConnectorError as exc:
             if exc.failure_class in (FailureClass.authentication,
                                      FailureClass.authorization):
@@ -142,7 +162,7 @@ class CalendarConnector:
             )
         return ConnectorHealth(
             status=HealthStatus.healthy,
-            detail=(f"authenticated; {len(cals)} calendars visible; "
+            detail=(f"authenticated; {len(cals)} calendars on first page; "
                     "read-only calendar.readonly"),
         )
 
@@ -181,35 +201,53 @@ class CalendarConnector:
     ) -> FetchPage:
         cal_id = plan.metadata["calendar_id"]
         base = dict(cursor or plan.cursor_before or {})
-        page_token = (base.get("progress") or {}).get("page_token")
+        progress = dict(base.get("progress") or {})
+        page_token = progress.get("page_token")
+        pages_done = int(progress.get("pages_done") or 0)
         updated_min = None if page_token else self._updated_min(base)
         events, next_token = self.client.list_events(
             cal_id, updated_min=updated_min, page_token=page_token,
             max_results=50, show_deleted=True,
         )
+        pages_done += 1
         items: list[RawFetchItem] = []
         window_max = base.get("window_max_seen") or base.get("watermark")
         for ev in events:
             if self.freebusy_only:
-                ev = dict(ev)
-                ev["freebusy_only"] = True
+                ev = cal_norm.freebusy_projection(ev)
             items.append(self._raw_from_event(ev, cal_id))
             updated = ev.get("updated")
             if updated and (not window_max or str(updated) > str(window_max)):
                 window_max = updated
 
-        if next_token:
+        budget_exhausted = pages_done >= self.max_pages and bool(next_token)
+        if next_token and not budget_exhausted:
             after = {
                 "watermark": base.get("watermark"),
                 "window_max_seen": window_max,
-                "progress": {"page_token": next_token},
+                "progress": {
+                    "page_token": next_token,
+                    "pages_done": pages_done,
+                },
+            }
+            return FetchPage(raw_items=items, cursor_after=after, done=False)
+        if budget_exhausted:
+            # Preserve provider page token for the next sync call.
+            after = {
+                "watermark": base.get("watermark"),
+                "window_max_seen": window_max,
+                "progress": {
+                    "page_token": next_token,
+                    "pages_done": 0,
+                },
             }
             return FetchPage(raw_items=items, cursor_after=after, done=False)
         after = {"watermark": window_max or base.get("watermark")}
         return FetchPage(raw_items=items, cursor_after=after, done=True)
 
     def _raw_from_event(self, event: dict[str, Any], calendar_id: str) -> RawFetchItem:
-        eid = str(event.get("id") or "?")
+        provider_eid = str(event.get("id") or "?")
+        eid = cal_norm.qualified_event_id(calendar_id, provider_eid)
         status = str(event.get("status") or "").lower()
         deleted = status == "cancelled" or bool(event.get("deleted"))
         return RawFetchItem(
@@ -224,6 +262,7 @@ class CalendarConnector:
                 "calendar_id": calendar_id,
                 "account_email": self._account_email
                 or self.account.external_account_id or "me",
+                "provider_event_id": provider_eid,
                 "object": event,
             },
             occurred_at=cal_norm._start_iso(event),
@@ -251,8 +290,13 @@ class CalendarConnector:
                 external_revision=raw_item.external_revision,
                 content=f"Calendar event cancelled {raw_item.external_id}",
                 deleted=True,
-                source_metadata={"provider": "google_calendar", "deleted": True,
-                                 "calendar_id": calendar_id},
+                source_metadata={
+                    "provider": "google_calendar",
+                    "deleted": True,
+                    "calendar_id": calendar_id,
+                    "provider_event_id": payload.get("provider_event_id")
+                    or obj.get("id"),
+                },
                 confidentiality={"source_trust": 0.40},
             )]
         rec = cal_norm.record_from_event(
@@ -262,6 +306,7 @@ class CalendarConnector:
             account_key=str(account_key),
             calendar_id=str(calendar_id),
             event=obj,
+            external_id=raw_item.external_id,
         )
         rec.external_id = raw_item.external_id
         rec.external_revision = raw_item.external_revision

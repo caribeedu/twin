@@ -12,10 +12,11 @@ from .correlate import (
     meeting_thread_key,
 )
 from .model import MeetingRecord, SpeakerIdentity, TranscriptSegment
-from .normalize import records_from_meeting
-from .speakers import attach_speaker_ids, map_speakers
+from .normalize import records_from_meeting, revision_for_meeting
+from .speakers import ACTOR_PROMOTE_THRESHOLD, attach_speaker_ids, map_speakers
 
 __all__ = [
+    "ACTOR_PROMOTE_THRESHOLD",
     "MeetingRecord",
     "SpeakerIdentity",
     "TranscriptSegment",
@@ -27,4 +28,5 @@ __all__ = [
     "meeting_correlation_metadata",
     "meeting_thread_key",
     "records_from_meeting",
+    "revision_for_meeting",
 ]

@@ -2,6 +2,7 @@
 
 Never assume ``Speaker 1`` is a person. Confidence stays explicit; low-
 confidence mappings remain candidates for review, not auto-merges.
+Identities are account-scoped — never global across SourceAccounts.
 """
 
 from __future__ import annotations
@@ -14,27 +15,50 @@ from .model import MeetingRecord, SpeakerIdentity, TranscriptSegment
 _SPEAKER_N = re.compile(r"^speaker\s*(\d+)$", re.I)
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 
+# Below this, actor_id stays null / meeting-local label only.
+ACTOR_PROMOTE_THRESHOLD = 0.70
+
 
 def actor_id_for(
-    *, provider: str, email: Optional[str] = None,
-    provider_speaker_id: Optional[str] = None, label: Optional[str] = None,
+    *,
+    provider: str,
+    account_key: str,
+    meeting_id: str,
+    email: Optional[str] = None,
+    provider_speaker_id: Optional[str] = None,
+    label: Optional[str] = None,
+    confidence: float = 0.0,
 ) -> Optional[str]:
     if email:
         m = _EMAIL.search(email)
         if m:
             return f"mail:{m.group(0).lower()}"
     if provider_speaker_id:
-        return f"meeting:{provider}:id:{provider_speaker_id}"
-    if label and not _SPEAKER_N.match(label.strip()):
+        return (
+            f"meeting:{provider}:{account_key}:speaker:{provider_speaker_id}"
+        )
+    # Unconfirmed names must not become cross-meeting identities.
+    if label and confidence >= ACTOR_PROMOTE_THRESHOLD and not _SPEAKER_N.match(
+        label.strip()
+    ):
         slug = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
         if slug:
-            return f"meeting:{provider}:name:{slug}"
+            return f"meeting:{provider}:{account_key}:name:{slug}"
+    if label and not _SPEAKER_N.match(label.strip()):
+        # Meeting-local candidate only — never promoted into actor_ids.
+        slug = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
+        if slug:
+            return (
+                f"meeting:{provider}:{account_key}:{meeting_id}:label:{slug}"
+            )
     return None
 
 
 def map_speakers(
     *,
     provider: str,
+    account_key: str,
+    meeting_id: str,
     segment_labels: list[str],
     participants: Optional[list[Any]] = None,
     organizer_email: Optional[str] = None,
@@ -44,9 +68,8 @@ def map_speakers(
     """Build SpeakerIdentity rows from transcript labels + attendee hints."""
     participants = participants or []
     provider_speaker_map = provider_speaker_map or {}
-    # Build email/name pools from participants (strings or dicts).
     emails: list[str] = []
-    names: dict[str, str] = {}  # lower name → email or display
+    names: dict[str, str] = {}
     for p in participants:
         if isinstance(p, str):
             if "@" in p:
@@ -91,12 +114,10 @@ def map_speakers(
             signals.append("participant_name_match")
             confidence = 0.70
         elif len(emails) == 1 and not _SPEAKER_N.match(key):
-            # Single attendee + named speaker → weak link
             email = emails[0]
             signals.append("sole_participant_heuristic")
             confidence = 0.45
         elif (host_email or organizer_email) and not _SPEAKER_N.match(key):
-            # Do not auto-bind host; leave low confidence name actor
             signals.append("named_speaker_unlinked")
             confidence = 0.30
         else:
@@ -104,10 +125,20 @@ def map_speakers(
             confidence = 0.10
 
         aid = actor_id_for(
-            provider=provider, email=email,
+            provider=provider,
+            account_key=account_key,
+            meeting_id=meeting_id,
+            email=email,
             provider_speaker_id=str(provider_id) if provider_id else None,
-            label=key if confidence >= 0.30 else None,
+            label=key,
+            confidence=confidence,
         )
+        # Weak provisional labels must not look like durable actors.
+        if confidence < ACTOR_PROMOTE_THRESHOLD and not email and not provider_id:
+            # Keep meeting-local label id for lineage, but callers filter
+            # actor_ids by threshold.
+            pass
+
         seen[key] = SpeakerIdentity(
             label=key,
             actor_id=aid,
@@ -134,9 +165,32 @@ def attach_speaker_ids(
             text=seg.text,
             start_ms=seg.start_ms,
             end_ms=seg.end_ms,
-            speaker_identity_id=sp.actor_id if sp else None,
+            speaker_identity_id=(
+                sp.actor_id if sp and sp.confidence >= ACTOR_PROMOTE_THRESHOLD
+                else None
+            ),
             confidence=sp.confidence if sp else seg.confidence,
         ))
     meeting.segments = new_segments
     meeting.speakers = speakers
     return meeting
+
+
+def resolved_actor_ids(speakers: list[dict[str, Any] | SpeakerIdentity],
+                       *, spoke_labels: Optional[set[str]] = None) -> list[str]:
+    """Actors for cognition: confirmed/high-confidence speakers who spoke."""
+    out: list[str] = []
+    for sp in speakers:
+        if isinstance(sp, SpeakerIdentity):
+            label, aid, conf = sp.label, sp.actor_id, sp.confidence
+        else:
+            label = str(sp.get("label") or "")
+            aid = sp.get("actor_id")
+            conf = float(sp.get("confidence") or 0)
+        if not aid or conf < ACTOR_PROMOTE_THRESHOLD:
+            continue
+        if spoke_labels is not None and label not in spoke_labels:
+            continue
+        if aid not in out:
+            out.append(aid)
+    return out

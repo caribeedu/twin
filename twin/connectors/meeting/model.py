@@ -25,8 +25,8 @@ class TranscriptSegment:
 @dataclass
 class SpeakerIdentity:
     """Mapped speaker — never assume label == person without evidence."""
-    label: str                          # as seen in transcript ("Speaker 1", "Edu")
-    actor_id: Optional[str] = None      # meeting:{provider}:{key} or mail:{addr}
+    label: str
+    actor_id: Optional[str] = None
     display_name: Optional[str] = None
     email: Optional[str] = None
     provider_speaker_id: Optional[str] = None
@@ -52,8 +52,12 @@ class MeetingRecord:
     calendar_event_id: Optional[str] = None
     calendar_iCalUID: Optional[str] = None
     conference_url: Optional[str] = None
-    recording_ref: Optional[str] = None
+    # Stable provider recording id when known — never a signed/expiring URL.
+    recording_id: Optional[str] = None
+    # Transient media URLs stay in raw_metadata only (not identity).
     host_email: Optional[str] = None
+    provider_status: Optional[str] = None   # processing | partial | complete | live | failed
+    transcript_complete: bool = True
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,7 +100,9 @@ class MeetingRecord:
             "calendar_event_id": self.calendar_event_id,
             "calendar_iCalUID": self.calendar_iCalUID,
             "conference_url": self.conference_url,
-            "recording_ref": self.recording_ref,
+            "recording_id": self.recording_id,
             "host_email": self.host_email,
+            "provider_status": self.provider_status,
+            "transcript_complete": self.transcript_complete,
             "raw_metadata": dict(self.raw_metadata),
         }

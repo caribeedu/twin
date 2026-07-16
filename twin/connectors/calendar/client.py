@@ -89,9 +89,14 @@ class CalendarClient:
             )
         return data
 
-    def list_calendars(self) -> list[dict[str, Any]]:
-        data = self.call("users/me/calendarList")
-        return list(data.get("items") or [])
+    def list_calendars(
+        self, *, page_token: Optional[str] = None, max_results: int = 100,
+    ) -> tuple[list[dict[str, Any]], Optional[str]]:
+        params: dict[str, Any] = {"maxResults": max_results}
+        if page_token:
+            params["pageToken"] = page_token
+        data = self.call("users/me/calendarList", params=params)
+        return list(data.get("items") or []), data.get("nextPageToken")
 
     def list_events(
         self, calendar_id: str, *,

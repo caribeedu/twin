@@ -77,29 +77,77 @@ def test_sync_ingests_event_with_correlation(store, creds, calendar):
     assert result.percepts == 1
     rec = store.list_connector_records(inst.id)[0]
     assert rec.external_type == "calendar_event"
+    assert rec.external_id == f"google_calendar:{CAL}:evt_arch_1"
     assert rec.thread_key.startswith("calendar:google_calendar:")
+    assert rec.source_metadata["provider_event_id"] == "evt_arch_1"
     assert rec.source_metadata["calendar_event_id"] == "evt_arch_1"
     assert rec.source_metadata["conference_url"] == "https://meet.google.com/abc-defg"
     fp = correlation_fingerprint(
         title="Architecture sync", started_at="2026-07-15T15:00:00Z",
     )
     assert rec.source_metadata["correlation_fingerprint"] == fp
-    assert any(a.get("kind") == "correlation_fingerprint"
-               for a in rec.artifact_refs)
     ckpt = store.get_connector_checkpoint(inst.id, f"calendar:{CAL}")
     assert ckpt is not None
     assert ckpt.cursor.get("watermark")
 
 
-def test_freebusy_hides_title(store, creds, calendar):
-    calendar.add_event("evt_fb", summary="Secret 1:1", description="private notes")
+def test_freebusy_redacts_raw_and_record(store, creds, calendar):
+    calendar.add_event(
+        "evt_fb", summary="Secret 1:1", description="private notes",
+        attendees=["doctor@clinic.com"],
+        hangout_link="https://meet.google.com/secret",
+    )
     _acc, inst = _mk(store, creds, extra={"freebusy_only": True})
     sync_connector(store, creds, inst.id)
     rec = store.list_connector_records(inst.id)[0]
     assert rec.source_metadata["detail_level"] == "freebusy"
     assert "Secret" not in rec.content
     assert "private notes" not in rec.content
+    assert "doctor@" not in rec.content
     assert rec.confidentiality["source_trust"] == 0.55
+    raw = store.list_connector_raw_items(inst.id)[0]
+    blob = str(raw.payload)
+    assert "Secret" not in blob
+    assert "private notes" not in blob
+    assert "doctor@" not in blob
+    assert "meet.google.com/secret" not in blob
+    assert raw.payload["object"].get("freebusy_only") is True
+    assert "summary" not in raw.payload["object"]
+    assert "description" not in raw.payload["object"]
+
+
+def test_same_event_id_two_calendars_no_collision(store, creds, calendar):
+    calendar.add_event("shared_id", calendar_id="primary", summary="Primary copy")
+    calendar.add_event(
+        "shared_id", calendar_id="work@acme.com", summary="Work copy",
+        updated="2026-07-15T15:00:00Z",
+    )
+    _acc, inst = _mk(store, creds, calendars=("primary", "work@acme.com"))
+    sync_connector(store, creds, inst.id)
+    ids = {r.external_id for r in store.list_connector_records(inst.id)}
+    assert "google_calendar:primary:shared_id" in ids
+    assert "google_calendar:work@acme.com:shared_id" in ids
+    assert len(ids) == 2
+
+
+def test_cancel_one_calendar_does_not_delete_other(store, creds, calendar):
+    calendar.add_event("shared_id", calendar_id="primary", summary="Primary")
+    calendar.add_event(
+        "shared_id", calendar_id="work@acme.com", summary="Work",
+        updated="2026-07-15T15:00:00Z",
+    )
+    _acc, inst = _mk(store, creds, calendars=("primary", "work@acme.com"))
+    sync_connector(store, creds, inst.id)
+    calendar.cancel_event("shared_id", calendar_id="primary")
+    sync_connector(store, creds, inst.id)
+    by_id = {r.external_id: r for r in store.list_connector_records(inst.id)}
+    # Latest revision for primary is deleted; work remains live.
+    primary_revs = [r for r in store.list_connector_records(inst.id)
+                    if r.external_id == "google_calendar:primary:shared_id"]
+    assert any(r.deleted for r in primary_revs)
+    work = [r for r in store.list_connector_records(inst.id)
+            if r.external_id == "google_calendar:work@acme.com:shared_id"]
+    assert work and not any(r.deleted for r in work)
 
 
 def test_cancelled_emits_tombstone(store, creds, calendar):

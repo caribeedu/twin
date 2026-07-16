@@ -102,9 +102,17 @@ class FakeCalendarAPI:
             )
 
         if path == "users/me/calendarList":
-            return httpx.Response(200, json={
-                "items": list(self.calendars.values()),
-            })
+            items = list(self.calendars.values())
+            page_size = int(params.get("maxResults") or 100)
+            page_token = params.get("pageToken")
+            offset = int(page_token.split(":", 1)[1]) if (
+                page_token and page_token.startswith("p:")
+            ) else 0
+            page = items[offset: offset + page_size]
+            body: dict[str, Any] = {"items": page}
+            if offset + page_size < len(items):
+                body["nextPageToken"] = f"p:{offset + page_size}"
+            return httpx.Response(200, json=body)
 
         # calendars/{id}/events
         if path.startswith("calendars/") and path.endswith("/events"):

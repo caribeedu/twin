@@ -55,8 +55,27 @@ def _attendee_addrs(event: dict[str, Any]) -> list[str]:
 def revision_for_event(event: dict[str, Any]) -> str:
     for key in ("etag", "updated", "sequence"):
         if event.get(key) is not None:
-            return f"{event[key]}.{_hash8(event.get('summary') or '')}"
+            return f"{event[key]}.{_hash8(event.get('summary') or event.get('id') or '')}"
     return _hash8(str(event.get("id") or "0"))
+
+
+def qualified_event_id(calendar_id: str, event_id: str) -> str:
+    """Stable Twin id: calendar-qualified so multi-calendar sync cannot collide."""
+    return f"google_calendar:{calendar_id}:{event_id}"
+
+
+def freebusy_projection(event: dict[str, Any]) -> dict[str, Any]:
+    """Minimized event persisted under freebusy_only — no title/PII fields."""
+    return {
+        "id": event.get("id"),
+        "status": event.get("status") or "confirmed",
+        "start": event.get("start"),
+        "end": event.get("end"),
+        "updated": event.get("updated"),
+        "etag": event.get("etag"),
+        "transparency": event.get("transparency") or "opaque",
+        "freebusy_only": True,
+    }
 
 
 def record_from_event(
@@ -67,8 +86,10 @@ def record_from_event(
     account_key: str,
     calendar_id: str,
     event: dict[str, Any],
+    external_id: Optional[str] = None,
 ) -> ConnectorRecord:
-    eid = str(event.get("id") or "?")
+    provider_event_id = str(event.get("id") or event.get("provider_event_id") or "?")
+    eid = external_id or qualified_event_id(calendar_id, provider_event_id)
     title = event.get("summary") or event.get("title") or "(no title)"
     status = str(event.get("status") or "confirmed").lower()
     deleted = status == "cancelled" or bool(event.get("deleted"))
@@ -91,7 +112,8 @@ def record_from_event(
         "transparency": transparency,
         "freebusy_only": freebusy_only,
     })
-    corr = calendar_correlation_metadata({**event, "id": eid})
+    # Correlation keeps the provider raw event id (not the Twin-qualified key).
+    corr = calendar_correlation_metadata({**event, "id": provider_event_id})
     tkey = calendar_thread_key(provider, account_key, eid)
 
     if freebusy_only or transparency == "transparent":
@@ -100,6 +122,23 @@ def record_from_event(
             f"When: {start or '?'} → {end or '?'}"
         )
         detail_level = "freebusy"
+        # Do not leak title/attendees via metadata in freebusy mode.
+        source_metadata: dict[str, Any] = {
+            "provider": provider,
+            "account_key": account_key,
+            "calendar_id": calendar_id,
+            "provider_event_id": provider_event_id,
+            "status": status,
+            "detail_level": detail_level,
+            "author_kind": kind,
+            "transparency": transparency,
+            "time_range": {"start": start, "end": end},
+            "attendee_count": 0,
+            "correlation_fingerprint": corr.get("correlation_fingerprint"),
+        }
+        # Fingerprint without title is weak/absent — drop if title-dependent.
+        if freebusy_only:
+            source_metadata.pop("correlation_fingerprint", None)
     else:
         desc = event.get("description") or ""
         loc = event.get("location") or ""
@@ -119,21 +158,30 @@ def record_from_event(
             lines.append(_clip(desc))
         content = "\n".join(lines)
         detail_level = "full"
-
-    source_metadata: dict[str, Any] = {
-        "provider": provider,
-        "account_key": account_key,
-        "calendar_id": calendar_id,
-        "status": status,
-        "detail_level": detail_level,
-        "author_kind": kind,
-        "transparency": transparency,
-        "time_range": {"start": start, "end": end},
-        "attendee_count": len(attendees),
-        **corr,
-    }
+        source_metadata = {
+            "provider": provider,
+            "account_key": account_key,
+            "calendar_id": calendar_id,
+            "provider_event_id": provider_event_id,
+            "status": status,
+            "detail_level": detail_level,
+            "author_kind": kind,
+            "transparency": transparency,
+            "time_range": {"start": start, "end": end},
+            "attendee_count": len(attendees),
+            **corr,
+        }
     if deleted:
         source_metadata["deleted"] = True
+
+    artifact_refs = [{
+        "kind": "calendar_event",
+        "event_id": eid,
+        "provider_event_id": provider_event_id,
+        "calendar_id": calendar_id,
+    }]
+    if not freebusy_only:
+        artifact_refs.extend(correlation_artifact_refs(corr))
 
     return ConnectorRecord(
         connector_id=connector_id,
@@ -142,14 +190,11 @@ def record_from_event(
         external_id=eid,
         external_revision=revision_for_event(event),
         occurred_at=start,
-        actor_ids=actors,
-        participant_ids=participants,
+        actor_ids=[] if freebusy_only else actors,
+        participant_ids=[] if freebusy_only else participants,
         project_hint=calendar_id,
         thread_key=tkey,
-        artifact_refs=(
-            [{"kind": "calendar_event", "event_id": eid, "calendar_id": calendar_id}]
-            + correlation_artifact_refs(corr)
-        ),
+        artifact_refs=artifact_refs,
         content=content,
         source_metadata=source_metadata,
         confidentiality={"source_trust": trust},
