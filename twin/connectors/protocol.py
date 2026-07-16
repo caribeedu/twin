@@ -94,6 +94,9 @@ class RawFetchItem:
 class FetchPage:
     raw_items: list[RawFetchItem] = field(default_factory=list)
     cursor_after: dict[str, Any] = field(default_factory=dict)
+    # False = commit this page as a durable continuation batch; the runtime
+    # will start another batch (or leave the stream due) rather than keep
+    # fetching into the same in-memory staging buffer.
     done: bool = True
 
 

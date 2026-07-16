@@ -85,6 +85,9 @@ class StreamResult:
     retry_after: Optional[int] = None  # provider-instructed wait (rate limits)
     batch_id: Optional[str] = None
     cursor_after: dict[str, Any] = field(default_factory=dict)
+    # False when this batch committed a durable continuation cursor — the
+    # outer run_sync loop may start another batch for the same stream.
+    done: bool = True
 
 
 @dataclass
@@ -525,7 +528,7 @@ def run_sync(
                 worst = HealthStatus.degraded
             if not sr.committed:
                 break
-            if not _window_incomplete(sr.cursor_after):
+            if sr.done:
                 break
             if max_batches and batches >= max_batches:
                 break
@@ -533,11 +536,6 @@ def run_sync(
     result.health = worst
     _persist_health(store, instance, result)
     return result
-
-
-def _window_incomplete(cursor: Optional[dict[str, Any]]) -> bool:
-    """Durable continuation cursor: watermark not yet promoted."""
-    return bool(cursor and cursor.get("substream") and "progress" in cursor)
 
 
 def _sync_stream(
@@ -599,28 +597,22 @@ def _sync_stream_leased(
 
     sr = StreamResult(stream=stream, batch_id=batch.id)
     staged = _Staged()
-    cursor: Optional[dict[str, Any]] = plan.cursor_before or None
-    last_page: Optional[FetchPage] = None
+    page: Optional[FetchPage] = None
     try:
-        # 1. fetch + stage — outside any transaction, nothing persisted yet.
-        # The lease is renewed after every page so a slow provider or a long
-        # backfill never outlives its authority silently.
-        while True:
-            page = adapter.fetch_batch(plan, cursor)
-            for raw in page.raw_items:
-                stage_raw_fetch_item(store, adapter, instance, account,
-                                     batch, staged, raw)
-            last_page = page
-            cursor = page.cursor_after
-            if not store.renew_stream_lease(instance.id, stream, lease_owner,
-                                            fencing_token,
-                                            ttl_seconds=LEASE_TTL_SECONDS):
-                raise LeaseLost(
-                    f"lease for {instance.id}/{stream} lost mid-fetch "
-                    f"(fencing token {fencing_token})"
-                )
-            if page.done:
-                break
+        # One FetchPage = one durable batch. ``done=False`` means "commit a
+        # continuation cursor"; the outer run_sync loop may start another
+        # batch. Never accumulate pages in memory until the window ends.
+        page = adapter.fetch_batch(plan, plan.cursor_before or None)
+        for raw in page.raw_items:
+            stage_raw_fetch_item(store, adapter, instance, account,
+                                 batch, staged, raw)
+        if not store.renew_stream_lease(instance.id, stream, lease_owner,
+                                        fencing_token,
+                                        ttl_seconds=LEASE_TTL_SECONDS):
+            raise LeaseLost(
+                f"lease for {instance.id}/{stream} lost mid-fetch "
+                f"(fencing token {fencing_token})"
+            )
     except LeaseLost as exc:
         _abort_batch(store, batch, sr, exc)
         return sr  # another worker owns the stream now; publish nothing
@@ -652,8 +644,9 @@ def _sync_stream_leased(
         _fill_stream(sr, batch)
         return sr
 
-    # 2b. full success → single atomic finalize (fenced)
-    cursor_after = adapter.acknowledge(plan, last_page or FetchPage())
+    # 2b. success → atomic finalize (fenced), even when page.done is False
+    # (durable continuation). Watermark promotion is encoded in cursor_after.
+    cursor_after = adapter.acknowledge(plan, page or FetchPage())
     try:
         sr.deletion_events = _finalize_committed(
             store, instance, account, batch, staged,
@@ -673,6 +666,7 @@ def _sync_stream_leased(
 
     sr.committed = True
     sr.cursor_after = cursor_after or {}
+    sr.done = True if page is None else bool(page.done)
     _fill_stream(sr, batch)
     return sr
 

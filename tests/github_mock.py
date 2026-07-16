@@ -167,7 +167,10 @@ class FakeGitHubAPI:
         url = urlparse(str(request.url))
         path = url.path
         params = {k: v[0] for k, v in parse_qs(url.query).items()}
-        self.requests.append(path)
+        # path + query so continuation tests can assert page=N
+        self.requests.append(str(request.url.path) + (
+            f"?{url.query}" if url.query else ""
+        ))
 
         auth = request.headers.get("Authorization", "")
         if self.valid_token is not None and auth != f"Bearer {self.valid_token}":

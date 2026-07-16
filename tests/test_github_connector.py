@@ -596,6 +596,9 @@ def test_max_pages_continuation_ingests_all_issues_without_starvation(store, cre
 def test_durable_continuation_survives_restart_between_batches(store, creds, gh):
     """Crash mid-window: next sync resumes from persisted next_url, does not
     re-fetch the prefix, and only promotes watermark at the end."""
+    from twin.connectors.github.adapter import GithubConnector
+    from twin.connectors.registry import build_adapter
+
     for n in range(1, 251):
         gh.add_issue(REPO, n, title=f"Issue {n}",
                      updated_at=f"2026-02-01T{(n % 24):02d}:{(n % 60):02d}:00Z")
@@ -604,28 +607,58 @@ def test_durable_continuation_survives_restart_between_batches(store, creds, gh)
         "max_batches_per_stream": 1,
     })
     stream = f"repo:{REPO}:issues"
-    first = sync_connector(store, creds, inst.id, streams=[stream])
+    fetch_calls = {"n": 0}
+    real_fetch = GithubConnector.fetch_batch
+
+    def counting_fetch(self, plan, cursor):
+        fetch_calls["n"] += 1
+        return real_fetch(self, plan, cursor)
+
+    GithubConnector.fetch_batch = counting_fetch
+    try:
+        first = sync_connector(store, creds, inst.id, streams=[stream])
+    finally:
+        GithubConnector.fetch_batch = real_fetch
+
     assert first.health.value == "healthy"
+    assert len(first.streams) == 1
     assert first.streams[0].committed
+    assert first.streams[0].done is False
+    assert fetch_calls["n"] == 1  # exactly one FetchPage per batch
+    assert first.streams[0].raw <= 100  # one GitHub page, not the whole window
+
     ckpt = store.get_connector_checkpoint(inst.id, stream)
     assert ckpt is not None
     assert ckpt.cursor.get("substream") == "issues"
-    assert ckpt.cursor.get("progress", {}).get("issues", {}).get("next_url")
-    # watermark stays at the pre-window value (None) until the window ends
+    next_url = ckpt.cursor.get("progress", {}).get("issues", {}).get("next_url")
+    assert next_url and "page=2" in next_url
     assert ckpt.cursor.get("watermark") is None
     after_first = len(_records_by_type(store, inst.id).get("issue", []))
     assert 0 < after_first < 250
 
-    # simulate process restart: new sync resumes the durable continuation
-    mid_batches = store.list_connector_batches(inst.id)
+    # process B: rebuild adapter (fresh client) and resume — must hit page=2,
+    # not re-request the initial listing
+    gh.requests.clear()
+    account = store.get_source_account(inst.account_id)
+    adapter = build_adapter(inst, account, TOKEN)
+    assert isinstance(adapter, GithubConnector)
     second = sync_connector(store, creds, inst.id, streams=[stream])
     assert second.streams[0].committed
+    assert second.streams[0].raw <= 100
+    issue_lists = [r for r in gh.requests
+                   if "/issues?" in r or r.endswith("/issues")]
+    issue_lists = [r for r in issue_lists if "/comments" not in r]
+    assert any("page=2" in r for r in issue_lists)
+    # reject a fresh page-1 listing; per_page=100 must not match "page=1"
+    assert not any(
+        r.endswith("/issues") or "page=1&" in r or r.endswith("page=1")
+        for r in issue_lists
+    )
+
     ckpt2 = store.get_connector_checkpoint(inst.id, stream)
     assert ckpt2.version > ckpt.version
-    # still in the same window or further — never wiped back to a bare start
     assert "progress" in ckpt2.cursor or ckpt2.cursor.get("watermark")
 
-    # finish the window
     for _ in range(40):
         ckpt = store.get_connector_checkpoint(inst.id, stream)
         if ckpt and "progress" not in (ckpt.cursor or {}):
@@ -636,11 +669,11 @@ def test_durable_continuation_survives_restart_between_batches(store, creds, gh)
     final = store.get_connector_checkpoint(inst.id, stream)
     assert final.cursor.get("watermark")
     assert "progress" not in final.cursor
-    # more than one committed batch for this stream
     committed = [b for b in store.list_connector_batches(inst.id)
                  if b.stream == stream
                  and getattr(b.status, "value", b.status) == "committed"]
     assert len(committed) >= 2
+    assert all(b.raw_count <= 100 for b in committed)
 
 
 def test_paginated_pr_reviews_all_ingested(store, creds, gh):
