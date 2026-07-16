@@ -1378,6 +1378,17 @@ Phase 2 — GitHub Connector (done):
 - optional webhook receiver `POST /api/webhooks/github/{connector_id}`: HMAC-authenticated (`X-Hub-Signature-256` against a dedicated secret in the CredentialStore, uniform 401 on every failure), it only marks the sync state due with a `targeted_streams` hint the scheduler consumes — the payload never becomes canonical state and polling remains the authoritative reconciliation;
 - `tests/test_github_connector.py` contract suite against an offline API double (`tests/github_mock.py`), a Postgres mirror test, and `evals/connectors/` scenarios `github_pr_lifecycle` and `github_bot_lineage`.
 
+Phase 3 — Slack Connector (done):
+
+- Web API adapter (`twin/connectors/slack/`) over the Phase 1 framework: `SlackClient` (cursor pagination, per-stream page budget, rate-limit → structured `retry_after`), `auth_mode=slack_bot_token` with honest "privilege unverified via auth.test" health detail; read-only operation (no chat:write);
+- dynamic streams per allowlisted channel — `channel:{id}` from `plan_streams()` — each with its own checkpoint/lease; incremental cursor is the maximum observed Slack event `ts` across history roots and thread replies (not a pure history cursor) plus lookback; substreams `history` then `threads`; durable continuation when the page budget is exhausted;
+- activity on roots older than the lookback window is recovered via durable Events API hints (`pending_threads`, `pending_message_refreshes`, `pending_tombstones`) — the webhook never becomes canonical content; each hint generation has an `id` (`event_id` or synthetic) so a fetch only consumes generations it observed; consumption uses commit-free `consume_connector_sync_hints_cas` inside finalize (CAS conflict aborts the whole batch);
+- external types `channel` / `message` / `thread_reply` with workspace-qualified ids (`slack:{team_id}:{user}`, `thread_key=slack:{team_id}:{channel}:{thread_ts}`); edit revisions via `edited.ts`+content hash; reply deletions preserve `external_type=thread_reply` for lineage; file bytes are not fetched — messages may carry `slack_file` artifact refs with `download_status=metadata_only`;
+- channel metadata revalidated via `conversations.info` each sync (TTL cache, default 1h); `channel_kind` fails closed — stale metadata with a failed refresh never authorizes as public; `include_private_channels` / `include_direct_messages` enforced at sync time;
+- conservative source trust (human root 0.70 / reply 0.65; bots 0.45 marked `derived=likely_notification`, with GitHub-ref extraction); Slack source policy requires review for every allowed candidate type;
+- setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification, `event_id` dedupe);
+- `tests/test_slack_connector.py` against `tests/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.

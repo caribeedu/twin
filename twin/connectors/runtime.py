@@ -64,6 +64,10 @@ class CheckpointConflict(RuntimeError):
     """The checkpoint moved underneath this batch — abort, never regress."""
 
 
+class SyncHintConflict(RuntimeError):
+    """Sync-state hint CAS lost the race inside finalize — abort the batch."""
+
+
 class LeaseLost(RuntimeError):
     """This worker no longer holds the stream lease (fencing token stale) —
     it must stop publishing results, even mid-flight."""
@@ -203,6 +207,9 @@ class _Staged:
     # in-batch idempotency: everything seen in THIS batch, keyed like the store
     raw_by_key: dict[str, RawConnectorItem] = field(default_factory=dict)
     record_by_key: dict[str, ConnectorRecord] = field(default_factory=dict)
+    # Adapter sync-state hints (tombstones / targeted refreshes) consumed only
+    # inside the finalize transaction — never before durable commit.
+    consumed_sync_hints: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _stage_dlq(
@@ -388,6 +395,7 @@ def _finalize_committed(
     batch: ConnectorBatch, staged: _Staged, *,
     cursor_after: dict[str, Any], plan, expected_version: int,
     emit_percepts: bool, lease_owner: str, fencing_token: int,
+    adapter=None,
 ) -> int:
     """The single transaction that makes a stream's evidence visible:
 
@@ -395,6 +403,7 @@ def _finalize_committed(
         + raw + records + percepts + deletion events
         + batch committed
         + checkpoint CAS
+        + adapter sync-hint consumption (tombstones / refreshes)
 
     All of it or none of it. ``batch committed ⇔ checkpoint references it``,
     and only the worker that still holds the lease (same fencing token) may
@@ -459,6 +468,11 @@ def _finalize_committed(
                 f"checkpoint for {instance.id}/{batch.stream} moved "
                 f"(expected version {expected_version})"
             )
+        # Sync-state hint consumption participates in the same transaction
+        # via a commit-free CAS. Failure must abort the whole finalize.
+        consume = getattr(adapter, "consume_sync_hints", None) if adapter else None
+        if callable(consume) and staged.consumed_sync_hints:
+            consume(store, staged.consumed_sync_hints)
     return deletion_events
 
 
@@ -588,6 +602,9 @@ def _sync_stream_leased(
 ) -> StreamResult:
     checkpoint = store.get_connector_checkpoint(instance.id, stream)
     expected_version = checkpoint.version if checkpoint else 0
+    attach = getattr(adapter, "attach_sync_hints", None)
+    if callable(attach):
+        attach(store)
     plan = adapter.plan_sync(account, checkpoint, stream=stream)
     batch = ConnectorBatch(
         connector_id=instance.id, stream=stream,
@@ -606,6 +623,9 @@ def _sync_stream_leased(
         for raw in page.raw_items:
             stage_raw_fetch_item(store, adapter, instance, account,
                                  batch, staged, raw)
+        collect_hints = getattr(adapter, "collect_sync_hint_consumptions", None)
+        if callable(collect_hints):
+            staged.consumed_sync_hints.extend(collect_hints() or [])
         if not store.renew_stream_lease(instance.id, stream, lease_owner,
                                         fencing_token,
                                         ttl_seconds=LEASE_TTL_SECONDS):
@@ -646,6 +666,8 @@ def _sync_stream_leased(
 
     # 2b. success → atomic finalize (fenced), even when page.done is False
     # (durable continuation). Watermark promotion is encoded in cursor_after.
+    # acknowledge must NOT drop sync-state hints — that happens inside
+    # _finalize_committed so a failed finalize cannot lose tombstones.
     cursor_after = adapter.acknowledge(plan, page or FetchPage())
     try:
         sr.deletion_events = _finalize_committed(
@@ -653,8 +675,9 @@ def _sync_stream_leased(
             cursor_after=cursor_after or {}, plan=plan,
             expected_version=expected_version, emit_percepts=emit_percepts,
             lease_owner=lease_owner, fencing_token=fencing_token,
+            adapter=adapter,
         )
-    except (CheckpointConflict, LeaseLost) as exc:
+    except (CheckpointConflict, SyncHintConflict, LeaseLost) as exc:
         _abort_batch(store, batch, sr, exc)
         return sr
     except Exception as exc:

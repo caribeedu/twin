@@ -366,6 +366,88 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
         restore()
 
 
+def _slack_env():
+    import httpx
+
+    tests_dir = Path(__file__).resolve().parents[2] / "tests"
+    if str(tests_dir) not in sys.path:
+        sys.path.insert(0, str(tests_dir))
+    from slack_mock import FakeSlackAPI
+
+    from twin.connectors.slack import client as slclient
+
+    api = FakeSlackAPI()
+    real_build = slclient._build_http
+
+    def fake_build(base_url, token):
+        original = real_build(base_url, token)
+        headers = dict(original.headers)
+        original.close()
+        return httpx.Client(transport=api.transport(),
+                            base_url="https://slack.com/api/", headers=headers)
+
+    slclient._build_http = fake_build
+    return api, (lambda: setattr(slclient, "_build_http", real_build))
+
+
+def _run_slack_thread_bot_lineage(case: dict) -> tuple[bool, str]:
+    api, restore = _slack_env()
+    channel = case["channel"]
+    exp = case["expected"]
+    try:
+        with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+            store = SqliteStore(":memory:")
+            creds = build_credential_store(Path(tmp))
+            acc = register_source_account(
+                store, connector_type="slack",
+                source_owner=case["source_owner"],
+                org_key=case.get("org_key"),
+                owner_principal_id="principal_eval",
+            )
+            inst = add_connector_instance(
+                store, creds, account_id=acc.id, secret="xoxb-test-token",
+                configuration={"channels": [channel]},
+            )
+            api.add_channel(channel, name="engineering")
+            api.add_message(channel, "1700000001.000100",
+                            text="Should we use Redis for the queue?",
+                            reply_count=1)
+            api.add_reply(channel, "1700000001.000100", "1700000001.000200",
+                          text="Prefer PostgreSQL advisory locks.")
+            api.add_message(channel, "1700000002.000100",
+                            text="GitHub: PR #8 opened in acme/atlas",
+                            user="U_BOT", bot_id="B1", subtype="bot_message")
+            for m in api.messages[channel]:
+                if m["ts"] == "1700000001.000100":
+                    m["reply_count"] = 1
+            sync_connector(store, creds, inst.id)
+
+            records = store.list_connector_records(inst.id)
+            human = [r for r in records
+                     if r.external_type in ("message", "thread_reply")
+                     and r.source_metadata.get("author_kind") == "human"]
+            if len(human) < 2:
+                return False, f"expected root+reply, got {len(human)} human records"
+            if any(r.thread_key != exp["thread_key"] for r in human):
+                return False, "thread items do not share one thread_key"
+            bots = [r for r in records
+                    if r.source_metadata.get("author_kind") == "bot"]
+            if not bots:
+                return False, "bot notification missing"
+            bot = bots[0]
+            if bot.confidentiality["source_trust"] != exp["bot_trust"]:
+                return False, "bot trust not calibrated"
+            if bot.source_metadata.get("derived") != exp["derived"]:
+                return False, "bot not marked derived"
+            percepts = store.list_percepts()
+            if not percepts or any(p.metadata.get("vault_id") != exp["vault_id"]
+                                   for p in percepts):
+                return False, "ownership not sealed on every percept"
+        return True, "ok"
+    finally:
+        restore()
+
+
 _SCENARIOS = {
     "normalization": _run_simple,
     "replay": _run_simple,
@@ -376,6 +458,7 @@ _SCENARIOS = {
     "source_deletion": _run_source_deletion,
     "github_pr_lifecycle": _run_github_pr_lifecycle,
     "github_bot_lineage": _run_github_bot_lineage,
+    "slack_thread_bot_lineage": _run_slack_thread_bot_lineage,
 }
 
 

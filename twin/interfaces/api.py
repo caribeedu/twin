@@ -1046,6 +1046,20 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         except WebhookRejected as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.reason)
 
+    @app.post("/api/webhooks/slack/{connector_id}")
+    async def api_slack_webhook(connector_id: str, request: Request):
+        from ..connectors.slack.webhook import WebhookRejected, handle_slack_webhook
+        body = await request.body()
+        try:
+            return handle_slack_webhook(
+                ws.store, _conn_creds(), connector_id,
+                body=body,
+                timestamp=request.headers.get("X-Slack-Request-Timestamp"),
+                signature=request.headers.get("X-Slack-Signature"),
+            )
+        except WebhookRejected as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.reason)
+
     @app.get("/api/judgment/conflicts")
     def api_judgment_conflicts(status: str = "open"):
         return [c.model_dump(mode="json") for c in ws.store.list_judgment_conflicts(status=status)]
