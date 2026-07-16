@@ -1,0 +1,16 @@
+{
+  "id": "gmail_thread_lineage",
+  "scenario": "gmail_thread_lineage",
+  "description": "Gmail thread shares mail: thread_key; GitHub notification is derived and low-trust.",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "label": "INBOX",
+  "expected": {
+    "thread_key": "mail:gmail:edu@acme.com:t_arch",
+    "bot_trust": 0.40,
+    "derived": "likely_notification",
+    "vault_id": "vault_work_acme",
+    "classification_human": "human_authored",
+    "classification_bot": "code_review_notification"
+  }
+}

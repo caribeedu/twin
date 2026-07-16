@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from .models import (
+    BackfillJob,
     ConnectorBatch,
     ConnectorCheckpoint,
     ConnectorDeadLetter,
@@ -184,3 +185,17 @@ def row_to_sync_state(row: Any) -> ConnectorSyncState:
     if "version" in keys and row["version"] is not None:
         data["version"] = int(row["version"])
     return ConnectorSyncState.model_validate(data)
+
+
+def backfill_job_to_row(job: BackfillJob) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "connector_id": job.connector_id,
+        "status": job.status.value if hasattr(job.status, "value") else job.status,
+        "created_at": job.created_at,
+        "payload": _j(job.model_dump(mode="json")),
+    }
+
+
+def row_to_backfill_job(row: Any) -> BackfillJob:
+    return BackfillJob.model_validate(_loads(row["payload"], {}))

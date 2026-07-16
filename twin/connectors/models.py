@@ -339,3 +339,34 @@ class ConnectorSyncState(BaseModel):
     version: int = Field(default=0, ge=0)
     updated_at: str = Field(default_factory=now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BackfillJobStatus(str, Enum):
+    planned = "planned"
+    running = "running"
+    paused = "paused"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class BackfillJob(BaseModel):
+    """Partitionable historical backfill (v0.6 §34) — separate from continuous sync.
+
+    Progress.partitions is a list of year-month windows. Completing a partition
+    is durable; the job can pause and resume without redoing finished months.
+    """
+    id: str = Field(default_factory=lambda: ids.new_id("backfill"))
+    connector_id: str
+    status: BackfillJobStatus = BackfillJobStatus.planned
+    range_start: Optional[str] = None
+    range_end: Optional[str] = None
+    partition_strategy: str = "year_month"
+    streams: list[str] = Field(default_factory=list)
+    progress: dict[str, Any] = Field(default_factory=dict)
+    estimated_items: Optional[int] = None
+    last_error: Optional[str] = None          # sanitized
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    completed_at: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

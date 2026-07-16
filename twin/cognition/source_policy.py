@@ -57,6 +57,20 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
                                   "event", "fact"}),
         drop=frozenset({"preference", "belief", "relationship", "procedure"}),
     ),
+    # Email is stricter still (v0.6 §70): narrow allowlist, every candidate
+    # needs review; belief/preference/relationship never auto-flow.
+    "gmail": SourcePolicy(
+        allow=frozenset({"decision", "constraint", "task", "fact"}),
+        require_review=frozenset({"decision", "constraint", "task", "fact"}),
+        drop=frozenset({"preference", "belief", "relationship",
+                        "procedure", "event"}),
+    ),
+    "outlook": SourcePolicy(
+        allow=frozenset({"decision", "constraint", "task", "fact"}),
+        require_review=frozenset({"decision", "constraint", "task", "fact"}),
+        drop=frozenset({"preference", "belief", "relationship",
+                        "procedure", "event"}),
+    ),
     # exercised by the contract suite; mirrors github's posture
     "fake": SourcePolicy(
         allow=frozenset({"decision", "constraint", "procedure", "fact",

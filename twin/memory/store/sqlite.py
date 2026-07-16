@@ -623,6 +623,14 @@ CREATE TABLE IF NOT EXISTS connector_deletion_events (
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cdel_conn ON connector_deletion_events(connector_id);
+CREATE TABLE IF NOT EXISTS connector_backfill_jobs (
+    id TEXT PRIMARY KEY,
+    connector_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'planned',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id);
 """
 
 

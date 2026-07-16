@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from twin.clock import now_iso
 from twin.connectors.models import (
+    BackfillJob,
     ConnectorBatch,
     ConnectorCheckpoint,
     ConnectorDeadLetter,
@@ -26,6 +27,7 @@ from twin.connectors.models import (
 )
 from twin.connectors.persistence import (
     account_to_row,
+    backfill_job_to_row,
     batch_to_row,
     checkpoint_to_row,
     credential_ref_to_row,
@@ -35,6 +37,7 @@ from twin.connectors.persistence import (
     raw_item_to_row,
     record_to_row,
     row_to_account,
+    row_to_backfill_job,
     row_to_batch,
     row_to_checkpoint,
     row_to_credential_ref,
@@ -659,3 +662,27 @@ class ConnectorStoreMixin:
     def list_connector_sync_states(self) -> list[ConnectorSyncState]:
         rows = self._j_fetchall("SELECT * FROM connector_sync_state", ())
         return [row_to_sync_state(r) for r in rows]
+
+    # -- backfill jobs (v0.6 Phase 4) --------------------------------------
+
+    def insert_backfill_job(self, job: BackfillJob) -> str:
+        self._c_insert("connector_backfill_jobs", backfill_job_to_row(job))
+        return job.id
+
+    def get_backfill_job(self, job_id: str) -> Optional[BackfillJob]:
+        row = self._j_fetchone(
+            "SELECT * FROM connector_backfill_jobs WHERE id = ?", (job_id,)
+        )
+        return row_to_backfill_job(row) if row else None
+
+    def list_backfill_jobs(self, connector_id: str) -> list[BackfillJob]:
+        rows = self._j_fetchall(
+            "SELECT * FROM connector_backfill_jobs WHERE connector_id = ?"
+            " ORDER BY created_at DESC",
+            (connector_id,),
+        )
+        return [row_to_backfill_job(r) for r in rows]
+
+    def update_backfill_job(self, job: BackfillJob) -> None:
+        job.updated_at = now_iso()
+        self._c_update("connector_backfill_jobs", job.id, backfill_job_to_row(job))

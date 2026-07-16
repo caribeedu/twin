@@ -448,6 +448,101 @@ def _run_slack_thread_bot_lineage(case: dict) -> tuple[bool, str]:
         restore()
 
 
+def _gmail_env():
+    import httpx
+
+    tests_dir = Path(__file__).resolve().parents[2] / "tests"
+    if str(tests_dir) not in sys.path:
+        sys.path.insert(0, str(tests_dir))
+    from gmail_mock import FakeGmailAPI
+    from twin.connectors.gmail import client as gclient
+
+    api = FakeGmailAPI()
+    real_build = gclient._build_http
+
+    def fake_build(base_url, token):
+        original = real_build(base_url, token)
+        headers = dict(original.headers)
+        original.close()
+        return httpx.Client(
+            transport=api.transport(),
+            base_url="https://gmail.googleapis.com/gmail/v1/",
+            headers=headers,
+        )
+
+    gclient._build_http = fake_build
+    return api, (lambda: setattr(gclient, "_build_http", real_build))
+
+
+def _run_gmail_thread_lineage(case: dict) -> tuple[bool, str]:
+    api, restore = _gmail_env()
+    label = case["label"]
+    exp = case["expected"]
+    try:
+        with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+            store = SqliteStore(":memory:")
+            creds = build_credential_store(Path(tmp))
+            acc = register_source_account(
+                store, connector_type="gmail",
+                source_owner=case["source_owner"],
+                org_key=case.get("org_key"),
+                owner_principal_id="principal_eval",
+                external_account_id="edu@acme.com",
+            )
+            inst = add_connector_instance(
+                store, creds, account_id=acc.id, secret="ya29.test-token",
+                configuration={"labels": [label]},
+            )
+            api.add_message(
+                "m_root", thread_id="t_arch", subject="Architecture",
+                body="Should we use Redis for the queue?",
+                from_addr="alice@acme.com",
+                internal_date_ms=1700000001000,
+            )
+            api.add_message(
+                "m_reply", thread_id="t_arch", subject="Re: Architecture",
+                body="Prefer PostgreSQL advisory locks.",
+                from_addr="edu@acme.com",
+                internal_date_ms=1700000002000,
+                in_reply_to="<m_root@mail.acme.com>",
+            )
+            api.add_message(
+                "m_bot", thread_id="t_gh", subject="[GitHub] PR #8 opened",
+                body="opened a pull request in acme/atlas",
+                from_addr="notifications@github.com",
+                internal_date_ms=1700000003000,
+            )
+            sync_connector(store, creds, inst.id)
+
+            records = store.list_connector_records(inst.id)
+            human = [r for r in records
+                     if r.source_metadata.get("author_kind") == "human"
+                     and r.thread_key == exp["thread_key"]]
+            if len(human) < 2:
+                return False, f"expected root+reply, got {len(human)} human records"
+            if any(r.source_metadata.get("classification")
+                   != exp["classification_human"] for r in human):
+                return False, "human classification wrong"
+            bots = [r for r in records
+                    if r.source_metadata.get("author_kind") == "automated"]
+            if not bots:
+                return False, "notification missing"
+            bot = bots[0]
+            if bot.confidentiality["source_trust"] != exp["bot_trust"]:
+                return False, "notification trust not calibrated"
+            if bot.source_metadata.get("derived") != exp["derived"]:
+                return False, "notification not marked derived"
+            if bot.source_metadata.get("classification") != exp["classification_bot"]:
+                return False, "notification classification wrong"
+            percepts = store.list_percepts()
+            if not percepts or any(p.metadata.get("vault_id") != exp["vault_id"]
+                                   for p in percepts):
+                return False, "ownership not sealed on every percept"
+        return True, "ok"
+    finally:
+        restore()
+
+
 _SCENARIOS = {
     "normalization": _run_simple,
     "replay": _run_simple,
@@ -459,6 +554,7 @@ _SCENARIOS = {
     "github_pr_lifecycle": _run_github_pr_lifecycle,
     "github_bot_lineage": _run_github_bot_lineage,
     "slack_thread_bot_lineage": _run_slack_thread_bot_lineage,
+    "gmail_thread_lineage": _run_gmail_thread_lineage,
 }
 
 

@@ -1389,6 +1389,14 @@ Phase 3 — Slack Connector (done):
 - setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification, `event_id` dedupe);
 - `tests/test_slack_connector.py` against `tests/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
 
+Phase 4 — Professional Email (done):
+
+- shared cognitive mail layer (`twin/connectors/mail/`): MIME split (authored/quoted/signature), HTML sanitize (never execute), classification (human / notification / newsletter / calendar / code-review / …), conservative trust, and one `ConnectorRecord` normalizer for both providers (`actor_ids=mail:{addr}`, `thread_key=mail:{provider}:{account}:{thread_id}`, attachments as `metadata_only` artifact refs);
+- Gmail adapter (`twin/connectors/gmail/`, `auth_mode=oauth2`, `gmail.readonly`) and Outlook/Graph adapter (`twin/connectors/outlook/`, `Mail.Read`) — dynamic streams `label:{id}` / `folder:{id}` from an explicit allowlist only (empty → `awaiting_configuration`); continuous sync uses watermark + lookback; no send/delete;
+- partitionable `BackfillJob` (year-month windows): preview never ingests; `create_backfill_job` + `run_backfill_partition` advance one month through the normal sync spine; CLI `twin connector gmail labels` / `outlook folders` / `backfill --preview|--create|--jobs|--run-partition`;
+- email source policy stricter than Slack (narrow allowlist, every candidate needs review); notifications/newsletters marked `derived=likely_notification` and stay below the review threshold;
+- `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` against offline doubles, and `evals/connectors/` scenario `gmail_thread_lineage`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.
