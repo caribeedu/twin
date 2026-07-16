@@ -95,14 +95,15 @@ def record_from_message(
     trust, kind, classification = trust_for(external_type, message)
     tkey = thread_key(provider, account_key, thread_id)
     actors = [a for a in [actor_id(from_addr)] if a]
+    participants = list(actors)
     for field in ("to", "cc"):
         raw = message.get(field) or []
         if isinstance(raw, str):
             raw = [raw]
         for addr in raw:
             aid = actor_id(addr if isinstance(addr, str) else str(addr))
-            if aid and aid not in actors:
-                actors.append(aid)
+            if aid and aid not in participants:
+                participants.append(aid)
 
     header = f"Email [{provider}] {subject}\nFrom: {from_addr}"
     body = _clip(authored)
@@ -113,6 +114,7 @@ def record_from_message(
         "account_key": account_key,
         "thread_id": thread_id,
         "classification": classification,
+        "classification_kind": "source_heuristic",
         "author_kind": kind,
         "label_ids": message.get("label_ids") or message.get("labelIds") or [],
         "folder_id": message.get("folder_id"),
@@ -121,11 +123,18 @@ def record_from_message(
         "in_reply_to": message.get("in_reply_to") or message.get("inReplyTo"),
         "has_quoted_history": bool(message.get("quoted")),
         "memory_relevant": is_memory_relevant(classification),
+        "attachment_mode": message.get("attachment_mode") or "metadata_only",
+        "html_present": bool(
+            message.get("body_html_untrusted_stub")
+            or message.get("body_html_sanitized")
+        ),
     }
     if kind in ("automated", "list") or not is_memory_relevant(classification):
         source_metadata["derived"] = "likely_notification"
-    if message.get("is_reply"):
+    if message.get("is_reply") is True:
         source_metadata["is_reply"] = True
+    elif message.get("is_reply") is False:
+        source_metadata["is_reply"] = False
 
     artifacts = (
         [{"kind": external_type, "message_id": msg_id, "thread_id": thread_id}]
@@ -140,7 +149,7 @@ def record_from_message(
         occurred_at=message.get("occurred_at") or message.get("receivedDateTime")
             or message.get("internalDate_iso"),
         actor_ids=actors,
-        participant_ids=actors,
+        participant_ids=participants,
         project_hint=message.get("folder_id") or (message.get("label_ids") or [None])[0],
         thread_key=tkey,
         artifact_refs=artifacts,

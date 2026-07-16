@@ -11,6 +11,7 @@ from twin.connectors import (
     register_source_account,
     sync_connector,
 )
+from twin.connectors.protocol import ConnectorError
 
 from outlook_mock import FakeOutlookAPI
 
@@ -41,7 +42,7 @@ def outlook(monkeypatch):
     return api
 
 
-def _mk(store, creds, *, folders=(FOLDER,), secret=TOKEN):
+def _mk(store, creds, *, folders=(FOLDER,), secret=TOKEN, extra=None):
     acc = register_source_account(
         store, connector_type="outlook", source_owner="employer", org_key="acme",
         owner_principal_id="principal_test",
@@ -49,7 +50,7 @@ def _mk(store, creds, *, folders=(FOLDER,), secret=TOKEN):
     )
     inst = add_connector_instance(
         store, creds, account_id=acc.id, secret=secret,
-        configuration={"folders": list(folders)},
+        configuration={"folders": list(folders), **(extra or {})},
     )
     return acc, inst
 
@@ -74,7 +75,9 @@ def test_sync_ingests_message_with_thread(store, creds, outlook):
     rec = store.list_connector_records(inst.id)[0]
     assert rec.thread_key == "mail:outlook:edu@acme.com:conv1"
     assert rec.source_metadata["classification"] == "human_authored"
-    assert store.get_connector_checkpoint(inst.id, f"folder:{FOLDER}")
+    assert rec.actor_ids == ["mail:alice@acme.com"]
+    ckpt = store.get_connector_checkpoint(inst.id, f"folder:{FOLDER}")
+    assert ckpt.cursor.get("delta_link")
 
 
 def test_reply_shares_conversation_thread(store, creds, outlook):
@@ -89,10 +92,64 @@ def test_reply_shares_conversation_thread(store, creds, outlook):
     )
     _acc, inst = _mk(store, creds)
     sync_connector(store, creds, inst.id)
-    keys = {r.thread_key for r in store.list_connector_records(inst.id)}
+    recs = store.list_connector_records(inst.id)
+    keys = {r.thread_key for r in recs}
     assert keys == {"mail:outlook:edu@acme.com:conv9"}
-    assert any(r.external_type == "thread_message"
-               for r in store.list_connector_records(inst.id))
+    assert any(r.source_metadata.get("is_reply") for r in recs)
+
+
+def test_attachment_discovery_lists_real_metadata(store, creds, outlook):
+    outlook.add_message(
+        "om_att", conversation_id="c_att", subject="spec",
+        body="see attached",
+        attachment={
+            "id": "att1",
+            "name": "spec.pdf",
+            "contentType": "application/pdf",
+            "size": 1234,
+            "isInline": False,
+            "contentId": None,
+            "@odata.type": "#microsoft.graph.fileAttachment",
+        },
+    )
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    rec = store.list_connector_records(inst.id)[0]
+    atts = [a for a in rec.artifact_refs if a.get("kind") == "email_attachment"]
+    assert atts
+    assert atts[0]["filename"] == "spec.pdf"
+    assert atts[0]["external_id"] == "att1"
+    assert atts[0]["download_status"] == "metadata_only"
+    assert rec.source_metadata.get("attachment_mode") == "metadata_only"
+
+
+def test_delta_removed_emits_deletion(store, creds, outlook):
+    outlook.add_message(
+        "om1", conversation_id="c1", subject="temp", body="temp",
+    )
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    outlook.remove_message("om1")
+    result = sync_connector(store, creds, inst.id)
+    assert result.streams[0].deletion_events >= 1
+    assert store.list_connector_deletion_events(inst.id)
+
+
+def test_nextlink_rate_limit_raises(store, creds, outlook):
+    from twin.connectors.outlook.client import OutlookClient
+    client = OutlookClient(TOKEN)
+    # Patch http to mock transport
+    client._http = httpx.Client(
+        transport=outlook.transport(),
+        base_url="https://graph.microsoft.com/v1.0/",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    outlook.next_link_rate_limited = True
+    with pytest.raises(ConnectorError) as ei:
+        client.call_url(
+            "https://graph.microsoft.com/v1.0/delta-next/page2")
+    assert ei.value.failure_class.value == "rate_limit"
+    client.close()
 
 
 def test_rate_limit_degrades(store, creds, outlook):

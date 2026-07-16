@@ -44,6 +44,7 @@ from .models import (
     OwnershipClass,
     RawConnectorItem,
     SourceAccount,
+    SyncExecutionContext,
     SyncMode,
     idempotency_key,
 )
@@ -121,6 +122,7 @@ __all__ = [
     "RawConnectorItem",
     "RawFetchItem",
     "SourceAccount",
+    "SyncExecutionContext",
     "SyncMode",
     "SyncPlan",
     "SyncResult",

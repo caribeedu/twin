@@ -39,7 +39,16 @@ def strip_html(html: str) -> str:
 
 
 def sanitize_html(html: str) -> str:
-    """Remove active content; keep a truncated markup stub for provenance."""
+    """Legacy alias — NOT safe for UI render. Prefer ``untrusted_html_stub``."""
+    return untrusted_html_stub(html)
+
+
+def untrusted_html_stub(html: str) -> str:
+    """Truncated HTML kept only as provenance — never treat as safe-to-render.
+
+    Strips a few active tags for storage hygiene but is NOT an allowlist
+    sanitizer. Downstream UIs must not render this field as trusted HTML.
+    """
     cleaned = _SCRIPT.sub("", html or "")
     if len(cleaned) > 8000:
         cleaned = cleaned[:8000] + "…"
@@ -138,7 +147,7 @@ def parts_from_gmail_payload(payload: dict[str, Any]) -> dict[str, Any]:
     regions = split_authored(plain)
     return {
         "body_text": plain,
-        "body_html_sanitized": sanitize_html(html) if html else "",
+        "body_html_untrusted_stub": untrusted_html_stub(html) if html else "",
         "authored": regions["authored"],
         "quoted": regions["quoted"],
         "signature": regions["signature"],
@@ -192,7 +201,7 @@ def parts_from_raw_rfc822(raw: bytes) -> dict[str, Any]:
     regions = split_authored(plain)
     return {
         "body_text": plain,
-        "body_html_sanitized": sanitize_html(html) if html else "",
+        "body_html_untrusted_stub": untrusted_html_stub(html) if html else "",
         "authored": regions["authored"],
         "quoted": regions["quoted"],
         "signature": regions["signature"],

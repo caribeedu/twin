@@ -17,6 +17,7 @@ class FakeGmailAPI:
     def __init__(self):
         self.valid_token: Optional[str] = "ya29.test-token"
         self.email = "edu@acme.com"
+        self.history_id = 1000
         self.labels: dict[str, dict[str, Any]] = {
             "INBOX": {"id": "INBOX", "name": "INBOX", "type": "system",
                       "messagesTotal": 0},
@@ -24,6 +25,8 @@ class FakeGmailAPI:
                            "messagesTotal": 0},
         }
         self.messages: dict[str, dict[str, Any]] = {}
+        self.history_events: list[dict[str, Any]] = []
+        self.history_too_old = False
         self.rate_limited = False
         self.requests: list[str] = []
 
@@ -33,6 +36,7 @@ class FakeGmailAPI:
         label_ids: Optional[list[str]] = None,
         internal_date_ms: int = 1700000001000,
         in_reply_to: Optional[str] = None,
+        record_history: bool = True,
     ) -> dict[str, Any]:
         headers = [
             {"name": "From", "value": from_addr},
@@ -48,7 +52,7 @@ class FakeGmailAPI:
             "labelIds": label_ids or ["INBOX"],
             "snippet": body[:80],
             "internalDate": str(internal_date_ms),
-            "historyId": str(internal_date_ms),
+            "historyId": str(self.history_id),
             "payload": {
                 "mimeType": "text/plain",
                 "headers": headers,
@@ -61,7 +65,45 @@ class FakeGmailAPI:
                 self.labels[lid]["messagesTotal"] = (
                     int(self.labels[lid].get("messagesTotal") or 0) + 1
                 )
+        if record_history:
+            self.history_id += 1
+            self.history_events.append({
+                "id": str(self.history_id),
+                "messagesAdded": [{"message": {
+                    "id": msg_id, "labelIds": list(msg["labelIds"]),
+                }}],
+            })
         return msg
+
+    def add_label(self, msg_id: str, label_id: str) -> None:
+        msg = self.messages[msg_id]
+        if label_id not in msg["labelIds"]:
+            msg["labelIds"].append(label_id)
+        self.history_id += 1
+        self.history_events.append({
+            "id": str(self.history_id),
+            "labelsAdded": [{"message": {"id": msg_id},
+                             "labelIds": [label_id]}],
+        })
+
+    def delete_message(self, msg_id: str) -> None:
+        self.messages.pop(msg_id, None)
+        self.history_id += 1
+        self.history_events.append({
+            "id": str(self.history_id),
+            "messagesDeleted": [{"message": {"id": msg_id}}],
+        })
+
+    def remove_label(self, msg_id: str, label_id: str) -> None:
+        msg = self.messages.get(msg_id)
+        if msg and label_id in msg["labelIds"]:
+            msg["labelIds"] = [l for l in msg["labelIds"] if l != label_id]
+        self.history_id += 1
+        self.history_events.append({
+            "id": str(self.history_id),
+            "labelsRemoved": [{"message": {"id": msg_id},
+                               "labelIds": [label_id]}],
+        })
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handler)
@@ -69,7 +111,6 @@ class FakeGmailAPI:
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = urlparse(str(request.url))
         path = url.path.lstrip("/")
-        # base https://gmail.googleapis.com/gmail/v1/ + users/me/...
         if path.startswith("gmail/v1/"):
             path = path[len("gmail/v1/"):]
         params = {k: v for k, v in parse_qs(url.query).items()}
@@ -85,28 +126,77 @@ class FakeGmailAPI:
 
         if path == "users/me/profile":
             return httpx.Response(200, json={
-                "emailAddress": self.email, "messagesTotal": len(self.messages),
+                "emailAddress": self.email,
+                "messagesTotal": len(self.messages),
+                "historyId": str(self.history_id),
             })
         if path == "users/me/labels":
             return httpx.Response(200, json={"labels": list(self.labels.values())})
+        if path == "users/me/history":
+            if self.history_too_old:
+                return httpx.Response(404, json={
+                    "error": {"code": 404, "message": "historyId too old"},
+                })
+            start = int(flat.get("startHistoryId") or 0)
+            label_filter = flat.get("labelId")
+            events = []
+            for ev in self.history_events:
+                if int(ev["id"]) <= start:
+                    continue
+                if label_filter:
+                    # keep events that mention the label or deletions
+                    keep = False
+                    for key in ("messagesAdded", "labelsAdded", "labelsRemoved"):
+                        for row in ev.get(key) or []:
+                            labs = row.get("labelIds") or (
+                                (row.get("message") or {}).get("labelIds") or [])
+                            if label_filter in labs:
+                                keep = True
+                    if ev.get("messagesDeleted"):
+                        keep = True
+                    if not keep:
+                        continue
+                events.append(ev)
+            return httpx.Response(200, json={
+                "history": events,
+                "historyId": str(self.history_id),
+            })
         if path == "users/me/messages":
             label_ids = params.get("labelIds") or []
             q = flat.get("q", "")
             after_ts = None
+            before_ts = None
             if "after:" in q:
                 try:
                     after_ts = int(q.split("after:")[1].split()[0]) * 1000
                 except ValueError:
                     after_ts = None
+            if "before:" in q:
+                try:
+                    before_ts = int(q.split("before:")[1].split()[0]) * 1000
+                except ValueError:
+                    before_ts = None
             matches = []
             for msg in self.messages.values():
                 if label_ids and not any(l in msg["labelIds"] for l in label_ids):
                     continue
-                if after_ts is not None and int(msg["internalDate"]) < after_ts:
+                if after_ts is not None and int(msg["internalDate"]) <= after_ts:
+                    continue
+                if before_ts is not None and int(msg["internalDate"]) >= before_ts:
                     continue
                 matches.append({"id": msg["id"], "threadId": msg["threadId"]})
             matches.sort(key=lambda m: m["id"])
-            return httpx.Response(200, json={"messages": matches})
+            page_size = int(flat.get("maxResults") or 50)
+            page_token = flat.get("pageToken")
+            start = int(page_token) if page_token and page_token.isdigit() else 0
+            page = matches[start:start + page_size]
+            next_token = None
+            if start + page_size < len(matches):
+                next_token = str(start + page_size)
+            body: dict[str, Any] = {"messages": page}
+            if next_token:
+                body["nextPageToken"] = next_token
+            return httpx.Response(200, json=body)
         if path.startswith("users/me/messages/"):
             mid = path.rsplit("/", 1)[-1]
             msg = self.messages.get(mid)

@@ -686,3 +686,29 @@ class ConnectorStoreMixin:
     def update_backfill_job(self, job: BackfillJob) -> None:
         job.updated_at = now_iso()
         self._c_update("connector_backfill_jobs", job.id, backfill_job_to_row(job))
+
+    def cas_backfill_job(self, job: BackfillJob, expected_version: int) -> bool:
+        """Compare-and-set on BackfillJob.version for partition claims."""
+        existing = self.get_backfill_job(job.id)
+        if existing is None:
+            return False
+        if existing.version != expected_version:
+            return False
+        merged = job.model_copy(update={
+            "version": expected_version + 1,
+            "updated_at": now_iso(),
+        })
+        row = backfill_job_to_row(merged)
+        cols = [c for c in row if c != "id"]
+        sets = ", ".join(f"{c} = ?" for c in cols)
+        cur = self._j_exec(
+            f"UPDATE connector_backfill_jobs SET {sets}"
+            " WHERE id = ? AND version = ?",
+            tuple(row[c] for c in cols) + (job.id, expected_version),
+        )
+        self._j_commit()
+        if getattr(cur, "rowcount", 0) > 0:
+            job.version = expected_version + 1
+            job.updated_at = merged.updated_at
+            return True
+        return False

@@ -618,8 +618,10 @@ CREATE TABLE IF NOT EXISTS connector_backfill_jobs (
     connector_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'planned',
     created_at TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
 );
+ALTER TABLE connector_backfill_jobs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id);
 """
 

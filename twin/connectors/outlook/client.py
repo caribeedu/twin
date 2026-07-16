@@ -40,6 +40,20 @@ class OutlookClient:
                 f"graph network error: {type(exc).__name__}",
                 failure_class=FailureClass.network, retryable=True,
             ) from exc
+        return self._decode(resp)
+
+    def call_url(self, url: str) -> dict[str, Any]:
+        """Absolute nextLink / deltaLink — same status handling as ``call``."""
+        try:
+            resp = self._http.get(url)
+        except httpx.HTTPError as exc:
+            raise ConnectorError(
+                f"graph network error: {type(exc).__name__}",
+                failure_class=FailureClass.network, retryable=True,
+            ) from exc
+        return self._decode(resp)
+
+    def _decode(self, resp: httpx.Response) -> dict[str, Any]:
         if resp.status_code == 429:
             retry = resp.headers.get("Retry-After", "60")
             raise ConnectorError(
@@ -105,16 +119,26 @@ class OutlookClient:
         if filter_query:
             params["$filter"] = filter_query
         path = f"me/mailFolders/{quote(folder_id, safe='')}/messages"
-        if skip_token and skip_token.startswith("http"):
-            # absolute nextLink
-            try:
-                resp = self._http.get(skip_token)
-                data = resp.json()
-            except Exception as exc:
-                raise ConnectorError(
-                    f"graph nextLink failed: {type(exc).__name__}",
-                    failure_class=FailureClass.network, retryable=True,
-                ) from exc
+        if skip_token and str(skip_token).startswith("http"):
+            data = self.call_url(skip_token)
         else:
             data = self.call(path, params=params)
         return list(data.get("value") or []), data.get("@odata.nextLink")
+
+    def delta_messages(
+        self, folder_id: str, *,
+        link: Optional[str] = None,
+        top: int = 50,
+    ) -> dict[str, Any]:
+        if link and str(link).startswith("http"):
+            return self.call_url(link)
+        path = f"me/mailFolders/{quote(folder_id, safe='')}/messages/delta"
+        return self.call(path, params={"$top": top})
+
+    def list_attachments(self, message_id: str) -> list[dict[str, Any]]:
+        data = self.call(
+            f"me/messages/{quote(message_id, safe='')}/attachments",
+            params={"$select": ("id,name,contentType,size,isInline,"
+                                "contentId,@odata.type")},
+        )
+        return list(data.get("value") or [])

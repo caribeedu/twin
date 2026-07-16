@@ -628,6 +628,7 @@ CREATE TABLE IF NOT EXISTS connector_backfill_jobs (
     connector_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'planned',
     created_at TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id);
@@ -814,6 +815,13 @@ class SqliteStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, Me
         if css_cols and "version" not in css_cols:
             self.conn.execute(
                 "ALTER TABLE connector_sync_state "
+                "ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
+            )
+        cbf_cols = {r[1] for r in self.conn.execute(
+            "PRAGMA table_info(connector_backfill_jobs)")}
+        if cbf_cols and "version" not in cbf_cols:
+            self.conn.execute(
+                "ALTER TABLE connector_backfill_jobs "
                 "ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
             )
         self._maybe_commit()

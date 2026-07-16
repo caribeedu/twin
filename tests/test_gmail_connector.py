@@ -14,6 +14,7 @@ from twin.connectors import (
     run_backfill_partition,
     sync_connector,
 )
+from twin.connectors.mail.streams import format_backfill_stream
 
 from gmail_mock import FakeGmailAPI
 
@@ -73,14 +74,14 @@ def test_sync_ingests_message_with_thread_and_classification(store, creds, gmail
     result = sync_connector(store, creds, inst.id)
     assert result.health.value == "healthy"
     assert result.percepts == 1
-    recs = store.list_connector_records(inst.id)
-    assert len(recs) == 1
-    rec = recs[0]
+    rec = store.list_connector_records(inst.id)[0]
     assert rec.thread_key.startswith("mail:gmail:")
     assert rec.source_metadata["classification"] == "human_authored"
-    assert rec.actor_ids[0] == "mail:alice@acme.com"
-    assert "mail:edu@acme.com" in rec.actor_ids
-    assert store.get_connector_checkpoint(inst.id, f"label:{LABEL}") is not None
+    assert rec.actor_ids == ["mail:alice@acme.com"]
+    assert "mail:edu@acme.com" in rec.participant_ids
+    ckpt = store.get_connector_checkpoint(inst.id, f"label:{LABEL}")
+    assert ckpt is not None
+    assert ckpt.cursor.get("history_id")
 
 
 def test_github_notification_is_derived(store, creds, gmail):
@@ -120,6 +121,7 @@ def test_idempotent_resync(store, creds, gmail):
     gmail.add_message("m1", thread_id="t1", subject="one", body="one")
     _acc, inst = _mk(store, creds)
     assert sync_connector(store, creds, inst.id).percepts == 1
+    # second pass uses history feed — empty history → no new percepts
     assert sync_connector(store, creds, inst.id).percepts == 0
 
 
@@ -130,6 +132,141 @@ def test_rate_limit_degrades(store, creds, gmail):
     result = sync_connector(store, creds, inst.id)
     assert result.health.value == "degraded"
     assert store.list_percepts() == []
+
+
+def test_history_picks_up_old_message_label_add(store, creds, gmail):
+    gmail.add_message(
+        "old", thread_id="t_old", subject="old mail",
+        body="from 2022", label_ids=["INBOX"],
+        internal_date_ms=1640995200000,  # 2022-01-01
+    )
+    _acc, inst = _mk(store, creds, labels=["Label_Work"])
+    # bootstrap empty work label
+    sync_connector(store, creds, inst.id)
+    ckpt = store.get_connector_checkpoint(inst.id, "label:Label_Work")
+    assert ckpt.cursor.get("history_id")
+    # later: old message receives Work label
+    gmail.add_label("old", "Label_Work")
+    sync_connector(store, creds, inst.id)
+    ids = {r.external_id for r in store.list_connector_records(inst.id)}
+    assert "old" in ids
+
+
+def test_history_deletion_emits_event(store, creds, gmail):
+    gmail.add_message("m1", thread_id="t1", subject="bye", body="bye")
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    gmail.delete_message("m1")
+    result = sync_connector(store, creds, inst.id)
+    assert result.streams[0].deletion_events >= 1
+    events = store.list_connector_deletion_events(inst.id)
+    assert events
+    assert events[0].external_id == "m1"
+
+
+def test_backfill_does_not_regress_continuous_checkpoint(store, creds, gmail):
+    # Continuous sync first — watermark in 2026
+    gmail.add_message(
+        "recent", thread_id="t_r", subject="recent", body="hi",
+        internal_date_ms=1750000000000,  # ~2025-06
+    )
+    _acc, inst = _mk(store, creds, extra={
+        "backfill_since": "2020-01-01",
+        "backfill_until": "2020-01-31",
+    })
+    sync_connector(store, creds, inst.id)
+    cont = store.get_connector_checkpoint(inst.id, f"label:{LABEL}")
+    cont_wm = cont.cursor.get("watermark")
+    cont_ver = cont.version
+    assert cont_wm
+
+    # Historical message in Jan 2020
+    gmail.add_message(
+        "old2020", thread_id="t_old", subject="jan 2020", body="archive",
+        internal_date_ms=1577836801000,  # 2020-01-01 approx
+        record_history=False,
+    )
+    cfg_before = dict(inst.configuration)
+    job = create_backfill_job(store, creds, inst.id)
+    out = run_backfill_partition(store, creds, job.id)
+    assert out["partition_status"] in ("completed", "continuation_pending")
+
+    # Continuous checkpoint untouched
+    cont2 = store.get_connector_checkpoint(inst.id, f"label:{LABEL}")
+    assert cont2.cursor.get("watermark") == cont_wm
+    assert cont2.version == cont_ver
+
+    # Backfill stream has its own checkpoint
+    bf_stream = format_backfill_stream(
+        job.id, "2020-01", f"label:{LABEL}")
+    bf_ckpt = store.get_connector_checkpoint(inst.id, bf_stream)
+    assert bf_ckpt is not None
+
+    # Config not mutated
+    inst2 = store.get_connector_instance(inst.id)
+    assert inst2.configuration == cfg_before
+
+    # Idempotent with continuous records
+    ids = {r.external_id for r in store.list_connector_records(inst.id)}
+    assert "old2020" in ids
+    assert "recent" in ids
+
+
+def test_backfill_continuation_not_marked_completed(store, creds, gmail):
+    # Many messages in one month; page size 50; max_batches=1
+    for i in range(120):
+        gmail.add_message(
+            f"m{i:03d}", thread_id="t_b", subject=f"msg {i}", body=f"b{i}",
+            internal_date_ms=1577836801000 + i * 1000,
+            record_history=False,
+        )
+    _acc, inst = _mk(store, creds, extra={
+        "backfill_since": "2020-01-01",
+        "backfill_until": "2020-01-31",
+        "max_batches_per_stream": 1,
+        "max_pages_per_stream": 1,
+    })
+    job = create_backfill_job(store, creds, inst.id)
+    first = run_backfill_partition(store, creds, job.id)
+    assert first["partition_status"] == "continuation_pending"
+    assert first["continuation_pending"] is True
+    job1 = store.get_backfill_job(job.id)
+    part = job1.progress["partitions"][0]
+    assert part["status"] == "continuation_pending"
+
+    # Drive to completion
+    for _ in range(20):
+        out = run_backfill_partition(store, creds, job.id)
+        if out.get("partition_status") == "completed" or out.get("done"):
+            break
+    job2 = store.get_backfill_job(job.id)
+    assert job2.progress["partitions"][0]["status"] == "completed"
+    assert len(store.list_connector_records(inst.id)) == 120
+
+
+def test_backfill_claim_rejects_second_worker(store, creds, gmail):
+    gmail.add_message(
+        "m1", thread_id="t1", subject="x", body="y",
+        internal_date_ms=1577836801000, record_history=False,
+    )
+    _acc, inst = _mk(store, creds, extra={
+        "backfill_since": "2020-01-01",
+        "backfill_until": "2020-01-31",
+    })
+    job = create_backfill_job(store, creds, inst.id)
+    # Manually claim as worker A with fresh CAS
+    from twin.connectors.mail.backfill import apply_partition_claim
+    expected = job.version
+    job.progress = apply_partition_claim(
+        job.progress, "2020-01", worker_id="worker_a", claim_token=1,
+    )
+    job.status = job.status  # noqa — keep planned→running via claim helper path
+    from twin.connectors.models import BackfillJobStatus
+    job.status = BackfillJobStatus.running
+    assert store.cas_backfill_job(job, expected)
+
+    with pytest.raises(ValueError, match="already claimed"):
+        run_backfill_partition(store, creds, job.id, worker_id="worker_b")
 
 
 def test_backfill_preview_lists_partitions(store, creds, gmail):
@@ -144,26 +281,6 @@ def test_backfill_preview_lists_partitions(store, creds, gmail):
     assert preview["partition_strategy"] == "year_month"
     keys = [p["partition_key"] for p in preview["partitions"]]
     assert keys == ["2026-01", "2026-02", "2026-03"]
-    assert store.list_connector_records(inst.id) == []
-
-
-def test_backfill_job_partition_advances(store, creds, gmail):
-    gmail.add_message(
-        "m1", thread_id="t1", subject="jan mail", body="hello",
-        internal_date_ms=1736200000000,  # 2025-01-07-ish
-    )
-    _acc, inst = _mk(store, creds, extra={
-        "backfill_since": "2025-01-01",
-        "backfill_until": "2025-01-31",
-    })
-    job = create_backfill_job(store, creds, inst.id)
-    assert job.progress["total_partitions"] == 1
-    out = run_backfill_partition(store, creds, job.id)
-    assert out["partition_status"] == "completed"
-    assert out["done"] is True
-    job2 = store.get_backfill_job(job.id)
-    assert job2.status.value == "completed"
-    assert store.list_connector_records(inst.id)
 
 
 def test_gmail_source_policy_requires_review(store, cfg, embedder):

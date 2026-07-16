@@ -319,11 +319,17 @@ def sync_connector(
     *,
     streams: Optional[list[str]] = None,
     emit_percepts: bool = True,
+    lease_owner: Optional[str] = None,
+    execution_context: Optional["SyncExecutionContext"] = None,
 ) -> SyncResult:
+    from .models import SyncExecutionContext
+
     adapter, instance, account = _load_adapter(store, credentials, connector_id)
     return run_sync(
         store, adapter, instance, account,
         streams=streams, emit_percepts=emit_percepts,
+        lease_owner=lease_owner,
+        execution_context=execution_context or SyncExecutionContext(),
     )
 
 
@@ -431,9 +437,12 @@ def create_backfill_job(
     """Create a partitionable BackfillJob from the current configuration.
 
     Does not ingest. Use ``run_backfill_partition`` (or CLI) to advance one
-    partition at a time through the normal sync spine.
+    partition at a time through the normal sync spine. Stored ``streams`` are
+    continuous base streams (``label:…`` / ``folder:…``); each partition run
+    namespaces them under ``backfill:{job}:{partition}:…``.
     """
     from .mail.backfill import plan_year_month_partitions
+    from .mail.streams import continuous_base_streams
     from .models import BackfillJob, BackfillJobStatus
 
     adapter, instance, account = _load_adapter(store, credentials, connector_id)
@@ -443,6 +452,7 @@ def create_backfill_job(
     plan_streams = getattr(adapter, "plan_streams", None)
     streams = ((plan_streams(account) if callable(plan_streams) else None)
                or list(adapter.adapter_manifest().streams) or [])
+    streams = continuous_base_streams(list(streams))
     if not streams:
         raise ValueError(
             f"connector {connector_id} has no streams configured for backfill")
@@ -470,75 +480,154 @@ def create_backfill_job(
 def run_backfill_partition(
     store, credentials: CredentialStore, job_id: str, *,
     emit_percepts: bool = True,
+    worker_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Advance one BackfillJob partition via ``sync_connector``.
+    """Advance one BackfillJob partition via namespaced sync streams.
 
-    Sets temporary ``backfill_since`` / ``backfill_until`` on the instance for
-    the duration of the sync, then restores the prior configuration.
+    Invariants:
+    - does NOT mutate ``ConnectorInstance.configuration``;
+    - uses ``backfill:{job}:{partition}:{base}`` streams so continuous
+      checkpoints never regress;
+    - claims the partition via CAS + fencing token;
+    - marks the partition completed only when every stream reports ``done``.
     """
-    from .mail.backfill import mark_partition, next_runnable_partition
-    from .models import BackfillJobStatus
+    import uuid
+
+    from .mail.backfill import (
+        apply_partition_claim,
+        has_live_partition_claim,
+        next_runnable_partition,
+        release_partition_claim,
+    )
+    from .mail.streams import format_backfill_stream
+    from .models import BackfillJobStatus, SyncExecutionContext
 
     job = store.get_backfill_job(job_id)
     if job is None:
         raise ValueError(f"backfill job {job_id} not found")
     if job.status in (BackfillJobStatus.completed, BackfillJobStatus.cancelled):
         raise ValueError(f"backfill job {job_id} is {job.status.value}")
+
+    owner = worker_id or f"backfill_{uuid.uuid4().hex[:12]}"
+    expected = job.version
     part = next_runnable_partition(job.progress or {})
     if part is None:
+        if has_live_partition_claim(job.progress or {}):
+            raise ValueError(
+                f"backfill job {job_id} partition already claimed")
         job.status = BackfillJobStatus.completed
         job.completed_at = now_iso()
-        store.update_backfill_job(job)
+        if not store.cas_backfill_job(job, expected):
+            raise ValueError(f"backfill job {job_id} claim lost (complete race)")
         return {"job_id": job.id, "status": job.status.value, "done": True}
 
+    claim_token = (part.get("claim_token") or 0) + 1
+    job.status = BackfillJobStatus.running
+    job.progress = apply_partition_claim(
+        job.progress, part["partition_key"],
+        worker_id=owner, claim_token=claim_token,
+    )
+    if not store.cas_backfill_job(job, expected):
+        raise ValueError(
+            f"backfill job {job_id} partition {part['partition_key']} "
+            "already claimed")
+
+    # Config must stay untouched — snapshot to prove it after sync.
     instance = store.get_connector_instance(job.connector_id)
     if instance is None:
         raise ValueError(f"connector {job.connector_id} not found")
-    prior_cfg = dict(instance.configuration or {})
-    cfg = dict(prior_cfg)
-    cfg["backfill_since"] = part["range_start"]
-    cfg["backfill_until"] = part["range_end"]
-    store.update_connector_instance(job.connector_id, configuration=cfg)
+    cfg_before = dict(instance.configuration or {})
 
-    job.status = BackfillJobStatus.running
-    job.progress = mark_partition(job.progress, part["partition_key"], "running")
-    store.update_backfill_job(job)
+    bf_streams = [
+        format_backfill_stream(job.id, part["partition_key"], base)
+        for base in (job.streams or [])
+    ]
+    ctx = SyncExecutionContext(
+        mode="backfill",
+        job_id=job.id,
+        partition_key=part["partition_key"],
+        range_start=part["range_start"],
+        range_end=part["range_end"],
+        claim_token=claim_token,
+        worker_id=owner,
+        attachment_mode=(cfg_before.get("attachment_mode") or "metadata_only"),
+    )
+    result = sync_connector(
+        store, credentials, job.connector_id,
+        streams=bf_streams,
+        emit_percepts=emit_percepts,
+        lease_owner=owner,
+        execution_context=ctx,
+    )
 
-    try:
-        result = sync_connector(
-            store, credentials, job.connector_id,
-            streams=job.streams or None,
-            emit_percepts=emit_percepts,
+    instance_after = store.get_connector_instance(job.connector_id)
+    cfg_after = dict((instance_after.configuration if instance_after else {}) or {})
+    if cfg_after != cfg_before:
+        raise RuntimeError(
+            "backfill mutated connector configuration — invariant violated")
+
+    # Refresh job for CAS after sync (version already bumped by claim).
+    job = store.get_backfill_job(job_id)
+    if job is None:
+        raise ValueError(f"backfill job {job_id} disappeared")
+    expected = job.version
+
+    streams_ok = all(
+        s.skipped or (s.committed and s.done) for s in result.streams
+    )
+    any_continuation = any(
+        s.committed and not s.done and not s.skipped for s in result.streams
+    )
+    if result.ok and streams_ok and result.streams:
+        status = "completed"
+        job.progress = release_partition_claim(
+            job.progress, part["partition_key"],
+            status="completed", claim_token=claim_token,
         )
-        ok = result.ok and all(
-            s.committed or s.skipped for s in result.streams
-        )
-        status = "completed" if ok else "failed"
-        job.progress = mark_partition(
-            job.progress, part["partition_key"], status,
-            last_error=None if ok else "partition sync degraded or failed",
-        )
-        if not ok:
-            job.status = BackfillJobStatus.failed
-            job.last_error = "partition sync degraded or failed"
-        elif next_runnable_partition(job.progress) is None:
+        if next_runnable_partition(job.progress) is None:
             job.status = BackfillJobStatus.completed
             job.completed_at = now_iso()
         else:
             job.status = BackfillJobStatus.running
-        store.update_backfill_job(job)
+    elif result.ok and any_continuation:
+        status = "continuation_pending"
+        job.progress = release_partition_claim(
+            job.progress, part["partition_key"],
+            status="continuation_pending", claim_token=claim_token,
+            continuation_pending=True,
+        )
+        job.status = BackfillJobStatus.running
+    else:
+        status = "failed"
+        job.progress = release_partition_claim(
+            job.progress, part["partition_key"],
+            status="failed", claim_token=claim_token,
+            last_error="partition sync degraded or failed",
+        )
+        job.status = BackfillJobStatus.failed
+        job.last_error = "partition sync degraded or failed"
+
+    if not store.cas_backfill_job(job, expected):
+        # Stale worker lost the claim — do not overwrite successor progress.
         return {
-            "job_id": job.id,
+            "job_id": job_id,
             "partition_key": part["partition_key"],
-            "partition_status": status,
-            "job_status": job.status.value,
+            "partition_status": "claim_lost",
+            "job_status": "unknown",
             "health": result.health.value,
             "percepts": result.percepts,
-            "done": job.status == BackfillJobStatus.completed,
+            "done": False,
         }
-    finally:
-        # Always restore continuous-sync configuration bounds.
-        store.update_connector_instance(job.connector_id, configuration=prior_cfg)
+    return {
+        "job_id": job.id,
+        "partition_key": part["partition_key"],
+        "partition_status": status,
+        "job_status": job.status.value,
+        "health": result.health.value,
+        "percepts": result.percepts,
+        "done": job.status == BackfillJobStatus.completed,
+        "continuation_pending": status == "continuation_pending",
+    }
 
 
 def pause_connector(store, connector_id: str) -> ConnectorInstance:

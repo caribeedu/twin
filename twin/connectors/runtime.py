@@ -50,6 +50,7 @@ from .models import (
     HealthStatus,
     RawConnectorItem,
     SourceAccount,
+    SyncExecutionContext,
     idempotency_key,
 )
 from .protocol import ConnectorError, FetchPage, RawFetchItem
@@ -480,8 +481,11 @@ def run_sync(
     store, adapter, instance: ConnectorInstance, account: SourceAccount, *,
     streams: Optional[list[str]] = None, emit_percepts: bool = True,
     lease_owner: Optional[str] = None,
+    execution_context: Optional[SyncExecutionContext] = None,
 ) -> SyncResult:
     result = SyncResult(connector_id=instance.id)
+    # Per-invocation bounds/mode — never write these onto instance.configuration.
+    adapter._execution_context = execution_context or SyncExecutionContext()
 
     if instance.status not in SYNCABLE_STATUSES:
         if instance.status in (ConnectorStatus.revoked,

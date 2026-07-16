@@ -1391,11 +1391,12 @@ Phase 3 — Slack Connector (done):
 
 Phase 4 — Professional Email (done):
 
-- shared cognitive mail layer (`twin/connectors/mail/`): MIME split (authored/quoted/signature), HTML sanitize (never execute), classification (human / notification / newsletter / calendar / code-review / …), conservative trust, and one `ConnectorRecord` normalizer for both providers (`actor_ids=mail:{addr}`, `thread_key=mail:{provider}:{account}:{thread_id}`, attachments as `metadata_only` artifact refs);
-- Gmail adapter (`twin/connectors/gmail/`, `auth_mode=oauth2`, `gmail.readonly`) and Outlook/Graph adapter (`twin/connectors/outlook/`, `Mail.Read`) — dynamic streams `label:{id}` / `folder:{id}` from an explicit allowlist only (empty → `awaiting_configuration`); continuous sync uses watermark + lookback; no send/delete;
-- partitionable `BackfillJob` (year-month windows): preview never ingests; `create_backfill_job` + `run_backfill_partition` advance one month through the normal sync spine; CLI `twin connector gmail labels` / `outlook folders` / `backfill --preview|--create|--jobs|--run-partition`;
-- email source policy stricter than Slack (narrow allowlist, every candidate needs review); notifications/newsletters marked `derived=likely_notification` and stay below the review threshold;
-- `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` against offline doubles, and `evals/connectors/` scenario `gmail_thread_lineage`.
+- shared cognitive mail layer (`twin/connectors/mail/`): MIME split (authored/quoted/signature), HTML kept only as `body_html_untrusted_stub` (never safe-to-render), source-heuristic classification, conservative trust, and one `ConnectorRecord` normalizer (`actor_ids` = sender only; `participant_ids` = sender+to+cc; `thread_key=mail:{provider}:{account}:{thread_id}`); attachment mode is explicit (`metadata_only` / discovery — bytes not downloaded by default);
+- Gmail adapter (`gmail.readonly`): continuous sync uses History API (`history_id`) after bootstrap; backfill is a time-range scan on namespaced streams `backfill:{job}:{partition}:label:{id}` so continuous checkpoints never regress; label removals / deletions emit tombstones;
+- Outlook/Graph adapter (`Mail.Read`): continuous sync uses delta queries (`delta_link`); `@removed` → tombstone; attachment listing returns real Graph metadata; nextLink/deltaLink share the same error decoder (429 cannot silently finish a window);
+- partitionable `BackfillJob`: bounds travel via `SyncExecutionContext` (never mutate instance configuration); partition claim/CAS + fencing token; a partition completes only when every stream reports `done=True` (continuation_pending otherwise); CLI/API preview/create/run-partition;
+- email source policy stricter than Slack; notifications marked `derived=likely_notification`;
+- `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` and eval `gmail_thread_lineage`.
 
 ### v0.7 — Personal Domains
 

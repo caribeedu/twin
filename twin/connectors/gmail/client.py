@@ -1,6 +1,6 @@
 """Thin Gmail API v1 client (read-only).
 
-Authenticated GETs for labels/messages, page-token pagination and
+Authenticated GETs for labels/messages/history, page-token pagination and
 rate-limit translation into structured ``ConnectorError``s.
 """
 
@@ -44,7 +44,9 @@ class GmailClient:
                 f"gmail network error: {type(exc).__name__}",
                 failure_class=FailureClass.network, retryable=True,
             ) from exc
+        return self._decode(resp)
 
+    def _decode(self, resp: httpx.Response) -> dict[str, Any]:
         if resp.status_code == 429:
             retry = resp.headers.get("Retry-After", "60")
             raise ConnectorError(
@@ -81,6 +83,17 @@ class GmailClient:
         if data.get("error"):
             err = data["error"]
             msg = err.get("message") if isinstance(err, dict) else str(err)
+            code = err.get("code") if isinstance(err, dict) else None
+            # historyIdTooOld surfaces as 404 + error payload on some clients
+            if code == 404 or (isinstance(msg, str) and "history" in msg.lower()
+                               and "too old" in msg.lower()):
+                exc = ConnectorError(
+                    "gmail historyId too old",
+                    failure_class=FailureClass.schema_change,
+                    retryable=True,
+                )
+                exc.history_id_too_old = True  # type: ignore[attr-defined]
+                raise exc
             raise ConnectorError(
                 f"gmail api error: {msg}",
                 failure_class=FailureClass.provider_error,
@@ -114,3 +127,19 @@ class GmailClient:
             f"users/me/messages/{quote(message_id, safe='')}",
             params={"format": fmt},
         )
+
+    def list_history(
+        self, *, start_history_id: str, label_id: Optional[str] = None,
+        page_token: Optional[str] = None, max_results: int = 100,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "startHistoryId": start_history_id,
+            "maxResults": max_results,
+            "historyTypes": ["messageAdded", "messageDeleted",
+                             "labelAdded", "labelRemoved"],
+        }
+        if label_id:
+            params["labelId"] = label_id
+        if page_token:
+            params["pageToken"] = page_token
+        return self.call("users/me/history", params=params)

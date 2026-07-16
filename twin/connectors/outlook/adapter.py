@@ -1,10 +1,13 @@
 """OutlookConnector — Microsoft Graph mail adapter (v0.6 Phase 4).
 
-Shares the Gmail cognitive model (``mail.normalize``). Streams:
+Streams:
 
     folder:{folder_id}
+    backfill:{job}:{partition}:folder:{folder_id}
 
-Explicit folder allowlist only — never whole mailbox by default.
+Continuous sync uses Graph delta queries (``delta_link`` in the checkpoint).
+Backfill is a receivedDateTime window on a namespaced stream. ``@removed``
+objects become tombstones. Attachment discovery lists real Graph metadata.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from ..mail import mime as mail_mime
 from ..mail import normalize as mail_norm
 from ..mail import sync_state as ss
 from ..mail.classification import classify_message
+from ..mail.streams import parse_folder_stream, parse_mail_stream
 from ..models import (
     ConnectorCheckpoint,
     ConnectorInstance,
@@ -24,6 +28,7 @@ from ..models import (
     HealthStatus,
     RawConnectorItem,
     SourceAccount,
+    SyncExecutionContext,
 )
 from ..protocol import (
     AdapterManifest,
@@ -38,16 +43,6 @@ from .client import GRAPH_API, OutlookClient
 
 DEFAULT_LOOKBACK_SECONDS = 86400
 DEFAULT_MAX_PAGES = 5
-
-
-def _parse_stream(stream: str) -> str:
-    parts = stream.split(":", 1)
-    if len(parts) != 2 or parts[0] != "folder" or not parts[1]:
-        raise ConnectorError(
-            f"unknown outlook stream layout: {stream!r}",
-            failure_class=FailureClass.schema_change,
-        )
-    return parts[1]
 
 
 def _iso_minus_seconds(iso_ts: Optional[str], seconds: int) -> Optional[str]:
@@ -89,11 +84,12 @@ class OutlookConnector:
         self.lookback_seconds = int(cfg.get("lookback_seconds",
                                             DEFAULT_LOOKBACK_SECONDS))
         self.backfill_since: Optional[str] = cfg.get("backfill_since")
-        self.backfill_until: Optional[str] = cfg.get("backfill_until")
         self.max_pages = int(cfg.get("max_pages_per_stream", DEFAULT_MAX_PAGES))
         self.api_base_url: str = cfg.get("api_base_url", GRAPH_API)
+        self.attachment_mode: str = cfg.get("attachment_mode") or "metadata_only"
         self._client: Optional[OutlookClient] = None
         self._account_email: Optional[str] = cfg.get("account_email")
+        self._execution_context = SyncExecutionContext()
 
     @property
     def client(self) -> OutlookClient:
@@ -101,18 +97,22 @@ class OutlookConnector:
             self._client = OutlookClient(self.secret, base_url=self.api_base_url)
         return self._client
 
+    @property
+    def exec_ctx(self) -> SyncExecutionContext:
+        return getattr(self, "_execution_context", None) or SyncExecutionContext()
+
     @staticmethod
     def adapter_manifest() -> AdapterManifest:
         return AdapterManifest(
             connector_type="outlook",
-            adapter_version="1.0",
+            adapter_version="1.1",
             schema_version=1,
             auth_mode="oauth2",
             affordances={
                 "incremental_sync": True,
                 "webhooks": False,
-                "deletions": False,
-                "attachments": False,
+                "deletions": True,
+                "attachments": True,
                 "threads": True,
             },
             supported_external_types=["message", "thread_message"],
@@ -184,45 +184,80 @@ class OutlookConnector:
                 failure_class=FailureClass.configuration,
                 human_action_required=True,
             )
-        folder = _parse_stream(stream)
+        meta = parse_mail_stream(stream)
+        folder = parse_folder_stream(meta["base_stream"])
         return SyncPlan(
             stream=stream,
             cursor_before=dict(checkpoint.cursor) if checkpoint else {},
             lookback_seconds=self.lookback_seconds,
-            metadata={"folder": folder},
+            metadata={
+                "folder": folder,
+                "mode": meta["mode"],
+                "job_id": meta.get("job_id"),
+                "partition_key": meta.get("partition_key"),
+            },
         )
 
-    def _window_oldest(self, cursor: Optional[dict[str, Any]]) -> Optional[str]:
-        if self.backfill_since and not (cursor or {}).get("watermark"):
-            return self.backfill_since
+    def _range_bounds(self, mode: str) -> tuple[Optional[str], Optional[str]]:
+        ctx = self.exec_ctx
+        if mode == "backfill" or ctx.mode == "backfill":
+            return ctx.range_start, ctx.range_end
+        return self.backfill_since, None
+
+    def _window_oldest(self, cursor: Optional[dict[str, Any]],
+                       mode: str) -> Optional[str]:
+        since, _until = self._range_bounds(mode)
+        if mode == "backfill":
+            return since
+        if cursor is None or not (cursor or {}).get("watermark"):
+            return since
         watermark = (cursor or {}).get("watermark")
         if watermark:
             return _iso_minus_seconds(str(watermark), self.lookback_seconds)
-        return self.backfill_since
+        return since
 
-    def _filter(self, oldest: Optional[str]) -> Optional[str]:
+    def _filter(self, oldest: Optional[str], until: Optional[str]) -> Optional[str]:
         clauses = []
         if oldest:
             clauses.append(f"receivedDateTime ge {oldest}")
-        if self.backfill_until:
-            clauses.append(f"receivedDateTime le {self.backfill_until}")
+        if until:
+            clauses.append(f"receivedDateTime le {until}")
         return " and ".join(clauses) if clauses else None
 
     def fetch_batch(
         self, plan: SyncPlan, cursor: Optional[dict[str, Any]],
     ) -> FetchPage:
+        mode = plan.metadata.get("mode") or "continuous"
         folder = plan.metadata["folder"]
+        if mode == "backfill":
+            return self._fetch_timerange(plan, cursor, folder)
         base = cursor or plan.cursor_before or {}
+        if base.get("delta_link") or base.get("next_link"):
+            return self._fetch_delta(base, folder)
+        # Bootstrap scan, then open a delta feed.
+        page = self._fetch_timerange(plan, cursor, folder, seal_delta=True)
+        return page
+
+    def _fetch_timerange(
+        self, plan: SyncPlan, cursor: Optional[dict[str, Any]], folder: str,
+        *, seal_delta: bool = False,
+    ) -> FetchPage:
+        mode = plan.metadata.get("mode") or "continuous"
+        base = cursor or plan.cursor_before or {}
+        since, until = self._range_bounds(mode)
         window_oldest = (
             base.get("window_oldest") if ss.in_progress(base)
-            else self._window_oldest(base)
+            else self._window_oldest(base, mode)
         )
         cur = ss.normalize_cursor(base, window_oldest=window_oldest)
+        if base.get("delta_link"):
+            cur["delta_link"] = base["delta_link"]
         state = ss.substream_state(cur, "messages")
         next_link = state.get("next_link")
         messages, next_link = self.client.list_messages(
             folder,
-            filter_query=None if next_link else self._filter(cur.get("window_oldest")),
+            filter_query=None if next_link else self._filter(
+                cur.get("window_oldest"), until),
             skip_token=next_link,
             top=50,
         )
@@ -237,11 +272,103 @@ class OutlookConnector:
         if next_link:
             return FetchPage(raw_items=items, cursor_after=cur, done=False)
         state.pop("next_link", None)
-        return FetchPage(
-            raw_items=items,
-            cursor_after=ss.finalize_cursor(cur),
-            done=True,
+        finalized = ss.finalize_cursor(cur)
+        if seal_delta and mode == "continuous":
+            # Open delta feed; persist deltaLink for subsequent continuous sync.
+            data = self.client.delta_messages(folder, top=1)
+            # Drain any nextLinks until we hold a deltaLink.
+            while data.get("@odata.nextLink") and not data.get("@odata.deltaLink"):
+                data = self.client.delta_messages(
+                    folder, link=data["@odata.nextLink"])
+            if data.get("@odata.deltaLink"):
+                finalized["delta_link"] = data["@odata.deltaLink"]
+            if finalized.get("watermark"):
+                finalized["reconciliation_watermark"] = finalized["watermark"]
+        elif cur.get("delta_link"):
+            finalized["delta_link"] = cur["delta_link"]
+        return FetchPage(raw_items=items, cursor_after=finalized, done=True)
+
+    def _fetch_delta(self, cursor: dict[str, Any], folder: str) -> FetchPage:
+        link = cursor.get("next_link") or cursor.get("delta_link")
+        data = self.client.delta_messages(folder, link=link)
+        items: list[RawFetchItem] = []
+        for msg in data.get("value") or []:
+            if not isinstance(msg, dict):
+                continue
+            removed = msg.get("@removed")
+            mid = msg.get("id")
+            if removed and mid:
+                items.append(self._tombstone(mid, folder))
+                continue
+            if msg.get("isDraft"):
+                continue
+            if mid:
+                items.append(self._raw_from_graph(msg, folder))
+        after = {
+            "watermark": cursor.get("watermark"),
+            "reconciliation_watermark": cursor.get("reconciliation_watermark")
+            or cursor.get("watermark"),
+        }
+        if data.get("@odata.nextLink"):
+            after["delta_link"] = cursor.get("delta_link")
+            after["next_link"] = data["@odata.nextLink"]
+            return FetchPage(raw_items=items, cursor_after=after, done=False)
+        if data.get("@odata.deltaLink"):
+            after["delta_link"] = data["@odata.deltaLink"]
+        elif cursor.get("delta_link"):
+            after["delta_link"] = cursor["delta_link"]
+        return FetchPage(raw_items=items, cursor_after=after, done=True)
+
+    def _tombstone(self, message_id: str, folder: str) -> RawFetchItem:
+        return RawFetchItem(
+            external_type="message",
+            external_id=str(message_id),
+            external_revision=f"{message_id}.deleted",
+            payload={
+                "provider": "outlook",
+                "object": {"id": message_id, "folder_id": folder, "deleted": True},
+                "account_email": self._account_email
+                or self.account.external_account_id or "me",
+            },
+            deleted=True,
         )
+
+    def _attachment_meta(self, msg: dict[str, Any]) -> list[dict[str, Any]]:
+        mode = self.exec_ctx.attachment_mode or self.attachment_mode
+        if not msg.get("hasAttachments"):
+            return []
+        mid = msg.get("id")
+        if not mid:
+            return [{
+                "filename": "(has attachments)",
+                "mime_type": "application/octet-stream",
+                "size": 0,
+                "download_status": mode,
+            }]
+        try:
+            raw = self.client.list_attachments(str(mid))
+        except ConnectorError:
+            return [{
+                "filename": "(has attachments)",
+                "mime_type": "application/octet-stream",
+                "size": 0,
+                "download_status": "metadata_only",
+            }]
+        out = []
+        for att in raw:
+            out.append({
+                "attachment_id": att.get("id"),
+                "filename": att.get("name") or "attachment",
+                "mime_type": att.get("contentType") or "application/octet-stream",
+                "size": int(att.get("size") or 0),
+                "content_id": att.get("contentId"),
+                "is_inline": bool(att.get("isInline")),
+                "odata_type": att.get("@odata.type"),
+                "download_status": mode if mode in (
+                    "metadata_only", "discovery") else "metadata_only",
+                "storage_ref": None,
+            })
+        return out
 
     def _raw_from_graph(self, msg: dict[str, Any], folder: str) -> RawFetchItem:
         body = msg.get("body") or {}
@@ -249,10 +376,10 @@ class OutlookConnector:
         ctype = (body.get("contentType") or "").lower()
         if ctype == "html":
             plain = mail_mime.strip_html(content)
-            html = mail_mime.sanitize_html(content)
+            html_stub = mail_mime.untrusted_html_stub(content)
         else:
             plain = content
-            html = ""
+            html_stub = ""
         regions = mail_mime.split_authored(plain)
         from_addr = ((msg.get("from") or {}).get("emailAddress") or {}).get("address") or ""
         subject = msg.get("subject") or ""
@@ -262,9 +389,15 @@ class OutlookConnector:
             from_addr=from_addr,
         )
         conv = msg.get("conversationId") or msg.get("id")
-        # Graph rarely exposes In-Reply-To; treat quoted bodies / Re: subjects
-        # as replies (conversationId alone is not enough — it is shared).
-        in_reply = bool(regions.get("quoted")) or subject.lower().startswith("re:")
+        # conversationId already threads; is_reply is soft metadata only.
+        is_reply: Optional[bool]
+        if regions.get("quoted"):
+            is_reply = True
+        elif subject.lower().startswith("re:"):
+            is_reply = True
+        else:
+            is_reply = None  # unknown — do not force thread_message
+        mode = self.exec_ctx.attachment_mode or self.attachment_mode
         obj = {
             "id": msg.get("id"),
             "thread_id": conv,
@@ -280,21 +413,18 @@ class OutlookConnector:
             "changeKey": msg.get("changeKey"),
             "internet_message_id": msg.get("internetMessageId"),
             "classification": classification,
-            "is_reply": in_reply,
+            "is_reply": is_reply,
             "body_text": plain,
-            "body_html_sanitized": html,
+            "body_html_untrusted_stub": html_stub,
             "authored": regions["authored"],
             "quoted": regions["quoted"],
             "signature": regions["signature"],
-            "attachments": (
-                [{"filename": "(has attachments)", "mime_type": "application/octet-stream",
-                  "size": 0, "download_status": "metadata_only"}]
-                if msg.get("hasAttachments") else []
-            ),
+            "attachments": self._attachment_meta(msg),
+            "attachment_mode": mode,
         }
-        ext_type = "thread_message" if in_reply else "message"
+        # Prefer stable external_type=message; reply is metadata.
         return RawFetchItem(
-            external_type=ext_type,
+            external_type="message",
             external_id=str(msg.get("id")),
             external_revision=mail_norm.revision_for_message(obj),
             payload={"provider": "outlook", "object": obj,
@@ -314,6 +444,18 @@ class OutlookConnector:
                 external_type=raw_item.external_type,
             )
         account_key = payload.get("account_email") or "me"
+        if raw_item.deleted or obj.get("deleted"):
+            return [ConnectorRecord(
+                connector_id=raw_item.connector_id,
+                source_account_id=raw_item.source_account_id,
+                external_type=raw_item.external_type or "message",
+                external_id=raw_item.external_id,
+                external_revision=raw_item.external_revision,
+                content=f"Email [outlook] deleted {raw_item.external_id}",
+                deleted=True,
+                source_metadata={"provider": "outlook", "deleted": True},
+                confidentiality={"source_trust": 0.40},
+            )]
         rec = mail_norm.record_from_message(
             connector_id=raw_item.connector_id,
             account_id=raw_item.source_account_id,

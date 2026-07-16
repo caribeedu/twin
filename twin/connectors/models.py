@@ -11,6 +11,7 @@ built, not only in the service layer.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
@@ -355,6 +356,7 @@ class BackfillJob(BaseModel):
 
     Progress.partitions is a list of year-month windows. Completing a partition
     is durable; the job can pause and resume without redoing finished months.
+    ``version`` is a CAS fencing counter for partition claims.
     """
     id: str = Field(default_factory=lambda: ids.new_id("backfill"))
     connector_id: str
@@ -366,7 +368,25 @@ class BackfillJob(BaseModel):
     progress: dict[str, Any] = Field(default_factory=dict)
     estimated_items: Optional[int] = None
     last_error: Optional[str] = None          # sanitized
+    version: int = Field(default=0, ge=0)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     completed_at: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@dataclass
+class SyncExecutionContext:
+    """Per-invocation sync parameters that must NOT mutate connector config.
+
+    Backfill bounds, job identity and attachment mode travel here so a job
+    cannot race the scheduler by rewriting ``ConnectorInstance.configuration``.
+    """
+    mode: str = "continuous"  # continuous | backfill
+    job_id: Optional[str] = None
+    partition_key: Optional[str] = None
+    range_start: Optional[str] = None
+    range_end: Optional[str] = None
+    attachment_mode: Optional[str] = None  # metadata_only | discovery
+    claim_token: Optional[int] = None
+    worker_id: Optional[str] = None
