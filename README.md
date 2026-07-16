@@ -1378,6 +1378,16 @@ Phase 2 — GitHub Connector (done):
 - optional webhook receiver `POST /api/webhooks/github/{connector_id}`: HMAC-authenticated (`X-Hub-Signature-256` against a dedicated secret in the CredentialStore, uniform 401 on every failure), it only marks the sync state due with a `targeted_streams` hint the scheduler consumes — the payload never becomes canonical state and polling remains the authoritative reconciliation;
 - `tests/test_github_connector.py` contract suite against an offline API double (`tests/github_mock.py`), a Postgres mirror test, and `evals/connectors/` scenarios `github_pr_lifecycle` and `github_bot_lineage`.
 
+Phase 3 — Slack Connector (done):
+
+- Web API adapter (`twin/connectors/slack/`) over the Phase 1 framework: `SlackClient` (cursor pagination, per-stream page budget, rate-limit → structured `retry_after`), bot-token auth with honest "privilege unverified via auth.test" health detail; read-only operation (no chat:write);
+- dynamic streams per allowlisted channel — `channel:{id}` from `plan_streams()` — each with its own checkpoint/lease; incremental cursor is the Slack message `ts` watermark with lookback; substreams `history` then `threads` (conversations.replies for parents with `reply_count > 0`); durable continuation when the page budget is exhausted;
+- four external types normalized to `ConnectorRecord`s (`channel`, `message`, `thread_reply`, `file_share`) with `slack:{user}` actor ids, shared `thread_key`/`lineage_root` per thread, edit revisions via `edited.ts`+content hash, and `deletions: true` via Events API tombstone hints (`pending_tombstones` on sync-state, consumed during fetch);
+- conservative source trust (human root 0.70 / reply 0.65 / file 0.60; bots 0.45 marked `derived=likely_notification`, with GitHub-ref extraction for cross-source lineage); channel kind (`public|private|im|mpim`) recorded in metadata;
+- per-source candidate policy: Slack may propose decision/constraint/task/event/fact, all born needing review; drops preference/belief/relationship/procedure; instance overrides can only narrow;
+- setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification challenge, targeted-stream hints + deletion tombstones — payload never canonical);
+- `tests/test_slack_connector.py` against `tests/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.

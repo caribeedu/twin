@@ -83,6 +83,8 @@ from .service import (
 
 # Import adapters for their registration side effects.
 from . import fake  # noqa: E402,F401
+from . import github  # noqa: E402,F401
+from . import slack  # noqa: E402,F401
 
 __all__ = [
     "AdapterManifest",

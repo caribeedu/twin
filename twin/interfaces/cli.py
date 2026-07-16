@@ -542,7 +542,11 @@ def cmd_connector(args) -> None:
             from ..connectors import set_credential
             set_credential(ws.store, creds, args.connector_id, args.secret)
         if getattr(args, "webhook_secret", None):
-            from ..connectors.github.webhook import set_webhook_secret
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst and inst.connector_type == "slack":
+                from ..connectors.slack.webhook import set_webhook_secret
+            else:
+                from ..connectors.github.webhook import set_webhook_secret
             set_webhook_secret(ws.store, creds, args.connector_id,
                                args.webhook_secret)
         inst = ws.store.get_connector_instance(args.connector_id)
@@ -578,6 +582,22 @@ def cmd_connector(args) -> None:
                       f"pushed={repo.get('pushed_at')}")
         else:
             raise SystemExit(f"unknown github command: {args.github_command}")
+    elif cmd == "slack":
+        if args.slack_command == "channels":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for ch in adapter.list_channels():
+                kind = ("private" if ch.get("is_private")
+                        else "im" if ch.get("is_im") else "public")
+                print(f"{ch['id']:16}  #{ch.get('name') or '?':32}  "
+                      f"{kind:8}  members={ch.get('num_members')}")
+        else:
+            raise SystemExit(f"unknown slack command: {args.slack_command}")
     elif cmd == "backfill":
         if not args.preview:
             raise SystemExit(
@@ -1016,7 +1036,7 @@ def main(argv: list[str] | None = None) -> None:
     ccfg.add_argument("--secret", default=None)
     ccfg.add_argument("--config", default=None, help="JSON instance configuration")
     ccfg.add_argument("--webhook-secret", default=None,
-                      help="dedicated webhook HMAC secret (github)")
+                      help="dedicated webhook HMAC secret (github/slack)")
     ccfg.set_defaults(func=cmd_connector)
     cgh = cs.add_parser("github", help="github-specific helpers")
     cghs = cgh.add_subparsers(dest="github_command", required=True)
@@ -1024,6 +1044,12 @@ def main(argv: list[str] | None = None) -> None:
                            help="repositories the token can reach")
     cghr.add_argument("connector_id")
     cghr.set_defaults(func=cmd_connector)
+    csl = cs.add_parser("slack", help="slack-specific helpers")
+    csls = csl.add_subparsers(dest="slack_command", required=True)
+    cslc = csls.add_parser("channels",
+                           help="channels the token can see")
+    cslc.add_argument("connector_id")
+    cslc.set_defaults(func=cmd_connector)
     cbf = cs.add_parser("backfill", help="preview backfill scope (never ingests)")
     cbf.add_argument("connector_id")
     cbf.add_argument("--preview", action="store_true")

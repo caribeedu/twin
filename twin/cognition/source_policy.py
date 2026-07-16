@@ -48,6 +48,15 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
         require_review=frozenset({"task", "procedure"}),
         drop=frozenset({"preference", "belief", "relationship"}),
     ),
+    # Slack is more conservative: informal chat may propose decisions /
+    # commitments / risks, but never beliefs, preferences or relationships,
+    # and candidates that do flow in are born needing review.
+    "slack": SourcePolicy(
+        allow=frozenset({"decision", "constraint", "task", "event", "fact"}),
+        require_review=frozenset({"decision", "constraint", "task",
+                                  "event", "fact"}),
+        drop=frozenset({"preference", "belief", "relationship", "procedure"}),
+    ),
     # exercised by the contract suite; mirrors github's posture
     "fake": SourcePolicy(
         allow=frozenset({"decision", "constraint", "procedure", "fact",

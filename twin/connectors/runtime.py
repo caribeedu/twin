@@ -588,6 +588,9 @@ def _sync_stream_leased(
 ) -> StreamResult:
     checkpoint = store.get_connector_checkpoint(instance.id, stream)
     expected_version = checkpoint.version if checkpoint else 0
+    attach = getattr(adapter, "attach_sync_hints", None)
+    if callable(attach):
+        attach(store)
     plan = adapter.plan_sync(account, checkpoint, stream=stream)
     batch = ConnectorBatch(
         connector_id=instance.id, stream=stream,
