@@ -712,3 +712,38 @@ class ConnectorStoreMixin:
             job.updated_at = merged.updated_at
             return True
         return False
+
+    def assert_backfill_claim_fenced(
+        self, job_id: str, partition_key: str, *,
+        worker_id: str, claim_token: int,
+    ) -> bool:
+        """True when the worker still holds a non-expired partition claim."""
+        from twin.connectors.mail.backfill import claim_is_held
+
+        job = self.get_backfill_job(job_id)
+        if job is None:
+            return False
+        return claim_is_held(
+            job.progress or {}, partition_key,
+            worker_id=worker_id, claim_token=claim_token,
+        )
+
+    def renew_backfill_claim(
+        self, job_id: str, partition_key: str, *,
+        worker_id: str, claim_token: int,
+    ) -> bool:
+        """Heartbeat: extend claim TTL under CAS. False if fence lost."""
+        from twin.connectors.mail.backfill import renew_partition_claim
+
+        job = self.get_backfill_job(job_id)
+        if job is None:
+            return False
+        expected = job.version
+        renewed = renew_partition_claim(
+            job.progress or {}, partition_key,
+            worker_id=worker_id, claim_token=claim_token,
+        )
+        if renewed is None:
+            return False
+        job.progress = renewed
+        return self.cas_backfill_job(job, expected)

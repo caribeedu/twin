@@ -308,3 +308,138 @@ def test_list_labels_helper(store, creds, gmail):
     adapter = build_adapter(inst, account, TOKEN)
     labels = adapter.list_labels()
     assert any(l["id"] == "INBOX" for l in labels)
+
+
+def test_bootstrap_catchup_keeps_messages_arriving_during_scan(store, creds, gmail):
+    """history_id is captured BEFORE the scan; concurrent arrivals land via catchup."""
+    for i in range(55):
+        gmail.add_message(
+            f"p{i:03d}", thread_id="t_boot", subject=f"p{i}", body=f"b{i}",
+            internal_date_ms=1700000001000 + i * 1000,
+        )
+    _acc, inst = _mk(store, creds, extra={"max_batches_per_stream": 1})
+    first = sync_connector(store, creds, inst.id)
+    assert first.streams[0].committed
+    ckpt = store.get_connector_checkpoint(inst.id, f"label:{LABEL}")
+    assert ckpt.cursor.get("bootstrap_history_id")
+    h0 = ckpt.cursor["bootstrap_history_id"]
+
+    gmail.add_message(
+        "during_boot", thread_id="t_new", subject="arrived mid bootstrap",
+        body="must not be lost",
+        internal_date_ms=1700000099000,
+    )
+
+    for _ in range(15):
+        sync_connector(store, creds, inst.id)
+        ckpt = store.get_connector_checkpoint(inst.id, f"label:{LABEL}")
+        if (ckpt and ckpt.cursor.get("history_id")
+                and not ckpt.cursor.get("bootstrap_phase")
+                and "progress" not in (ckpt.cursor or {})):
+            break
+    ids = {r.external_id for r in store.list_connector_records(inst.id)}
+    assert "during_boot" in ids
+    final = store.get_connector_checkpoint(inst.id, f"label:{LABEL}")
+    assert final.cursor.get("history_id")
+    assert final.cursor.get("history_id") != h0 or "during_boot" in ids
+
+
+def test_label_removal_keeps_message_if_other_allowlisted_label_remains(
+    store, creds, gmail,
+):
+    gmail.add_message(
+        "m_both", thread_id="t1", subject="shared", body="hi",
+        label_ids=["INBOX", "Label_Work"],
+    )
+    _acc, inst = _mk(store, creds, labels=["INBOX", "Label_Work"])
+    sync_connector(store, creds, inst.id)
+    before_events = len(store.list_connector_deletion_events(inst.id))
+    gmail.remove_label("m_both", "Label_Work")
+    sync_connector(store, creds, inst.id)
+    assert len(store.list_connector_deletion_events(inst.id)) == before_events
+    live = [r for r in store.list_connector_records(inst.id)
+            if r.external_id == "m_both" and not r.deleted]
+    assert live
+    assert "label:INBOX" in (live[-1].source_metadata.get("source_memberships") or [])
+
+
+def test_label_removal_tombs_when_no_allowlisted_label_remains(store, creds, gmail):
+    gmail.add_message(
+        "m_only", thread_id="t1", subject="only work", body="hi",
+        label_ids=["Label_Work"],
+    )
+    _acc, inst = _mk(store, creds, labels=["Label_Work"])
+    sync_connector(store, creds, inst.id)
+    gmail.remove_label("m_only", "Label_Work")
+    sync_connector(store, creds, inst.id)
+    assert store.list_connector_deletion_events(inst.id)
+
+
+def test_thread_message_tombstone_resolves_external_type(store, creds, gmail):
+    gmail.add_message(
+        "m_root", thread_id="t99", subject="Architecture",
+        body="root", internal_date_ms=1700000001000,
+    )
+    gmail.add_message(
+        "m_reply", thread_id="t99", subject="Re: Architecture",
+        body="reply", internal_date_ms=1700000002000,
+        in_reply_to="<m_root@mail.acme.com>",
+    )
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    reply = next(r for r in store.list_connector_records(inst.id)
+                 if r.external_id == "m_reply")
+    assert reply.external_type == "thread_message"
+    assert reply.percept_id
+    gmail.delete_message("m_reply")
+    sync_connector(store, creds, inst.id)
+    events = store.list_connector_deletion_events(inst.id)
+    hit = [e for e in events if e.external_id == "m_reply"]
+    assert hit
+    assert hit[0].external_type == "thread_message"
+    assert reply.percept_id in hit[0].affected_percept_ids
+
+
+def test_stale_backfill_worker_cannot_publish(store, creds, gmail):
+    from twin.connectors.models import SyncExecutionContext
+    from twin.connectors.mail.streams import format_backfill_stream
+
+    for i in range(60):
+        gmail.add_message(
+            f"m{i:03d}", thread_id="t1", subject=f"x{i}", body=f"y{i}",
+            internal_date_ms=1577836801000 + i * 1000, record_history=False,
+        )
+    _acc, inst = _mk(store, creds, extra={
+        "backfill_since": "2020-01-01",
+        "backfill_until": "2020-01-31",
+        "max_batches_per_stream": 1,
+    })
+    job = create_backfill_job(store, creds, inst.id)
+    first = run_backfill_partition(store, creds, job.id, worker_id="worker_a")
+    assert first["partition_status"] == "continuation_pending"
+    job = store.get_backfill_job(job.id)
+    part = job.progress["partitions"][0]
+    old_token = part["claim_token"]
+    # Expire A's claim and let B take over.
+    part["claim_expires_at"] = "2000-01-01T00:00:00Z"
+    # Clear continuation flag so only expiry makes it runnable for B.
+    part["continuation_pending"] = False
+    part["status"] = "running"
+    expected = job.version
+    assert store.cas_backfill_job(job, expected)
+    run_backfill_partition(store, creds, job.id, worker_id="worker_b")
+
+    stream = format_backfill_stream(job.id, "2020-01", f"label:{LABEL}")
+    before = len(store.list_connector_records(inst.id))
+    stale = sync_connector(
+        store, creds, inst.id, streams=[stream],
+        lease_owner="worker_a",
+        execution_context=SyncExecutionContext(
+            mode="backfill", job_id=job.id, partition_key="2020-01",
+            range_start="2020-01-01", range_end="2020-01-31T23:59:59Z",
+            claim_token=old_token, worker_id="worker_a",
+        ),
+    )
+    assert any(s.skipped == "backfill_claim_lost" for s in stale.streams)
+    assert not any(s.committed for s in stale.streams)
+    assert len(store.list_connector_records(inst.id)) == before

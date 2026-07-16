@@ -19,6 +19,10 @@ from ..mail import mime as mail_mime
 from ..mail import normalize as mail_norm
 from ..mail import sync_state as ss
 from ..mail.classification import classify_message
+from ..mail.membership import (
+    active_memberships,
+    resolve_mail_tombstone_type,
+)
 from ..mail.streams import parse_folder_stream, parse_mail_stream
 from ..models import (
     ConnectorCheckpoint,
@@ -90,6 +94,7 @@ class OutlookConnector:
         self._client: Optional[OutlookClient] = None
         self._account_email: Optional[str] = cfg.get("account_email")
         self._execution_context = SyncExecutionContext()
+        self._store = None
 
     @property
     def client(self) -> OutlookClient:
@@ -231,27 +236,25 @@ class OutlookConnector:
         folder = plan.metadata["folder"]
         if mode == "backfill":
             return self._fetch_timerange(plan, cursor, folder)
+        # Continuous sync: Graph delta is the authoritative feed (Strategy A).
+        # Initial enumeration values are processed — never discarded.
         base = cursor or plan.cursor_before or {}
-        if base.get("delta_link") or base.get("next_link"):
-            return self._fetch_delta(base, folder)
-        # Bootstrap scan, then open a delta feed.
-        page = self._fetch_timerange(plan, cursor, folder, seal_delta=True)
-        return page
+        return self._fetch_delta(base, folder)
 
     def _fetch_timerange(
         self, plan: SyncPlan, cursor: Optional[dict[str, Any]], folder: str,
-        *, seal_delta: bool = False,
     ) -> FetchPage:
         mode = plan.metadata.get("mode") or "continuous"
         base = cursor or plan.cursor_before or {}
+        if (mode == "backfill" and base.get("partition_complete")
+                and not ss.in_progress(base)):
+            return FetchPage(raw_items=[], cursor_after=dict(base), done=True)
         since, until = self._range_bounds(mode)
         window_oldest = (
             base.get("window_oldest") if ss.in_progress(base)
             else self._window_oldest(base, mode)
         )
         cur = ss.normalize_cursor(base, window_oldest=window_oldest)
-        if base.get("delta_link"):
-            cur["delta_link"] = base["delta_link"]
         state = ss.substream_state(cur, "messages")
         next_link = state.get("next_link")
         messages, next_link = self.client.list_messages(
@@ -273,19 +276,8 @@ class OutlookConnector:
             return FetchPage(raw_items=items, cursor_after=cur, done=False)
         state.pop("next_link", None)
         finalized = ss.finalize_cursor(cur)
-        if seal_delta and mode == "continuous":
-            # Open delta feed; persist deltaLink for subsequent continuous sync.
-            data = self.client.delta_messages(folder, top=1)
-            # Drain any nextLinks until we hold a deltaLink.
-            while data.get("@odata.nextLink") and not data.get("@odata.deltaLink"):
-                data = self.client.delta_messages(
-                    folder, link=data["@odata.nextLink"])
-            if data.get("@odata.deltaLink"):
-                finalized["delta_link"] = data["@odata.deltaLink"]
-            if finalized.get("watermark"):
-                finalized["reconciliation_watermark"] = finalized["watermark"]
-        elif cur.get("delta_link"):
-            finalized["delta_link"] = cur["delta_link"]
+        if mode == "backfill":
+            finalized["partition_complete"] = True
         return FetchPage(raw_items=items, cursor_after=finalized, done=True)
 
     def _fetch_delta(self, cursor: dict[str, Any], folder: str) -> FetchPage:
@@ -298,19 +290,31 @@ class OutlookConnector:
             removed = msg.get("@removed")
             mid = msg.get("id")
             if removed and mid:
-                items.append(self._tombstone(mid, folder))
+                action = self._removed_action(mid, folder, removed)
+                if action is not None:
+                    items.append(action)
                 continue
             if msg.get("isDraft"):
                 continue
             if mid:
                 items.append(self._raw_from_graph(msg, folder))
+                if msg.get("receivedDateTime"):
+                    # keep a soft watermark for diagnostics
+                    cursor = dict(cursor)
+                    cursor["watermark"] = max(
+                        str(cursor.get("watermark") or ""),
+                        str(msg["receivedDateTime"]),
+                    )
         after = {
             "watermark": cursor.get("watermark"),
             "reconciliation_watermark": cursor.get("reconciliation_watermark")
             or cursor.get("watermark"),
         }
         if data.get("@odata.nextLink"):
-            after["delta_link"] = cursor.get("delta_link")
+            # Preserve prior delta_link only as fallback; next page continues
+            # the same enumeration — all values are processed.
+            if cursor.get("delta_link"):
+                after["delta_link"] = cursor["delta_link"]
             after["next_link"] = data["@odata.nextLink"]
             return FetchPage(raw_items=items, cursor_after=after, done=False)
         if data.get("@odata.deltaLink"):
@@ -319,9 +323,36 @@ class OutlookConnector:
             after["delta_link"] = cursor["delta_link"]
         return FetchPage(raw_items=items, cursor_after=after, done=True)
 
+    def _removed_action(
+        self, message_id: str, folder: str, removed: dict[str, Any],
+    ) -> Optional[RawFetchItem]:
+        """``@removed`` may mean delete OR move (reason=changed).
+
+        Only leave the cognitive scope when the message is gone or no longer
+        in any allowlisted folder.
+        """
+        reason = str((removed or {}).get("reason") or "").lower()
+        if reason == "deleted":
+            return self._tombstone(message_id, folder)
+        # changed / moved / unknown — resolve current membership
+        try:
+            msg = self.client.get_message(message_id)
+        except ConnectorError:
+            return self._tombstone(message_id, folder)
+        if not msg:
+            return self._tombstone(message_id, folder)
+        parent = msg.get("parentFolderId")
+        if parent and parent in self.folders:
+            return self._raw_from_graph(msg, parent)
+        # Outside every allowlisted folder → global tombstone
+        return self._tombstone(message_id, folder)
+
     def _tombstone(self, message_id: str, folder: str) -> RawFetchItem:
+        ext_type = resolve_mail_tombstone_type(
+            self._store, self.instance.id, str(message_id),
+        )
         return RawFetchItem(
-            external_type="message",
+            external_type=ext_type,
             external_id=str(message_id),
             external_revision=f"{message_id}.deleted",
             payload={
@@ -398,11 +429,15 @@ class OutlookConnector:
         else:
             is_reply = None  # unknown — do not force thread_message
         mode = self.exec_ctx.attachment_mode or self.attachment_mode
+        memberships = active_memberships(
+            kind="folder", configured_ids=self.folders, current_ids=[folder],
+        )
         obj = {
             "id": msg.get("id"),
             "thread_id": conv,
             "conversationId": conv,
             "folder_id": folder,
+            "source_memberships": memberships,
             "subject": subject,
             "from": from_addr,
             "to": _addr_list(msg.get("toRecipients")),

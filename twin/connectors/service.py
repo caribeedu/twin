@@ -496,10 +496,12 @@ def run_backfill_partition(
     from .mail.backfill import (
         apply_partition_claim,
         has_live_partition_claim,
+        incomplete_base_streams,
         next_runnable_partition,
+        record_stream_results,
         release_partition_claim,
     )
-    from .mail.streams import format_backfill_stream
+    from .mail.streams import format_backfill_stream, parse_mail_stream
     from .models import BackfillJobStatus, SyncExecutionContext
 
     job = store.get_backfill_job(job_id)
@@ -538,10 +540,39 @@ def run_backfill_partition(
         raise ValueError(f"connector {job.connector_id} not found")
     cfg_before = dict(instance.configuration or {})
 
+    # Re-read part after claim so stream progress is current.
+    part = next(
+        (p for p in (job.progress or {}).get("partitions") or []
+         if p.get("partition_key") == part["partition_key"]),
+        part,
+    )
+    pending_bases = incomplete_base_streams(part, list(job.streams or []))
     bf_streams = [
         format_backfill_stream(job.id, part["partition_key"], base)
-        for base in (job.streams or [])
+        for base in pending_bases
     ]
+    if not bf_streams:
+        # All streams already completed for this partition.
+        job = store.get_backfill_job(job_id)
+        expected = job.version
+        job.progress = release_partition_claim(
+            job.progress, part["partition_key"],
+            status="completed", claim_token=claim_token,
+        )
+        if next_runnable_partition(job.progress) is None:
+            job.status = BackfillJobStatus.completed
+            job.completed_at = now_iso()
+        else:
+            job.status = BackfillJobStatus.running
+        store.cas_backfill_job(job, expected)
+        return {
+            "job_id": job_id,
+            "partition_key": part["partition_key"],
+            "partition_status": "completed",
+            "job_status": job.status.value,
+            "done": job.status == BackfillJobStatus.completed,
+        }
+
     ctx = SyncExecutionContext(
         mode="backfill",
         job_id=job.id,
@@ -566,19 +597,56 @@ def run_backfill_partition(
         raise RuntimeError(
             "backfill mutated connector configuration — invariant violated")
 
-    # Refresh job for CAS after sync (version already bumped by claim).
     job = store.get_backfill_job(job_id)
     if job is None:
         raise ValueError(f"backfill job {job_id} disappeared")
     expected = job.version
 
-    streams_ok = all(
-        s.skipped or (s.committed and s.done) for s in result.streams
+    claim_lost = any(
+        s.skipped == "backfill_claim_lost" for s in result.streams
+    )
+    if claim_lost:
+        # Stale worker must not mutate successor progress.
+        return {
+            "job_id": job_id,
+            "partition_key": part["partition_key"],
+            "partition_status": "claim_lost",
+            "job_status": "unknown",
+            "health": result.health.value,
+            "percepts": result.percepts,
+            "done": False,
+        }
+
+    stream_rows: list[tuple[str, bool, bool]] = []
+    for s in result.streams:
+        meta = parse_mail_stream(s.stream)
+        stream_rows.append(
+            (meta["base_stream"], bool(s.committed), bool(s.done))
+        )
+    job.progress = record_stream_results(
+        job.progress, part["partition_key"], stream_rows,
+        claim_token=claim_token,
+    )
+
+    streams_ok = bool(result.streams) and all(
+        (s.skipped and s.skipped != "backfill_claim_lost")
+        or (s.committed and s.done)
+        for s in result.streams
+    )
+    # Also require previously-completed streams remain completed.
+    part_after = next(
+        (p for p in (job.progress or {}).get("partitions") or []
+         if p.get("partition_key") == part["partition_key"]),
+        {},
+    )
+    all_bases_done = all(
+        (part_after.get("streams") or {}).get(b) == "completed"
+        for b in (job.streams or [])
     )
     any_continuation = any(
         s.committed and not s.done and not s.skipped for s in result.streams
     )
-    if result.ok and streams_ok and result.streams:
+    if result.ok and streams_ok and all_bases_done:
         status = "completed"
         job.progress = release_partition_claim(
             job.progress, part["partition_key"],
@@ -589,7 +657,7 @@ def run_backfill_partition(
             job.completed_at = now_iso()
         else:
             job.status = BackfillJobStatus.running
-    elif result.ok and any_continuation:
+    elif result.ok and (any_continuation or not all_bases_done):
         status = "continuation_pending"
         job.progress = release_partition_claim(
             job.progress, part["partition_key"],
@@ -608,7 +676,6 @@ def run_backfill_partition(
         job.last_error = "partition sync degraded or failed"
 
     if not store.cas_backfill_job(job, expected):
-        # Stale worker lost the claim — do not overwrite successor progress.
         return {
             "job_id": job_id,
             "partition_key": part["partition_key"],

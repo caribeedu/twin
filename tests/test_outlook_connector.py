@@ -135,6 +135,54 @@ def test_delta_removed_emits_deletion(store, creds, outlook):
     assert store.list_connector_deletion_events(inst.id)
 
 
+def test_delta_bootstrap_persists_enumeration_values(store, creds, outlook):
+    outlook.add_message(
+        "om_boot", conversation_id="c_b", subject="in delta enum",
+        body="must be kept",
+    )
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    ids = {r.external_id for r in store.list_connector_records(inst.id)}
+    assert "om_boot" in ids
+    ckpt = store.get_connector_checkpoint(inst.id, f"folder:{FOLDER}")
+    assert ckpt.cursor.get("delta_link")
+
+
+def test_move_between_allowlisted_folders_is_not_global_delete(store, creds, outlook):
+    outlook.add_message(
+        "om_move", conversation_id="c_m", subject="moving", body="x",
+        folder_id="Inbox",
+    )
+    _acc, inst = _mk(store, creds, folders=["Inbox", "Folder_Work"])
+    sync_connector(store, creds, inst.id)
+    before = len(store.list_connector_deletion_events(inst.id))
+    outlook.move_message("om_move", "Folder_Work")
+    sync_connector(store, creds, inst.id)
+    assert len(store.list_connector_deletion_events(inst.id)) == before
+    live = [r for r in store.list_connector_records(inst.id)
+            if r.external_id == "om_move" and not r.deleted]
+    assert live
+    assert any(
+        "folder:Folder_Work" in (r.source_metadata.get("source_memberships") or [])
+        for r in live
+    )
+
+
+def test_move_outside_allowlist_tombs(store, creds, outlook):
+    outlook.folders["Archive"] = {
+        "id": "Archive", "displayName": "Archive", "totalItemCount": 0,
+    }
+    outlook.add_message(
+        "om_out", conversation_id="c_o", subject="leaving", body="x",
+        folder_id="Inbox",
+    )
+    _acc, inst = _mk(store, creds, folders=["Inbox"])
+    sync_connector(store, creds, inst.id)
+    outlook.move_message("om_out", "Archive")
+    sync_connector(store, creds, inst.id)
+    assert store.list_connector_deletion_events(inst.id)
+
+
 def test_nextlink_rate_limit_raises(store, creds, outlook):
     from twin.connectors.outlook.client import OutlookClient
     client = OutlookClient(TOKEN)

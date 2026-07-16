@@ -66,7 +66,14 @@ from .registry import (
     register_adapter,
 )
 from .models import ConnectorDeletionEvent, StreamLease  # noqa: F401
-from .runtime import CheckpointConflict, LeaseLost, SyncResult, build_percept, run_sync
+from .runtime import (
+    BackfillClaimLost,
+    CheckpointConflict,
+    LeaseLost,
+    SyncResult,
+    build_percept,
+    run_sync,
+)
 from .service import (
     add_connector_instance,
     backfill_preview,
@@ -126,6 +133,7 @@ __all__ = [
     "SyncMode",
     "SyncPlan",
     "SyncResult",
+    "BackfillClaimLost",
     "CheckpointConflict",
     "ConnectorDeletionEvent",
     "CredentialBackendUnavailable",

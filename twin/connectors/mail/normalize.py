@@ -128,6 +128,7 @@ def record_from_message(
             message.get("body_html_untrusted_stub")
             or message.get("body_html_sanitized")
         ),
+        "source_memberships": list(message.get("source_memberships") or []),
     }
     if kind in ("automated", "list") or not is_memory_relevant(classification):
         source_metadata["derived"] = "likely_notification"

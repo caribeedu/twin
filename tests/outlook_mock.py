@@ -21,7 +21,7 @@ class FakeOutlookAPI:
         self.folder_messages: dict[str, list[str]] = {}
         self.attachments: dict[str, list[dict[str, Any]]] = {}
         self.delta_token = 1
-        self.pending_delta: list[dict[str, Any]] = []
+        self.pending_delta: dict[str, list[dict[str, Any]]] = {}
         self.rate_limited = False
         self.next_link_rate_limited = False
         self.requests: list[str] = []
@@ -33,6 +33,7 @@ class FakeOutlookAPI:
         quoted: bool = False,
         has_attachments: bool = False,
         attachment: Optional[dict[str, Any]] = None,
+        via_delta: bool = False,
     ) -> dict[str, Any]:
         content = body
         if quoted:
@@ -51,6 +52,7 @@ class FakeOutlookAPI:
             "hasAttachments": has_attachments or bool(attachment),
             "isDraft": False,
             "body": {"contentType": "Text", "content": content},
+            "parentFolderId": folder_id,
             "_folder_id": folder_id,
         }
         self.messages[msg_id] = msg
@@ -61,7 +63,25 @@ class FakeOutlookAPI:
         if attachment:
             self.attachments[msg_id] = [attachment]
             msg["hasAttachments"] = True
+        if via_delta:
+            self.pending_delta.setdefault(folder_id, []).append(dict(msg))
         return msg
+
+    def move_message(self, msg_id: str, new_folder: str) -> None:
+        msg = self.messages.get(msg_id)
+        if not msg:
+            return
+        old = msg.get("_folder_id")
+        if old and msg_id in self.folder_messages.get(old, []):
+            self.folder_messages[old].remove(msg_id)
+            self.pending_delta.setdefault(old, []).append({
+                "id": msg_id, "@removed": {"reason": "changed"},
+            })
+        msg["_folder_id"] = new_folder
+        msg["parentFolderId"] = new_folder
+        msg["changeKey"] = f"ck-{msg_id}-moved-{new_folder}"
+        self.folder_messages.setdefault(new_folder, []).append(msg_id)
+        self.pending_delta.setdefault(new_folder, []).append(dict(msg))
 
     def remove_message(self, msg_id: str) -> None:
         msg = self.messages.pop(msg_id, None)
@@ -70,7 +90,10 @@ class FakeOutlookAPI:
         folder = msg.get("_folder_id")
         if folder and msg_id in self.folder_messages.get(folder, []):
             self.folder_messages[folder].remove(msg_id)
-        self.pending_delta.append({"id": msg_id, "@removed": {"reason": "deleted"}})
+        if folder:
+            self.pending_delta.setdefault(folder, []).append({
+                "id": msg_id, "@removed": {"reason": "deleted"},
+            })
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handler)
@@ -91,7 +114,6 @@ class FakeOutlookAPI:
             return httpx.Response(429, json={"error": {"message": "rate"}},
                                   headers={"Retry-After": "60"})
 
-        # Absolute nextLink simulation
         if path.startswith("delta-next/") or "delta-next" in path:
             if self.next_link_rate_limited:
                 return httpx.Response(429, json={"error": {"message": "rate"}},
@@ -111,6 +133,13 @@ class FakeOutlookAPI:
         if path == "me/mailFolders":
             return httpx.Response(200, json={"value": list(self.folders.values())})
 
+        if path.startswith("me/messages/") and "/attachments" not in path:
+            mid = path[len("me/messages/"):].split("/")[0]
+            msg = self.messages.get(mid)
+            if not msg:
+                return httpx.Response(404, json={"error": {"message": "gone"}})
+            return httpx.Response(200, json=msg)
+
         if "/attachments" in path and path.startswith("me/messages/"):
             mid = path[len("me/messages/"):].split("/")[0]
             return httpx.Response(200, json={
@@ -121,10 +150,12 @@ class FakeOutlookAPI:
             folder_id = "Inbox"
             if "mailFolders/" in path:
                 folder_id = path.split("mailFolders/")[1].split("/")[0]
-            # Initial delta: return deltaLink immediately (empty page).
+            delta_link = (
+                f"https://graph.microsoft.com/v1.0/me/mailFolders/"
+                f"{folder_id}/messages/delta?$deltatoken={self.delta_token}"
+            )
             if "deltatoken" in (url.query or "") or params.get("$deltatoken"):
-                values = list(self.pending_delta)
-                self.pending_delta.clear()
+                values = list(self.pending_delta.pop(folder_id, []))
                 self.delta_token += 1
                 return httpx.Response(200, json={
                     "value": values,
@@ -133,12 +164,12 @@ class FakeOutlookAPI:
                         f"{folder_id}/messages/delta?$deltatoken={self.delta_token}"
                     ),
                 })
+            # Initial delta enumeration — authoritative folder snapshot.
+            ids = list(self.folder_messages.get(folder_id, []))
+            values = [dict(self.messages[i]) for i in ids if i in self.messages]
             return httpx.Response(200, json={
-                "value": [],
-                "@odata.deltaLink": (
-                    f"https://graph.microsoft.com/v1.0/me/mailFolders/"
-                    f"{folder_id}/messages/delta?$deltatoken={self.delta_token}"
-                ),
+                "value": values,
+                "@odata.deltaLink": delta_link,
             })
 
         if path.startswith("me/mailFolders/") and path.endswith("/messages"):

@@ -1392,9 +1392,9 @@ Phase 3 — Slack Connector (done):
 Phase 4 — Professional Email (done):
 
 - shared cognitive mail layer (`twin/connectors/mail/`): MIME split (authored/quoted/signature), HTML kept only as `body_html_untrusted_stub` (never safe-to-render), source-heuristic classification, conservative trust, and one `ConnectorRecord` normalizer (`actor_ids` = sender only; `participant_ids` = sender+to+cc; `thread_key=mail:{provider}:{account}:{thread_id}`); attachment mode is explicit (`metadata_only` / discovery — bytes not downloaded by default);
-- Gmail adapter (`gmail.readonly`): continuous sync uses History API (`history_id`) after bootstrap; backfill is a time-range scan on namespaced streams `backfill:{job}:{partition}:label:{id}` so continuous checkpoints never regress; label removals / deletions emit tombstones;
-- Outlook/Graph adapter (`Mail.Read`): continuous sync uses delta queries (`delta_link`); `@removed` → tombstone; attachment listing returns real Graph metadata; nextLink/deltaLink share the same error decoder (429 cannot silently finish a window);
-- partitionable `BackfillJob`: bounds travel via `SyncExecutionContext` (never mutate instance configuration); partition claim/CAS + fencing token; a partition completes only when every stream reports `done=True` (continuation_pending otherwise); CLI/API preview/create/run-partition;
+- Gmail adapter (`gmail.readonly`): bootstrap captures `bootstrap_history_id` *before* the time-range scan, then History catch-up seals `history_id` (no gap for concurrent arrivals); label removal tombs only when no allowlisted label remains; tombstones resolve `thread_message` vs `message`;
+- Outlook/Graph adapter (`Mail.Read`): continuous sync bootstraps via delta enumeration (all `value`s processed, never discarded); `@removed`/`changed` resolves current folder membership before global tombstone; attachment discovery + shared nextLink/deltaLink error decoder;
+- partitionable `BackfillJob`: `SyncExecutionContext` bounds; namespaced streams; per-stream partition progress; claim CAS + finalize fence + heartbeat renew (stale workers cannot publish); completes only when every stream is `done`;
 - email source policy stricter than Slack; notifications marked `derived=likely_notification`;
 - `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` and eval `gmail_thread_lineage`.
 

@@ -74,6 +74,11 @@ class LeaseLost(RuntimeError):
     it must stop publishing results, even mid-flight."""
 
 
+class BackfillClaimLost(RuntimeError):
+    """Backfill partition claim expired or was taken over — stale workers
+    must not publish evidence, not only fail to update job progress."""
+
+
 @dataclass
 class StreamResult:
     stream: str
@@ -420,6 +425,21 @@ def _finalize_committed(
                 f"lease for {instance.id}/{batch.stream} no longer held "
                 f"(fencing token {fencing_token})"
             )
+        # Backfill claim fence: stale partition workers cannot publish.
+        ctx = getattr(adapter, "_execution_context", None) if adapter else None
+        if (ctx is not None and getattr(ctx, "mode", None) == "backfill"
+                and getattr(ctx, "job_id", None)
+                and getattr(ctx, "partition_key", None)
+                and getattr(ctx, "claim_token", None) is not None
+                and getattr(ctx, "worker_id", None)):
+            if not store.assert_backfill_claim_fenced(
+                ctx.job_id, ctx.partition_key,
+                worker_id=ctx.worker_id, claim_token=int(ctx.claim_token),
+            ):
+                raise BackfillClaimLost(
+                    f"backfill claim lost for {ctx.job_id}/"
+                    f"{ctx.partition_key} (token {ctx.claim_token})"
+                )
         for item in staged.new_raw_items:
             store.insert_connector_raw_item(item)
         for rec in staged.records:
@@ -606,9 +626,27 @@ def _sync_stream_leased(
 ) -> StreamResult:
     checkpoint = store.get_connector_checkpoint(instance.id, stream)
     expected_version = checkpoint.version if checkpoint else 0
+    # Mail adapters resolve tombstone types / membership against the store.
+    adapter._store = store
     attach = getattr(adapter, "attach_sync_hints", None)
     if callable(attach):
         attach(store)
+    # Heartbeat backfill claims before planning/fetching a stream.
+    ctx = getattr(adapter, "_execution_context", None)
+    if (ctx is not None and getattr(ctx, "mode", None) == "backfill"
+            and getattr(ctx, "job_id", None)
+            and getattr(ctx, "partition_key", None)
+            and getattr(ctx, "claim_token", None) is not None
+            and getattr(ctx, "worker_id", None)):
+        if not store.renew_backfill_claim(
+            ctx.job_id, ctx.partition_key,
+            worker_id=ctx.worker_id, claim_token=int(ctx.claim_token),
+        ):
+            return StreamResult(
+                stream=stream,
+                skipped="backfill_claim_lost",
+                failure_class=FailureClass.configuration.value,
+            )
     plan = adapter.plan_sync(account, checkpoint, stream=stream)
     batch = ConnectorBatch(
         connector_id=instance.id, stream=stream,
@@ -672,6 +710,22 @@ def _sync_stream_leased(
     # (durable continuation). Watermark promotion is encoded in cursor_after.
     # acknowledge must NOT drop sync-state hints — that happens inside
     # _finalize_committed so a failed finalize cannot lose tombstones.
+    # Renew claim again immediately before publish.
+    ctx = getattr(adapter, "_execution_context", None)
+    if (ctx is not None and getattr(ctx, "mode", None) == "backfill"
+            and getattr(ctx, "job_id", None)
+            and getattr(ctx, "partition_key", None)
+            and getattr(ctx, "claim_token", None) is not None
+            and getattr(ctx, "worker_id", None)):
+        if not store.renew_backfill_claim(
+            ctx.job_id, ctx.partition_key,
+            worker_id=ctx.worker_id, claim_token=int(ctx.claim_token),
+        ):
+            _abort_batch(store, batch, sr, BackfillClaimLost(
+                f"backfill claim lost before finalize for {ctx.job_id}"
+            ))
+            return sr
+
     cursor_after = adapter.acknowledge(plan, page or FetchPage())
     try:
         sr.deletion_events = _finalize_committed(
@@ -681,7 +735,7 @@ def _sync_stream_leased(
             lease_owner=lease_owner, fencing_token=fencing_token,
             adapter=adapter,
         )
-    except (CheckpointConflict, SyncHintConflict, LeaseLost) as exc:
+    except (CheckpointConflict, SyncHintConflict, LeaseLost, BackfillClaimLost) as exc:
         _abort_batch(store, batch, sr, exc)
         return sr
     except Exception as exc:

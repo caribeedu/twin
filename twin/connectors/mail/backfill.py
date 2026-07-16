@@ -183,3 +183,85 @@ def release_partition_claim(
     out["completed_partitions"] = completed
     out["total_partitions"] = len(parts)
     return out
+
+
+def renew_partition_claim(
+    progress: dict[str, Any], partition_key: str, *,
+    worker_id: str, claim_token: int,
+    ttl_seconds: int = CLAIM_TTL_SECONDS,
+    now: Optional[datetime] = None,
+) -> Optional[dict[str, Any]]:
+    """Extend claim TTL when token+worker still match. None if fence lost."""
+    now = now or datetime.now(timezone.utc)
+    expires = (now + timedelta(seconds=ttl_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = dict(progress or {})
+    parts = []
+    found = False
+    for part in out.get("partitions") or []:
+        row = dict(part)
+        if row.get("partition_key") == partition_key:
+            if (row.get("claimed_by") != worker_id
+                    or row.get("claim_token") != claim_token
+                    or _claim_expired(row, now=now)):
+                return None
+            row["claim_expires_at"] = expires
+            found = True
+        parts.append(row)
+    if not found:
+        return None
+    out["partitions"] = parts
+    return out
+
+
+def claim_is_held(
+    progress: dict[str, Any], partition_key: str, *,
+    worker_id: str, claim_token: int,
+    now: Optional[datetime] = None,
+) -> bool:
+    for part in progress.get("partitions") or []:
+        if part.get("partition_key") != partition_key:
+            continue
+        if part.get("claimed_by") != worker_id:
+            return False
+        if part.get("claim_token") != claim_token:
+            return False
+        if _claim_expired(part, now=now):
+            return False
+        return True
+    return False
+
+
+def incomplete_base_streams(
+    part: dict[str, Any], base_streams: list[str],
+) -> list[str]:
+    """Skip base streams already completed for this partition."""
+    done = (part.get("streams") or {})
+    return [s for s in base_streams if done.get(s) != "completed"]
+
+
+def record_stream_results(
+    progress: dict[str, Any], partition_key: str,
+    stream_results: list[tuple[str, bool, bool]],
+    *, claim_token: int,
+) -> dict[str, Any]:
+    """Update per-base-stream status from ``(base_stream, committed, done)``."""
+    out = dict(progress or {})
+    parts = []
+    for part in out.get("partitions") or []:
+        row = dict(part)
+        if row.get("partition_key") == partition_key:
+            if row.get("claim_token") != claim_token:
+                parts.append(row)
+                continue
+            streams = dict(row.get("streams") or {})
+            for base, committed, done in stream_results:
+                if committed and done:
+                    streams[base] = "completed"
+                elif committed and not done:
+                    streams[base] = "continuation_pending"
+                elif not committed:
+                    streams[base] = streams.get(base) or "failed"
+            row["streams"] = streams
+        parts.append(row)
+    out["partitions"] = parts
+    return out

@@ -135,6 +135,15 @@ class OutlookClient:
         path = f"me/mailFolders/{quote(folder_id, safe='')}/messages/delta"
         return self.call(path, params={"$top": top})
 
+    def get_message(self, message_id: str) -> dict[str, Any]:
+        return self.call(
+            f"me/messages/{quote(message_id, safe='')}",
+            params={"$select": ("id,subject,bodyPreview,from,toRecipients,"
+                                "ccRecipients,receivedDateTime,conversationId,"
+                                "internetMessageId,changeKey,hasAttachments,"
+                                "body,isDraft,parentFolderId")},
+        )
+
     def list_attachments(self, message_id: str) -> list[dict[str, Any]]:
         data = self.call(
             f"me/messages/{quote(message_id, safe='')}/attachments",

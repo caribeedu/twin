@@ -20,6 +20,11 @@ from ..mail import mime as mail_mime
 from ..mail import normalize as mail_norm
 from ..mail import sync_state as ss
 from ..mail.classification import classify_message
+from ..mail.membership import (
+    active_memberships,
+    resolve_mail_tombstone_type,
+    still_in_scope,
+)
 from ..mail.streams import parse_label_stream, parse_mail_stream
 from ..models import (
     ConnectorCheckpoint,
@@ -113,6 +118,7 @@ class GmailConnector:
         self._client: Optional[GmailClient] = None
         self._account_email: Optional[str] = cfg.get("account_email")
         self._execution_context = SyncExecutionContext()
+        self._store = None
 
     @property
     def client(self) -> GmailClient:
@@ -274,26 +280,45 @@ class GmailConnector:
         if mode == "backfill":
             return self._fetch_timerange(plan, cursor, label)
         base = cursor or plan.cursor_before or {}
-        if base.get("history_id") and not ss.in_progress(base):
+        # Sealed continuous feed.
+        if (base.get("history_id") and not base.get("bootstrap_phase")
+                and not ss.in_progress(base)):
             return self._fetch_history(plan, base, label)
-        # Bootstrap / reconciliation scan, then seal history_id.
-        return self._fetch_timerange(plan, cursor, label, seal_history=True)
+        # After time-range bootstrap: catch up events since H0.
+        if base.get("bootstrap_phase") == "history_catchup":
+            return self._fetch_history(plan, base, label, catchup=True)
+        # Bootstrap scan — capture history boundary FIRST.
+        return self._fetch_timerange(plan, cursor, label, bootstrap=True)
 
     def _fetch_timerange(
         self, plan: SyncPlan, cursor: Optional[dict[str, Any]], label: str,
-        *, seal_history: bool = False,
+        *, bootstrap: bool = False,
     ) -> FetchPage:
         mode = plan.metadata.get("mode") or "continuous"
         base = cursor or plan.cursor_before or {}
+        # Already finished this backfill partition window — no re-scan.
+        if (mode == "backfill" and base.get("partition_complete")
+                and not ss.in_progress(base)):
+            return FetchPage(raw_items=[], cursor_after=dict(base), done=True)
+
         since, until = self._range_bounds(mode)
         window_oldest = (
             base.get("window_oldest") if ss.in_progress(base)
             else self._window_oldest(base, mode)
         )
         cur = ss.normalize_cursor(base, window_oldest=window_oldest)
-        # Preserve history_id across bootstrap continuations.
+        # Capture change-feed boundary BEFORE the scan so concurrent events
+        # cannot fall between the last page and a late profile.historyId.
+        if bootstrap and not cur.get("bootstrap_history_id"):
+            profile = self.client.profile()
+            hid = profile.get("historyId")
+            if hid:
+                cur["bootstrap_history_id"] = str(hid)
+        if base.get("bootstrap_history_id"):
+            cur["bootstrap_history_id"] = base["bootstrap_history_id"]
         if base.get("history_id"):
             cur["history_id"] = base["history_id"]
+
         state = ss.substream_state(cur, "messages")
         page_token = state.get("page_token")
         query = self._query_for_window(cur.get("window_oldest"), until)
@@ -318,21 +343,33 @@ class GmailConnector:
             return FetchPage(raw_items=items, cursor_after=cur, done=False)
         state.pop("page_token", None)
         finalized = ss.finalize_cursor(cur)
-        if seal_history and mode == "continuous":
-            profile = self.client.profile()
-            hid = profile.get("historyId") or cur.get("history_id")
-            if hid:
-                finalized["history_id"] = str(hid)
+        if bootstrap and mode == "continuous":
+            # Do NOT seal with a late profile historyId — catch up from H0.
+            h0 = cur.get("bootstrap_history_id")
             if finalized.get("watermark"):
                 finalized["reconciliation_watermark"] = finalized["watermark"]
-        elif cur.get("history_id"):
-            finalized["history_id"] = cur["history_id"]
+            if h0:
+                finalized["bootstrap_history_id"] = str(h0)
+                finalized["bootstrap_phase"] = "history_catchup"
+                finalized["history_id"] = str(h0)
+                return FetchPage(raw_items=items, cursor_after=finalized,
+                                 done=False)
+            return FetchPage(raw_items=items, cursor_after=finalized, done=True)
+        if mode == "backfill":
+            finalized["partition_complete"] = True
         return FetchPage(raw_items=items, cursor_after=finalized, done=True)
 
     def _fetch_history(
         self, plan: SyncPlan, cursor: dict[str, Any], label: str,
+        *, catchup: bool = False,
     ) -> FetchPage:
-        start = str(cursor["history_id"])
+        start = str(
+            cursor.get("history_id")
+            or cursor.get("bootstrap_history_id")
+            or ""
+        )
+        if not start:
+            return self._fetch_timerange(plan, cursor, label, bootstrap=True)
         state = dict(cursor.get("history_progress") or {})
         page_token = state.get("page_token")
         try:
@@ -342,13 +379,11 @@ class GmailConnector:
             )
         except ConnectorError as exc:
             if getattr(exc, "history_id_too_old", False):
-                # Controlled reconciliation: drop history_id, re-bootstrap.
                 fresh = {
                     "watermark": cursor.get("reconciliation_watermark")
                     or cursor.get("watermark"),
                 }
-                return self._fetch_timerange(
-                    plan, fresh, label, seal_history=True)
+                return self._fetch_timerange(plan, fresh, label, bootstrap=True)
             raise
 
         items: list[RawFetchItem] = []
@@ -387,9 +422,14 @@ class GmailConnector:
                 msg = lab_rm.get("message") or {}
                 mid = msg.get("id")
                 lab_ids = set(lab_rm.get("labelIds") or [])
-                if mid and label in lab_ids and mid not in seen_del:
+                if not mid or label not in lab_ids or mid in seen_del:
+                    continue
+                decision = self._label_removal_action(mid)
+                if decision == "tombstone":
                     items.append(self._tombstone(mid, label))
                     seen_del.add(mid)
+                elif decision is not None:
+                    items.append(decision)
 
         next_token = data.get("nextPageToken")
         new_history = str(data.get("historyId") or start)
@@ -397,16 +437,42 @@ class GmailConnector:
             "watermark": cursor.get("watermark"),
             "reconciliation_watermark": cursor.get("reconciliation_watermark")
             or cursor.get("watermark"),
-            "history_id": start if next_token else new_history,
         }
         if next_token:
+            after["history_id"] = start
             after["history_progress"] = {"page_token": next_token}
+            if catchup or cursor.get("bootstrap_phase"):
+                after["bootstrap_phase"] = "history_catchup"
+                after["bootstrap_history_id"] = cursor.get(
+                    "bootstrap_history_id") or start
             return FetchPage(raw_items=items, cursor_after=after, done=False)
+        # Catch-up / continuous page complete — seal final history_id.
+        after["history_id"] = new_history
         return FetchPage(raw_items=items, cursor_after=after, done=True)
 
+    def _label_removal_action(self, message_id: str) -> Any:
+        """Return tombstone / updated RawFetchItem / None.
+
+        Removing one allowlisted label is not a global deletion while another
+        configured label still covers the message.
+        """
+        full = self.client.get_message(message_id)
+        if not full:
+            return "tombstone"
+        current = list(full.get("labelIds") or [])
+        if still_in_scope(configured_ids=self.labels, current_ids=current):
+            # Still in connector scope — refresh membership metadata.
+            # Prefer a remaining configured label as the stream context.
+            remaining = [l for l in current if l in self.labels]
+            return self._raw_from_gmail(full, remaining[0])
+        return "tombstone"
+
     def _tombstone(self, message_id: str, label: str) -> RawFetchItem:
+        ext_type = resolve_mail_tombstone_type(
+            self._store, self.instance.id, str(message_id),
+        )
         return RawFetchItem(
-            external_type="message",
+            external_type=ext_type,
             external_id=str(message_id),
             external_revision=f"{message_id}.deleted",
             payload={
@@ -426,7 +492,6 @@ class GmailConnector:
         payload = full.get("payload") or {}
         headers = _header_map(payload)
         parts = mail_mime.parts_from_gmail_payload(payload)
-        # Honest attachment mode — Phase 4 ships discovery/metadata only.
         mode = self.exec_ctx.attachment_mode or self.attachment_mode
         for att in parts.get("attachments") or []:
             att["download_status"] = mode if mode in (
@@ -442,12 +507,17 @@ class GmailConnector:
         )
         thread_id = full.get("threadId") or full.get("id")
         in_reply = bool(headers.get("In-Reply-To") or headers.get("References"))
+        label_ids = list(full.get("labelIds") or [label])
+        memberships = active_memberships(
+            kind="label", configured_ids=self.labels, current_ids=label_ids,
+        )
         obj = {
             "id": full.get("id"),
             "thread_id": thread_id,
             "threadId": thread_id,
-            "label_ids": full.get("labelIds") or [label],
+            "label_ids": label_ids,
             "folder_id": label,
+            "source_memberships": memberships,
             "subject": subject,
             "from": from_addr,
             "to": _addresses(headers.get("To") or ""),
@@ -465,7 +535,6 @@ class GmailConnector:
             "attachment_mode": mode,
             **parts,
         }
-        # Rename: stub is provenance, not safe-to-render HTML.
         if "body_html_sanitized" in obj:
             obj["body_html_untrusted_stub"] = obj.pop("body_html_sanitized")
         ext_type = "thread_message" if in_reply else "message"
