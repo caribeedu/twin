@@ -748,6 +748,34 @@ def create_server(home: Optional[str] = None):
         ], ensure_ascii=False)
 
     @mcp.tool()
+    def connector_backfill_preview(connector_id: str,
+                                   client: Optional[str] = None,
+                                   client_token: Optional[str] = None) -> str:
+        """What a backfill WOULD ingest for a connector — per-stream scope,
+        vault, ingestion policy and provider-side volume estimates. Read
+        only: previewing never starts ingestion. Requires capability
+        connector:backfill on that connector."""
+        from ..connectors import (
+            CAP_BACKFILL,
+            authorize_connector,
+            backfill_preview,
+            build_credential_store,
+        )
+        access = _connector_access(client, client_token)
+        auth = authorize_connector(ws.store, access, CAP_BACKFILL,
+                                   connector_id=connector_id)
+        if not auth.allowed:
+            return _connector_denied(auth)
+        try:
+            preview = backfill_preview(
+                ws.store, build_credential_store(ws.cfg.home), connector_id,
+                principal_id=access.principal_id,
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        return json.dumps(preview, ensure_ascii=False)
+
+    @mcp.tool()
     def connector_sync(
         connector_id: str,
         confirm: bool = False,

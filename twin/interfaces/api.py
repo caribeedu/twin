@@ -12,7 +12,7 @@ from __future__ import annotations
 import html
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -751,6 +751,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     from ..connectors import build_credential_store as _bcs
     from ..connectors import (
+        CAP_BACKFILL,
         CAP_CONFIGURE,
         CAP_CREDENTIALS,
         CAP_OPERATE,
@@ -760,6 +761,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         CAP_SYNC,
         add_connector_instance,
         authorize_connector,
+        backfill_preview,
         connector_health,
         pause_connector,
         register_source_account,
@@ -1004,6 +1006,45 @@ def create_app(home: Optional[str] = None) -> FastAPI:
              "affected_percept_ids": e.affected_percept_ids}
             for e in ws.store.list_connector_deletion_events(connector_id)
         ]
+
+    @app.post("/api/connectors/{connector_id}/backfill")
+    def api_connector_backfill(
+        connector_id: str, preview: bool = True,
+        x_twin_client: Optional[str] = Header(default=None),
+        x_twin_token: Optional[str] = Header(default=None),
+    ):
+        access = _connector_access(x_twin_client, x_twin_token, CAP_BACKFILL,
+                                   connector_id)
+        if not preview:
+            # Phase 2 backfill IS the first sync of an unwatermarked stream,
+            # bounded by configuration.backfill_since — execute it through
+            # /sync (capability connector:sync). This endpoint only previews.
+            raise HTTPException(
+                status_code=400,
+                detail="only preview=true is supported: set "
+                       "configuration.backfill_since and run /sync to ingest")
+        try:
+            return backfill_preview(ws.store, _conn_creds(), connector_id,
+                                    principal_id=access.principal_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+    @app.post("/api/webhooks/github/{connector_id}")
+    async def api_github_webhook(connector_id: str, request: Request):
+        # Authenticated by HMAC against a dedicated webhook secret — never by
+        # twin identity, never by the API token. A valid delivery only nudges
+        # the scheduler; the payload never becomes canonical state.
+        from ..connectors.github.webhook import WebhookRejected, handle_github_webhook
+        body = await request.body()
+        try:
+            return handle_github_webhook(
+                ws.store, _conn_creds(), connector_id,
+                event=request.headers.get("X-GitHub-Event"),
+                body=body,
+                signature=request.headers.get("X-Hub-Signature-256"),
+            )
+        except WebhookRejected as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.reason)
 
     @app.get("/api/judgment/conflicts")
     def api_judgment_conflicts(status: str = "open"):

@@ -17,22 +17,33 @@ from .models import (
 )
 
 
-def snapshot_health(store, connector_id: str, status: HealthStatus) -> ConnectorSyncState:
-    state = store.get_connector_sync_state(connector_id) or ConnectorSyncState(id=connector_id)
-    state.status = status
-    state.updated_at = now_iso()
+def snapshot_health(store, connector_id: str, status: HealthStatus,
+                    retry_after: int | None = None) -> ConnectorSyncState:
     dead = store.list_connector_dead_letters(connector_id, status="open")
-    state.dead_letters = len(dead)
-    if status == HealthStatus.healthy:
-        state.last_success_at = now_iso()
-        state.retry_count = 0
-        state.backoff_seconds = 0
-    elif status in (HealthStatus.degraded, HealthStatus.failed, HealthStatus.unauthorized):
-        state.last_failure_at = now_iso()
-        state.retry_count += 1
-        state.backoff_seconds = min(3600, max(60, state.backoff_seconds * 2 or 60))
-    store.upsert_connector_sync_state(state)
-    return state
+    n_dead = len(dead)
+
+    def _apply(state: ConnectorSyncState) -> None:
+        state.status = status
+        state.updated_at = now_iso()
+        state.dead_letters = n_dead
+        if status == HealthStatus.healthy:
+            state.last_success_at = now_iso()
+            state.retry_count = 0
+            state.backoff_seconds = 0
+        elif status == HealthStatus.awaiting_configuration:
+            pass  # configuration gap — not a provider failure, no backoff
+        elif status in (HealthStatus.degraded, HealthStatus.failed,
+                        HealthStatus.unauthorized):
+            state.last_failure_at = now_iso()
+            state.retry_count += 1
+            backoff = min(3600, max(60, state.backoff_seconds * 2 or 60))
+            # a provider-instructed wait (rate limit reset) overrides the
+            # exponential guess — the provider knows its own window
+            if retry_after is not None:
+                backoff = max(backoff, min(int(retry_after), 6 * 3600))
+            state.backoff_seconds = backoff
+
+    return store.apply_connector_sync_state(connector_id, _apply)
 
 
 def connector_health(store, connector_id: str) -> dict[str, Any]:

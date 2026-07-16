@@ -359,6 +359,50 @@ def sync_fingerprint(
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
 
 
+def backfill_preview(
+    store, credentials: CredentialStore, connector_id: str, *,
+    principal_id: str,
+) -> dict[str, Any]:
+    """What a backfill WOULD ingest — scope, vault, policy, per-stream state
+    and (when the adapter offers it) provider-side volume estimates. Read
+    only: previewing never starts ingestion (v0.6 §77–79).
+
+    Phase 2 backfill itself is the first sync of a stream without a
+    watermark, bounded by ``configuration["backfill_since"]``; the
+    partitionable/resumable BackfillJob arrives with Phase 4."""
+    adapter, instance, account = _load_adapter(store, credentials, connector_id)
+    manifest = adapter.adapter_manifest()
+    plan_streams = getattr(adapter, "plan_streams", None)
+    streams = ((plan_streams(account) if callable(plan_streams) else None)
+               or list(manifest.streams) or ["default"])
+    estimates: dict[str, Any] = {}
+    estimator = getattr(adapter, "estimate_backfill", None)
+    if callable(estimator):
+        estimates = estimator()
+    config = instance.configuration or {}
+    stream_rows = []
+    for stream in streams:
+        ckpt = store.get_connector_checkpoint(connector_id, stream)
+        stream_rows.append({
+            "stream": stream,
+            # no checkpoint yet → the next sync IS the backfill for this stream
+            "mode": "incremental" if ckpt else "backfill",
+            "watermark": (ckpt.cursor or {}).get("watermark") if ckpt else None,
+            "estimate": estimates.get(stream),
+        })
+    return {
+        "connector_id": connector_id,
+        "connector_type": instance.connector_type,
+        "source_owner": account.source_owner.value,
+        "vault_id": account.vault_id,
+        "backfill_since": config.get("backfill_since"),
+        "ingestion_policy": config.get("ingestion_policy"),
+        "streams": stream_rows,
+        "requested_by": principal_id,
+        "started": False,  # a preview NEVER ingests
+    }
+
+
 def pause_connector(store, connector_id: str) -> ConnectorInstance:
     return store.update_connector_instance(
         connector_id, status=ConnectorStatus.paused.value
@@ -395,13 +439,11 @@ def revoke_connector(
     # 1. stop everything first — whatever happens next, no more fetches
     store.update_connector_instance(
         connector_id, status=ConnectorStatus.revoking.value)
-    state = store.get_connector_sync_state(connector_id)
-    if state is None:
-        from .models import ConnectorSyncState
-        state = ConnectorSyncState(id=connector_id)
-    state.paused = True
-    state.status = HealthStatus.revoked
-    store.upsert_connector_sync_state(state)
+    def _pause(state) -> None:
+        state.paused = True
+        state.status = HealthStatus.revoked
+
+    store.apply_connector_sync_state(connector_id, _pause)
 
     # 2. destroy + verify secret material
     residual = False

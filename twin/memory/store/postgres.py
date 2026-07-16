@@ -589,8 +589,10 @@ CREATE TABLE IF NOT EXISTS connector_sync_state (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'healthy',
     next_run_at TEXT,
+    version INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
 );
+ALTER TABLE connector_sync_state ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0;
 -- one worker per (connector, stream); leases expire so crashes cannot wedge a stream
 CREATE TABLE IF NOT EXISTS connector_stream_leases (
     connector_id TEXT NOT NULL,

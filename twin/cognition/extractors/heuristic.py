@@ -32,7 +32,21 @@ _CONSTRAINT_MARKERS = [
     r"\bcompliance\b", r"\bobrigat[oó]rio\b",
 ]
 
+# A rejected alternative is still a decision — arguably the more valuable
+# half of one (v0.6 §26: alternatives must survive the final state). Checked
+# BEFORE the plain decision markers so "instead of Redis we'll use Postgres"
+# lands as a decision that carries its rejected option.
+_REJECTED_ALTERNATIVE_MARKERS = [
+    r"\bdecided against\b", r"\brejected (?:because|in favor of)\b",
+    r"\binstead of\b.{1,80}\b(?:use|using|went with|we(?:'ll| will) use)\b",
+    r"\bnot going with\b", r"\bwe won'?t use\b", r"\bruled out\b",
+    r"\bdescartamos\b", r"\brejeitamos\b", r"\bdecidimos n[aã]o usar\b",
+    r"\bem vez de\b.{1,80}\b(?:usar|vamos usar|usaremos)\b",
+]
+
 _MARKER_SETS = [
+    ("rejected_alternative",
+     [re.compile(p, re.IGNORECASE) for p in _REJECTED_ALTERNATIVE_MARKERS]),
     ("decision", [re.compile(p, re.IGNORECASE) for p in _DECISION_MARKERS]),
     ("task", [re.compile(p, re.IGNORECASE) for p in _TASK_MARKERS]),
     ("preference", [re.compile(p, re.IGNORECASE) for p in _PREFERENCE_MARKERS]),
@@ -90,9 +104,10 @@ def extract(percept: Percept) -> ExtractionResult:
             if title.lower() in seen_titles:
                 break
             seen_titles.add(title.lower())
+            rejected = mem_type == "rejected_alternative"
             memories.append(
                 ExtractedMemory(
-                    type=mem_type,
+                    type="decision" if rejected else mem_type,
                     title=title,
                     summary=sentence,
                     domain=default_domain,
@@ -100,6 +115,7 @@ def extract(percept: Percept) -> ExtractionResult:
                     confidence=0.5,  # heuristic → always below review threshold
                     entities=_entities(sentence),
                     evidence_quote=sentence,
+                    payload={"rejected_alternative": True} if rejected else {},
                 ).normalized()
             )
             break  # one memory per sentence, first matching type wins

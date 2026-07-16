@@ -199,6 +199,173 @@ def _run_source_deletion(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _github_env():
+    """Route the real GitHub adapter at the offline API double from the test
+    suite. Returns (api, restore) — call restore() in a finally block."""
+    import httpx
+
+    tests_dir = Path(__file__).resolve().parents[2] / "tests"
+    if str(tests_dir) not in sys.path:
+        sys.path.insert(0, str(tests_dir))
+    from github_mock import FakeGitHubAPI, _user
+
+    from twin.connectors.github import client as ghclient
+
+    api = FakeGitHubAPI()
+    real_build = ghclient._build_http
+
+    def fake_build(base_url, token):
+        original = real_build(base_url, token)
+        headers = dict(original.headers)
+        original.close()
+        return httpx.Client(transport=api.transport(),
+                            base_url="https://api.github.com", headers=headers)
+
+    ghclient._build_http = fake_build
+    return api, _user, (lambda: setattr(ghclient, "_build_http", real_build))
+
+
+def _setup_github(case: dict, tmp: str, repo: str):
+    store = SqliteStore(":memory:")
+    creds = build_credential_store(Path(tmp))
+    acc = register_source_account(
+        store, connector_type="github", source_owner=case["source_owner"],
+        org_key=case.get("org_key"), owner_principal_id="principal_eval",
+    )
+    inst = add_connector_instance(
+        store, creds, account_id=acc.id, secret="gh-test-token",
+        configuration={"repositories": [repo]},
+    )
+    return store, creds, acc, inst
+
+
+def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
+    api, _user, restore = _github_env()
+    repo, number = case["repo"], case["pr_number"]
+    exp = case["expected"]
+    try:
+        with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+            store, creds, acc, inst = _setup_github(case, tmp, repo)
+            api.add_repo(repo)
+            pr = api.add_pull(repo, number, title="Queue backend",
+                              body="We decided to use Redis for the queue.",
+                              updated_at="2026-01-01T10:00:00Z", head_sha="s3")
+            sync_connector(store, creds, inst.id)
+
+            api.add_review(repo, number, 501, state="CHANGES_REQUESTED",
+                           body="Do not use Redis here — persistence requirements.",
+                           submitted_at="2026-01-02T10:00:00Z")
+            pr["updated_at"] = "2026-01-02T10:00:00Z"
+            sync_connector(store, creds, inst.id)
+
+            pr["body"] = "We decided to use PostgreSQL advisory locks for the queue."
+            pr["merged"] = True
+            pr["merged_at"] = "2026-01-03T10:00:00Z"
+            pr["state"] = "closed"
+            pr["updated_at"] = "2026-01-03T10:00:00Z"
+            sync_connector(store, creds, inst.id)
+            # ingesting the same final state twice must change nothing
+            replay = sync_connector(store, creds, inst.id)
+            if replay.percepts != 0:
+                return False, "replay of the final state produced new percepts"
+
+            prs = [r for r in store.list_connector_records(inst.id)
+                   if r.external_type == "pull_request"]
+            if len(prs) != exp["pr_revisions"]:
+                return False, f"pr revisions {len(prs)} != {exp['pr_revisions']}"
+            final = max(prs, key=lambda r: r.external_revision)
+            early = min(prs, key=lambda r: r.external_revision)
+            if final.confidentiality["source_trust"] != exp["final_trust"]:
+                return False, "merged state did not carry the highest trust"
+            if "PostgreSQL advisory locks" not in final.content:
+                return False, "final decision content missing from merged state"
+            if early.confidentiality["source_trust"] != exp["early_trust"]:
+                return False, "pre-merge revision trust drifted"
+            if "Redis" not in early.content:
+                return False, "rejected alternative was erased"
+            lineage = [r for r in store.list_connector_records(inst.id)
+                       if r.thread_key]
+            if not lineage or any(r.thread_key != exp["thread_key"] for r in lineage):
+                return False, "lineage does not share one thread_key"
+            percepts = store.list_percepts()
+            if not percepts or any(p.metadata.get("vault_id") != exp["vault_id"]
+                                   for p in percepts):
+                return False, "ownership not sealed on every percept"
+
+            # extraction (offline heuristic): both decisions become
+            # candidates, the merged one outranks, nothing auto-confirms
+            from twin.cognition import extract_pending
+            from twin.config import Config
+            from twin.memory.embeddings import get_embedder
+            cfg = Config(home=Path(tmp) / "twin-home")
+            cfg.extractor = "heuristic"
+            cfg.embedder = "hash"
+            cfg.ensure_home()
+            extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
+            decisions = [m for m in store.list_memories()
+                         if m.type.value == "decision"]
+            pg = [m for m in decisions if "PostgreSQL" in m.summary]
+            redis = [m for m in decisions if "Redis" in m.summary
+                     and "PostgreSQL" not in m.summary]
+            if not pg or not redis:
+                return False, "extraction lost the decision or its alternative"
+            if max(m.confidence for m in pg) <= max(m.confidence for m in redis):
+                return False, "merged decision does not outrank the alternative"
+            if any(m.status.value != "candidate" for m in decisions):
+                return False, "a connector-derived decision was auto-confirmed"
+        return True, "ok"
+    finally:
+        restore()
+
+
+def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
+    api, _user, restore = _github_env()
+    repo = case["repo"]
+    exp = case["expected"]
+    try:
+        with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+            store, creds, acc, inst = _setup_github(case, tmp, repo)
+            api.add_repo(repo)
+            api.add_issue(repo, 1, title="Queue decision",
+                          body="We must pick a queue backend.",
+                          updated_at="2026-01-01T09:00:00Z")
+            api.add_issue_comment(
+                repo, 900, 1,
+                body="We decided to use PostgreSQL for the queue.",
+                updated_at="2026-01-01T10:00:00Z",
+                user=_user("release-bot[bot]", bot=True))
+            sync_connector(store, creds, inst.id)
+
+            bots = [r for r in store.list_connector_records(inst.id)
+                    if r.external_type == "issue_comment"]
+            if len(bots) != 1:
+                return False, f"expected 1 bot comment record, got {len(bots)}"
+            bot = bots[0]
+            if bot.confidentiality["source_trust"] != exp["bot_trust"]:
+                return False, "bot trust not calibrated below the threshold"
+            if bot.source_metadata.get("derived") != exp["derived"]:
+                return False, "bot comment not marked as a derived notification"
+            if bot.source_metadata.get("lineage_root") != exp["lineage_root"]:
+                return False, "bot comment lost the lineage root it references"
+
+            from twin.cognition import extract_pending
+            from twin.config import Config
+            from twin.memory.embeddings import get_embedder
+            cfg = Config(home=Path(tmp) / "twin-home")
+            cfg.extractor = "heuristic"
+            cfg.embedder = "hash"
+            cfg.ensure_home()
+            extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
+            memories = store.list_memories()
+            if not memories:
+                return False, "extraction produced nothing to review"
+            if not all(m.needs_review for m in memories):
+                return False, "a bot-derived memory was born without review"
+        return True, "ok"
+    finally:
+        restore()
+
+
 _SCENARIOS = {
     "normalization": _run_simple,
     "replay": _run_simple,
@@ -207,6 +374,8 @@ _SCENARIOS = {
     "revision_collision": _run_revision_collision,
     "checkpoint_failure": _run_checkpoint_failure,
     "source_deletion": _run_source_deletion,
+    "github_pr_lifecycle": _run_github_pr_lifecycle,
+    "github_bot_lineage": _run_github_bot_lineage,
 }
 
 

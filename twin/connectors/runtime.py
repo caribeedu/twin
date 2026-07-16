@@ -82,8 +82,12 @@ class StreamResult:
     failed: int = 0
     deletion_events: int = 0
     failure_class: Optional[str] = None
+    retry_after: Optional[int] = None  # provider-instructed wait (rate limits)
     batch_id: Optional[str] = None
     cursor_after: dict[str, Any] = field(default_factory=dict)
+    # False when this batch committed a durable continuation cursor — the
+    # outer run_sync loop may start another batch for the same stream.
+    done: bool = True
 
 
 @dataclass
@@ -146,6 +150,14 @@ def build_percept(
         "thread_key": record.thread_key,
         "project_hint": record.project_hint,
     }
+    # instance-level candidate-policy override rides with the percept so the
+    # extraction pipeline (not the adapter) can enforce it (§49–50)
+    policy_override = (instance.configuration or {}).get("ingestion_policy")
+    if isinstance(policy_override, dict) and policy_override:
+        metadata["ingestion_policy"] = policy_override
+    # source_metadata the cognitive layers may need (author kind, lineage…)
+    if record.source_metadata:
+        metadata["source_metadata"] = record.source_metadata
     return Percept(
         percept_type=f"connector_{record.external_type}",
         source_sensor=instance.connector_type,
@@ -480,22 +492,46 @@ def run_sync(
         return result
 
     manifest = adapter.adapter_manifest()
-    target_streams = streams or manifest.streams or ["default"]
+    target_streams = streams
+    if not target_streams:
+        plan_streams = getattr(adapter, "plan_streams", None)
+        if callable(plan_streams):
+            target_streams = plan_streams(account)
+    if not target_streams:
+        if manifest.dynamic_streams:
+            result.health = HealthStatus.awaiting_configuration
+            _persist_health(store, instance, result)
+            return result
+        target_streams = manifest.streams or ["default"]
     owner = lease_owner or f"worker_{uuid.uuid4().hex[:12]}"
+
+    # Cap how many durable continuation batches one sync call may commit per
+    # stream. 0 / missing = keep going until the window finishes (or fails).
+    max_batches = int((instance.configuration or {})
+                      .get("max_batches_per_stream") or 0)
 
     worst = HealthStatus.healthy
     for stream in target_streams:
-        sr = _sync_stream(store, adapter, instance, account, stream,
-                          emit_percepts=emit_percepts, lease_owner=owner)
-        result.streams.append(sr)
-        if sr.skipped:
-            continue  # another worker owns the stream — not a health problem
-        if sr.failure_class in (
-            FailureClass.authentication.value, FailureClass.authorization.value
-        ):
-            worst = HealthStatus.unauthorized
-        elif not sr.committed and worst == HealthStatus.healthy:
-            worst = HealthStatus.degraded
+        batches = 0
+        while True:
+            sr = _sync_stream(store, adapter, instance, account, stream,
+                              emit_percepts=emit_percepts, lease_owner=owner)
+            result.streams.append(sr)
+            batches += 1
+            if sr.skipped:
+                break  # another worker owns the stream — not a health problem
+            if sr.failure_class in (
+                FailureClass.authentication.value, FailureClass.authorization.value
+            ):
+                worst = HealthStatus.unauthorized
+            elif not sr.committed and worst == HealthStatus.healthy:
+                worst = HealthStatus.degraded
+            if not sr.committed:
+                break
+            if sr.done:
+                break
+            if max_batches and batches >= max_batches:
+                break
 
     result.health = worst
     _persist_health(store, instance, result)
@@ -561,28 +597,22 @@ def _sync_stream_leased(
 
     sr = StreamResult(stream=stream, batch_id=batch.id)
     staged = _Staged()
-    cursor: Optional[dict[str, Any]] = plan.cursor_before or None
-    last_page: Optional[FetchPage] = None
+    page: Optional[FetchPage] = None
     try:
-        # 1. fetch + stage — outside any transaction, nothing persisted yet.
-        # The lease is renewed after every page so a slow provider or a long
-        # backfill never outlives its authority silently.
-        while True:
-            page = adapter.fetch_batch(plan, cursor)
-            for raw in page.raw_items:
-                stage_raw_fetch_item(store, adapter, instance, account,
-                                     batch, staged, raw)
-            last_page = page
-            cursor = page.cursor_after
-            if not store.renew_stream_lease(instance.id, stream, lease_owner,
-                                            fencing_token,
-                                            ttl_seconds=LEASE_TTL_SECONDS):
-                raise LeaseLost(
-                    f"lease for {instance.id}/{stream} lost mid-fetch "
-                    f"(fencing token {fencing_token})"
-                )
-            if page.done:
-                break
+        # One FetchPage = one durable batch. ``done=False`` means "commit a
+        # continuation cursor"; the outer run_sync loop may start another
+        # batch. Never accumulate pages in memory until the window ends.
+        page = adapter.fetch_batch(plan, plan.cursor_before or None)
+        for raw in page.raw_items:
+            stage_raw_fetch_item(store, adapter, instance, account,
+                                 batch, staged, raw)
+        if not store.renew_stream_lease(instance.id, stream, lease_owner,
+                                        fencing_token,
+                                        ttl_seconds=LEASE_TTL_SECONDS):
+            raise LeaseLost(
+                f"lease for {instance.id}/{stream} lost mid-fetch "
+                f"(fencing token {fencing_token})"
+            )
     except LeaseLost as exc:
         _abort_batch(store, batch, sr, exc)
         return sr  # another worker owns the stream now; publish nothing
@@ -591,6 +621,7 @@ def _sync_stream_leased(
         batch.failure_class = exc.failure_class
         batch.error = sanitize_error(exc)
         batch.completed_at = now_iso()
+        sr.retry_after = exc.retry_after
         with store.transaction():
             for item in staged.new_raw_items:
                 store.insert_connector_raw_item(item)
@@ -613,8 +644,9 @@ def _sync_stream_leased(
         _fill_stream(sr, batch)
         return sr
 
-    # 2b. full success → single atomic finalize (fenced)
-    cursor_after = adapter.acknowledge(plan, last_page or FetchPage())
+    # 2b. success → atomic finalize (fenced), even when page.done is False
+    # (durable continuation). Watermark promotion is encoded in cursor_after.
+    cursor_after = adapter.acknowledge(plan, page or FetchPage())
     try:
         sr.deletion_events = _finalize_committed(
             store, instance, account, batch, staged,
@@ -634,6 +666,7 @@ def _sync_stream_leased(
 
     sr.committed = True
     sr.cursor_after = cursor_after or {}
+    sr.done = True if page is None else bool(page.done)
     _fill_stream(sr, batch)
     return sr
 
@@ -650,4 +683,7 @@ def _fill_stream(sr: StreamResult, batch: ConnectorBatch) -> None:
 
 def _persist_health(store, instance: ConnectorInstance, result: SyncResult) -> None:
     from .health import snapshot_health
-    snapshot_health(store, instance.id, result.health)
+    retry_after = max(
+        (s.retry_after for s in result.streams if s.retry_after), default=None,
+    )
+    snapshot_health(store, instance.id, result.health, retry_after=retry_after)

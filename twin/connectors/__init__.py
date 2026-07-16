@@ -66,6 +66,7 @@ from .models import ConnectorDeletionEvent, StreamLease  # noqa: F401
 from .runtime import CheckpointConflict, LeaseLost, SyncResult, build_percept, run_sync
 from .service import (
     add_connector_instance,
+    backfill_preview,
     discard_dead_letter,
     pause_connector,
     reclassify_source_account,
@@ -123,6 +124,7 @@ __all__ = [
     "StreamLease",
     "add_connector_instance",
     "authorize_connector",
+    "backfill_preview",
     "build_adapter",
     "build_credential_store",
     "build_percept",

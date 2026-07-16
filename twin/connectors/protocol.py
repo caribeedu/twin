@@ -52,6 +52,9 @@ class AdapterManifest:
     affordances: dict[str, bool] = field(default_factory=dict)
     supported_external_types: list[str] = field(default_factory=list)
     streams: list[str] = field(default_factory=list)
+    # When true, an empty plan_streams() means "not configured yet" — the
+    # runtime must not fall back to manifest.streams or "default".
+    dynamic_streams: bool = False
     default_scopes: list[str] = field(default_factory=list)
     # How this adapter authenticates. Only "generated_local_token" adapters
     # may receive a framework-generated secret; external providers without a
@@ -91,6 +94,9 @@ class RawFetchItem:
 class FetchPage:
     raw_items: list[RawFetchItem] = field(default_factory=list)
     cursor_after: dict[str, Any] = field(default_factory=dict)
+    # False = commit this page as a durable continuation batch; the runtime
+    # will start another batch (or leave the stream due) rather than keep
+    # fetching into the same in-memory staging buffer.
     done: bool = True
 
 
@@ -111,6 +117,14 @@ class ProfessionalConnector(Protocol):
     def discover_accounts(self) -> list[SourceAccount]: ...
 
     def validate_credentials(self) -> ConnectorHealth: ...
+
+    def plan_streams(self, account: SourceAccount) -> list[str]:
+        """OPTIONAL (duck-typed): dynamic stream list derived from the
+        instance configuration — e.g. one stream per configured repository.
+        Adapters with a fixed topology may omit it; the runtime then falls
+        back to ``adapter_manifest().streams``. Each stream gets its own
+        checkpoint and its own fenced lease."""
+        ...
 
     def plan_sync(
         self,

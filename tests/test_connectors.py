@@ -1085,6 +1085,105 @@ def test_manifest_and_adapter_registration():
     assert manifest.auth_mode == "generated_local_token"
 
 
+# -- v0.6 phase 2 framework deltas -------------------------------------------------
+
+
+def test_adapter_plan_streams_drives_dynamic_streams(store, creds, monkeypatch):
+    """An adapter may derive its streams from configuration (one per repo);
+    each dynamic stream gets its own checkpoint."""
+    from twin.connectors.fake import FakeConnector
+
+    _acc, inst = _make(store, creds)
+    monkeypatch.setattr(
+        FakeConnector, "plan_streams",
+        lambda self, account: ["issues"],  # narrow to a single dynamic stream
+        raising=False,
+    )
+    result = sync_connector(store, creds, inst.id)
+    assert [s.stream for s in result.streams] == ["issues"]
+    assert store.get_connector_checkpoint(inst.id, "issues") is not None
+    assert store.get_connector_checkpoint(inst.id, "pull_requests") is None
+
+
+def test_rate_limit_retry_after_drives_backoff(store, creds):
+    """A provider-instructed retry_after overrides the exponential guess —
+    the scheduler waits what the provider asked, not 60s."""
+    from twin.connectors.fake import FakeConnector
+
+    _acc, inst = _make(store, creds, configuration={"fail_mode": "rate_limit"})
+    original = FakeConnector.fetch_batch
+
+    def rate_limited(self, plan, cursor):
+        from twin.connectors.protocol import ConnectorError
+        from twin.connectors.models import FailureClass
+        raise ConnectorError("rate limited", failure_class=FailureClass.rate_limit,
+                             retryable=True, retry_after=900)
+
+    FakeConnector.fetch_batch = rate_limited
+    try:
+        result = sync_connector(store, creds, inst.id)
+    finally:
+        FakeConnector.fetch_batch = original
+    assert result.health.value == "degraded"
+    state = store.get_connector_sync_state(inst.id)
+    assert state.backoff_seconds >= 900  # provider window respected
+
+
+def test_source_policy_gates_connector_candidates(store, cfg, embedder):
+    """A connector-fed percept only proposes memory types its source policy
+    allows: preferences/beliefs are dropped, review-required types come in
+    flagged, and local (non-connector) percepts are unaffected."""
+    from twin.cognition.pipeline import extract_percept
+    from twin.sensory.percept import Percept
+
+    content = (
+        "We decided to use PostgreSQL for the queue.\n"
+        "I prefer dark mode in every editor.\n"
+    )
+    connector_percept = Percept(
+        percept_type="connector_issue", source_sensor="github",
+        content=content, source_trust=0.9,
+        metadata={"connector_type": "github"},
+    ).seal()
+    store.insert_percept(connector_percept)
+    report = extract_percept(store, cfg, embedder, connector_percept)
+    types = {store.get_memory(m).type.value for m in report.inserted}
+    assert "preference" not in types          # dropped by policy
+    assert report.policy_dropped >= 1
+    assert "decision" in types                # allowed type flows normally
+
+    # equivalent content from a LOCAL sensor keeps the old behavior
+    # (distinct wording — identical content would dedupe at the percept level)
+    local = Percept(percept_type="document", source_sensor="document",
+                    content=("We decided to adopt RabbitMQ for the mail queue.\n"
+                             "I prefer light mode in every terminal.\n"),
+                    source_trust=0.9).seal()
+    store.insert_percept(local)
+    local_report = extract_percept(store, cfg, embedder, local)
+    local_types = {store.get_memory(m).type.value for m in local_report.inserted}
+    assert "preference" in local_types
+    assert local_report.policy_dropped == 0
+
+
+def test_source_policy_instance_override(store, cfg, embedder):
+    """ingestion_policy on the percept metadata (from instance config)
+    narrows the connector-type default — never widens it."""
+    from twin.cognition.pipeline import extract_percept
+    from twin.sensory.percept import Percept
+
+    percept = Percept(
+        percept_type="connector_issue", source_sensor="github",
+        content="We decided to use PostgreSQL for the queue.",
+        source_trust=0.9,
+        metadata={"connector_type": "github",
+                  "ingestion_policy": {"drop": ["decision"]}},
+    ).seal()
+    store.insert_percept(percept)
+    report = extract_percept(store, cfg, embedder, percept)
+    assert report.inserted == []
+    assert report.policy_dropped >= 1
+
+
 # -- scheduler -------------------------------------------------------------------
 
 

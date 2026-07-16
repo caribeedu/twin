@@ -25,6 +25,7 @@ from twin.connectors import (
 READER_TOKEN = "tok-reader"
 SYNCER_TOKEN = "tok-syncer"
 PACK_ONLY_TOKEN = "tok-packonly"
+BACKFILLER_TOKEN = "tok-backfiller"
 
 
 def _bootstrap_identity(store):
@@ -49,6 +50,8 @@ def _bootstrap_identity(store):
               ["vault_general", "vault_personal"])
     principal("principal_pack_only", ["read_context_pack"],
               ["vault_general", "vault_personal"])
+    principal("principal_conn_backfiller", ["connector:read", "connector:backfill"],
+              ["vault_general", "vault_personal"])
 
     def binding(client, pid, token, caps, vaults):
         register_client_binding(
@@ -65,6 +68,9 @@ def _bootstrap_identity(store):
             ["vault_general", "vault_personal"])
     binding("pack-only", "principal_pack_only", PACK_ONLY_TOKEN,
             ["read_context_pack"], ["vault_general", "vault_personal"])
+    binding("conn-backfiller", "principal_conn_backfiller", BACKFILLER_TOKEN,
+            ["connector:read", "connector:backfill"],
+            ["vault_general", "vault_personal"])
 
 
 def _make_connector(home: str):
@@ -137,6 +143,18 @@ async def test_mcp_connector_tools_require_identity_and_capability(tmp_path, mon
     })
     assert denied.get("error") == "not_authorized"
     assert "connector:sync" in denied["reason"]
+
+    # …nor connector:backfill
+    denied = await _call(server, "connector_backfill_preview", {
+        "connector_id": inst.id,
+        "client": "conn-reader", "client_token": READER_TOKEN,
+    })
+    assert denied.get("error") == "not_authorized"
+    preview = await _call(server, "connector_backfill_preview", {
+        "connector_id": inst.id,
+        "client": "conn-backfiller", "client_token": BACKFILLER_TOKEN,
+    })
+    assert preview["started"] is False and preview["streams"]
 
 
 @pytest.mark.anyio
@@ -229,6 +247,108 @@ def test_api_connector_endpoints_require_capabilities(tmp_path, monkeypatch):
     r = client.post(f"/api/connectors/{inst.id}/sync", json={}, headers=syncer)
     assert r.status_code == 200
     assert r.json()["percepts"] == 3
+
+
+def test_api_backfill_preview_capability_and_read_only(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from twin.interfaces.api import create_app
+    from twin.workspace import Workspace
+
+    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    home = str(tmp_path / "twin-home")
+    _acc, inst = _make_connector(home)
+    client = TestClient(create_app(home=home))
+
+    reader = {"x-twin-client": "conn-reader", "x-twin-token": READER_TOKEN}
+    backfiller = {"x-twin-client": "conn-backfiller",
+                  "x-twin-token": BACKFILLER_TOKEN}
+
+    # connector:read does NOT imply connector:backfill
+    assert client.post(f"/api/connectors/{inst.id}/backfill",
+                       headers=reader).status_code == 403
+    assert client.post(f"/api/connectors/{inst.id}/backfill").status_code == 403
+
+    r = client.post(f"/api/connectors/{inst.id}/backfill", headers=backfiller)
+    assert r.status_code == 200
+    preview = r.json()
+    assert preview["started"] is False
+    assert preview["streams"]
+
+    # execution is not this endpoint's job — preview only
+    assert client.post(f"/api/connectors/{inst.id}/backfill?preview=false",
+                       headers=backfiller).status_code == 400
+
+    # previewing ingested nothing
+    ws = Workspace(home)
+    assert ws.store.list_connector_records(inst.id) == []
+    ws.close()
+
+
+def test_api_github_webhook_authenticates_by_hmac_only(tmp_path, monkeypatch):
+    import hashlib
+    import hmac as hmac_mod
+
+    from fastapi.testclient import TestClient
+
+    from twin.connectors.github.webhook import set_webhook_secret
+    from twin.interfaces.api import create_app
+    from twin.workspace import Workspace
+
+    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    home = str(tmp_path / "twin-home")
+    _acc, fake_inst = _make_connector(home)
+
+    ws = Workspace(home)
+    creds = build_credential_store(Path(home))
+    gh_acc = register_source_account(
+        ws.store, connector_type="github", source_owner="personal",
+        owner_principal_id="principal_conn_syncer",
+    )
+    gh_inst = add_connector_instance(
+        ws.store, creds, account_id=gh_acc.id, secret="gh-token",
+        configuration={"repositories": ["acme/atlas"]},
+    )
+    set_webhook_secret(ws.store, creds, gh_inst.id, "hook-secret")
+    ws.close()
+
+    client = TestClient(create_app(home=home))
+    body = json.dumps({"action": "opened",
+                       "repository": {"full_name": "acme/atlas"}}).encode()
+    sig = "sha256=" + hmac_mod.new(b"hook-secret", body,
+                                   hashlib.sha256).hexdigest()
+
+    # valid HMAC → scheduled; no twin identity headers involved at all
+    r = client.post(f"/api/webhooks/github/{gh_inst.id}", content=body,
+                    headers={"X-GitHub-Event": "issues",
+                             "X-Hub-Signature-256": sig,
+                             "content-type": "application/json"})
+    assert r.status_code == 200
+    assert r.json()["scheduled"] == ["repo:acme/atlas:issues"]
+
+    # bad signature, missing signature, wrong connector type, unknown id —
+    # all the same 401
+    for url, headers in (
+        (f"/api/webhooks/github/{gh_inst.id}",
+         {"X-GitHub-Event": "issues", "X-Hub-Signature-256": "sha256=bad"}),
+        (f"/api/webhooks/github/{gh_inst.id}", {"X-GitHub-Event": "issues"}),
+        (f"/api/webhooks/github/{fake_inst.id}",
+         {"X-GitHub-Event": "issues", "X-Hub-Signature-256": sig}),
+        ("/api/webhooks/github/conn_unknown",
+         {"X-GitHub-Event": "issues", "X-Hub-Signature-256": sig}),
+    ):
+        r = client.post(url, content=body,
+                        headers={**headers, "content-type": "application/json"})
+        assert r.status_code == 401, url
+
+    # the webhook never wrote canonical state
+    ws = Workspace(home)
+    assert ws.store.list_connector_records(gh_inst.id) == []
+    state = ws.store.get_connector_sync_state(gh_inst.id)
+    assert state.metadata["targeted_streams"] == ["repo:acme/atlas:issues"]
+    ws.close()
 
 
 def test_api_connector_add_binds_to_resolved_principal(tmp_path, monkeypatch):

@@ -169,9 +169,18 @@ def sync_state_to_row(s: ConnectorSyncState) -> dict[str, Any]:
         "id": s.id,
         "status": s.status,
         "next_run_at": s.next_run_at,
+        "version": s.version,  # column so CAS can guard in SQL
         "payload": _j(s.model_dump(mode="json")),
     }
 
 
 def row_to_sync_state(row: Any) -> ConnectorSyncState:
-    return ConnectorSyncState.model_validate(_loads(row["payload"], {}))
+    data = _loads(row["payload"], {})
+    # prefer the SQL column when present so CAS cannot drift from payload
+    try:
+        keys = row.keys()
+    except Exception:
+        keys = ()
+    if "version" in keys and row["version"] is not None:
+        data["version"] = int(row["version"])
+    return ConnectorSyncState.model_validate(data)
