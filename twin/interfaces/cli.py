@@ -627,6 +627,36 @@ def cmd_connector(args) -> None:
                       f"items={folder.get('total_item_count')}")
         else:
             raise SystemExit(f"unknown outlook command: {args.outlook_command}")
+    elif cmd == "calendar":
+        if args.calendar_command == "calendars":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for cal in adapter.list_calendars():
+                primary = " primary" if cal.get("primary") else ""
+                print(f"{cal['id']:40}  {cal.get('summary') or '?':32}  "
+                      f"role={cal.get('access_role')}{primary}")
+        else:
+            raise SystemExit(f"unknown calendar command: {args.calendar_command}")
+    elif cmd == "fireflies":
+        if args.fireflies_command == "meetings":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for m in adapter.list_meetings():
+                print(f"{m.get('id') or '?':24}  {m.get('title') or '?':40}  "
+                      f"{m.get('date') or ''}")
+        else:
+            raise SystemExit(
+                f"unknown fireflies command: {args.fireflies_command}")
     elif cmd == "backfill":
         if getattr(args, "run_partition", False):
             if not args.job_id:
@@ -1114,6 +1144,16 @@ def main(argv: list[str] | None = None) -> None:
     coutf = couts.add_parser("folders", help="mail folders the token can see")
     coutf.add_argument("connector_id")
     coutf.set_defaults(func=cmd_connector)
+    ccal = cs.add_parser("calendar", help="calendar-specific helpers")
+    ccals = ccal.add_subparsers(dest="calendar_command", required=True)
+    ccalc = ccals.add_parser("calendars", help="calendars the token can see")
+    ccalc.add_argument("connector_id")
+    ccalc.set_defaults(func=cmd_connector)
+    cff = cs.add_parser("fireflies", help="fireflies-specific helpers")
+    cffs = cff.add_subparsers(dest="fireflies_command", required=True)
+    cffm = cffs.add_parser("meetings", help="recent transcripts the token can see")
+    cffm.add_argument("connector_id")
+    cffm.set_defaults(func=cmd_connector)
     cbf = cs.add_parser("backfill",
                         help="preview / create / advance partitionable BackfillJob")
     cbf.add_argument("connector_id", nargs="?", default=None)

@@ -40,6 +40,8 @@ _DEFAULT_INTERVALS = {
     "email": 600,
     "gmail": 600,
     "outlook": 600,
+    "calendar": 900,
+    "fireflies": 1800,
 }
 
 
