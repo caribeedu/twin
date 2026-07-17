@@ -42,6 +42,7 @@ _DEFAULT_INTERVALS = {
     "outlook": 600,
     "calendar": 900,
     "fireflies": 1800,
+    "folder": 300,
 }
 
 

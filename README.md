@@ -1408,6 +1408,14 @@ Phase 5 — Calendar and meetings (done):
 - setup helpers: `twin connector calendar calendars`, `twin connector fireflies meetings`;
 - `tests/test_calendar_connector.py` + `tests/test_fireflies_connector.py` + `tests/test_meeting_normalize.py` and eval `calendar_meeting_correlation`.
 
+Phase 6 — Shared documents (done):
+
+- shared document cognitive layer (`twin/connectors/documents/`): provider-agnostic `DocumentRecord` / `DocumentRevision` + `DocumentProvider` protocol for future Drive / OneDrive / Notion; normalize emits `document_revision` with stable `document_id` lineage, revision id, content hash, path, parent folder, permissions; prior revisions remain addressable after edits;
+- local folder adapter (`twin/connectors/folder/`): explicit watch roots (empty → `awaiting_configuration`); include/exclude globs; content-hash incremental sync via checkpoint `known_files`; deletes → tombstones with percept lineage; `auth_mode=none` (no fake cloud token); oversized files hashed but body omitted (`content_truncated`);
+- source policy requires review for decision/constraint/procedure/fact/task; scheduler interval `folder: 5m`;
+- setup helper: `twin connector folder roots`;
+- `tests/test_folder_connector.py` + `tests/test_document_normalize.py` and eval `folder_document_revisions`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.
