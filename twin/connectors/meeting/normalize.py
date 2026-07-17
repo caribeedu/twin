@@ -133,15 +133,60 @@ def _participant_ids(data: dict[str, Any]) -> list[str]:
     return out
 
 
+def _tombstone(
+    *,
+    connector_id: str,
+    account_id: str,
+    external_type: str,
+    external_id: str,
+    revision: str,
+    provider: str,
+    thread_key: str,
+    meeting_id: str,
+    content: str,
+) -> ConnectorRecord:
+    return ConnectorRecord(
+        connector_id=connector_id,
+        source_account_id=account_id,
+        external_type=external_type,
+        external_id=external_id,
+        external_revision=revision,
+        idempotency_key=idempotency_key(
+            provider, account_id, external_type, external_id, revision,
+        ),
+        thread_key=thread_key,
+        content=content,
+        deleted=True,
+        source_metadata={
+            "provider": provider,
+            "meeting_id": meeting_id,
+            "lineage_root": meeting_id,
+            "deleted": True,
+        },
+        confidentiality={"source_trust": 0.40},
+    )
+
+
 def records_from_meeting(
     *,
     connector_id: str,
     account_id: str,
     account_key: str,
     meeting: MeetingRecord | dict[str, Any],
+    previous: Optional[dict[str, Any]] = None,
 ) -> list[ConnectorRecord]:
-    """Emit manifest + transcript chunks (primary) + optional summary (derived)."""
+    """Emit manifest + transcript chunks (primary) + optional summary (derived).
+
+    ``previous`` (from store) may include ``chunk_count`` and ``had_summary`` so
+    structural shrinks emit tombstones for retired chunks/summaries.
+    """
     data = meeting.to_dict() if isinstance(meeting, MeetingRecord) else dict(meeting)
+    # Signed / expiring media URLs must never reach cognitive envelopes.
+    raw_meta = data.get("raw_metadata")
+    if isinstance(raw_meta, dict) and "media_urls" in raw_meta:
+        raw_meta = dict(raw_meta)
+        raw_meta.pop("media_urls", None)
+        data["raw_metadata"] = raw_meta
     provider = data.get("provider") or "meeting"
     mid = str(data.get("external_id") or data.get("id") or "?")
     title = data.get("title") or "(untitled meeting)"
@@ -242,8 +287,41 @@ def records_from_meeting(
         confidentiality={"source_trust": m_trust},
     ))
 
-    # Incomplete / empty → manifest only (no faux-primary empty transcript).
+    prev = previous or {}
+    prev_chunk_count = int(prev.get("chunk_count") or 0)
+    prev_had_summary = bool(prev.get("had_summary"))
+
+    def _emit_chunk_tombstones(from_index: int) -> None:
+        for index in range(from_index, prev_chunk_count):
+            cid = f"{mid}:chunk:{index}"
+            records.append(_tombstone(
+                connector_id=connector_id,
+                account_id=account_id,
+                external_type="meeting_transcript_chunk",
+                external_id=cid,
+                revision=f"{seg_rev}.chunk{index}.deleted",
+                provider=provider,
+                thread_key=tkey,
+                meeting_id=mid,
+                content=f"Meeting chunk removed {cid}",
+            ))
+
+    # Incomplete / empty → manifest only (no faux-primary empty transcript),
+    # but still retire previously published structural artifacts.
     if not complete and not segments:
+        _emit_chunk_tombstones(0)
+        if prev_had_summary and status == "failed":
+            records.append(_tombstone(
+                connector_id=connector_id,
+                account_id=account_id,
+                external_type="meeting_summary",
+                external_id=f"{mid}:summary",
+                revision=f"{seg_rev}.summary.deleted",
+                provider=provider,
+                thread_key=tkey,
+                meeting_id=mid,
+                content=f"Meeting summary removed {mid}",
+            ))
         return records
 
     # --- transcript chunks (primary evidence; never silently drop segments) ---
@@ -295,6 +373,10 @@ def records_from_meeting(
             confidentiality={"source_trust": trust},
         ))
 
+    # Structural shrink: retire chunk ids that no longer exist.
+    if prev_chunk_count > chunk_count:
+        _emit_chunk_tombstones(chunk_count)
+
     summary = data.get("provider_summary")
     if summary and complete:
         s_trust, s_kind = trust_for_meeting("meeting_summary", data)
@@ -325,5 +407,18 @@ def records_from_meeting(
                 "author_kind": s_kind,
             },
             confidentiality={"source_trust": s_trust},
+        ))
+    elif complete and prev_had_summary and not summary:
+        # Final revision dropped the summary — retire prior derived evidence.
+        records.append(_tombstone(
+            connector_id=connector_id,
+            account_id=account_id,
+            external_type="meeting_summary",
+            external_id=f"{mid}:summary",
+            revision=f"{seg_rev}.summary.deleted",
+            provider=provider,
+            thread_key=tkey,
+            meeting_id=mid,
+            content=f"Meeting summary removed {mid}",
         ))
     return records

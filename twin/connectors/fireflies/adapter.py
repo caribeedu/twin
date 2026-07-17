@@ -4,13 +4,13 @@ Stream:
 
     meetings
 
-Transcript is primary evidence (chunked); provider summary is derived.
-Speakers are account-scoped with explicit confidence. Calendar correlation
-lives in metadata / artifact_refs.
+Discovery uses ``transcripts(fromDate)`` which filters by *creation* time.
+Incomplete transcripts are kept in ``pending_transcripts`` and re-fetched by
+ID until terminal. Recent completes are periodically reconciled for late
+edits (summary / sentences).
 
-Deletion/reconciliation: Fireflies GraphQL does not expose a deletion feed.
-``deletions=false`` — Twin retains previously ingested transcripts until a
-future reconcile/offboarding policy removes them. Documented Phase 5 limit.
+Deletion feed: not offered by provider (``deletions=false``). Structural
+chunk/summary shrinks emit tombstones from the meeting normalizer.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from ..protocol import (
     SyncPlan,
 )
 from ..registry import register_adapter
+from . import sync_state as ss
 from .client import FIREFLIES_API, FirefliesClient
 
 DEFAULT_LOOKBACK_SECONDS = 86400
@@ -59,7 +60,6 @@ def _date_to_iso(value: Any) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        # Fireflies often returns epoch ms.
         ms = float(value)
         if ms > 1e12:
             ms = ms / 1000.0
@@ -91,7 +91,6 @@ def _summary_text(summary: Any) -> Optional[str]:
 
 
 def _infer_status(payload: dict[str, Any], segments: list) -> tuple[str, bool]:
-    """Return (provider_status, transcript_complete)."""
     if payload.get("is_live"):
         return "live", False
     info = payload.get("meeting_info") or {}
@@ -103,13 +102,11 @@ def _infer_status(payload: dict[str, Any], segments: list) -> tuple[str, bool]:
     if summary_status in ("failed", "error"):
         return "failed", False
     if not segments and summary_status in ("", "none", "null"):
-        # Empty sentences — treat as incomplete unless explicitly processed.
         if payload.get("sentences") is None:
             return "processing", False
         return "partial", False
     if summary_status in ("processed", "complete", "done", "completed"):
         return "complete", True
-    # Sentences present and not live → treat as complete primary evidence.
     if segments:
         return "complete", True
     return "partial", False
@@ -132,7 +129,6 @@ def meeting_from_fireflies(
             labels.append(str(label))
             start = s.get("start_time") if s.get("start_time") is not None else s.get("start_ms")
             end = s.get("end_time") if s.get("end_time") is not None else s.get("end_ms")
-            # Fireflies start_time is often seconds (float); store as ms int.
             if isinstance(start, float) and start < 1e6:
                 start = int(start * 1000)
             if isinstance(end, float) and end < 1e6:
@@ -147,13 +143,9 @@ def meeting_from_fireflies(
 
     attendees = payload.get("meeting_attendees") or []
     participants = payload.get("participants") or []
-    # participants may be email strings; attendees are objects.
     combined: list[Any] = list(attendees)
     for p in participants:
-        if isinstance(p, str):
-            combined.append(p)
-        else:
-            combined.append(p)
+        combined.append(p)
 
     speaker_map: dict[str, dict[str, Any]] = {}
     for sp in payload.get("speakers") or []:
@@ -162,12 +154,10 @@ def meeting_from_fireflies(
         name = sp.get("name")
         if name:
             speaker_map[str(name)] = sp
-        # Also index by id for sentence speaker_id joins.
         sid = sp.get("id")
         if sid:
             speaker_map[str(sid)] = sp
 
-    # Enrich speaker_map from sentence speaker_id when name known.
     for s in sentences if isinstance(sentences, list) else []:
         if not isinstance(s, dict):
             continue
@@ -184,11 +174,10 @@ def meeting_from_fireflies(
         or payload.get("start_time")
     )
 
-    media_urls = {
-        k: payload.get(k)
-        for k in ("audio_url", "video_url", "transcript_url")
+    media_present = [
+        k for k in ("audio_url", "video_url", "transcript_url")
         if payload.get(k)
-    }
+    ]
 
     meeting = MeetingRecord(
         provider="fireflies",
@@ -218,15 +207,14 @@ def meeting_from_fireflies(
         ),
         calendar_iCalUID=payload.get("ical_uid") or payload.get("iCalUID"),
         conference_url=payload.get("meeting_link") or payload.get("conference_url"),
-        recording_id=mid if media_urls else None,
+        recording_id=mid if media_present else None,
         host_email=payload.get("host_email"),
         provider_status=status,
         transcript_complete=complete,
         raw_metadata={
             "fireflies_keys": sorted(payload.keys())[:40],
-            "media_urls_present": sorted(media_urls.keys()),
-            # URLs may be signed/expiring — never use as stable identity.
-            "media_urls": media_urls,
+            "media_urls_present": media_present,
+            # Intentionally omit signed media URLs from persisted payloads.
             "summary_status": (payload.get("meeting_info") or {}).get(
                 "summary_status"),
             "is_live": bool(payload.get("is_live")),
@@ -265,6 +253,11 @@ class FirefliesConnector:
         self.backfill_since: Optional[str] = cfg.get("backfill_since")
         self.max_pages = int(cfg.get("max_pages_per_stream", 5))
         self.api_base_url: str = cfg.get("api_base_url", FIREFLIES_API)
+        self.page_overlap = int(cfg.get("page_overlap", ss.DEFAULT_PAGE_OVERLAP))
+        self.reconcile_days = int(cfg.get("reconcile_days", ss.DEFAULT_RECONCILE_DAYS))
+        self.reconcile_interval_seconds = int(
+            cfg.get("reconcile_interval_seconds", 3600))
+        self.max_known = int(cfg.get("max_known_transcripts", ss.DEFAULT_MAX_KNOWN))
         self._client: Optional[FirefliesClient] = None
         self._account_email: Optional[str] = cfg.get("account_email")
         self._store = None
@@ -279,13 +272,12 @@ class FirefliesConnector:
     def adapter_manifest() -> AdapterManifest:
         return AdapterManifest(
             connector_type="fireflies",
-            adapter_version="1.1",
+            adapter_version="1.2",
             schema_version=1,
             auth_mode="api_key",
             affordances={
                 "incremental_sync": True,
                 "webhooks": False,
-                # No provider deletion feed — see module docstring.
                 "deletions": False,
                 "attachments": False,
                 "threads": True,
@@ -336,7 +328,10 @@ class FirefliesConnector:
         self._account_email = me.get("email") or self._account_email
         return ConnectorHealth(
             status=HealthStatus.healthy,
-            detail=f"authenticated as {email}; GraphQL read-only transcripts",
+            detail=(
+                f"authenticated as {email}; GraphQL read-only transcripts; "
+                "creation_watermark + pending_transcripts for updates"
+            ),
         )
 
     def plan_streams(self, account: SourceAccount) -> list[str]:
@@ -361,77 +356,227 @@ class FirefliesConnector:
             metadata={},
         )
 
-    def _from_date(self, cursor: Optional[dict[str, Any]]) -> Optional[str]:
-        watermark = (cursor or {}).get("watermark")
-        if watermark:
-            return _iso_minus_seconds(str(watermark), self.lookback_seconds)
+    def _creation_from_date(self, cursor: dict[str, Any]) -> Optional[str]:
+        wm = ss.creation_watermark(cursor)
+        if wm:
+            return _iso_minus_seconds(str(wm), self.lookback_seconds)
         return self.backfill_since
+
+    def _account_key(self) -> str:
+        return self._account_email or self.account.external_account_id or "me"
+
+    def _raw_from_meeting(self, meeting: MeetingRecord) -> RawFetchItem:
+        obj = meeting.to_dict()
+        # Defense in depth: never persist signed URLs on the raw object.
+        meta = obj.get("raw_metadata")
+        if isinstance(meta, dict):
+            meta = dict(meta)
+            meta.pop("media_urls", None)
+            obj["raw_metadata"] = meta
+        return RawFetchItem(
+            external_type="meeting_transcript",
+            external_id=meeting.external_id,
+            external_revision=revision_for_meeting(obj),
+            payload={
+                "provider": "fireflies",
+                "account_email": self._account_key(),
+                "object": obj,
+            },
+            occurred_at=meeting.started_at,
+        )
+
+    def _fetch_one(
+        self, tid: str, *, seen_ids: set[str], items: list[RawFetchItem],
+        pending: dict[str, dict[str, Any]], known: dict[str, dict[str, Any]],
+        cursor: dict[str, Any],
+    ) -> None:
+        if tid in seen_ids:
+            return
+        full = self.client.get_transcript(str(tid))
+        seen_ids.add(tid)
+        if full is None:
+            # Provider no longer returns it — drop pending; retain known.
+            pending.pop(tid, None)
+            return
+        meeting = meeting_from_fireflies(full, account_key=self._account_key())
+        items.append(self._raw_from_meeting(meeting))
+        ss.note_transcript(
+            pending, known,
+            tid=meeting.external_id,
+            status=meeting.provider_status or "unknown",
+            started_at=meeting.started_at,
+            max_known=self.max_known,
+        )
+        ss.bump_creation_seen(cursor, meeting.started_at)
 
     def fetch_batch(
         self, plan: SyncPlan, cursor: Optional[dict[str, Any]],
     ) -> FetchPage:
         base = dict(cursor or plan.cursor_before or {})
         progress = dict(base.get("progress") or {})
-        skip = int(progress.get("skip") or 0)
-        pages_done = int(progress.get("pages_done") or 0)
-        from_date = self._from_date(base) if skip == 0 else base.get("_from_date")
-        stubs, next_skip = self.client.list_transcripts(
-            from_date=from_date, skip=skip, limit=50,
-        )
-        pages_done += 1
-        account_key = (
-            self._account_email or self.account.external_account_id or "me"
-        )
+        pending = ss.pending_map(base)
+        known = ss.known_map(base)
+        seen_ids: set[str] = set()
         items: list[RawFetchItem] = []
-        window_max = base.get("window_max_seen") or base.get("watermark")
-        for stub in stubs:
-            tid = stub.get("id")
-            if not tid:
-                continue
-            full = self.client.get_transcript(str(tid))
-            if full is None:
-                continue
-            meeting = meeting_from_fireflies(full, account_key=str(account_key))
-            obj = meeting.to_dict()
-            # Strip signed media URLs from the object persisted as cognition
-            # input — keep them only under raw_metadata.media_urls.
-            items.append(RawFetchItem(
-                external_type="meeting_transcript",
-                external_id=meeting.external_id,
-                external_revision=revision_for_meeting(obj),
-                payload={
-                    "provider": "fireflies",
-                    "account_email": account_key,
-                    "object": obj,
-                },
-                occurred_at=meeting.started_at,
-            ))
-            stamp = meeting.started_at or _date_to_iso(full.get("date"))
-            if stamp and (not window_max or str(stamp) > str(window_max)):
-                window_max = stamp
+        pages_done = int(progress.get("pages_done") or 0)
+        phase = progress.get("phase") or "pending"
 
-        budget_exhausted = pages_done >= self.max_pages and next_skip is not None
-        if next_skip is not None and not budget_exhausted:
-            after = {
-                "watermark": base.get("watermark"),
-                "window_max_seen": window_max,
-                "_from_date": from_date,
-                "progress": {"skip": next_skip, "pages_done": pages_done},
-            }
-            return FetchPage(raw_items=items, cursor_after=after, done=False)
-        if budget_exhausted:
-            after = {
-                "watermark": base.get("watermark"),
-                "window_max_seen": window_max,
-                "_from_date": from_date,
-                "progress": {"skip": next_skip, "pages_done": 0},
-            }
-            return FetchPage(raw_items=items, cursor_after=after, done=False)
-        return FetchPage(
-            raw_items=items,
-            cursor_after={"watermark": window_max or base.get("watermark")},
-            done=True,
+        # Phase 1: re-fetch incomplete transcripts by ID (independent of fromDate).
+        if phase == "pending":
+            pending_ids = list(pending.keys())
+            start_idx = int(progress.get("pending_idx") or 0)
+            for offset, tid in enumerate(pending_ids[start_idx:]):
+                if pages_done >= self.max_pages:
+                    after = self._cursor_after(
+                        base, pending, known, progress={
+                            "phase": "pending",
+                            "pages_done": 0,
+                            "pending_idx": start_idx + offset,
+                        },
+                        promote=False,
+                    )
+                    return FetchPage(
+                        raw_items=items, cursor_after=after, done=False,
+                    )
+                self._fetch_one(
+                    tid, seen_ids=seen_ids, items=items,
+                    pending=pending, known=known, cursor=base,
+                )
+                pages_done += 1
+            phase = "discover"
+            pages_done = 0
+            progress = {}
+
+        # Phase 2: discover newly *created* meetings via fromDate.
+        if phase == "discover":
+            skip = int(progress.get("skip") or 0)
+            from_date = (
+                base.get("_from_date") if skip
+                else self._creation_from_date(base)
+            )
+            stubs, _next = self.client.list_transcripts(
+                from_date=from_date, skip=skip, limit=50,
+            )
+            pages_done += 1
+            for stub in stubs:
+                tid = stub.get("id")
+                if not tid:
+                    continue
+                self._fetch_one(
+                    str(tid), seen_ids=seen_ids, items=items,
+                    pending=pending, known=known, cursor=base,
+                )
+            next_skip = ss.next_skip_with_overlap(
+                skip, len(stubs), overlap=self.page_overlap, limit=50,
+            )
+            if next_skip is not None and pages_done < self.max_pages:
+                after = self._cursor_after(
+                    base, pending, known,
+                    progress={
+                        "phase": "discover",
+                        "skip": next_skip,
+                        "pages_done": pages_done,
+                    },
+                    from_date=from_date,
+                    promote=False,
+                )
+                return FetchPage(raw_items=items, cursor_after=after, done=False)
+            if next_skip is not None:
+                after = self._cursor_after(
+                    base, pending, known,
+                    progress={
+                        "phase": "discover",
+                        "skip": next_skip,
+                        "pages_done": 0,
+                    },
+                    from_date=from_date,
+                    promote=False,
+                )
+                return FetchPage(raw_items=items, cursor_after=after, done=False)
+            # End of discover window — optional reconcile of recent completes.
+            phase = "reconcile"
+            pages_done = 0
+
+        # Phase 3: re-fetch recent known completes for late summary/sentence edits.
+        if phase == "reconcile":
+            if ss.reconcile_due(
+                base, interval_seconds=self.reconcile_interval_seconds,
+            ):
+                candidates = ss.reconcile_candidates(
+                    known, pending,
+                    reconcile_days=self.reconcile_days,
+                    limit=min(40, max(1, self.max_pages * 10)),
+                )
+                start_idx = int(progress.get("reconcile_idx") or 0)
+                for tid in candidates[start_idx:]:
+                    if pages_done >= self.max_pages:
+                        after = self._cursor_after(
+                            base, pending, known,
+                            progress={
+                                "phase": "reconcile",
+                                "pages_done": 0,
+                                "reconcile_idx": candidates.index(tid),
+                            },
+                            promote=False,
+                        )
+                        return FetchPage(
+                            raw_items=items, cursor_after=after, done=False,
+                        )
+                    self._fetch_one(
+                        tid, seen_ids=seen_ids, items=items,
+                        pending=pending, known=known, cursor=base,
+                    )
+                    pages_done += 1
+                base["last_reconciliation_at"] = (
+                    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                )
+
+        after = self._cursor_after(
+            base, pending, known, progress={}, promote=True,
         )
+        return FetchPage(raw_items=items, cursor_after=after, done=True)
+
+    def _cursor_after(
+        self,
+        base: dict[str, Any],
+        pending: dict[str, dict[str, Any]],
+        known: dict[str, dict[str, Any]],
+        *,
+        progress: dict[str, Any],
+        from_date: Optional[str] = None,
+        promote: bool,
+    ) -> dict[str, Any]:
+        after = {
+            "creation_watermark": ss.creation_watermark(base),
+            "window_max_seen": base.get("window_max_seen"),
+            "pending_transcripts": pending,
+            "known_transcripts": known,
+            "last_reconciliation_at": base.get("last_reconciliation_at"),
+            "progress": progress,
+        }
+        if from_date is not None:
+            after["_from_date"] = from_date
+        if promote:
+            return ss.promote_creation_watermark(after)
+        return after
+
+    def _previous_meeting_state(self, meeting_id: str) -> dict[str, Any]:
+        if self._store is None:
+            return {}
+        manifests = self._store.list_connector_records_for_object(
+            self.instance.id, "meeting_manifest", f"{meeting_id}:manifest",
+        )
+        live_manifests = [m for m in manifests if not m.deleted]
+        chunk_count = 0
+        if live_manifests:
+            chunk_count = int(
+                (live_manifests[-1].source_metadata or {}).get("chunk_count") or 0
+            )
+        summaries = self._store.list_connector_records_for_object(
+            self.instance.id, "meeting_summary", f"{meeting_id}:summary",
+        )
+        had_summary = any(not s.deleted for s in summaries)
+        return {"chunk_count": chunk_count, "had_summary": had_summary}
 
     def normalize(self, raw_item: RawConnectorItem) -> list[ConnectorRecord]:
         payload = raw_item.payload or {}
@@ -444,11 +589,13 @@ class FirefliesConnector:
                 external_type=raw_item.external_type,
             )
         account_key = payload.get("account_email") or "me"
+        mid = str(obj.get("external_id") or raw_item.external_id)
         return records_from_meeting(
             connector_id=raw_item.connector_id,
             account_id=raw_item.source_account_id,
             account_key=str(account_key),
             meeting=obj,
+            previous=self._previous_meeting_state(mid),
         )
 
     def acknowledge(self, plan: SyncPlan, page: FetchPage) -> dict[str, Any]:

@@ -223,3 +223,56 @@ def test_freebusy_projection_strips_sensitive_fields():
     assert "attendees" not in proj
     assert "hangoutLink" not in proj
     assert proj["freebusy_only"] is True
+
+
+def test_chunk_shrink_emits_tombstones():
+    segs = [TranscriptSegment(i, "A", f"seg-{i}") for i in range(4)]
+    # Force 4 chunks by using a tiny budget via previous comparison only —
+    # previous_chunk_count drives tombstones even if current packs tighter.
+    meeting = MeetingRecord(
+        provider="fireflies",
+        external_id="mtg_shrink",
+        title="Shrink",
+        started_at="2026-07-15T10:00:00Z",
+        segments=segs[:2],
+        transcript_complete=True,
+        provider_status="complete",
+        provider_summary=None,
+    )
+    recs = records_from_meeting(
+        connector_id="c", account_id="a", account_key="edu@acme.com",
+        meeting=meeting,
+        previous={"chunk_count": 4, "had_summary": True},
+    )
+    tombs = [r for r in recs if r.deleted]
+    tomb_ids = {r.external_id for r in tombs}
+    assert "mtg_shrink:chunk:2" in tomb_ids
+    assert "mtg_shrink:chunk:3" in tomb_ids
+    assert "mtg_shrink:summary" in tomb_ids
+
+
+def test_media_urls_stripped_from_cognitive_records():
+    meeting = MeetingRecord(
+        provider="fireflies",
+        external_id="mtg_media",
+        title="M",
+        started_at="2026-07-15T10:00:00Z",
+        segments=[TranscriptSegment(0, "A", "hi")],
+        transcript_complete=True,
+        provider_status="complete",
+        raw_metadata={
+            "media_urls": {
+                "audio_url": "https://cdn.example/a?sig=secret-token",
+            },
+            "media_urls_present": ["audio_url"],
+        },
+    )
+    recs = records_from_meeting(
+        connector_id="c", account_id="a", account_key="edu@acme.com",
+        meeting=meeting,
+    )
+    blob = " ".join(r.content for r in recs) + " ".join(
+        str(r.source_metadata) for r in recs
+    )
+    assert "secret-token" not in blob
+    assert "cdn.example" not in blob

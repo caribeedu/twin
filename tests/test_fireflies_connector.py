@@ -236,3 +236,181 @@ def test_ownership_sealed(store, creds, fireflies):
         p.metadata.get("vault_id") == "vault_work_acme"
         for p in store.list_percepts()
     )
+
+
+def test_pending_survives_outside_creation_lookback(store, creds, fireflies):
+    """Incomplete meeting created long ago still completes via pending_transcripts."""
+    fireflies.add_transcript(
+        "mtg_old",
+        title="Old processing",
+        date="2026-07-01T15:00:00Z",
+        sentences=[],
+        summary_status="processing",
+        summary=None,
+    )
+    _acc, inst = _mk(store, creds, extra={
+        "lookback_seconds": 3600,
+        "reconcile_interval_seconds": 10**9,  # disable reconcile noise
+    })
+    sync_connector(store, creds, inst.id)
+    ckpt = store.get_connector_checkpoint(inst.id, "meetings")
+    assert "mtg_old" in (ckpt.cursor.get("pending_transcripts") or {})
+    # Move creation watermark far ahead so fromDate discovery cannot see it.
+    ckpt.cursor["creation_watermark"] = "2026-07-15T18:00:00Z"
+    ckpt.cursor.pop("watermark", None)
+    store.cas_connector_checkpoint(ckpt, expected_version=ckpt.version)
+
+    # Provider finishes after the meeting left the creation lookback window.
+    fireflies.add_transcript(
+        "mtg_old",
+        title="Old processing",
+        date="2026-07-01T15:00:00Z",
+        summary_status="processed",
+        summary={"overview": "Late decision: use PostgreSQL."},
+        sentences=[
+            {"index": 0, "speaker_name": "Alice", "speaker_id": "a",
+             "text": "Decision: use PostgreSQL."},
+        ],
+        speakers=[{"name": "Alice", "id": "a", "email": "alice@acme.com"}],
+    )
+    result = sync_connector(store, creds, inst.id)
+    assert result.health.value == "healthy"
+    chunks = [
+        r for r in store.list_connector_records(inst.id)
+        if r.external_type == "meeting_transcript_chunk" and not r.deleted
+    ]
+    assert any("PostgreSQL" in r.content for r in chunks)
+    summaries = [
+        r for r in store.list_connector_records(inst.id)
+        if r.external_type == "meeting_summary" and not r.deleted
+    ]
+    assert summaries
+    ckpt2 = store.get_connector_checkpoint(inst.id, "meetings")
+    assert "mtg_old" not in (ckpt2.cursor.get("pending_transcripts") or {})
+    assert ckpt2.cursor.get("creation_watermark")
+
+
+def test_failed_finalize_keeps_pending(store, creds, fireflies, monkeypatch):
+    fireflies.add_transcript(
+        "mtg_pend",
+        date="2026-07-14T12:00:00Z",
+        sentences=[],
+        summary_status="processing",
+        summary=None,
+    )
+    _acc, inst = _mk(store, creds, extra={"reconcile_interval_seconds": 10**9})
+    sync_connector(store, creds, inst.id)
+    ckpt = store.get_connector_checkpoint(inst.id, "meetings")
+    assert "mtg_pend" in ckpt.cursor["pending_transcripts"]
+    gen_before = ckpt.cursor["pending_transcripts"]["mtg_pend"]["generation"]
+
+    fireflies.transcripts["mtg_pend"]["meeting_info"]["summary_status"] = "processed"
+    fireflies.transcripts["mtg_pend"]["sentences"] = [
+        {"index": 0, "speaker_name": "Alice", "text": "done"},
+    ]
+    fireflies.transcripts["mtg_pend"]["summary"] = {"overview": "done"}
+
+    from twin.connectors import runtime as rt
+    real_finalize = rt._finalize_committed
+
+    def boom(*args, **kwargs):
+        raise rt.CheckpointConflict("injected finalize failure")
+
+    monkeypatch.setattr(rt, "_finalize_committed", boom)
+    sync_connector(store, creds, inst.id)
+    monkeypatch.setattr(rt, "_finalize_committed", real_finalize)
+
+    ckpt_fail = store.get_connector_checkpoint(inst.id, "meetings")
+    assert "mtg_pend" in ckpt_fail.cursor["pending_transcripts"]
+    assert ckpt_fail.cursor["pending_transcripts"]["mtg_pend"]["generation"] == gen_before
+    # No cognitive evidence from the failed finalize.
+    assert not any(
+        r.external_type == "meeting_transcript_chunk"
+        for r in store.list_connector_records(inst.id)
+    )
+
+
+def test_chunk_shrink_tombstones_via_sync(store, creds, fireflies):
+    # Many short segments → multiple chunks under default MAX_CHUNK_CHARS.
+    from twin.connectors.meeting.normalize import MAX_CHUNK_CHARS
+    pad = "x" * (MAX_CHUNK_CHARS // 3)
+    sentences = [
+        {"index": i, "speaker_name": "Alice", "speaker_id": "a",
+         "text": f"block-{i} {pad}"}
+        for i in range(12)
+    ]
+    fireflies.add_transcript(
+        "mtg_chunks",
+        sentences=sentences,
+        speakers=[{"name": "Alice", "id": "a", "email": "alice@acme.com"}],
+        summary={"overview": "long"},
+    )
+    _acc, inst = _mk(store, creds, extra={"reconcile_interval_seconds": 10**9})
+    sync_connector(store, creds, inst.id)
+    before = [
+        r for r in store.list_connector_records(inst.id)
+        if r.external_type == "meeting_transcript_chunk" and not r.deleted
+    ]
+    assert len(before) >= 3
+    # Shrink to two short sentences → fewer chunks; excess tombstoned.
+    fireflies.add_transcript(
+        "mtg_chunks",
+        sentences=[
+            {"index": 0, "speaker_name": "Alice", "speaker_id": "a",
+             "text": "short a"},
+            {"index": 1, "speaker_name": "Alice", "speaker_id": "a",
+             "text": "short b"},
+        ],
+        speakers=[{"name": "Alice", "id": "a", "email": "alice@acme.com"}],
+        summary=None,
+        summary_status="processed",
+    )
+    # Force reconcile of this known id on next sync.
+    ckpt = store.get_connector_checkpoint(inst.id, "meetings")
+    ckpt.cursor["last_reconciliation_at"] = None
+    # Keep creation watermark so discover may not re-list; reconcile will.
+    store.cas_connector_checkpoint(ckpt, expected_version=ckpt.version)
+    sync_connector(store, creds, inst.id)
+    chunk_ids = {
+        r.external_id for r in store.list_connector_records(inst.id)
+        if r.external_type == "meeting_transcript_chunk"
+    }
+    latest = {}
+    for eid in chunk_ids:
+        revs = store.list_connector_records_for_object(
+            inst.id, "meeting_transcript_chunk", eid,
+        )
+        latest[eid] = revs[-1]
+    active = [eid for eid, r in latest.items() if not r.deleted]
+    retired = [eid for eid, r in latest.items() if r.deleted]
+    assert active == ["mtg_chunks:chunk:0"]
+    assert len(retired) >= 2
+    events = store.list_connector_deletion_events(inst.id)
+    assert any(e.external_type == "meeting_transcript_chunk" for e in events)
+    assert any(
+        e.affected_percept_ids for e in events
+        if e.external_type == "meeting_transcript_chunk"
+    )
+    # Summary removed on final revision.
+    sum_revs = store.list_connector_records_for_object(
+        inst.id, "meeting_summary", "mtg_chunks:summary",
+    )
+    assert sum_revs and sum_revs[-1].deleted
+
+
+def test_signed_media_urls_absent_from_raw_and_records(store, creds, fireflies):
+    fireflies.add_transcript(
+        "mtg_url",
+        audio_url="https://cdn.example/audio?sig=expiring-secret",
+    )
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    for raw in store.list_connector_raw_items(inst.id):
+        blob = str(raw.payload)
+        assert "expiring-secret" not in blob
+        assert "media_urls" not in blob or "expiring-secret" not in blob
+        meta = (raw.payload.get("object") or {}).get("raw_metadata") or {}
+        assert "media_urls" not in meta
+    for rec in store.list_connector_records(inst.id):
+        assert "expiring-secret" not in rec.content
+        assert "expiring-secret" not in str(rec.source_metadata)

@@ -35,7 +35,7 @@ class FakeFirefliesAPI:
         *,
         title: str = "Architecture sync",
         date: Any = "2026-07-15T15:00:00Z",
-        summary: Optional[dict[str, Any] | str] = None,
+        summary: Any = ...,
         calendar_id: Optional[str] = "evt_arch_1",
         cal_id: Optional[str] = "evt_arch_1",
         meeting_link: Optional[str] = "https://meet.google.com/abc-defg",
@@ -49,11 +49,12 @@ class FakeFirefliesAPI:
         audio_url: Optional[str] = "https://cdn.example/audio?sig=expiring",
         missing: bool = False,
     ) -> dict[str, Any]:
-        if summary is None:
+        if summary is ...:
             summary = {"overview": "Team decided on PostgreSQL.",
                        "short_summary": "Postgres wins."}
         elif isinstance(summary, str):
             summary = {"overview": summary, "short_summary": summary}
+        # summary=None means "no provider summary" (tombstone scenarios).
         payload = {
             "id": tid,
             "title": title,
