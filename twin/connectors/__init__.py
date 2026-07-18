@@ -100,6 +100,7 @@ from . import gmail  # noqa: E402,F401
 from . import outlook  # noqa: E402,F401
 from . import calendar  # noqa: E402,F401
 from . import fireflies  # noqa: E402,F401
+from . import folder  # noqa: E402,F401
 
 
 __all__ = [

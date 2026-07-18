@@ -693,6 +693,93 @@ def _run_gmail_thread_lineage(case: dict) -> tuple[bool, str]:
         restore()
 
 
+def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
+    """Local folder: ingest → edit revision → delete tombstone + ownership."""
+    import tempfile
+    from pathlib import Path
+
+    exp = case["expected"]
+    with tempfile.TemporaryDirectory(prefix="twin-folder-eval-") as tmp:
+        root = Path(tmp) / "shared"
+        root.mkdir()
+        doc = root / "rfc.md"
+        doc.write_text(
+            "---\nauthor: Edu\n---\n\n# RFC\n\nDecision: use Postgres.\n",
+            encoding="utf-8",
+        )
+        store = SqliteStore(":memory:")
+        creds = build_credential_store(Path(tmp) / "creds")
+        acc = register_source_account(
+            store, connector_type="folder",
+            source_owner=case["source_owner"],
+            org_key=case.get("org_key"),
+            owner_principal_id="principal_eval",
+            external_account_id="local-docs",
+        )
+        inst = add_connector_instance(
+            store, creds, account_id=acc.id, secret=None,
+            configuration={"roots": [{
+                "id": "eng-docs", "path": str(root),
+            }]},
+        )
+        sync_connector(store, creds, inst.id)
+        recs = store.list_connector_records(inst.id)
+        chunks = [
+            r for r in recs
+            if r.external_type == "document_revision_chunk" and not r.deleted
+        ]
+        manifests = [
+            r for r in recs
+            if r.external_type == "document_manifest" and not r.deleted
+        ]
+        if len(chunks) != 1 or len(manifests) != 1:
+            return False, (
+                f"expected 1 chunk + 1 manifest after ingest, "
+                f"got {len(chunks)} chunks / {len(manifests)} manifests"
+            )
+        rec = chunks[0]
+        if rec.source_metadata.get("document_id") != exp["document_id"]:
+            return False, f"document id wrong: {rec.source_metadata.get('document_id')}"
+        if not str(rec.thread_key).startswith(exp["thread_prefix"]):
+            return False, f"thread key wrong: {rec.thread_key}"
+        if rec.confidentiality.get("source_trust") != exp["trust"]:
+            return False, "document trust not calibrated"
+        if "Postgres" not in rec.content:
+            return False, "content missing"
+        if rec.actor_ids:
+            return False, "front-matter author label must not auto-promote to actor_ids"
+
+        doc.write_text(
+            "---\nauthor: Edu\n---\n\n# RFC\n\nDecision: use MySQL instead.\n",
+            encoding="utf-8",
+        )
+        sync_connector(store, creds, inst.id)
+        revs = store.list_connector_records_for_object(
+            inst.id, "document_revision_chunk", f"{exp['document_id']}:chunk:0",
+        )
+        if len(revs) < 2:
+            return False, "edit did not create a new revision"
+        if len({r.thread_key for r in revs}) != 1:
+            return False, "revisions do not share thread_key"
+
+        doc.unlink()
+        sync_connector(store, creds, inst.id)
+        latest = store.list_connector_records_for_object(
+            inst.id, "document_revision_chunk", f"{exp['document_id']}:chunk:0",
+        )[-1]
+        if not latest.deleted:
+            return False, "delete did not tombstone latest chunk"
+        events = store.list_connector_deletion_events(inst.id)
+        if not events or not any(e.affected_percept_ids for e in events):
+            return False, "deletion event missing affected percepts"
+        percepts = store.list_percepts()
+        if not percepts or any(
+            p.metadata.get("vault_id") != exp["vault_id"] for p in percepts
+        ):
+            return False, "ownership not sealed on every percept"
+    return True, "ok"
+
+
 _SCENARIOS = {
     "normalization": _run_simple,
     "replay": _run_simple,
@@ -706,6 +793,7 @@ _SCENARIOS = {
     "slack_thread_bot_lineage": _run_slack_thread_bot_lineage,
     "gmail_thread_lineage": _run_gmail_thread_lineage,
     "calendar_meeting_correlation": _run_calendar_meeting_correlation,
+    "folder_document_revisions": _run_folder_document_revisions,
 }
 
 

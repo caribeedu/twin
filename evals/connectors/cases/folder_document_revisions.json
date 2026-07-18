@@ -1,0 +1,13 @@
+{
+  "id": "folder_document_revisions",
+  "scenario": "folder_document_revisions",
+  "description": "Local folder ingests a doc, edits create a new revision under one thread, delete tombs prior percepts, ownership sealed.",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "expected": {
+    "document_id": "folder:eng-docs:rfc.md",
+    "thread_prefix": "document:folder:",
+    "vault_id": "vault_work_acme",
+    "trust": 0.80
+  }
+}

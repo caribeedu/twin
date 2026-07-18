@@ -657,6 +657,23 @@ def cmd_connector(args) -> None:
         else:
             raise SystemExit(
                 f"unknown fireflies command: {args.fireflies_command}")
+    elif cmd == "folder":
+        if args.folder_command == "roots":
+            from ..connectors.registry import build_adapter
+            inst = ws.store.get_connector_instance(args.connector_id)
+            if inst is None:
+                raise SystemExit(f"connector {args.connector_id} not found")
+            acc = ws.store.get_source_account(inst.account_id)
+            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+            adapter = build_adapter(inst, acc, secret)
+            for root in adapter.list_roots():
+                flag = "ok" if root.get("readable") else (
+                    "missing" if not root.get("exists") else "unreadable"
+                )
+                print(f"{root.get('id') or '?':24}  {root.get('path') or '?':48}  "
+                      f"{flag}")
+        else:
+            raise SystemExit(f"unknown folder command: {args.folder_command}")
     elif cmd == "backfill":
         if getattr(args, "run_partition", False):
             if not args.job_id:
@@ -1154,6 +1171,11 @@ def main(argv: list[str] | None = None) -> None:
     cffm = cffs.add_parser("meetings", help="recent transcripts the token can see")
     cffm.add_argument("connector_id")
     cffm.set_defaults(func=cmd_connector)
+    cfol = cs.add_parser("folder", help="local folder connector helpers")
+    cfols = cfol.add_subparsers(dest="folder_command", required=True)
+    cfolr = cfols.add_parser("roots", help="configured watch roots and readability")
+    cfolr.add_argument("connector_id")
+    cfolr.set_defaults(func=cmd_connector)
     cbf = cs.add_parser("backfill",
                         help="preview / create / advance partitionable BackfillJob")
     cbf.add_argument("connector_id", nargs="?", default=None)

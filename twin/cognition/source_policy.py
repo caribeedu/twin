@@ -85,6 +85,14 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
                                   "fact", "event"}),
         drop=frozenset({"preference", "belief", "relationship", "procedure"}),
     ),
+    # Shared documents: technical facts/decisions/procedures; always review.
+    "folder": SourcePolicy(
+        allow=frozenset({"decision", "constraint", "procedure", "fact",
+                         "task"}),
+        require_review=frozenset({"decision", "constraint", "procedure",
+                                  "fact", "task"}),
+        drop=frozenset({"preference", "belief", "relationship", "event"}),
+    ),
     # exercised by the contract suite; mirrors github's posture
     "fake": SourcePolicy(
         allow=frozenset({"decision", "constraint", "procedure", "fact",

@@ -41,6 +41,7 @@ evals/connectors/
     slack_thread_bot_lineage.json  # Phase 3 thread + bot
     gmail_thread_lineage.json   # Phase 4 thread + notification
     calendar_meeting_correlation.json  # Phase 5 calendar↔meeting fingerprint
+    folder_document_revisions.json     # Phase 6 local folder revisions + delete
   run.py                        # tiny runner over Fake + real adapters
 ```
 

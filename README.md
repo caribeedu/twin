@@ -1408,6 +1408,16 @@ Phase 5 — Calendar and meetings (done):
 - setup helpers: `twin connector calendar calendars`, `twin connector fireflies meetings`;
 - `tests/test_calendar_connector.py` + `tests/test_fireflies_connector.py` + `tests/test_meeting_normalize.py` and eval `calendar_meeting_correlation`.
 
+Phase 6 — Shared documents (done):
+
+- shared document cognitive layer (`twin/connectors/documents/`): provider-agnostic `DocumentRecord` / `DocumentRevision` + `DocumentProvider` protocol for future Drive / OneDrive / Notion; long bodies emit `document_manifest` + `document_revision_chunk` (heading/paragraph/line chunking — never silent truncation); oversized files (`max_file_bytes`) emit metadata-only manifests (`content_available=false`, `evidence_role=artifact_metadata`); decode-lossy content is `operational` + `requires_review`; prior revisions remain addressable after edits;
+- document identity for the folder adapter is **path-stable, not rename-stable** (rename = delete + create unless a future correlator links them);
+- authorship: email → `mail:{email}` actors; plain front-matter names stay account-scoped `author_label` metadata (confidence 0.30) and are never auto-promoted to global person ids;
+- local folder adapter (`twin/connectors/folder/`): explicit watch roots (empty → `awaiting_configuration`); duplicate root ids and overlapping roots fail closed (`allow_overlapping_roots=true` to permit); include/exclude globs (defaults: md/markdown/txt/rst — json/yaml recognized as text only when included); **full scan** each sync (content-hash skips unchanged files; `max_pages_per_stream` is not a work budget); checkpoint `known_files` capped by `max_known_files` (default 50k); deletes / chunk shrinks → tombstones; `auth_mode=none`; symlinks rejected by default (`follow_symlinks=true` requires target inside the same root); POSIX permission bits inspected (Windows → `permission_inspection=not_evaluated`);
+- source policy requires review for decision/constraint/procedure/fact/task; scheduler interval `folder: 5m`;
+- setup helper: `twin connector folder roots`;
+- `tests/test_folder_connector.py` + `tests/test_document_normalize.py` and eval `folder_document_revisions`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.
