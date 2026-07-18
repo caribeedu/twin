@@ -1418,6 +1418,17 @@ Phase 6 — Shared documents (done):
 - setup helper: `twin connector folder roots`;
 - `tests/test_folder_connector.py` + `tests/test_document_normalize.py` and eval `folder_document_revisions`.
 
+Phase 7 — Cross-source cognition (done):
+
+- cognitive correlation layer (`twin/cognition/correlation/`): `ExternalIdentity` / `IdentityLink`, `ProjectLink`, `WorkEpisode` / `EpisodeLink` — connectors still only capture evidence; correlation proposes structure, never confirmed Memory or Judgment;
+- independence groups: evidence attaches via `lineage_root` / `notification_of` / `derived_from` / fingerprint / `thread_key` so GitHub bot notifications and provider summaries do not count as independent corroboration; derived content gets lower `directness`;
+- identity: upsert from actor ids; email-across-providers → candidate links (not auto-confirmed); never merge by display name alone;
+- project mapping: exact `Project.repos` / aliases → `ProjectLink` (unconfirmed until `twin project link`); soft hint matches stay candidates;
+- WorkEpisode clustering on strong keys only (shared lineage, PR/issue refs, calendar ids/fingerprints, threads); soft temporal co-occurrence alone does not merge;
+- conflict findings: `FindingType.cross_source_temporal_conflict` when ship vs postpone (or distinct dates) appear across episode sources — never auto-resolved;
+- CLI: `twin correlate`, `twin episode list|show`, `twin identity list|links|confirm`, `twin project link|links`;
+- `tests/test_correlation_phase7.py` and eval `cross_source_work_episode`.
+
 ### v0.7 — Personal Domains
 
 Goal: expand carefully from technical memory into a compartmentalized representation of personal life.

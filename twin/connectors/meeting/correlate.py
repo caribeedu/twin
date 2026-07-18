@@ -1,8 +1,8 @@
 """Calendar ↔ meeting correlation keys (v0.6 Phase 5).
 
-Phase 5 correlates at ``ConnectorRecord`` metadata / artifact_refs level —
-no WorkEpisode entity yet. Strong links use explicit IDs; weak links use a
-time+title fingerprint that later phases may promote.
+Phase 5 correlates at ``ConnectorRecord`` metadata / artifact_refs level.
+Phase 7 promotes strong keys into ``WorkEpisode`` via
+``twin.cognition.correlation`` (fingerprints remain weak until corroborated).
 """
 
 from __future__ import annotations

@@ -90,8 +90,10 @@ def _record(
         source_metadata["lineage_root"] = lineage_root
     if kind == "bot":
         # a bot post is usually a notification/derivation, never fresh
-        # first-hand evidence — phase 7 builds independence groups from this
+        # first-hand evidence — independence groups key off lineage_root
         source_metadata["derived"] = "likely_notification"
+        if lineage_root:
+            source_metadata["notification_of"] = lineage_root
     return ConnectorRecord(
         connector_id=connector_id,
         source_account_id=account_id,

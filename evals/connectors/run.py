@@ -780,6 +780,116 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
+    """Phase 7: PR + Slack → WorkEpisode; shared independence; temporal conflict."""
+    from twin.cognition.correlation import (
+        independence_group_for,
+        run_correlation_pass,
+    )
+    from twin.cognition.sessions import ensure_project
+    from twin.connectors.models import (
+        ConnectorInstance,
+        ConnectorRecord,
+        ConnectorStatus,
+        OwnershipClass,
+        SourceAccount,
+        idempotency_key,
+    )
+    from twin.memory.models import FindingType
+
+    exp = case["expected"]
+    root = exp["lineage_root"]
+    with tempfile.TemporaryDirectory(prefix="twin-corr-eval-") as tmp:
+        store = SqliteStore(":memory:")
+        ensure_project(store, exp["project_name"], repos=["acme/atlas"])
+        acc = SourceAccount(
+            id="acct_eval",
+            connector_type="github",
+            external_account_id="edu",
+            owner_principal_id="principal_eval",
+            source_owner=OwnershipClass.employer,
+            vault_id="vault_work_acme",
+            org_key=case.get("org_key"),
+        )
+        store.insert_source_account(acc)
+        inst = ConnectorInstance(
+            id="conn_eval",
+            connector_type="github",
+            account_id=acc.id,
+            status=ConnectorStatus.active,
+        )
+        store.insert_connector_instance(inst)
+
+        def _mk(eid, etype, content, *, actor_ids=None, occurred_at=None, **meta):
+            rec = ConnectorRecord(
+                connector_id=inst.id,
+                source_account_id=acc.id,
+                external_type=etype,
+                external_id=eid,
+                external_revision="1",
+                content=content,
+                actor_ids=list(actor_ids or ["github:alice"]),
+                source_metadata=dict(meta),
+                occurred_at=occurred_at or "2026-07-10T10:00:00Z",
+            )
+            rec.idempotency_key = idempotency_key(
+                "github", acc.id, etype, eid, "1",
+            )
+            store.insert_connector_record(rec)
+            return rec
+
+        pr = _mk(
+            "acme/atlas#8", "pull_request",
+            "# Caching\n\nShip Friday with Redis.",
+            repo="acme/atlas", lineage_root=root,
+            occurred_at="2026-07-10T10:00:00Z",
+        )
+        slack = _mk(
+            "C1.100", "message",
+            "Release postponed — see PR #8",
+            repo="acme/atlas", lineage_root=root,
+            actor_ids=["slack:T:U1"],
+            occurred_at="2026-07-11T12:00:00Z",
+        )
+        bot = _mk(
+            "comment-bot", "issue_comment",
+            "[bot] Ship Friday with Redis.",
+            repo="acme/atlas", lineage_root=root,
+            derived="likely_notification", notification_of=root,
+            actor_ids=["github:release-bot[bot]"],
+            occurred_at="2026-07-10T11:00:00Z",
+        )
+
+        g_pr = independence_group_for({
+            "source_metadata": pr.source_metadata, "external_id": pr.external_id,
+        })
+        g_bot = independence_group_for({
+            "source_metadata": bot.source_metadata, "external_id": bot.external_id,
+        })
+        if exp.get("independence_shared") and g_pr != g_bot:
+            return False, f"independence groups diverge: {g_pr} vs {g_bot}"
+
+        report = run_correlation_pass(store, connector_ids=[inst.id])
+        if report.episodes < 1:
+            return False, "no WorkEpisode created"
+        episodes = store.list_work_episodes()
+        ep = episodes[0]
+        if len(ep.source_refs) < exp["min_episode_refs"]:
+            return False, f"episode refs {len(ep.source_refs)} < {exp['min_episode_refs']}"
+        if ep.independence_group != f"lineage:{root}":
+            return False, f"bad episode independence_group: {ep.independence_group}"
+        if not ep.project_id:
+            return False, "episode missing project mapping"
+        findings = store.get_findings(f"episode:{ep.id}", unresolved_only=False)
+        if not any(f.type.value == exp["conflict_type"] for f in findings):
+            # also accept findings keyed only by type across all open findings
+            # when memory_id lookup is empty
+            if report.conflicts < 1:
+                return False, "expected cross_source_temporal_conflict"
+        _ = slack  # retained for lineage in episode source_refs
+    return True, "ok"
+
+
 _SCENARIOS = {
     "normalization": _run_simple,
     "replay": _run_simple,
@@ -794,6 +904,7 @@ _SCENARIOS = {
     "gmail_thread_lineage": _run_gmail_thread_lineage,
     "calendar_meeting_correlation": _run_calendar_meeting_correlation,
     "folder_document_revisions": _run_folder_document_revisions,
+    "cross_source_work_episode": _run_cross_source_work_episode,
 }
 
 

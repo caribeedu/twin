@@ -164,9 +164,15 @@ def _record(
         source_metadata["lineage_root"] = lineage_root
     if kind == "bot" or is_notification_like(payload):
         source_metadata["derived"] = "likely_notification"
+        if lineage_root:
+            source_metadata["notification_of"] = lineage_root
     refs = _github_refs(payload.get("text") or "")
     if refs:
         source_metadata["github_refs"] = refs
+        if source_metadata.get("derived") == "likely_notification":
+            # Prefer the first explicit GitHub object as the informational root.
+            source_metadata.setdefault("notification_of", refs[0])
+            source_metadata.setdefault("lineage_root", refs[0])
     arts = list(artifact_refs or [])
     if not arts:
         arts = [{"kind": external_type, "channel": channel,

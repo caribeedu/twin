@@ -141,10 +141,14 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
         if verdict.action == "duplicate" and verdict.existing_id:
             # New evidence for an existing memory — corroboration, not a new memory.
             from ..memory.provenance import attach_corroborating_evidence
+            from .correlation.independence import independence_group_for
+            igroup = independence_group_for(
+                percept, fallback=artifact_id or percept.id,
+            )
             attach_corroborating_evidence(
                 store, verdict.existing_id, percept.id,
                 extracted.evidence_quote or extracted.summary,
-                independence_group=artifact_id or percept.id,
+                independence_group=igroup,
                 source_trust=percept.source_trust,
             )
             report.duplicates += 1
@@ -181,13 +185,21 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             ),
         )
         store.insert_memory(mem)
+        from .correlation.independence import (
+            evidence_directness_for,
+            independence_group_for,
+        )
+        igroup = independence_group_for(
+            percept, fallback=artifact_id or percept.id,
+        )
         store.insert_evidence(Evidence(
             id=ids.evidence_id(),
             memory_id=mem.id,
             percept_id=percept.id,
             quote=extracted.evidence_quote or extracted.summary,
             source_trust=percept.source_trust,
-            independence_group=artifact_id or percept.id,
+            directness=evidence_directness_for(percept),
+            independence_group=igroup,
             artifact_id=artifact_id,
         ))
         store.store_embedding(mem.id, "memory", embedder.name, embedder.embed(dedupe_text))

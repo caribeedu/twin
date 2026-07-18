@@ -1,0 +1,14 @@
+{
+  "id": "cross_source_work_episode",
+  "scenario": "cross_source_work_episode",
+  "description": "GitHub PR + Slack mention share a WorkEpisode; bot/notification shares independence group; ship vs postpone yields cross_source_temporal_conflict; ownership/project mapping preserved.",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "expected": {
+    "lineage_root": "github:acme/atlas#8",
+    "min_episode_refs": 2,
+    "independence_shared": true,
+    "conflict_type": "cross_source_temporal_conflict",
+    "project_name": "Atlas"
+  }
+}

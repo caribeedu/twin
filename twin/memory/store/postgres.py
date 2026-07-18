@@ -24,6 +24,7 @@ from ..models import (
 )
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
+from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
 
@@ -652,7 +653,10 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
 
 
-class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, MemoryStore):
+class PostgresStore(
+    PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
+    ConnectorStoreMixin, MemoryStore,
+):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
         from psycopg.rows import dict_row
@@ -671,6 +675,7 @@ class PostgresStore(PrivacyStoreMixin, JudgmentStoreMixin, ConnectorStoreMixin, 
                 self.has_pgvector = False
             cur.execute(_SCHEMA_BASE)
             cur.execute(_CONNECTOR_SCHEMA)
+            cur.execute(CORRELATION_SCHEMA)
             cur.execute(_EMBEDDINGS_PGVECTOR if self.has_pgvector else _EMBEDDINGS_FALLBACK)
 
     def _begin_transaction(self) -> None:

@@ -883,6 +883,30 @@ def cmd_project(args) -> None:
             project.goals = sorted(set(project.goals) | set(args.goal))
             ws.store.update_project(project)
         print(f"{project.id}: {project.name} (repos: {', '.join(project.repos) or '—'})")
+    elif args.project_command == "link":
+        from ..cognition.correlation.projects import link_project
+        from ..cognition.sessions import ensure_project
+
+        project = ensure_project(ws.store, args.name)
+        link = link_project(
+            ws.store,
+            project_id=project.id,
+            external_type=args.external_type,
+            external_id=args.external_id,
+            confirmed=not args.candidate,
+            confidence=1.0 if not args.candidate else 0.7,
+        )
+        print(
+            f"{link.id}: {project.name} ← {link.external_type}:{link.external_id} "
+            f"(confirmed={link.confirmed})"
+        )
+    elif args.project_command == "links":
+        for link in ws.store.list_project_links():
+            print(
+                f"{link.id}  project={link.project_id}  "
+                f"{link.external_type}:{link.external_id}  "
+                f"conf={link.confidence:.2f} confirmed={link.confirmed}"
+            )
     else:
         for p in ws.store.list_projects():
             sessions = len(ws.store.list_sessions(project_id=p.id))
@@ -890,6 +914,75 @@ def cmd_project(args) -> None:
             print(f"{p.id}  {p.name} [{p.status}]"
                   f" — {memories} memories, {sessions} sessions,"
                   f" repos: {', '.join(p.repos) or '—'}")
+
+
+def cmd_correlate(args) -> None:
+    from ..cognition.correlation import run_correlation_pass
+
+    ws = Workspace(args.home)
+    report = run_correlation_pass(
+        ws.store,
+        connector_ids=args.connector or None,
+        detect_conflicts=not args.no_conflicts,
+    )
+    print(
+        f"scanned={report.records_scanned} identities={report.identities} "
+        f"identity_links={report.identity_links} project_links={report.project_links} "
+        f"episodes={report.episodes} conflicts={report.conflicts}"
+    )
+    for eid in report.episode_ids:
+        print(f"  episode {eid}")
+
+
+def cmd_episode(args) -> None:
+    ws = Workspace(args.home)
+    if args.episode_command == "show":
+        ep = ws.store.get_work_episode(args.episode_id)
+        if ep is None:
+            raise SystemExit(f"episode {args.episode_id} not found")
+        print(f"{ep.id}  {ep.title}  [{ep.status.value}] conf={ep.confidence:.2f}")
+        print(f"  project={ep.project_id or '—'}  indep={ep.independence_group or '—'}")
+        print(f"  participants={', '.join(ep.participant_actor_ids) or '—'}")
+        for ref in ep.source_refs:
+            print(
+                f"  - {ref.get('external_type')}:{ref.get('external_id')} "
+                f"({ref.get('occurred_at') or '?'})"
+            )
+        for link in ws.store.list_episode_links(ep.id):
+            print(
+                f"  link {link.kind.value} conf={link.confidence:.2f} "
+                f"{link.external_type}:{link.external_id}"
+            )
+    else:
+        for ep in ws.store.list_work_episodes(limit=args.limit):
+            print(
+                f"{ep.id}  [{ep.status.value}] conf={ep.confidence:.2f}  "
+                f"{ep.title[:60]}  refs={len(ep.source_refs)}"
+            )
+
+
+def cmd_identity(args) -> None:
+    ws = Workspace(args.home)
+    if args.identity_command == "links":
+        for link in ws.store.list_identity_links():
+            print(
+                f"{link.id}  {link.left_identity_id}↔{link.right_identity_id} "
+                f"[{link.status.value}] conf={link.confidence:.2f} "
+                f"signals={','.join(link.signals)}"
+            )
+    elif args.identity_command == "confirm":
+        from ..cognition.correlation.identity import confirm_identity_link
+
+        link = confirm_identity_link(
+            ws.store, args.link_id, entity_id=args.entity,
+        )
+        print(f"confirmed {link.id} status={link.status.value}")
+    else:
+        for ident in ws.store.list_external_identities(provider=args.provider):
+            print(
+                f"{ident.id}  {ident.actor_id}  email={ident.email or '—'} "
+                f"conf={ident.confidence:.2f} confirmed={ident.confirmed}"
+            )
 
 
 def cmd_watch(args) -> None:
@@ -1278,6 +1371,45 @@ def main(argv: list[str] | None = None) -> None:
     pp.set_defaults(func=cmd_project)
     pp = project_sub.add_parser("list")
     pp.set_defaults(func=cmd_project)
+    pp = project_sub.add_parser("link", help="map external container → project")
+    pp.add_argument("name", help="project name or id")
+    pp.add_argument("external_type", help="github_repository | slack_channel | …")
+    pp.add_argument("external_id")
+    pp.add_argument("--candidate", action="store_true",
+                    help="store as unconfirmed candidate link")
+    pp.set_defaults(func=cmd_project)
+    pp = project_sub.add_parser("links", help="list project links")
+    pp.set_defaults(func=cmd_project)
+
+    p = sub.add_parser(
+        "correlate",
+        help="cross-source pass: identities, project maps, WorkEpisodes, conflicts",
+    )
+    p.add_argument("--connector", action="append",
+                   help="limit to connector instance id (repeatable)")
+    p.add_argument("--no-conflicts", action="store_true")
+    p.set_defaults(func=cmd_correlate)
+
+    p = sub.add_parser("episode", help="WorkEpisode inspection")
+    ep_sub = p.add_subparsers(dest="episode_command", required=True)
+    ep = ep_sub.add_parser("list")
+    ep.add_argument("--limit", type=int, default=50)
+    ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser("show")
+    ep.add_argument("episode_id")
+    ep.set_defaults(func=cmd_episode)
+
+    p = sub.add_parser("identity", help="external identity resolution")
+    id_sub = p.add_subparsers(dest="identity_command", required=True)
+    ii = id_sub.add_parser("list")
+    ii.add_argument("--provider", default=None)
+    ii.set_defaults(func=cmd_identity)
+    ii = id_sub.add_parser("links")
+    ii.set_defaults(func=cmd_identity)
+    ii = id_sub.add_parser("confirm")
+    ii.add_argument("link_id")
+    ii.add_argument("--entity", default=None, help="canonical entity id")
+    ii.set_defaults(func=cmd_identity)
 
     p = sub.add_parser("watch", help="continuous incremental ingestion")
     p.add_argument("paths", nargs="+")

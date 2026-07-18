@@ -42,6 +42,7 @@ evals/connectors/
     gmail_thread_lineage.json   # Phase 4 thread + notification
     calendar_meeting_correlation.json  # Phase 5 calendar↔meeting fingerprint
     folder_document_revisions.json     # Phase 6 local folder revisions + delete
+    cross_source_work_episode.json     # Phase 7 WorkEpisode + independence + conflict
   run.py                        # tiny runner over Fake + real adapters
 ```
 

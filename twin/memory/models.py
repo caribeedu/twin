@@ -174,6 +174,7 @@ class FindingType(str, Enum):
     unsupported = "unsupported"
     stale = "stale"
     evidence_mapping_required = "evidence_mapping_required"
+    cross_source_temporal_conflict = "cross_source_temporal_conflict"
 
 
 class DuplicateGroup(BaseModel):
