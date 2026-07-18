@@ -5,13 +5,18 @@ OneDrive / Notion later) and normalize into ``DocumentRecord``.
 """
 
 from .model import DocumentRecord, DocumentRevision
-from .normalize import records_from_document, revision_for_document
+from .normalize import (
+    chunk_document_body,
+    records_from_document,
+    revision_for_document,
+)
 from .provider import DocumentProvider
 
 __all__ = [
     "DocumentProvider",
     "DocumentRecord",
     "DocumentRevision",
+    "chunk_document_body",
     "records_from_document",
     "revision_for_document",
 ]

@@ -724,17 +724,30 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
         )
         sync_connector(store, creds, inst.id)
         recs = store.list_connector_records(inst.id)
-        if len(recs) != 1:
-            return False, f"expected 1 record after ingest, got {len(recs)}"
-        rec = recs[0]
-        if rec.external_id != exp["document_id"]:
-            return False, f"document id wrong: {rec.external_id}"
+        chunks = [
+            r for r in recs
+            if r.external_type == "document_revision_chunk" and not r.deleted
+        ]
+        manifests = [
+            r for r in recs
+            if r.external_type == "document_manifest" and not r.deleted
+        ]
+        if len(chunks) != 1 or len(manifests) != 1:
+            return False, (
+                f"expected 1 chunk + 1 manifest after ingest, "
+                f"got {len(chunks)} chunks / {len(manifests)} manifests"
+            )
+        rec = chunks[0]
+        if rec.source_metadata.get("document_id") != exp["document_id"]:
+            return False, f"document id wrong: {rec.source_metadata.get('document_id')}"
         if not str(rec.thread_key).startswith(exp["thread_prefix"]):
             return False, f"thread key wrong: {rec.thread_key}"
         if rec.confidentiality.get("source_trust") != exp["trust"]:
             return False, "document trust not calibrated"
         if "Postgres" not in rec.content:
             return False, "content missing"
+        if rec.actor_ids:
+            return False, "front-matter author label must not auto-promote to actor_ids"
 
         doc.write_text(
             "---\nauthor: Edu\n---\n\n# RFC\n\nDecision: use MySQL instead.\n",
@@ -742,7 +755,7 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
         )
         sync_connector(store, creds, inst.id)
         revs = store.list_connector_records_for_object(
-            inst.id, "document_revision", exp["document_id"],
+            inst.id, "document_revision_chunk", f"{exp['document_id']}:chunk:0",
         )
         if len(revs) < 2:
             return False, "edit did not create a new revision"
@@ -752,12 +765,12 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
         doc.unlink()
         sync_connector(store, creds, inst.id)
         latest = store.list_connector_records_for_object(
-            inst.id, "document_revision", exp["document_id"],
+            inst.id, "document_revision_chunk", f"{exp['document_id']}:chunk:0",
         )[-1]
         if not latest.deleted:
-            return False, "delete did not tombstone latest revision"
+            return False, "delete did not tombstone latest chunk"
         events = store.list_connector_deletion_events(inst.id)
-        if not events or not events[0].affected_percept_ids:
+        if not events or not any(e.affected_percept_ids for e in events):
             return False, "deletion event missing affected percepts"
         percepts = store.list_percepts()
         if not percepts or any(
