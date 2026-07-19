@@ -285,20 +285,93 @@ def test_frozen_vault_on_binding(store, cfg, embedder):
     r = svc.handle(HostEvent(
         kind="session_start", host_type="claude-code",
         external_session_id="vault1", text="tech work", domain="technical",
+        metadata={"vault_id": "vault_work_acme", "host_capabilities": {"observe_session": True}},
     ))
     assert r.ok
-    assert r.binding.vault_id
-    assert r.binding.metadata.get("host_capabilities")
+    assert r.binding.vault_id == "vault_work_acme"
+    # Capabilities live on binding metadata from SessionStart path
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="vault2", text="other", domain="technical",
+    ))
+    b2 = store.find_active_host_session_binding(
+        host_type="claude-code", external_session_id="vault2",
+    )
+    assert b2 is not None
+    assert b2.metadata.get("host_capabilities")
     # Capabilities not repeated on observation artifacts
     svc.handle(HostEvent(
         kind="user_message", host_type="claude-code",
-        external_session_id="vault1", text="hi",
+        external_session_id="vault2", text="hi",
     ))
-    ses = store.get_session(r.session_id)
+    ses = store.get_session(b2.cognitive_session_id)
     user_arts = [a for a in ses.artifacts if a.get("kind") == "user_message"]
     assert user_arts
     host_meta = (user_arts[0].get("host") or {})
     assert "host_capabilities" not in host_meta
+
+
+def test_is_unique_violation_narrow():
+    import sqlite3
+
+    from twin.memory.store.host_binding_mixin import is_unique_violation
+
+    unique = sqlite3.IntegrityError("UNIQUE constraint failed: host_observed_events.event_id")
+    assert is_unique_violation(unique)
+
+    not_null = sqlite3.IntegrityError("NOT NULL constraint failed: host_observed_events.event_id")
+    assert not is_unique_violation(not_null)
+
+    fk = sqlite3.IntegrityError("FOREIGN KEY constraint failed")
+    assert not is_unique_violation(fk)
+
+    check = sqlite3.IntegrityError("CHECK constraint failed: occurrence")
+    assert not is_unique_violation(check)
+
+    class UniqueViolation(Exception):
+        pgcode = "23505"
+
+    assert is_unique_violation(UniqueViolation("duplicate key"))
+
+    class Wrapped(Exception):
+        pass
+
+    wrapped = Wrapped("outer")
+    wrapped.__cause__ = unique
+    assert is_unique_violation(wrapped)
+
+
+def test_not_null_observed_event_not_silent_duplicate(store, cfg, embedder):
+    """Integrity errors unrelated to unique must propagate, not become duplicates."""
+    import sqlite3
+
+    from twin.memory.store.host_binding_mixin import is_unique_violation
+
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="nn1", text="x", domain="technical",
+    ))
+    assert start.ok
+
+    def _boom(*_a, **_k):
+        raise sqlite3.IntegrityError(
+            "NOT NULL constraint failed: host_observed_events.event_id"
+        )
+
+    with patch.object(store, "_c_insert", side_effect=_boom):
+        r = svc.handle(HostEvent(
+            kind="user_message", host_type="claude-code",
+            external_session_id="nn1", text="hi", event_id="e1",
+        ))
+    # Fail-open at service boundary — but must NOT claim duplicated.
+    assert not r.ok
+    assert r.extras.get("duplicated") is not True
+    assert r.error == "native observation failed"
+    # Classifier itself must reject NOT NULL
+    assert not is_unique_violation(
+        sqlite3.IntegrityError("NOT NULL constraint failed: host_observed_events.event_id")
+    )
 
 
 def test_tool_input_redacted_in_normalize():

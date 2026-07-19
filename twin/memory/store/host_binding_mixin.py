@@ -10,19 +10,57 @@ from twin.memory.models import HostSessionBinding
 
 
 def is_unique_violation(exc: BaseException) -> bool:
-    name = type(exc).__name__.lower()
-    msg = str(exc).lower()
-    pgcode = getattr(exc, "pgcode", None)
-    if pgcode is None:
-        diag = getattr(exc, "diag", None)
-        pgcode = getattr(diag, "sqlstate", None) if diag is not None else None
-    return (
-        pgcode == "23505"
-        or "uniqueviolation" in name
-        or "integrityerror" in name
-        or "unique constraint" in msg
-        or "duplicate key" in msg
-    )
+    """True only for UNIQUE / PRIMARY KEY conflicts — never generic IntegrityError.
+
+    SQLite ``IntegrityError`` also covers NOT NULL / FOREIGN KEY / CHECK; those
+    must surface as real errors, not silent ``duplicated=True``.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+
+        sqlstate = (
+            getattr(cur, "sqlstate", None)
+            or getattr(cur, "pgcode", None)
+        )
+        if sqlstate is None:
+            diag = getattr(cur, "diag", None)
+            sqlstate = getattr(diag, "sqlstate", None) if diag is not None else None
+        if sqlstate == "23505":
+            return True
+
+        name = type(cur).__name__.lower()
+        if "uniqueviolation" in name:
+            return True
+
+        sqlite_name = getattr(cur, "sqlite_errorname", None)
+        if sqlite_name in {
+            "SQLITE_CONSTRAINT_UNIQUE",
+            "SQLITE_CONSTRAINT_PRIMARYKEY",
+        }:
+            return True
+
+        # Older SQLite / wrapped drivers — message only, never bare IntegrityError.
+        message = str(cur).lower()
+        if (
+            "unique constraint failed" in message
+            or "duplicate key value violates unique constraint" in message
+            or "is not unique" in message
+        ):
+            # Exclude other constraint phrases that can contain "unique" loosely.
+            if "not null" in message or "foreign key" in message or "check constraint" in message:
+                pass
+            else:
+                return True
+
+        for linked in (cur.__cause__, cur.__context__):
+            if isinstance(linked, BaseException):
+                stack.append(linked)
+    return False
 
 
 HOST_BINDING_SCHEMA = """

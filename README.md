@@ -1437,7 +1437,7 @@ Phase 8 — Native proof (done):
 - one host-native adapter: Claude Code Hooks (`twin/interfaces/native/claude_code/`) — observes session start, user messages, tool request/completion, file/project context, session end; does **not** assemble Context Packs or create a parallel memory store;
 - `HostSessionBinding` (`hsb_…`) links `(host_type, external_session_id, occurrence)` ↔ `CognitiveSession`; after Stop, the same external id opens occurrence N+1 (history preserved); **cwd never identifies a conversation** — missing session id is rejected;
 - security freeze: domain / project / persona / purpose / audience / vault captured at bind; refresh cannot widen scope silently;
-- observations are idempotent only with a trustworthy id (`event_id` / `delivery_id` / `tool_call_id+phase` / `sequence`); equal text alone never collapses events; races on insert return `duplicated`, not errors;
+- observations are idempotent only with a trustworthy id (`event_id` / `delivery_id` / `tool_call_id+phase` / `sequence`); equal text alone never collapses events; only UNIQUE/PRIMARY KEY conflicts map to `duplicated` (never generic IntegrityError / NOT NULL / FK / CHECK);
 - concurrent SessionStart: unique binding wins; loser abandons its orphan `CognitiveSession` and returns the winner;
 - tool inputs pass redaction; unknown hooks → `unsupported_host_event` (never forged `user_message`); `transcript_path` → `transcript:{hash}` identity;
 - fail-open hooks: Twin failures return `ok=false` + `error_id` (no traceback on stdout) and exit 0 with `--fail-open`; stderr/logger hold diagnostics; Context Pack only for SessionStart/pack_request;

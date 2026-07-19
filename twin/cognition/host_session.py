@@ -213,15 +213,16 @@ def bind_and_start(
         persona=persona, purpose=purpose, audience=audience,
         tool_id=host_type,
     )
+    # Vault comes from project / explicit metadata — never inferred from domain name.
     vault_id = None
     if started.session.project_id:
         proj = store.get_project(started.session.project_id)
         if proj is not None:
             vault_id = (proj.metadata or {}).get("vault_id")
-    if not vault_id and started.session.domain == "work":
-        vault_id = "vault_work"
-    elif not vault_id:
-        vault_id = "vault_general"
+    if not vault_id and isinstance(metadata, dict):
+        vault_id = metadata.get("vault_id")
+    if not vault_id:
+        vault_id = None
     binding = HostSessionBinding(
         host_type=host_type,
         external_session_id=external_session_id,
