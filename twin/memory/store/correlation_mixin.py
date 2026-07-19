@@ -252,20 +252,18 @@ class CorrelationStoreMixin:
         *,
         external_type: str,
         external_id: str,
-        source_account_id: Optional[str] = None,
+        source_account_id: str = "",
     ) -> Optional[ProjectLink]:
-        if source_account_id:
-            row = self._j_fetchone(
-                "SELECT * FROM project_links WHERE external_type = ? AND "
-                "external_id = ? AND source_account_id = ?",
-                (external_type, external_id, source_account_id),
-            )
-        else:
-            row = self._j_fetchone(
-                "SELECT * FROM project_links WHERE external_type = ? AND "
-                "external_id = ? ORDER BY id LIMIT 1",
-                (external_type, external_id),
-            )
+        """Exact account match — including legacy unscoped ``""``.
+
+        Never wildcards across accounts. Pass ``source_account_id=""`` to find
+        only links created without an account scope.
+        """
+        row = self._j_fetchone(
+            "SELECT * FROM project_links WHERE external_type = ? AND "
+            "external_id = ? AND source_account_id = ?",
+            (external_type, external_id, source_account_id or ""),
+        )
         return row_to_project_link(row, decrypt=self._corr_dec) if row else None
 
     def list_project_links(
@@ -321,6 +319,30 @@ class CorrelationStoreMixin:
             return None
         eid = row["episode_id"] if hasattr(row, "keys") else row[0]
         return self.get_work_episode(eid)
+
+    def list_episode_anchors(self, episode_id: str) -> list[dict[str, Any]]:
+        rows = self._j_fetchall(
+            "SELECT episode_id, vault_id, anchor_type, anchor_value "
+            "FROM episode_anchors WHERE episode_id = ?",
+            (episode_id,),
+        )
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            if hasattr(r, "keys"):
+                out.append({
+                    "episode_id": r["episode_id"],
+                    "vault_id": r["vault_id"],
+                    "anchor_type": r["anchor_type"],
+                    "anchor_value": r["anchor_value"],
+                })
+            else:
+                out.append({
+                    "episode_id": r[0],
+                    "vault_id": r[1],
+                    "anchor_type": r[2],
+                    "anchor_value": r[3],
+                })
+        return out
 
     def upsert_episode_anchor(
         self,

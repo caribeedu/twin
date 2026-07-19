@@ -1,0 +1,26 @@
+{
+  "id": "connector_completion",
+  "scenario": "connector_completion",
+  "description": "Live completion_matrix is ok; pass cells carry evidence; Fake sync never confirms Memory or Judgment.",
+  "connector_type": "fake",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "fixtures": {
+    "issues": [
+      {
+        "external_id": "comp-1",
+        "external_revision": "1",
+        "seq": 1,
+        "occurred_at": "2026-07-15T09:00:00Z",
+        "content": "Connector completion evidence check."
+      }
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "confirmed_memories": 0,
+    "judgments": 0,
+    "matrix_ok": true,
+    "pass_requires_evidence": true
+  }
+}

@@ -56,5 +56,5 @@ jobs:
         # the full suite runs on Linux; Windows validates the locking
         # backend, atomic writes, backup recovery and fail-closed behavior
         run: >-
-          pytest -q tests/test_connectors.py
+          pytest -q tests/connectors/test_service.py
           -k "credential or lock or corrupted or backup or empty_map"

@@ -165,6 +165,35 @@ def propose_identity_links(store, identities: list[ExternalIdentity]) -> list[Id
     return created
 
 
+def _refresh_identity_confirmation(store, identity_id: Optional[str]) -> None:
+    """Sync ExternalIdentity.confirmed to ≥1 confirmed IdentityLink edge."""
+    if not identity_id:
+        return
+    ident = store.get_external_identity(identity_id)
+    if ident is None:
+        return
+    still = False
+    entity_id = None
+    for link in store.list_identity_links():
+        st = getattr(link.status, "value", link.status)
+        if st != IdentityStatus.confirmed.value:
+            continue
+        if identity_id not in (link.left_identity_id, link.right_identity_id):
+            continue
+        still = True
+        if link.entity_id and not entity_id:
+            entity_id = link.entity_id
+    if still:
+        ident.confirmed = True
+        ident.linked_entity_id = entity_id
+        store.update_external_identity(ident)
+        return
+    if ident.confirmed or ident.linked_entity_id:
+        ident.confirmed = False
+        ident.linked_entity_id = None
+        store.update_external_identity(ident)
+
+
 def confirm_identity_link(
     store,
     link_id: str,
@@ -195,6 +224,9 @@ def confirm_identity_link(
     if entity_id:
         link.entity_id = entity_id
     store.update_identity_link(link)
+    # confirmed on ExternalIdentity means ≥1 confirmed edge — not "has Entity".
+    _refresh_identity_confirmation(store, link.left_identity_id)
+    _refresh_identity_confirmation(store, link.right_identity_id)
     if entity_id:
         for iid in (link.left_identity_id, link.right_identity_id):
             if not iid:
@@ -202,10 +234,43 @@ def confirm_identity_link(
             ident = store.get_external_identity(iid)
             if ident is None:
                 continue
-            ident.linked_entity_id = entity_id
-            ident.confirmed = True
             ident.confidence = max(ident.confidence, 0.99)
             store.update_external_identity(ident)
+    return link
+
+
+def unconfirm_identity_link(store, link_id: str) -> IdentityLink:
+    """Roll a confirmed link back to candidate (manual undo).
+
+    Rejected links are not reopened here — use an explicit reopen path later.
+    """
+    link = store.get_identity_link(link_id)
+    if link is None:
+        raise ValueError(f"identity link {link_id} not found")
+    st = getattr(link.status, "value", link.status)
+    if st != IdentityStatus.confirmed.value:
+        raise ValueError(
+            f"identity link {link_id} is {st!r}; unconfirm requires confirmed"
+        )
+    link.status = IdentityStatus.candidate
+    meta = dict(link.metadata or {})
+    meta["unconfirmed_from"] = IdentityStatus.confirmed.value
+    link.metadata = meta
+    store.update_identity_link(link)
+    _refresh_identity_confirmation(store, link.left_identity_id)
+    _refresh_identity_confirmation(store, link.right_identity_id)
+    return link
+
+
+def reject_identity_link(store, link_id: str) -> IdentityLink:
+    """Explicit negative decision — not auto-proposed again as confirmed."""
+    link = store.get_identity_link(link_id)
+    if link is None:
+        raise ValueError(f"identity link {link_id} not found")
+    link.status = IdentityStatus.rejected
+    store.update_identity_link(link)
+    _refresh_identity_confirmation(store, link.left_identity_id)
+    _refresh_identity_confirmation(store, link.right_identity_id)
     return link
 
 

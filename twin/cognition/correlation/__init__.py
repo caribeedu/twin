@@ -10,6 +10,11 @@ from .independence import (
     independence_group_for,
     is_derived_evidence,
 )
+from .explain import (
+    explain_episode,
+    explain_identity_link,
+    explain_project_link,
+)
 from .models import (
     EpisodeLink,
     EpisodeLinkKind,
@@ -19,6 +24,7 @@ from .models import (
     IdentityLink,
     IdentityStatus,
     ProjectLink,
+    ProjectLinkStatus,
     WorkEpisode,
 )
 from .partition import partition_records, vault_for_record
@@ -34,8 +40,12 @@ __all__ = [
     "IdentityLink",
     "IdentityStatus",
     "ProjectLink",
+    "ProjectLinkStatus",
     "WorkEpisode",
     "evidence_directness_for",
+    "explain_episode",
+    "explain_identity_link",
+    "explain_project_link",
     "independence_group_for",
     "is_derived_evidence",
     "partition_records",

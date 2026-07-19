@@ -262,7 +262,18 @@ def _rebuild_episode_from_active_links(store, ep: WorkEpisode) -> WorkEpisode:
     # Keep primary lineage if still present among active links.
     lineage_groups = sorted(g for g in groups if g.startswith("lineage:"))
     ep.independence_group = lineage_groups[0] if lineage_groups else None
-    if not links:
+    # Confidence follows active membership — shrink/downgrade when evidence
+    # leaves (Phase 7 debt: never leave a stale high confidence).
+    # ``closed`` here means "no active members" and is reversible on rebuild
+    # when evidence returns (not a permanent manual close).
+    if links:
+        ep.confidence = max(float(lk.confidence or 0.0) for lk in links)
+        if ep.status == EpisodeStatus.closed or (
+            getattr(ep.status, "value", ep.status) == EpisodeStatus.closed.value
+        ):
+            ep.status = EpisodeStatus.candidate
+    else:
+        ep.confidence = 0.0
         ep.status = EpisodeStatus.closed
     ep.updated_at = now_iso()
     store.update_work_episode(ep)

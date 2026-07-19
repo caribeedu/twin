@@ -764,6 +764,12 @@ def cmd_connector(args) -> None:
     elif cmd == "contract":
         from ..connectors import contract_matrix
         print(_json.dumps(contract_matrix(), indent=2, default=str))
+    elif cmd == "completion":
+        from ..connectors import completion_matrix
+        matrix = completion_matrix()
+        print(_json.dumps(matrix, indent=2, default=str))
+        if not matrix.get("ok"):
+            raise SystemExit(1)
     else:
         raise SystemExit(f"unknown connector command: {cmd}")
 
@@ -926,16 +932,38 @@ def cmd_project(args) -> None:
             confirmed=not args.candidate,
             confidence=1.0 if not args.candidate else 0.7,
         )
+        status = getattr(link.status, "value", link.status)
         print(
             f"{link.id}: {project.name} ← {link.external_type}:{link.external_id} "
-            f"(confirmed={link.confirmed})"
+            f"(status={status})"
         )
+    elif args.project_command in ("reject", "historical", "confirm"):
+        from ..cognition.correlation.projects import set_project_link_status
+        from ..cognition.correlation.models import ProjectLinkStatus
+
+        mapping = {
+            "reject": ProjectLinkStatus.rejected,
+            "historical": ProjectLinkStatus.historical,
+            "confirm": ProjectLinkStatus.confirmed,
+        }
+        link = set_project_link_status(
+            ws.store, args.link_id, mapping[args.project_command],
+        )
+        print(f"{link.id} status={link.status.value}")
+    elif args.project_command == "explain":
+        import json as _json
+        from ..cognition.correlation.explain import explain_project_link
+        print(_json.dumps(explain_project_link(ws.store, args.link_id),
+                          indent=2, default=str))
     elif args.project_command == "links":
         for link in ws.store.list_project_links():
+            status = getattr(link.status, "value", None) or (
+                "confirmed" if link.confirmed else "candidate"
+            )
             print(
                 f"{link.id}  project={link.project_id}  "
                 f"{link.external_type}:{link.external_id}  "
-                f"conf={link.confidence:.2f} confirmed={link.confirmed}"
+                f"conf={link.confidence:.2f} status={status}"
             )
     else:
         for p in ws.store.list_projects():
@@ -1092,6 +1120,11 @@ def cmd_episode(args) -> None:
                 f"  link {link.kind.value} conf={link.confidence:.2f} "
                 f"{link.external_type}:{link.external_id}"
             )
+    elif args.episode_command == "explain":
+        import json as _json
+        from ..cognition.correlation.explain import explain_episode
+        print(_json.dumps(explain_episode(ws.store, args.episode_id),
+                          indent=2, default=str))
     else:
         for ep in ws.store.list_work_episodes(limit=args.limit):
             print(
@@ -1116,6 +1149,19 @@ def cmd_identity(args) -> None:
             ws.store, args.link_id, entity_id=args.entity,
         )
         print(f"confirmed {link.id} status={link.status.value}")
+    elif args.identity_command == "unconfirm":
+        from ..cognition.correlation.identity import unconfirm_identity_link
+        link = unconfirm_identity_link(ws.store, args.link_id)
+        print(f"unconfirmed {link.id} status={link.status.value}")
+    elif args.identity_command == "reject":
+        from ..cognition.correlation.identity import reject_identity_link
+        link = reject_identity_link(ws.store, args.link_id)
+        print(f"rejected {link.id} status={link.status.value}")
+    elif args.identity_command == "why":
+        import json as _json
+        from ..cognition.correlation.explain import explain_identity_link
+        print(_json.dumps(explain_identity_link(ws.store, args.link_id),
+                          indent=2, default=str))
     else:
         for ident in ws.store.list_external_identities(provider=args.provider):
             print(
@@ -1459,6 +1505,10 @@ def main(argv: list[str] | None = None) -> None:
     csyncdue.set_defaults(func=cmd_connector)
     cs.add_parser("contract", help="print §88 adapter contract matrix"
                   ).set_defaults(func=cmd_connector)
+    cs.add_parser(
+        "completion",
+        help="print connector completion criteria matrix (§93)",
+    ).set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")
@@ -1539,6 +1589,17 @@ def main(argv: list[str] | None = None) -> None:
     pp.set_defaults(func=cmd_project)
     pp = project_sub.add_parser("links", help="list project links")
     pp.set_defaults(func=cmd_project)
+    for name, help_ in (
+        ("confirm", "mark project link confirmed"),
+        ("reject", "reject a project link"),
+        ("historical", "archive link as historical (closed project provenance)"),
+    ):
+        pp = project_sub.add_parser(name, help=help_)
+        pp.add_argument("link_id")
+        pp.set_defaults(func=cmd_project)
+    pp = project_sub.add_parser("explain", help="why a project link exists")
+    pp.add_argument("link_id")
+    pp.set_defaults(func=cmd_project)
 
     p = sub.add_parser(
         "correlate",
@@ -1557,6 +1618,9 @@ def main(argv: list[str] | None = None) -> None:
     ep = ep_sub.add_parser("show")
     ep.add_argument("episode_id")
     ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser("explain", help="why this episode exists (anchors/links)")
+    ep.add_argument("episode_id")
+    ep.set_defaults(func=cmd_episode)
 
     p = sub.add_parser("identity", help="external identity resolution")
     id_sub = p.add_subparsers(dest="identity_command", required=True)
@@ -1568,6 +1632,15 @@ def main(argv: list[str] | None = None) -> None:
     ii = id_sub.add_parser("confirm")
     ii.add_argument("link_id")
     ii.add_argument("--entity", default=None, help="canonical entity id")
+    ii.set_defaults(func=cmd_identity)
+    ii = id_sub.add_parser("unconfirm", help="undo confirmation → candidate")
+    ii.add_argument("link_id")
+    ii.set_defaults(func=cmd_identity)
+    ii = id_sub.add_parser("reject", help="reject an identity link")
+    ii.add_argument("link_id")
+    ii.set_defaults(func=cmd_identity)
+    ii = id_sub.add_parser("why", help="explain an identity link")
+    ii.add_argument("link_id")
     ii.set_defaults(func=cmd_identity)
 
     p = sub.add_parser("watch", help="continuous incremental ingestion")

@@ -66,44 +66,44 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "fake": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_second_sync_is_idempotent",
+            "evidence": "tests/connectors/test_service.py::test_second_sync_is_idempotent",
         },
         "partial_batch_invisible": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_partial_failure_persists_nothing_cognitive",
+            "evidence": "tests/connectors/test_service.py::test_partial_failure_persists_nothing_cognitive",
         },
         "revision_collision_dlq": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_same_revision_different_content_is_a_collision",
+            "evidence": "tests/connectors/test_service.py::test_same_revision_different_content_is_a_collision",
         },
         "quarantine_no_percept": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_malicious_content_quarantined_never_extracted",
+            "evidence": "tests/connectors/test_service.py::test_malicious_content_quarantined_never_extracted",
         },
         "source_deletion_event": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_tombstone_builds_lineage_impact_event",
+            "evidence": "tests/connectors/test_service.py::test_tombstone_builds_lineage_impact_event",
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_checkpoint_advances_only_after_commit",
+            "evidence": "tests/connectors/test_service.py::test_checkpoint_advances_only_after_commit",
         },
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_rate_limit_degrades_and_keeps_checkpoint",
+            "evidence": "tests/connectors/test_service.py::test_rate_limit_degrades_and_keeps_checkpoint",
         },
         "unauthorized_health": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_auth_expiry_reports_unauthorized_and_no_checkpoint",
+            "evidence": "tests/connectors/test_service.py::test_auth_expiry_reports_unauthorized_and_no_checkpoint",
         },
         "unknown_schema_tolerated": {
             "status": "pass",
-            "evidence": "tests/test_connectors.py::test_sync_produces_raw_record_and_percept_with_lineage",
+            "evidence": "tests/connectors/test_service.py::test_sync_produces_raw_record_and_percept_with_lineage",
             "note": "extra fixture fields ignored by Fake normalizer",
         },
         "backfill_preview_safe": {
             "status": "pass",
-            "evidence": "tests/test_connector_ops_phase9.py::test_backfill_preview_still_safe",
+            "evidence": "tests/connectors/test_ops.py::test_backfill_preview_still_safe",
         },
         "large_attachment": {
             "status": "not_applicable",
@@ -114,11 +114,11 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "github": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_same_sync_twice_is_idempotent",
+            "evidence": "tests/connectors/github/test_adapter.py::test_same_sync_twice_is_idempotent",
         },
         "partial_batch_invisible": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_partial_batch_failure_exposes_nothing",
+            "evidence": "tests/connectors/github/test_adapter.py::test_partial_batch_failure_exposes_nothing",
         },
         "revision_collision_dlq": {
             "status": "not_tested",
@@ -127,7 +127,7 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         },
         "quarantine_no_percept": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_malicious_comment_quarantined_batch_still_commits",
+            "evidence": "tests/connectors/github/test_adapter.py::test_malicious_comment_quarantined_batch_still_commits",
         },
         "source_deletion_event": {
             "status": "not_supported",
@@ -136,24 +136,24 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_same_sync_twice_is_idempotent",
+            "evidence": "tests/connectors/github/test_adapter.py::test_same_sync_twice_is_idempotent",
             "note": "checkpoint stable across idempotent resync",
         },
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_rate_limit_degrades_with_provider_window",
+            "evidence": "tests/connectors/github/test_adapter.py::test_rate_limit_degrades_with_provider_window",
         },
         "unauthorized_health": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_auth_expiration_reports_unauthorized",
+            "evidence": "tests/connectors/github/test_adapter.py::test_auth_expiration_reports_unauthorized",
         },
         "unknown_schema_tolerated": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_unknown_schema_fields_are_tolerated",
+            "evidence": "tests/connectors/github/test_adapter.py::test_unknown_schema_fields_are_tolerated",
         },
         "backfill_preview_safe": {
             "status": "pass",
-            "evidence": "tests/test_github_connector.py::test_backfill_preview_reports_scope_and_never_ingests",
+            "evidence": "tests/connectors/github/test_adapter.py::test_backfill_preview_reports_scope_and_never_ingests",
         },
         "large_attachment": {
             "status": "not_supported",
@@ -164,7 +164,7 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "slack": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_slack_connector.py::test_same_sync_twice_is_idempotent",
+            "evidence": "tests/connectors/slack/test_adapter.py::test_same_sync_twice_is_idempotent",
         },
         "partial_batch_invisible": {
             "status": "not_tested",
@@ -180,15 +180,15 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         },
         "source_deletion_event": {
             "status": "pass",
-            "evidence": "tests/test_slack_connector.py::test_deletion_tombstone_from_webhook",
+            "evidence": "tests/connectors/slack/test_adapter.py::test_deletion_tombstone_from_webhook",
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_slack_connector.py::test_same_sync_twice_is_idempotent",
+            "evidence": "tests/connectors/slack/test_adapter.py::test_same_sync_twice_is_idempotent",
         },
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_slack_connector.py::test_rate_limit_degrades",
+            "evidence": "tests/connectors/slack/test_adapter.py::test_rate_limit_degrades",
         },
         "unauthorized_health": {
             "status": "not_tested",
@@ -201,7 +201,7 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         },
         "backfill_preview_safe": {
             "status": "pass",
-            "evidence": "tests/test_slack_connector.py::test_backfill_preview_never_ingests",
+            "evidence": "tests/connectors/slack/test_adapter.py::test_backfill_preview_never_ingests",
         },
         "large_attachment": {
             "status": "not_supported",
@@ -212,28 +212,28 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "gmail": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_gmail_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/gmail/test_adapter.py::test_idempotent_resync",
         },
         "partial_batch_invisible": {"status": "not_tested", "evidence": None},
         "revision_collision_dlq": {"status": "not_tested", "evidence": None},
         "quarantine_no_percept": {"status": "not_tested", "evidence": None},
         "source_deletion_event": {
             "status": "pass",
-            "evidence": "tests/test_gmail_connector.py::test_history_deletion_emits_event",
+            "evidence": "tests/connectors/gmail/test_adapter.py::test_history_deletion_emits_event",
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_gmail_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/gmail/test_adapter.py::test_idempotent_resync",
         },
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_gmail_connector.py::test_rate_limit_degrades",
+            "evidence": "tests/connectors/gmail/test_adapter.py::test_rate_limit_degrades",
         },
         "unauthorized_health": {"status": "not_tested", "evidence": None},
         "unknown_schema_tolerated": {"status": "not_tested", "evidence": None},
         "backfill_preview_safe": {
             "status": "pass",
-            "evidence": "tests/test_gmail_connector.py::test_backfill_preview_lists_partitions",
+            "evidence": "tests/connectors/gmail/test_adapter.py::test_backfill_preview_lists_partitions",
         },
         "large_attachment": {
             "status": "partial",
@@ -248,12 +248,12 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         "quarantine_no_percept": {"status": "not_tested", "evidence": None},
         "source_deletion_event": {
             "status": "pass",
-            "evidence": "tests/test_outlook_connector.py::test_delta_removed_emits_deletion",
+            "evidence": "tests/connectors/outlook/test_adapter.py::test_delta_removed_emits_deletion",
         },
         "checkpoint_after_commit": {"status": "not_tested", "evidence": None},
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_outlook_connector.py::test_rate_limit_degrades",
+            "evidence": "tests/connectors/outlook/test_adapter.py::test_rate_limit_degrades",
         },
         "unauthorized_health": {"status": "not_tested", "evidence": None},
         "unknown_schema_tolerated": {"status": "not_tested", "evidence": None},
@@ -267,22 +267,22 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "calendar": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_calendar_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/calendar/test_adapter.py::test_idempotent_resync",
         },
         "partial_batch_invisible": {"status": "not_tested", "evidence": None},
         "revision_collision_dlq": {"status": "not_tested", "evidence": None},
         "quarantine_no_percept": {"status": "not_tested", "evidence": None},
         "source_deletion_event": {
             "status": "pass",
-            "evidence": "tests/test_calendar_connector.py::test_cancelled_emits_tombstone",
+            "evidence": "tests/connectors/calendar/test_adapter.py::test_cancelled_emits_tombstone",
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_calendar_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/calendar/test_adapter.py::test_idempotent_resync",
         },
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_calendar_connector.py::test_rate_limit_degrades",
+            "evidence": "tests/connectors/calendar/test_adapter.py::test_rate_limit_degrades",
         },
         "unauthorized_health": {"status": "not_tested", "evidence": None},
         "unknown_schema_tolerated": {"status": "not_tested", "evidence": None},
@@ -295,7 +295,7 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "fireflies": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_fireflies_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/fireflies/test_adapter.py::test_idempotent_resync",
         },
         "partial_batch_invisible": {"status": "not_tested", "evidence": None},
         "revision_collision_dlq": {"status": "not_tested", "evidence": None},
@@ -307,11 +307,11 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_fireflies_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/fireflies/test_adapter.py::test_idempotent_resync",
         },
         "rate_limit_structured": {
             "status": "pass",
-            "evidence": "tests/test_fireflies_connector.py::test_rate_limit_degrades",
+            "evidence": "tests/connectors/fireflies/test_adapter.py::test_rate_limit_degrades",
         },
         "unauthorized_health": {"status": "not_tested", "evidence": None},
         "unknown_schema_tolerated": {"status": "not_tested", "evidence": None},
@@ -325,18 +325,18 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
     "folder": {
         "idempotent_ingest": {
             "status": "pass",
-            "evidence": "tests/test_folder_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/folder/test_adapter.py::test_idempotent_resync",
         },
         "partial_batch_invisible": {"status": "not_tested", "evidence": None},
         "revision_collision_dlq": {"status": "not_tested", "evidence": None},
         "quarantine_no_percept": {"status": "not_tested", "evidence": None},
         "source_deletion_event": {
             "status": "pass",
-            "evidence": "tests/test_folder_connector.py::test_delete_emits_tombstone",
+            "evidence": "tests/connectors/folder/test_adapter.py::test_delete_emits_tombstone",
         },
         "checkpoint_after_commit": {
             "status": "pass",
-            "evidence": "tests/test_folder_connector.py::test_idempotent_resync",
+            "evidence": "tests/connectors/folder/test_adapter.py::test_idempotent_resync",
         },
         "rate_limit_structured": {
             "status": "not_applicable",

@@ -207,7 +207,7 @@ def _github_env():
     tests_dir = Path(__file__).resolve().parents[2] / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
-    from github_mock import FakeGitHubAPI, _user
+    from tests.connectors.github.github_mock import FakeGitHubAPI, _user
 
     from twin.connectors.github import client as ghclient
 
@@ -372,7 +372,7 @@ def _slack_env():
     tests_dir = Path(__file__).resolve().parents[2] / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
-    from slack_mock import FakeSlackAPI
+    from tests.connectors.slack.slack_mock import FakeSlackAPI
 
     from twin.connectors.slack import client as slclient
 
@@ -454,7 +454,7 @@ def _gmail_env():
     tests_dir = Path(__file__).resolve().parents[2] / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
-    from gmail_mock import FakeGmailAPI
+    from tests.connectors.gmail.gmail_mock import FakeGmailAPI
     from twin.connectors.gmail import client as gclient
 
     api = FakeGmailAPI()
@@ -476,7 +476,7 @@ def _gmail_env():
 
 def _calendar_env():
     import httpx
-    from calendar_mock import FakeCalendarAPI
+    from tests.connectors.calendar.calendar_mock import FakeCalendarAPI
     from twin.connectors.calendar import client as cclient
 
     api = FakeCalendarAPI()
@@ -498,7 +498,7 @@ def _calendar_env():
 
 def _fireflies_env():
     import httpx
-    from fireflies_mock import FakeFirefliesAPI
+    from tests.connectors.fireflies.fireflies_mock import FakeFirefliesAPI
     from twin.connectors.fireflies import client as fclient
 
     api = FakeFirefliesAPI()
@@ -899,6 +899,44 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _run_connector_completion(case: dict) -> tuple[bool, str]:
+    """Live completion_matrix ok + evidence discipline + sync never confirms."""
+    from twin.connectors import completion_matrix
+
+    matrix = completion_matrix()
+    expected = case["expected"]
+    if expected.get("matrix_ok", True) and not matrix.get("ok"):
+        return False, (
+            f"completion matrix not ok: "
+            f"failed={matrix.get('failed')} "
+            f"partial={matrix.get('partial')}"
+        )
+    if expected.get("pass_requires_evidence"):
+        for row in matrix.get("criteria") or []:
+            if row.get("status") == "pass" and not (
+                row.get("evidence") or row.get("eval")
+            ):
+                return False, f"pass cell {row.get('id')} lacks evidence"
+
+    with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+        store, creds, _acc, inst = _setup(case, tmp)
+        sync_connector(store, creds, inst.id)
+        confirmed = [
+            m for m in store.list_memories()
+            if getattr(m.status, "value", m.status) == "confirmed"
+        ]
+        if len(confirmed) != expected["confirmed_memories"]:
+            return False, f"confirmed memories {len(confirmed)} != 0"
+        judgments = []
+        if hasattr(store, "list_judgments"):
+            judgments = list(store.list_judgments() or [])
+        elif hasattr(store, "list_judgment_items"):
+            judgments = list(store.list_judgment_items() or [])
+        if len(judgments) != expected["judgments"]:
+            return False, f"judgments {len(judgments)} != 0"
+    return True, "ok"
+
+
 def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
     """Phase 9 — health §57 + metrics §58 + setup/preview never ingest."""
     from twin.connectors import (
@@ -976,6 +1014,7 @@ _SCENARIOS = {
     "folder_document_revisions": _run_folder_document_revisions,
     "cross_source_work_episode": _run_cross_source_work_episode,
     "ops_health_metrics": _run_ops_health_metrics,
+    "connector_completion": _run_connector_completion,
 }
 
 
