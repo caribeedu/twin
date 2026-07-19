@@ -1434,12 +1434,15 @@ Phase 7 — Cross-source cognition (done):
 
 Phase 8 — Native proof (done):
 
-- one host-native adapter: Claude Code Hooks (`twin/interfaces/native/claude_code/`) — observes session start, user messages, tool summaries, file/project context, session end; does **not** assemble Context Packs or create a parallel memory store;
-- `HostSessionBinding` (`hsb_…`) links `external_session_id` ↔ `CognitiveSession`; proactive packs come only from `build_context_pack` / `start_session` in the cognitive core;
-- `InterventionRecommendation` is display-only (`supported_actions=["display"]`) — no host interruption/action in v0.6;
-- MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories the native adapter writes; `twin mcp` tools unchanged for queries/review/admin;
-- CLI: `twin native install|event|bindings`; hooks snippet via `twin native install`;
-- `tests/test_native_host_phase8.py` and eval `evals/native` (`host_session_proactive_pack`).
+- one host-native adapter: Claude Code Hooks (`twin/interfaces/native/claude_code/`) — observes session start, user messages, tool request/completion, file/project context, session end; does **not** assemble Context Packs or create a parallel memory store;
+- `HostSessionBinding` (`hsb_…`) links `(host_type, external_session_id, occurrence)` ↔ `CognitiveSession`; after Stop, the same external id opens occurrence N+1 (history preserved); **cwd never identifies a conversation** — missing session id is rejected;
+- security freeze: domain / project / persona / purpose / audience / vault captured at bind; refresh cannot widen scope silently;
+- observations are idempotent (`host_observed_events` + `event_id`); tool inputs pass redaction; unknown hooks → `unsupported_host_event` (never forged `user_message`);
+- fail-open hooks: Twin failures return `ok=false` + `error_id` and exit 0 with `--fail-open` so Claude Code is not blocked; stdout = protocol JSON (Context Pack only for SessionStart/pack_request), stderr = diagnostics;
+- orphan policy: Stop without binding is a no-op; observations without / after an active binding are rejected; duplicate SessionStart reuses the open binding;
+- `InterventionRecommendation` is a display-only *possible decision reversal cue* (heuristic; may false-positive) — no host interruption/action in v0.6; `HostCapabilities` declare what Claude Code can accept;
+- MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories; native path never confirms Memory;
+- CLI: `twin native install|event|bindings`; `tests/test_native_host_phase8.py` and eval `evals/native`.
 
 Deferred after Phase 7 merge (accepted debt + path — see **Correlation depth** below): episode phases, multi-factor confidence, ProjectLink lifecycle, identity graphs, intra-episode causality, incremental correlation, explainability CLI/API, scale/replay evals.
 

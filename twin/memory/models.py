@@ -387,25 +387,38 @@ class CognitiveSession(BaseModel):
 
 
 class HostSessionBinding(BaseModel):
-    """Link an external host session to a Twin CognitiveSession (v0.6 Phase 8).
+    """Link an external host conversation occurrence to a CognitiveSession.
 
-    Native adapters observe the host; they never create a parallel memory store.
+    ``occurrence`` allows the same ``external_session_id`` to start again
+    after Stop without mixing conversations. Security fields are frozen at
+    bind time and must not widen silently on refresh.
     """
 
     id: str = Field(default_factory=ids.host_session_binding_id)
     host_type: str                          # claude-code | codex | ...
     external_session_id: str
+    occurrence: int = 1
     cognitive_session_id: str
     project_id: Optional[str] = None
     principal_id: Optional[str] = None
-    connector_id: Optional[str] = None      # optional host connector handle
+    vault_id: Optional[str] = None
+    domain: Optional[str] = None
+    persona: str = "individual"
+    purpose: str = "task_execution"
+    audience: str = "self"
+    task_profile: Optional[str] = None
+    connector_id: Optional[str] = None
     started_at: str = ""
     ended_at: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class InterventionRecommendation(BaseModel):
-    """Display-only host intervention — Phase 8 does not act on the host."""
+    """Display-only heuristic cue — Phase 8 does not act on the host.
+
+    Reasons are *possible decision reversal cues*, not proven semantic
+    contradictions. May false-positive; never modifies host state.
+    """
 
     type: str = "warning"                   # warning | info
     reason: str = ""

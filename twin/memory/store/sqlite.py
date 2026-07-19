@@ -831,6 +831,47 @@ class SqliteStore(
                 "ALTER TABLE connector_backfill_jobs "
                 "ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
             )
+        # Phase 8 review: binding generations + frozen security columns
+        hsb_cols = {r[1] for r in self.conn.execute(
+            "PRAGMA table_info(host_session_bindings)")}
+        if hsb_cols:
+            for name, ddl in (
+                ("occurrence", "INTEGER NOT NULL DEFAULT 1"),
+                ("vault_id", "TEXT NOT NULL DEFAULT ''"),
+                ("domain", "TEXT NOT NULL DEFAULT ''"),
+                ("persona", "TEXT NOT NULL DEFAULT 'individual'"),
+                ("purpose", "TEXT NOT NULL DEFAULT 'task_execution'"),
+                ("audience", "TEXT NOT NULL DEFAULT 'self'"),
+                ("task_profile", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if name not in hsb_cols:
+                    self.conn.execute(
+                        f"ALTER TABLE host_session_bindings ADD COLUMN {name} {ddl}"
+                    )
+            # Replace global unique(host, ext) with (host, ext, occurrence)
+            self.conn.execute("DROP INDEX IF EXISTS uq_hsb_host_ext")
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_hsb_host_ext_occ "
+                "ON host_session_bindings(host_type, external_session_id, occurrence)"
+            )
+        self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS host_observed_events (
+                id TEXT PRIMARY KEY,
+                host_type TEXT NOT NULL,
+                external_session_id TEXT NOT NULL,
+                occurrence INTEGER NOT NULL DEFAULT 1,
+                event_id TEXT NOT NULL,
+                binding_id TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_host_event
+                ON host_observed_events(
+                    host_type, external_session_id, occurrence, event_id
+                );
+            """
+        )
         self._maybe_commit()
 
     def close(self) -> None:

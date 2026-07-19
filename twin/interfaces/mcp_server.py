@@ -404,9 +404,15 @@ def create_server(home: Optional[str] = None):
         Same Projects / Memories / Sessions as MCP — no parallel native store."""
         if not hasattr(ws.store, "find_host_session_binding"):
             return json.dumps({"error": "host bindings unsupported"})
-        binding = ws.store.find_host_session_binding(
-            host_type=host_type, external_session_id=external_session_id,
-        )
+        binding = None
+        if hasattr(ws.store, "find_active_host_session_binding"):
+            binding = ws.store.find_active_host_session_binding(
+                host_type=host_type, external_session_id=external_session_id,
+            )
+        if binding is None:
+            binding = ws.store.find_host_session_binding(
+                host_type=host_type, external_session_id=external_session_id,
+            )
         if binding is None:
             return json.dumps({"error": "not found"})
         session = ws.store.get_session(binding.cognitive_session_id)
@@ -415,7 +421,10 @@ def create_server(home: Optional[str] = None):
                 "id": binding.id,
                 "host_type": binding.host_type,
                 "external_session_id": binding.external_session_id,
+                "occurrence": binding.occurrence,
                 "cognitive_session_id": binding.cognitive_session_id,
+                "domain": binding.domain,
+                "project_id": binding.project_id,
                 "ended_at": binding.ended_at,
             },
             "session": _session_dict(session) if session else None,

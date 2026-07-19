@@ -1,29 +1,55 @@
-"""HostSessionBinding persistence (v0.6 Phase 8)."""
+"""HostSessionBinding + observed-event idempotency (v0.6 Phase 8)."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Optional
 
+from twin import ids
 from twin.memory.models import HostSessionBinding
 
 HOST_BINDING_SCHEMA = """
+DROP INDEX IF EXISTS uq_hsb_host_ext;
 CREATE TABLE IF NOT EXISTS host_session_bindings (
     id TEXT PRIMARY KEY,
     host_type TEXT NOT NULL,
     external_session_id TEXT NOT NULL,
+    occurrence INTEGER NOT NULL DEFAULT 1,
     cognitive_session_id TEXT NOT NULL,
     project_id TEXT NOT NULL DEFAULT '',
     principal_id TEXT NOT NULL DEFAULT '',
+    vault_id TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT '',
+    persona TEXT NOT NULL DEFAULT 'individual',
+    purpose TEXT NOT NULL DEFAULT 'task_execution',
+    audience TEXT NOT NULL DEFAULT 'self',
+    task_profile TEXT NOT NULL DEFAULT '',
     connector_id TEXT NOT NULL DEFAULT '',
     started_at TEXT NOT NULL DEFAULT '',
     ended_at TEXT,
     payload TEXT NOT NULL DEFAULT '{}'
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_hsb_host_ext
-    ON host_session_bindings(host_type, external_session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hsb_host_ext_occ
+    ON host_session_bindings(host_type, external_session_id, occurrence);
 CREATE INDEX IF NOT EXISTS idx_hsb_session
     ON host_session_bindings(cognitive_session_id);
+CREATE INDEX IF NOT EXISTS idx_hsb_active
+    ON host_session_bindings(host_type, external_session_id, ended_at);
+
+CREATE TABLE IF NOT EXISTS host_observed_events (
+    id TEXT PRIMARY KEY,
+    host_type TEXT NOT NULL,
+    external_session_id TEXT NOT NULL,
+    occurrence INTEGER NOT NULL DEFAULT 1,
+    event_id TEXT NOT NULL,
+    binding_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_host_event
+    ON host_observed_events(host_type, external_session_id, occurrence, event_id);
+CREATE INDEX IF NOT EXISTS idx_host_event_binding
+    ON host_observed_events(binding_id);
 """
 
 
@@ -32,9 +58,16 @@ def _binding_to_row(b: HostSessionBinding) -> dict[str, Any]:
         "id": b.id,
         "host_type": b.host_type,
         "external_session_id": b.external_session_id,
+        "occurrence": int(b.occurrence or 1),
         "cognitive_session_id": b.cognitive_session_id,
         "project_id": b.project_id or "",
         "principal_id": b.principal_id or "",
+        "vault_id": b.vault_id or "",
+        "domain": b.domain or "",
+        "persona": b.persona or "individual",
+        "purpose": b.purpose or "task_execution",
+        "audience": b.audience or "self",
+        "task_profile": b.task_profile or "",
         "connector_id": b.connector_id or "",
         "started_at": b.started_at or "",
         "ended_at": b.ended_at,
@@ -49,13 +82,21 @@ def _row_to_binding(row: Any) -> HostSessionBinding:
         meta = payload
     else:
         meta = json.loads(payload or "{}")
+    occ = row["occurrence"] if "occurrence" in keys else 1
     return HostSessionBinding(
         id=row["id"],
         host_type=row["host_type"],
         external_session_id=row["external_session_id"],
+        occurrence=int(occ or 1),
         cognitive_session_id=row["cognitive_session_id"],
         project_id=row["project_id"] or None,
         principal_id=row["principal_id"] or None,
+        vault_id=(row["vault_id"] if "vault_id" in keys else "") or None,
+        domain=(row["domain"] if "domain" in keys else "") or None,
+        persona=(row["persona"] if "persona" in keys else None) or "individual",
+        purpose=(row["purpose"] if "purpose" in keys else None) or "task_execution",
+        audience=(row["audience"] if "audience" in keys else None) or "self",
+        task_profile=(row["task_profile"] if "task_profile" in keys else "") or None,
         connector_id=row["connector_id"] or None,
         started_at=row["started_at"] or "",
         ended_at=row["ended_at"],
@@ -81,30 +122,70 @@ class HostBindingStoreMixin:
         )
         return _row_to_binding(row) if row else None
 
-    def find_host_session_binding(
+    def find_active_host_session_binding(
         self, *, host_type: str, external_session_id: str,
     ) -> Optional[HostSessionBinding]:
         row = self._j_fetchone(
             "SELECT * FROM host_session_bindings WHERE host_type = ? AND "
-            "external_session_id = ?",
+            "external_session_id = ? AND (ended_at IS NULL OR ended_at = '') "
+            "ORDER BY occurrence DESC LIMIT 1",
             (host_type, external_session_id),
         )
         return _row_to_binding(row) if row else None
+
+    def find_host_session_binding(
+        self, *, host_type: str, external_session_id: str,
+    ) -> Optional[HostSessionBinding]:
+        """Latest binding for the external id (active preferred, else newest)."""
+        active = self.find_active_host_session_binding(
+            host_type=host_type, external_session_id=external_session_id,
+        )
+        if active is not None:
+            return active
+        row = self._j_fetchone(
+            "SELECT * FROM host_session_bindings WHERE host_type = ? AND "
+            "external_session_id = ? ORDER BY occurrence DESC LIMIT 1",
+            (host_type, external_session_id),
+        )
+        return _row_to_binding(row) if row else None
+
+    def next_host_binding_occurrence(
+        self, *, host_type: str, external_session_id: str,
+    ) -> int:
+        row = self._j_fetchone(
+            "SELECT MAX(occurrence) AS m FROM host_session_bindings "
+            "WHERE host_type = ? AND external_session_id = ?",
+            (host_type, external_session_id),
+        )
+        if not row:
+            return 1
+        m = row["m"] if "m" in set(row.keys()) else None
+        return int(m or 0) + 1
 
     def find_host_session_binding_by_session(
         self, cognitive_session_id: str,
     ) -> Optional[HostSessionBinding]:
         row = self._j_fetchone(
             "SELECT * FROM host_session_bindings WHERE cognitive_session_id = ? "
-            "ORDER BY started_at DESC LIMIT 1",
+            "ORDER BY occurrence DESC LIMIT 1",
             (cognitive_session_id,),
         )
         return _row_to_binding(row) if row else None
 
     def list_host_session_bindings(
-        self, *, host_type: Optional[str] = None, limit: int = 200,
+        self,
+        *,
+        host_type: Optional[str] = None,
+        external_session_id: Optional[str] = None,
+        limit: int = 200,
     ) -> list[HostSessionBinding]:
-        if host_type:
+        if host_type and external_session_id:
+            rows = self._j_fetchall(
+                "SELECT * FROM host_session_bindings WHERE host_type = ? AND "
+                "external_session_id = ? ORDER BY occurrence DESC LIMIT ?",
+                (host_type, external_session_id, limit),
+            )
+        elif host_type:
             rows = self._j_fetchall(
                 "SELECT * FROM host_session_bindings WHERE host_type = ? "
                 "ORDER BY started_at DESC LIMIT ?",
@@ -117,3 +198,49 @@ class HostBindingStoreMixin:
                 (limit,),
             )
         return [_row_to_binding(r) for r in rows]
+
+    def has_host_observed_event(
+        self,
+        *,
+        host_type: str,
+        external_session_id: str,
+        occurrence: int,
+        event_id: str,
+    ) -> bool:
+        row = self._j_fetchone(
+            "SELECT id FROM host_observed_events WHERE host_type = ? AND "
+            "external_session_id = ? AND occurrence = ? AND event_id = ?",
+            (host_type, external_session_id, occurrence, event_id),
+        )
+        return row is not None
+
+    def insert_host_observed_event(
+        self,
+        *,
+        host_type: str,
+        external_session_id: str,
+        occurrence: int,
+        event_id: str,
+        binding_id: str,
+        kind: str,
+        created_at: str,
+    ) -> bool:
+        """Insert idempotency row. Returns False if already present."""
+        if self.has_host_observed_event(
+            host_type=host_type,
+            external_session_id=external_session_id,
+            occurrence=occurrence,
+            event_id=event_id,
+        ):
+            return False
+        self._c_insert("host_observed_events", {
+            "id": ids.new_id("hevt"),
+            "host_type": host_type,
+            "external_session_id": external_session_id,
+            "occurrence": occurrence,
+            "event_id": event_id,
+            "binding_id": binding_id,
+            "kind": kind,
+            "created_at": created_at,
+        })
+        return True

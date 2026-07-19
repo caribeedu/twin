@@ -918,13 +918,25 @@ def cmd_project(args) -> None:
 
 
 def cmd_native(args) -> None:
-    """Phase 8 — host-native observation (Claude Code hooks proof)."""
+    """Phase 8 — host-native observation (Claude Code hooks proof).
+
+    Protocol:
+    - stdout: JSON ``NativeEventResult`` (context_pack only for SessionStart /
+      pack_request);
+    - stderr: diagnostics;
+    - ``--fail-open`` (hooks default): Twin failures exit 0 so the host is not blocked;
+    - ``--strict`` / admin commands: non-zero exit on failure.
+    """
     import sys
     from pathlib import Path
 
-    from .native.claude_code import normalize_claude_code_hook, write_hooks_config
+    from .native.claude_code import (
+        MissingExternalSessionId,
+        normalize_claude_code_hook,
+        write_hooks_config,
+    )
     from .native.events import HostEvent
-    from .native.service import NativeHostService
+    from .native.service import NativeHostService, should_emit_pack
 
     ws = Workspace(args.home)
     if args.native_command == "install":
@@ -942,46 +954,68 @@ def cmd_native(args) -> None:
         host = args.host
         for b in ws.store.list_host_session_bindings(host_type=host, limit=args.limit):
             print(
-                f"{b.id}  {b.host_type}:{b.external_session_id}  "
+                f"{b.id}  {b.host_type}:{b.external_session_id}"
+                f"#occ={b.occurrence}  "
                 f"ses={b.cognitive_session_id}  "
+                f"domain={b.domain or '—'}  "
                 f"{'ended' if b.ended_at else 'active'}"
             )
         return
 
     # event
+    fail_open = bool(getattr(args, "fail_open", False)) and not getattr(args, "strict", False)
     raw = args.payload
     if args.stdin or raw in (None, "-", ""):
         raw = sys.stdin.read()
     host = (args.host or "claude-code").lower()
-    if host == "claude-code":
-        try:
-            data = json.loads(raw) if isinstance(raw, str) and raw.strip().startswith("{") else {}
-        except json.JSONDecodeError:
-            data = {"text": raw}
-        if isinstance(raw, str) and raw.strip() and not data:
-            data = {"prompt": raw}
-        event = normalize_claude_code_hook(
-            data if data else raw,
-            hook_name=args.hook,
-            default_cwd=args.cwd,
-        )
-        if args.external_session:
-            event.external_session_id = args.external_session
-        if args.kind:
-            event.kind = args.kind
-    else:
-        event = HostEvent(
-            kind=args.kind or "user_message",
-            host_type=host,
-            external_session_id=args.external_session or "native:default",
-            text=raw if isinstance(raw, str) else "",
-            cwd=args.cwd,
-            project=args.project,
-            domain=args.domain,
-        )
-    result = NativeHostService(ws.store, ws.cfg, ws.embedder).handle(event)
-    _print(result.to_dict())
+    try:
+        if host == "claude-code":
+            try:
+                data = json.loads(raw) if isinstance(raw, str) and raw.strip().startswith("{") else {}
+            except json.JSONDecodeError:
+                data = {"text": raw}
+            if isinstance(raw, str) and raw.strip() and not data:
+                data = {"prompt": raw}
+            if args.external_session and isinstance(data, dict):
+                data = {**data, "session_id": args.external_session}
+            event = normalize_claude_code_hook(
+                data if data else raw,
+                hook_name=args.hook,
+                default_cwd=args.cwd,
+            )
+            if args.kind:
+                event.kind = args.kind
+        else:
+            if not args.external_session:
+                raise MissingExternalSessionId(
+                    "external_session_id required — cwd/project must not identify conversations"
+                )
+            event = HostEvent(
+                kind=args.kind or "user_message",
+                host_type=host,
+                external_session_id=args.external_session,
+                text=raw if isinstance(raw, str) else "",
+                cwd=args.cwd,
+                project=args.project,
+                domain=args.domain,
+            )
+        result = NativeHostService(ws.store, ws.cfg, ws.embedder).handle(event)
+    except MissingExternalSessionId as exc:
+        from .native.service import NativeEventResult
+
+        result = NativeEventResult(ok=False, error=str(exc))
+        event = None
+
+    emit_pack = should_emit_pack(getattr(event, "kind", "") or "")
+    payload = result.to_dict(include_pack=emit_pack)
     if not result.ok:
+        print(
+            f"twin native: {result.error}"
+            + (f" error_id={result.error_id}" if result.error_id else ""),
+            file=sys.stderr,
+        )
+    print(json.dumps(payload, ensure_ascii=False, default=str))
+    if not result.ok and not fail_open:
         raise SystemExit(1)
 
 
@@ -1520,10 +1554,19 @@ def main(argv: list[str] | None = None) -> None:
     ni.add_argument("--host", default="claude-code")
     ni.add_argument("--hook", default=None, help="Claude Code hook name")
     ni.add_argument("--kind", default=None, help="override HostEvent.kind")
-    ni.add_argument("--external-session", default=None)
+    ni.add_argument("--external-session", default=None,
+                    help="required conversation id (never inferred from cwd)")
     ni.add_argument("--cwd", default=None)
     ni.add_argument("--project", default=None)
     ni.add_argument("--domain", default=None)
+    ni.add_argument(
+        "--fail-open", action="store_true",
+        help="exit 0 on Twin errors so host hooks are never blocked (hooks default)",
+    )
+    ni.add_argument(
+        "--strict", action="store_true",
+        help="non-zero exit on Twin errors (admin / CI)",
+    )
     ni.set_defaults(func=cmd_native)
 
     sub.add_parser("export", help="export everything as JSON").set_defaults(func=cmd_export)

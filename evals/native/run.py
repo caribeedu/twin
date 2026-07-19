@@ -9,14 +9,23 @@ from pathlib import Path
 
 from twin.cognition.sessions import start_session
 from twin.config import Config
-from twin.interfaces.native.claude_code import normalize_claude_code_hook
+from twin.interfaces.native.claude_code import (
+    MissingExternalSessionId,
+    normalize_claude_code_hook,
+)
 from twin.interfaces.native.events import HostEvent
 from twin.interfaces.native.service import NativeHostService
 from twin.memory.embeddings import get_embedder
-from twin.memory.models import MemoryStatus
 from twin.memory.store.sqlite import SqliteStore
 
 CASES = Path(__file__).parent / "cases"
+
+
+def _confirmed_ids(store) -> set[str]:
+    return {
+        m.id for m in store.list_memories(limit=5000)
+        if getattr(m.status, "value", m.status) == "confirmed"
+    }
 
 
 def _run_case(case: dict) -> tuple[bool, str]:
@@ -33,6 +42,16 @@ def _run_case(case: dict) -> tuple[bool, str]:
         svc = NativeHostService(store, cfg, embedder)
         host = case.get("host_type", "claude-code")
         ext = case["external_session_id"]
+        before = _confirmed_ids(store)
+
+        # Reject cwd-only identity
+        try:
+            normalize_claude_code_hook(
+                {"hook_event_name": "SessionStart", "cwd": "/tmp/x", "prompt": "no id"}
+            )
+            return False, "cwd fallback should have been rejected"
+        except MissingExternalSessionId:
+            pass
 
         hook = normalize_claude_code_hook(
             {
@@ -49,30 +68,43 @@ def _run_case(case: dict) -> tuple[bool, str]:
             return False, f"session_start failed: {start.error}"
         if start.context_pack is None:
             return False, "session_start returned no context_pack field"
-        if not start.session_id or not start.binding:
-            return False, "missing session or binding"
 
         pack2 = svc.handle(HostEvent(
             kind="pack_request", host_type=host, external_session_id=ext,
             text="proactive pack refresh", domain=case.get("domain", "technical"),
         ))
         if not pack2.ok or pack2.session_id != start.session_id:
-            return False, "pack_request not idempotent on binding"
+            return False, "pack_request not idempotent on open binding"
 
-        for kind, text, ref in (
-            ("user_message", "how does HostSessionBinding work?", None),
-            ("tool_execution", "pytest tests/test_native_host_phase8.py", "Bash"),
-            ("file_context", "edited adapter.py", "twin/interfaces/native/claude_code/adapter.py"),
-            ("assistant_result", "explained binding model", None),
+        # Domain freeze
+        bad = svc.handle(HostEvent(
+            kind="pack_request", host_type=host, external_session_id=ext,
+            text="widen", domain="personal",
+        ))
+        if bad.ok:
+            return False, "domain freeze not enforced"
+
+        for kind, text, eid in (
+            ("user_message", "how does HostSessionBinding work?", "um1"),
+            ("tool_requested", "pytest --collect", "tr1"),
+            ("tool_completed", "pytest passed", "tc1"),
+            ("file_context", "edited adapter.py", "fc1"),
+            ("assistant_result", "explained binding model", "ar1"),
         ):
             r = svc.handle(HostEvent(
                 kind=kind, host_type=host, external_session_id=ext,
-                text=text, ref=ref,
+                text=text, event_id=eid,
             ))
             if not r.ok:
                 return False, f"{kind} failed: {r.error}"
+            # idempotent retry
+            r2 = svc.handle(HostEvent(
+                kind=kind, host_type=host, external_session_id=ext,
+                text=text, event_id=eid,
+            ))
+            if not r2.ok or not r2.extras.get("duplicated"):
+                return False, f"{kind} retry not idempotent"
 
-        # Parallel MCP/CLI session on the same store
         other = start_session(
             store, cfg, embedder, "parallel mcp/cli session",
             client="cli", domain=case.get("domain", "technical"),
@@ -87,23 +119,20 @@ def _run_case(case: dict) -> tuple[bool, str]:
         if not end.ok or not end.binding or not end.binding.ended_at:
             return False, "session_end did not close binding"
 
-        ses = store.get_session(start.session_id)
-        if ses is None:
-            return False, "cognitive session missing"
-        for mid in ses.created_memory_ids or []:
-            mem = store.get_memory(mid)
-            if mem is not None and mem.status == MemoryStatus.confirmed:
-                return False, f"native path confirmed memory {mid}"
+        # Reuse external id → new occurrence
+        again = svc.handle(HostEvent(
+            kind="session_start", host_type=host, external_session_id=ext,
+            text="second conversation", domain=case.get("domain", "technical"),
+        ))
+        if not again.ok or again.binding.occurrence != 2:
+            return False, "reuse after Stop did not open occurrence 2"
+        if again.session_id == start.session_id:
+            return False, "reuse attached to old CognitiveSession"
 
-        kinds = {a.get("kind") for a in ses.artifacts}
-        for need in ("user_message", "tool_execution", "file_context"):
-            if need not in kinds:
-                return False, f"missing artifact kind {need}"
+        after = _confirmed_ids(store)
+        if after - before:
+            return False, f"native path confirmed memories: {after - before}"
 
-        # MCP-readable binding
-        found = store.find_host_session_binding(host_type=host, external_session_id=ext)
-        if found is None or found.cognitive_session_id != start.session_id:
-            return False, "binding not readable for MCP coexistence"
         return True, "ok"
 
 

@@ -684,6 +684,27 @@ class PostgresStore(
             cur.execute(_CONNECTOR_SCHEMA)
             cur.execute(CORRELATION_SCHEMA)
             cur.execute(HOST_BINDING_SCHEMA)
+            for stmt in (
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "occurrence INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "vault_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "domain TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "persona TEXT NOT NULL DEFAULT 'individual'",
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "purpose TEXT NOT NULL DEFAULT 'task_execution'",
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "audience TEXT NOT NULL DEFAULT 'self'",
+                "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
+                "task_profile TEXT NOT NULL DEFAULT ''",
+                "DROP INDEX IF EXISTS uq_hsb_host_ext",
+            ):
+                try:
+                    cur.execute(stmt)
+                except Exception:
+                    pass
             cur.execute(_EMBEDDINGS_PGVECTOR if self.has_pgvector else _EMBEDDINGS_FALLBACK)
 
     def _begin_transaction(self) -> None:
