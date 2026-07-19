@@ -28,6 +28,7 @@ from .credentials import (
     generate_token,
 )
 from .errors import sanitize_error
+from .completion import check_criterion, completion_matrix
 from .contract import check_adapter_contract, contract_matrix
 from .health import connector_health, snapshot_health
 from .counters import (
@@ -165,6 +166,8 @@ __all__ = [
     "build_credential_store",
     "build_percept",
     "check_adapter_contract",
+    "check_criterion",
+    "completion_matrix",
     "compute_connector_metrics",
     "connector_health",
     "contract_matrix",

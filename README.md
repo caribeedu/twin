@@ -1458,6 +1458,16 @@ Phase 9 — Evals and operations (done):
 - §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
 - `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
 
+Phase 10 — Final Review (done):
+
+- attests §93 Critérios de conclusão via evidence-based `completion_matrix()` (`twin/connectors/completion.py`) — 17 criteria, each with test and/or eval pointers; `pass` without evidence demoted; `ok` fails closed on `fail` / `not_tested` / `partial`;
+- gap-fill proofs: meeting revises decision via explicit `supersede` (never auto-confirm from connector); professional Context Pack includes authorized `vault_work` memory; personal persona denied; multi-evidence memory survives single-artifact deletion;
+- CLI: `twin connector completion` (exit 1 when matrix not ok);
+- documents §94 out-of-scope and §95 thesis alongside the matrix payload;
+- `tests/test_v06_final_review.py` and eval `v06_completion_scenario`.
+
+v0.6 is complete when `twin connector completion` reports `ok: true` and the Phase 1–9 suites remain green. Correlation depth (episode phases, multi-factor confidence, identity graphs, causality, incremental correlation, HTTP/MCP explain, scale evals) stays deferred to later `vX` — not a Phase 10 blocker.
+
 ### Correlation depth (planned vX — after Phase 7)
 
 Goal: deepen the correlation layer from “clustered evidence” into an explainable, incrementally maintained work-episode model — without turning correlation into Memory or Judgment.

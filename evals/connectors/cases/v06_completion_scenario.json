@@ -1,0 +1,26 @@
+{
+  "id": "v06_completion_scenario",
+  "scenario": "v06_completion_scenario",
+  "description": "Phase 10 Final Review — §93 completion matrix is evidence-based and ok; Fake sync still never confirms Memory/Judgment.",
+  "connector_type": "fake",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "fixtures": {
+    "issues": [
+      {
+        "external_id": "v06-1",
+        "external_revision": "1",
+        "seq": 1,
+        "occurred_at": "2026-07-15T09:00:00Z",
+        "content": "Ship v0.6 Final Review criteria."
+      }
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "criteria_count": 17,
+    "matrix_ok": true,
+    "confirmed_memories": 0,
+    "judgments": 0
+  }
+}

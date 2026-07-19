@@ -764,6 +764,12 @@ def cmd_connector(args) -> None:
     elif cmd == "contract":
         from ..connectors import contract_matrix
         print(_json.dumps(contract_matrix(), indent=2, default=str))
+    elif cmd == "completion":
+        from ..connectors import completion_matrix
+        matrix = completion_matrix()
+        print(_json.dumps(matrix, indent=2, default=str))
+        if not matrix.get("ok"):
+            raise SystemExit(1)
     else:
         raise SystemExit(f"unknown connector command: {cmd}")
 
@@ -1499,6 +1505,10 @@ def main(argv: list[str] | None = None) -> None:
     csyncdue.set_defaults(func=cmd_connector)
     cs.add_parser("contract", help="print §88 adapter contract matrix"
                   ).set_defaults(func=cmd_connector)
+    cs.add_parser(
+        "completion",
+        help="print v0.6 §93 Final Review completion matrix (Phase 10)",
+    ).set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")

@@ -899,6 +899,38 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _run_v06_completion_scenario(case: dict) -> tuple[bool, str]:
+    """Phase 10 — §93 completion matrix ok + sync never confirms Memory/Judgment."""
+    from twin.connectors import completion_matrix
+
+    matrix = completion_matrix()
+    expected = case["expected"]
+    if matrix.get("count") != expected["criteria_count"]:
+        return False, f"criteria count {matrix.get('count')} != {expected['criteria_count']}"
+    if bool(matrix.get("ok")) != bool(expected["matrix_ok"]):
+        return False, f"matrix.ok={matrix.get('ok')} failed={matrix.get('failed')}"
+    if matrix.get("failed") or matrix.get("partial"):
+        return False, f"failed={matrix.get('failed')} partial={matrix.get('partial')}"
+
+    with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+        store, creds, _acc, inst = _setup(case, tmp)
+        sync_connector(store, creds, inst.id)
+        confirmed = [
+            m for m in store.list_memories()
+            if getattr(m.status, "value", m.status) == "confirmed"
+        ]
+        if len(confirmed) != expected["confirmed_memories"]:
+            return False, f"confirmed memories {len(confirmed)} != 0"
+        judgments = []
+        if hasattr(store, "list_judgments"):
+            judgments = list(store.list_judgments() or [])
+        elif hasattr(store, "list_judgment_items"):
+            judgments = list(store.list_judgment_items() or [])
+        if len(judgments) != expected["judgments"]:
+            return False, f"judgments {len(judgments)} != 0"
+    return True, "ok"
+
+
 def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
     """Phase 9 — health §57 + metrics §58 + setup/preview never ingest."""
     from twin.connectors import (
@@ -976,6 +1008,7 @@ _SCENARIOS = {
     "folder_document_revisions": _run_folder_document_revisions,
     "cross_source_work_episode": _run_cross_source_work_episode,
     "ops_health_metrics": _run_ops_health_metrics,
+    "v06_completion_scenario": _run_v06_completion_scenario,
 }
 
 
