@@ -899,6 +899,67 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
+    """Phase 9 — health §57 + metrics §58 + setup/preview never ingest."""
+    from twin.connectors import (
+        backfill_preview,
+        compute_connector_metrics,
+        connector_health,
+        plan_connector_setup,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
+        store, creds, acc, inst = _setup(case, tmp)
+        result = sync_connector(store, creds, inst.id)
+        if result.percepts != case["expected"]["percepts"]:
+            return False, f"percepts {result.percepts} != {case['expected']['percepts']}"
+        records = store.list_connector_records(inst.id)
+        if len(records) != case["expected"]["records"]:
+            return False, f"records {len(records)} != {case['expected']['records']}"
+
+        health = connector_health(store, inst.id)
+        for key in case["expected"]["health_keys"]:
+            if key not in health:
+                return False, f"health missing {key}"
+        for key in ("schedule_lag_seconds", "checkpoint_age_seconds"):
+            if key not in health:
+                return False, f"health missing {key}"
+        if health.get("health") != "healthy":
+            return False, f"health={health.get('health')}"
+        if health.get("last_checkpoint_at") is None:
+            return False, "last_checkpoint_at missing after sync"
+        # lag_seconds is schedule lag — unknown until next_run_at exists
+        if health.get("lag_seconds") not in (None, 0):
+            return False, f"unexpected lag_seconds={health.get('lag_seconds')}"
+
+        metrics = compute_connector_metrics(store)["connectors"]
+        min_fetch = case["expected"]["metrics_min_fetch"]
+        if metrics.get("connector_fetch_total", 0) < min_fetch:
+            return False, (
+                f"connector_fetch_total {metrics.get('connector_fetch_total')} "
+                f"< {min_fetch}"
+            )
+        if "connector_memory_candidates" in metrics:
+            return False, "obsolete connector_memory_candidates still present"
+        if metrics.get("connector_percepts_total", 0) < min_fetch:
+            return False, "connector_percepts_total missing/low"
+
+        before = len(store.list_percepts())
+        plan = plan_connector_setup(
+            store, connector_type="github", source_owner="employer", org_key="acme",
+        )
+        if plan.get("ingests") is not False or plan.get("started") is not False:
+            return False, "setup plan must not start ingestion"
+        preview = backfill_preview(
+            store, creds, inst.id, principal_id="principal_eval",
+        )
+        if preview.get("started") is not False:
+            return False, "backfill preview started unexpectedly"
+        if len(store.list_percepts()) != before:
+            return False, "setup/preview mutated percepts"
+        return True, "ok"
+
+
 _SCENARIOS = {
     "normalization": _run_simple,
     "replay": _run_simple,
@@ -914,6 +975,7 @@ _SCENARIOS = {
     "calendar_meeting_correlation": _run_calendar_meeting_correlation,
     "folder_document_revisions": _run_folder_document_revisions,
     "cross_source_work_episode": _run_cross_source_work_episode,
+    "ops_health_metrics": _run_ops_health_metrics,
 }
 
 

@@ -1446,6 +1446,15 @@ Phase 8 — Native proof (done):
 - MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories; native path never confirms Memory;
 - CLI: `twin native install|event|bindings`; `tests/test_native_host_phase8.py` and eval `evals/native`.
 
+Phase 9 — Evals and operations (done):
+
+- connector observability (§58): durable `*_total` counters on `ConnectorSyncState`, applied **exactly once per `batch.id`** via `connector_counter_batches` ledger — claim + bump share one `store.transaction()` (claim never commits alone); `reconcile_connector_counters` recovers crash undercounts and can repair divergence with audit; summary metrics separated from high-cardinality `instances_detail`; `connector_percepts_total` counts Percepts (not Memory candidates); nested under `twin stats` / `GET /api/metrics`;
+- health snapshot (§57): `lag_seconds` ≡ `schedule_lag_seconds` (`max(0, now - next_run_at)`, `null` when unscheduled); `checkpoint_age_seconds` and optional `source_lag_seconds` are separate; never-run connectors report `health=unknown`; `pending_items` counts DLQ + backlog queues only (not `targeted_streams` scope);
+- setup plan (§77): `twin connector setup <type> --source-owner …` prints ownership→authenticate→scope→preview→confirm (never ingests) and surfaces ownership/vault/org warnings; backfill preview remains the historical import gate;
+- scheduler ops: `twin connector due` / `twin connector sync-due`; `twin doctor` resolves credentials (ref must decrypt), classifies due by schedule grace, and reports unhealthy / lagged instances;
+- §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
+- `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
+
 Deferred after Phase 7 merge (accepted debt + path — see **Correlation depth** below): episode phases, multi-factor confidence, ProjectLink lifecycle, identity graphs, intra-episode causality, incremental correlation, explainability CLI/API, scale/replay evals.
 
 ### Correlation depth (planned vX — after Phase 7)

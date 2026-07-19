@@ -1,0 +1,47 @@
+{
+  "id": "ops_health_metrics",
+  "scenario": "ops_health_metrics",
+  "description": "Phase 9 — after a Fake sync, §57 health exposes lag/pending/checkpoint and §58 metrics counters are non-zero; setup plan and backfill preview never ingest.",
+  "connector_type": "fake",
+  "source_owner": "employer",
+  "org_key": "acme",
+  "fixtures": {
+    "issues": [
+      {
+        "external_id": "ops-1",
+        "external_revision": "1",
+        "seq": 1,
+        "occurred_at": "2026-07-01T09:00:00Z",
+        "content": "Ship Phase 9 ops surfaces."
+      },
+      {
+        "external_id": "ops-2",
+        "external_revision": "1",
+        "seq": 2,
+        "occurred_at": "2026-07-01T10:00:00Z",
+        "content": "Contract matrix covers adapters."
+      },
+      {
+        "external_id": "ops-3",
+        "external_revision": "1",
+        "seq": 3,
+        "occurred_at": "2026-07-01T11:00:00Z",
+        "content": "Doctor reports connector lag."
+      }
+    ],
+    "pull_requests": []
+  },
+  "expected": {
+    "records": 3,
+    "percepts": 3,
+    "health_keys": [
+      "lag_seconds",
+      "pending_items",
+      "last_checkpoint_at",
+      "rate_limit_remaining"
+    ],
+    "metrics_min_fetch": 3,
+    "setup_ingests": false,
+    "preview_started": false
+  }
+}

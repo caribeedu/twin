@@ -146,6 +146,23 @@ def doctor(cfg: Config) -> list[Check]:
         checks.append(Check("mcp:clients", WARN,
                             "no client configured — twin setup mcp <client>"))
 
+    # Phase 9 — connector schedule / credentials / instance health
+    try:
+        from ..connectors.ops import doctor_connector_checks
+        from ..memory.store import create_store
+
+        conn_store = create_store(cfg.resolved_db_url)
+        try:
+            for row in doctor_connector_checks(conn_store, cfg.home):
+                status = row.get("status", WARN)
+                if status not in (OK, WARN, FAIL):
+                    status = WARN
+                checks.append(Check(row["name"], status, row.get("detail", "")))
+        finally:
+            conn_store.close()
+    except Exception as exc:
+        checks.append(Check("connectors", WARN, f"connector checks skipped: {exc}"))
+
     return checks
 
 

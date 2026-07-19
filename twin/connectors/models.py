@@ -94,6 +94,8 @@ class HealthStatus(str, Enum):
     unauthorized = "unauthorized"
     revoked = "revoked"
     failed = "failed"
+    # never synced / no durable health evidence yet (Phase 9 review)
+    unknown = "unknown"
 
 
 class DeadLetterStatus(str, Enum):
@@ -323,9 +325,13 @@ class ConnectorSyncState(BaseModel):
 
     ``version`` is a compare-and-set token so concurrent webhook hints and
     scheduler consumption never silently overwrite each other.
+
+    Cumulative counters (``*_total``) are durable and monotonic — bumped when
+    a batch reaches a terminal status. They must never be reconstructed from a
+    sliding window of recent batches.
     """
     id: str                                    # == connector_id
-    status: HealthStatus = HealthStatus.healthy
+    status: HealthStatus = HealthStatus.unknown
     interval_seconds: int = Field(default=300, ge=1)
     next_run_at: Optional[str] = None
     last_success_at: Optional[str] = None
@@ -334,9 +340,20 @@ class ConnectorSyncState(BaseModel):
     retry_count: int = Field(default=0, ge=0)
     backoff_seconds: int = Field(default=0, ge=0)
     paused: bool = False
+    # schedule lag only (max(0, now - next_run_at)); not checkpoint age
     lag_seconds: int = Field(default=0, ge=0)
     pending_items: int = Field(default=0, ge=0)
     dead_letters: int = Field(default=0, ge=0)
+    # durable §58 counters — never decrease
+    fetch_total: int = Field(default=0, ge=0)
+    failed_batches_total: int = Field(default=0, ge=0)
+    normalized_total: int = Field(default=0, ge=0)
+    deduplicated_total: int = Field(default=0, ge=0)
+    quarantined_total: int = Field(default=0, ge=0)
+    percepts_total: int = Field(default=0, ge=0)
+    rate_limit_wait_total: int = Field(default=0, ge=0)
+    deletion_events_total: int = Field(default=0, ge=0)
+    counters_initialized: bool = False
     version: int = Field(default=0, ge=0)
     updated_at: str = Field(default_factory=now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)
