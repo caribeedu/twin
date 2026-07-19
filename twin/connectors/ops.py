@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from ..clock import now_iso
 from .credentials import CredentialStore, build_credential_store
-from .health import connector_health
+from .health import connector_health, schedule_lag_seconds
 from .models import SYNCABLE_STATUSES, OwnershipClass
 from .registry import get_manifest, list_adapters
 from .scheduler import due_connectors, load_schedule, sync_due
@@ -24,6 +24,36 @@ class SetupStep:
     command: str = ""
 
 
+def _setup_warnings(
+    owner: OwnershipClass,
+    vault_id: Optional[str],
+    org_key: Optional[str],
+) -> list[str]:
+    warnings: list[str] = []
+    if owner in (OwnershipClass.employer, OwnershipClass.client) and not org_key:
+        warnings.append(
+            f"{owner.value} ownership requires org_key before add "
+            "(otherwise vault placement is refused)"
+        )
+    if owner == OwnershipClass.personal and org_key:
+        warnings.append(
+            "personal ownership with org_key is unusual — confirm this is intentional"
+        )
+    if vault_id:
+        if owner == OwnershipClass.personal and vault_id.startswith("vault_work_"):
+            warnings.append(
+                f"personal ownership with work vault {vault_id!r} is inconsistent"
+            )
+        if owner in (OwnershipClass.employer, OwnershipClass.client):
+            if vault_id in ("vault_personal", "vault_general"):
+                warnings.append(
+                    f"{owner.value} ownership should not use {vault_id!r}"
+                )
+        if owner == OwnershipClass.personal and vault_id == "vault_work_acme":
+            warnings.append("personal + vault_work_acme looks like a misconfiguration")
+    return warnings
+
+
 def plan_connector_setup(
     store,
     *,
@@ -37,8 +67,7 @@ def plan_connector_setup(
 ) -> dict[str, Any]:
     """Guided setup plan — never starts ingestion (v0.6 §77).
 
-    Returns ordered steps the operator must confirm. Preview-first: no secret
-    and no sync are performed here.
+    Order: ownership/vault → authenticate → scope → backfill preview → confirm.
     """
     adapters = list_adapters()
     if connector_type not in adapters:
@@ -58,11 +87,12 @@ def plan_connector_setup(
 
     manifest = get_manifest(connector_type)
     cfg = dict(configuration or {})
+    warnings = _setup_warnings(owner, vault_id, org_key)
     steps: list[SetupStep] = [
         SetupStep(
             id="classify_ownership",
             title="Confirm ownership and vault",
-            status="ready",
+            status="ready" if not warnings else "blocked",
             detail=(
                 f"source_owner={owner.value} vault={vault_id or '(auto)'} "
                 f"org_key={org_key or '—'}"
@@ -118,10 +148,12 @@ def plan_connector_setup(
         "auth_mode": getattr(manifest, "auth_mode", None) if manifest else None,
         "started": False,
         "ingests": False,
+        "warnings": warnings,
         "steps": [s.__dict__ for s in steps],
         "note": (
             "Setup plan only — nothing is registered or fetched until you run "
-            "the listed commands. Never import full history without preview."
+            "the listed commands. Order: ownership → authenticate → scope → "
+            "preview → confirm. Never import full history without preview."
         ),
         "planned_at": now_iso(),
     }
@@ -135,6 +167,7 @@ def list_due_connectors(store, home: Path) -> dict[str, Any]:
     for cid in due:
         inst = store.get_connector_instance(cid)
         state = store.get_connector_sync_state(cid)
+        lag = schedule_lag_seconds(state)
         rows.append({
             "connector_id": cid,
             "connector_type": inst.connector_type if inst else "?",
@@ -143,6 +176,7 @@ def list_due_connectors(store, home: Path) -> dict[str, Any]:
             "interval_seconds": intervals.get(
                 inst.connector_type if inst else "", 300,
             ),
+            "schedule_lag_seconds": lag,
             "paused": bool(state.paused) if state else False,
         })
     return {
@@ -170,8 +204,9 @@ def run_sync_due(store, credentials: CredentialStore, home: Path, *,
 
 
 def doctor_connector_checks(store, home: Path) -> list[dict[str, str]]:
-    """Checks for ``twin doctor`` — credentials, instances, lag, schedule."""
+    """Checks for ``twin doctor`` — credentials, instances, schedule lag."""
     checks: list[dict[str, str]] = []
+    intervals: dict[str, int] = {}
     try:
         intervals = load_schedule(home)
         checks.append({
@@ -186,6 +221,7 @@ def doctor_connector_checks(store, home: Path) -> list[dict[str, str]]:
             "detail": str(exc),
         })
 
+    creds = None
     try:
         creds = build_credential_store(home)
         checks.append({
@@ -223,25 +259,85 @@ def doctor_connector_checks(store, home: Path) -> list[dict[str, str]]:
         h = connector_health(store, inst.id)
         if h.get("health") in ("failed", "unauthorized", "degraded"):
             unhealthy += 1
-        if int(h.get("lag_seconds") or 0) > 3600:
-            lagged += 1
-        if inst.status in SYNCABLE_STATUSES and not inst.credential_ref:
-            checks.append({
-                "name": f"connectors:auth:{inst.id}",
-                "status": "warn",
-                "detail": "syncable but no credential_ref",
-            })
+        state = store.get_connector_sync_state(inst.id)
+        if state and not state.paused and h.get("paused") is not True:
+            lag = h.get("schedule_lag_seconds")
+            interval = intervals.get(inst.connector_type, state.interval_seconds or 300)
+            grace = max(60, int(interval))
+            if lag is not None and lag > grace:
+                lagged += 1
+
+        if inst.status in SYNCABLE_STATUSES:
+            if not inst.credential_ref:
+                if (get_manifest(inst.connector_type).auth_mode or "") == "none":
+                    continue
+                checks.append({
+                    "name": f"connectors:auth:{inst.id}",
+                    "status": "warn",
+                    "detail": "syncable but no credential_ref",
+                })
+            elif creds is None:
+                checks.append({
+                    "name": f"connectors:auth:{inst.id}",
+                    "status": "warn",
+                    "detail": "credential_ref set but store unavailable",
+                })
+            else:
+                try:
+                    secret = creds.get(inst.credential_ref)
+                except Exception as exc:
+                    checks.append({
+                        "name": f"connectors:auth:{inst.id}",
+                        "status": "fail",
+                        "detail": f"credential resolve error: {type(exc).__name__}",
+                    })
+                else:
+                    if secret is None:
+                        checks.append({
+                            "name": f"connectors:auth:{inst.id}",
+                            "status": "fail",
+                            "detail": "credential_ref present but secret missing/unreadable",
+                        })
+                    else:
+                        checks.append({
+                            "name": f"connectors:auth:{inst.id}",
+                            "status": "ok",
+                            "detail": "credential resolvable",
+                        })
 
     checks.append({
         "name": "connectors:instances",
-        "status": "warn" if unhealthy else "ok",
-        "detail": f"{len(instances)} registered, {unhealthy} unhealthy, {lagged} lag>1h",
+        "status": "warn" if (unhealthy or lagged) else "ok",
+        "detail": (
+            f"{len(instances)} registered, {unhealthy} unhealthy, "
+            f"{lagged} past schedule grace"
+        ),
     })
+
     due = due_connectors(store, home)
+    overdue = 0
+    for cid in due:
+        state = store.get_connector_sync_state(cid)
+        lag = schedule_lag_seconds(state)
+        inst = store.get_connector_instance(cid)
+        interval = intervals.get(
+            inst.connector_type if inst else "", 
+            (state.interval_seconds if state else 300) or 300,
+        )
+        grace = max(60, int(interval))
+        if lag is not None and lag > grace:
+            overdue += 1
+    if not due:
+        due_status, due_detail = "ok", "0 due for sync"
+    elif overdue:
+        due_status = "warn" if overdue < 3 else "fail"
+        due_detail = f"{len(due)} due ({overdue} past schedule grace)"
+    else:
+        due_status, due_detail = "ok", f"{len(due)} due within grace"
     checks.append({
         "name": "connectors:due",
-        "status": "ok",
-        "detail": f"{len(due)} due for sync",
+        "status": due_status,
+        "detail": due_detail,
     })
     return checks
 

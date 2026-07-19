@@ -615,6 +615,8 @@ def _abort_batch(store, batch: ConnectorBatch, sr: StreamResult,
     batch.quarantined_count = 0
     try:
         store.update_connector_batch(batch)
+        from .counters import record_batch_counters
+        record_batch_counters(store, batch.connector_id, batch)
     except Exception:  # even this failing must not mask the original error
         logger.exception("could not persist aborted state for batch %s", batch.id)
     _fill_stream(sr, batch)
@@ -697,12 +699,19 @@ def _sync_stream_leased(
                     last_error=sanitize_error(exc),
                 ))
             store.update_connector_batch(batch)
+        from .counters import record_batch_counters
+        record_batch_counters(
+            store, instance.id, batch,
+            rate_limited=(exc.failure_class == FailureClass.rate_limit),
+        )
         _fill_stream(sr, batch)
         return sr  # checkpoint NOT advanced
 
     # 2a. any item failure → nothing cognitive persists, watermark stays put
     if batch.failed_count > 0:
         _persist_partial(store, batch, staged)
+        from .counters import record_batch_counters
+        record_batch_counters(store, instance.id, batch)
         _fill_stream(sr, batch)
         return sr
 
@@ -749,6 +758,10 @@ def _sync_stream_leased(
     sr.cursor_after = cursor_after or {}
     sr.done = True if page is None else bool(page.done)
     _fill_stream(sr, batch)
+    from .counters import record_batch_counters
+    record_batch_counters(
+        store, instance.id, batch, deletion_events=sr.deletion_events,
+    )
     return sr
 
 

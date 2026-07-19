@@ -921,10 +921,16 @@ def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
         for key in case["expected"]["health_keys"]:
             if key not in health:
                 return False, f"health missing {key}"
+        for key in ("schedule_lag_seconds", "checkpoint_age_seconds"):
+            if key not in health:
+                return False, f"health missing {key}"
         if health.get("health") != "healthy":
             return False, f"health={health.get('health')}"
         if health.get("last_checkpoint_at") is None:
             return False, "last_checkpoint_at missing after sync"
+        # lag_seconds is schedule lag — unknown until next_run_at exists
+        if health.get("lag_seconds") not in (None, 0):
+            return False, f"unexpected lag_seconds={health.get('lag_seconds')}"
 
         metrics = compute_connector_metrics(store)["connectors"]
         min_fetch = case["expected"]["metrics_min_fetch"]
@@ -933,6 +939,10 @@ def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
                 f"connector_fetch_total {metrics.get('connector_fetch_total')} "
                 f"< {min_fetch}"
             )
+        if "connector_memory_candidates" in metrics:
+            return False, "obsolete connector_memory_candidates still present"
+        if metrics.get("connector_percepts_total", 0) < min_fetch:
+            return False, "connector_percepts_total missing/low"
 
         before = len(store.list_percepts())
         plan = plan_connector_setup(

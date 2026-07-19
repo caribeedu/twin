@@ -1448,12 +1448,12 @@ Phase 8 — Native proof (done):
 
 Phase 9 — Evals and operations (done):
 
-- connector observability (§58): `compute_connector_metrics` aggregates fetch/normalize/dedupe/quarantine/DLQ/deletion/lag counters by type/vault/instance (no content in labels); nested under `twin stats` / `GET /api/metrics`;
-- health snapshot (§57): `connector_health` / `snapshot_health` expose `lag_seconds`, `pending_items`, `last_checkpoint_at`, `rate_limit_remaining` (+ retry/backoff/next_run) alongside status, last batch and checkpoints;
-- setup plan (§77): `twin connector setup <type> --source-owner …` prints an ordered authenticate→ownership→scope→preview→confirm plan and never ingests; backfill preview remains the historical import gate;
-- scheduler ops: `twin connector due` / `twin connector sync-due` wrap the local interval scheduler; `twin doctor` reports schedule, credential store, instance health and due count;
-- §88 contract matrix: `twin connector contract` / `contract_matrix()` checks every registered adapter’s manifest + protocol surface and documents per-adapter gaps (large attachment, deletion feed, …);
-- `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; existing Fake/GitHub/Slack/… contract suites and `evals/connectors/` scenarios remain the behavioural proof.
+- connector observability (§58): durable monotonic `*_total` counters on `ConnectorSyncState` (bumped per terminal batch; never a sliding window of the last N batches); summary metrics separated from high-cardinality `instances_detail` (ids are diagnostics, not TSDB labels); `connector_percepts_total` counts Percepts (not Memory candidates); nested under `twin stats` / `GET /api/metrics`;
+- health snapshot (§57): `lag_seconds` ≡ `schedule_lag_seconds` (`max(0, now - next_run_at)`, `null` when unscheduled); `checkpoint_age_seconds` and optional `source_lag_seconds` are separate; never-run connectors report `health=unknown`; `pending_items` counts DLQ + backlog queues only (not `targeted_streams` scope);
+- setup plan (§77): `twin connector setup <type> --source-owner …` prints ownership→authenticate→scope→preview→confirm (never ingests) and surfaces ownership/vault/org warnings; backfill preview remains the historical import gate;
+- scheduler ops: `twin connector due` / `twin connector sync-due`; `twin doctor` resolves credentials (ref must decrypt), classifies due by schedule grace, and reports unhealthy / lagged instances;
+- §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
+- `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
 
 Deferred after Phase 7 merge (accepted debt + path — see **Correlation depth** below): episode phases, multi-factor confidence, ProjectLink lifecycle, identity graphs, intra-episode causality, incremental correlation, explainability CLI/API, scale/replay evals.
 
