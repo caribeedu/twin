@@ -142,6 +142,8 @@ def record_batch_counters(
         batch, deletion_events=deletion_events, rate_limited=rate_limited,
     )
 
+    # Single transaction: claim then bump. Neither step commits on its own —
+    # store._j_commit/_c_* use _maybe_commit (no-op while _tx_depth > 0).
     with store.transaction():
         claimed = store.claim_connector_counter_batch(
             connector_id, batch.id, contrib,

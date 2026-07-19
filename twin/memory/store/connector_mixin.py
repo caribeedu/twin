@@ -374,11 +374,18 @@ class ConnectorStoreMixin:
     ) -> bool:
         """Insert ledger row for ``batch_id``. True iff this caller claimed it.
 
-        PRIMARY KEY (connector_id, batch_id) makes concurrent claims safe —
-        only one INSERT succeeds. Uses INSERT OR IGNORE / ON CONFLICT DO
-        NOTHING so a conflict does not poison an open transaction (SQLite).
-        Must run inside the same transaction as the matching counter bump.
+        **Must be called inside** ``store.transaction()``. Does **not** commit —
+        the caller owns durability so claim + counter bump stay atomic.
+
+        PRIMARY KEY (connector_id, batch_id) makes concurrent claims safe.
+        Uses INSERT OR IGNORE / ON CONFLICT DO NOTHING so a conflict does not
+        poison an open SQLite transaction.
         """
+        if getattr(self, "_tx_depth", 0) <= 0:
+            raise RuntimeError(
+                "claim_connector_counter_batch must run inside "
+                "store.transaction() so claim + bump share one commit"
+            )
         counted_at = now_iso()
         payload = json.dumps(contribution, default=str)
         # Dialect: PostgresStore exposes .conn with psycopg; Sqlite uses sqlite3.
@@ -399,7 +406,7 @@ class ConnectorStoreMixin:
         cur = self._j_exec(
             sql, (connector_id, batch_id, counted_at, payload),
         )
-        self._j_commit()
+        # No _j_commit() here — outer transaction commits claim+bump together.
         return getattr(cur, "rowcount", 0) > 0
 
     def connector_counter_batch_claimed(

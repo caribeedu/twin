@@ -321,6 +321,140 @@ def test_doctor_warns_on_counter_divergence(store, creds, tmp_path):
     assert counter and counter[0]["status"] == "warn"
 
 
+# -- transactional claim + bump -----------------------------------------------
+
+
+class _SimulatedCrash(Exception):
+    pass
+
+
+def test_claim_requires_open_transaction(store, creds):
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed, raw_count=1,
+    )
+    with pytest.raises(RuntimeError, match="store.transaction"):
+        store.claim_connector_counter_batch(
+            inst.id, batch.id, {"fetch": 1},
+        )
+
+
+def test_claim_rolls_back_when_exception_before_bump(store, creds):
+    """Claim must not survive if the surrounding transaction rolls back."""
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=10, normalized_count=10, percept_count=10,
+    )
+    store.insert_connector_batch(batch)
+    from twin.connectors.counters import batch_contribution
+    contrib = batch_contribution(batch)
+
+    with pytest.raises(_SimulatedCrash):
+        with store.transaction():
+            assert store.claim_connector_counter_batch(
+                inst.id, batch.id, contrib,
+            ) is True
+            raise _SimulatedCrash("crash after claim, before bump")
+
+    assert not store.connector_counter_batch_claimed(inst.id, batch.id)
+    state = store.get_connector_sync_state(inst.id)
+    assert state is None or state.fetch_total == 0
+
+
+def test_claim_and_bump_roll_back_when_apply_fails(store, creds):
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=8, normalized_count=8, percept_count=8,
+    )
+    store.insert_connector_batch(batch)
+    from twin.connectors.counters import batch_contribution
+    contrib = batch_contribution(batch)
+
+    def _boom(state: ConnectorSyncState) -> None:
+        raise _SimulatedCrash("crash during bump")
+
+    with pytest.raises(_SimulatedCrash):
+        with store.transaction():
+            assert store.claim_connector_counter_batch(
+                inst.id, batch.id, contrib,
+            ) is True
+            store.apply_connector_sync_state(inst.id, _boom)
+
+    assert not store.connector_counter_batch_claimed(inst.id, batch.id)
+    state = store.get_connector_sync_state(inst.id)
+    assert state is None or state.fetch_total == 0
+
+    # retry after rollback succeeds exactly once
+    record_batch_counters(store, inst.id, batch)
+    record_batch_counters(store, inst.id, batch)
+    state = store.get_connector_sync_state(inst.id)
+    assert state.fetch_total == 8
+    assert store.connector_counter_batch_claimed(inst.id, batch.id)
+
+
+def test_record_batch_counters_atomic_on_apply_failure(store, creds, monkeypatch):
+    """Full record_batch_counters path: apply failure rolls claim back."""
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=6, normalized_count=6, percept_count=6,
+    )
+    store.insert_connector_batch(batch)
+
+    real_apply = store.apply_connector_sync_state
+
+    def _failing_apply(connector_id, mutator):
+        # claim already happened inside the open transaction; boom before bump
+        raise _SimulatedCrash("apply crashed")
+
+    monkeypatch.setattr(store, "apply_connector_sync_state", _failing_apply)
+    with pytest.raises(_SimulatedCrash):
+        record_batch_counters(store, inst.id, batch)
+
+    monkeypatch.setattr(store, "apply_connector_sync_state", real_apply)
+    assert not store.connector_counter_batch_claimed(inst.id, batch.id)
+
+    record_batch_counters(store, inst.id, batch)
+    assert store.get_connector_sync_state(inst.id).fetch_total == 6
+
+
+def test_reconcile_repairs_orphaned_ledger_claim(store, creds):
+    """Legacy inconsistency: ledger row without counter bump → repair."""
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=12, normalized_count=12, percept_count=12,
+    )
+    store.insert_connector_batch(batch)
+    from twin.connectors.counters import batch_contribution
+
+    # Commit a claim alone (simulates the old early-commit bug residue)
+    with store.transaction():
+        assert store.claim_connector_counter_batch(
+            inst.id, batch.id, batch_contribution(batch),
+        )
+    assert store.connector_counter_batch_claimed(inst.id, batch.id)
+    state = store.get_connector_sync_state(inst.id)
+    assert state is None or state.fetch_total == 0
+
+    # Normal record is a no-op (claim already held)
+    record_batch_counters(store, inst.id, batch)
+    state = store.get_connector_sync_state(inst.id)
+    assert state is None or state.fetch_total == 0
+
+    report = reconcile_connector_counters(store, inst.id, repair=True)
+    assert report["repaired"] is True or report["ok"] is True
+    state = store.get_connector_sync_state(inst.id)
+    assert state.fetch_total == 12
+
+
 # -- setup / preview / scheduler -----------------------------------------------
 
 

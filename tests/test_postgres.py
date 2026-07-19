@@ -375,3 +375,48 @@ def test_github_connector_on_postgres(pg_store, tmp_path, monkeypatch):
     assert len(prs) == 2
     assert {r.external_revision for r in prs} == {
         "2026-01-02T10:00:00Z", "2026-01-03T10:00:00Z"}
+
+
+def test_connector_counter_claim_bump_atomic_on_postgres(pg_store, tmp_path):
+    """Claim + bump share one Postgres transaction — crash rolls the ledger back."""
+    from twin.connectors import (
+        add_connector_instance,
+        build_credential_store,
+        record_batch_counters,
+        register_source_account,
+    )
+    from twin.connectors.counters import batch_contribution
+    from twin.connectors.models import BatchStatus, ConnectorBatch
+
+    class _Crash(Exception):
+        pass
+
+    creds = build_credential_store(tmp_path / "pg-counter-creds")
+    acc = register_source_account(
+        pg_store, connector_type="fake", source_owner="employer",
+        org_key="acme", owner_principal_id="principal_pg_counter",
+    )
+    inst = add_connector_instance(
+        pg_store, creds, account_id=acc.id, secret="tok-pg-counter",
+    )
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=9, normalized_count=9, percept_count=9,
+    )
+    pg_store.insert_connector_batch(batch)
+    contrib = batch_contribution(batch)
+
+    with pytest.raises(_Crash):
+        with pg_store.transaction():
+            assert pg_store.claim_connector_counter_batch(
+                inst.id, batch.id, contrib,
+            ) is True
+            raise _Crash("after claim")
+
+    assert not pg_store.connector_counter_batch_claimed(inst.id, batch.id)
+
+    record_batch_counters(pg_store, inst.id, batch)
+    record_batch_counters(pg_store, inst.id, batch)
+    state = pg_store.get_connector_sync_state(inst.id)
+    assert state is not None and state.fetch_total == 9
