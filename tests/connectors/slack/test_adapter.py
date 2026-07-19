@@ -16,7 +16,7 @@ from twin.connectors import (
     sync_connector,
 )
 
-from slack_mock import FakeSlackAPI
+from tests.connectors.slack.slack_mock import FakeSlackAPI
 
 TOKEN = "xoxb-test-token"
 CHANNEL = "C_ENG"

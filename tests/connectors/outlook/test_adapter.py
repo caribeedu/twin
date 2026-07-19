@@ -12,7 +12,7 @@ from twin.connectors import (
 )
 from twin.connectors.protocol import ConnectorError
 
-from outlook_mock import FakeOutlookAPI
+from tests.connectors.outlook.outlook_mock import FakeOutlookAPI
 
 TOKEN = "ewog.test-token"
 FOLDER = "Inbox"

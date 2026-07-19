@@ -3,12 +3,12 @@
 import json
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 from twin.sensory import sense_paths
 from twin.sensory.sensors.document import DocumentSensor
 from twin.sensory.sensors.meeting import MeetingSensor
 from twin.sensory.sensors.slack import SlackSensor
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
 
 PERCEPT_CONTRACT_FIELDS = {
     "id", "percept_type", "source_sensor", "occurred_at", "ingested_at",

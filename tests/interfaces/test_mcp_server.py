@@ -1,12 +1,11 @@
 import json
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 import pytest
 
 from twin.interfaces.mcp_server import create_server
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
-
 
 @pytest.fixture()
 def server(tmp_path, monkeypatch):

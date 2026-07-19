@@ -1,10 +1,9 @@
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 from twin.cognition import extract_pending, extract_percept
 from twin.sensory import sense_paths
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
-
 
 def _percept(store, subpath):
     percepts, _ = sense_paths([EXAMPLES / subpath])

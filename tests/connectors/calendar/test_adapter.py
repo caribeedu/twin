@@ -12,7 +12,7 @@ from twin.connectors import (
 )
 from twin.connectors.meeting.correlate import correlation_fingerprint
 
-from calendar_mock import FakeCalendarAPI
+from tests.connectors.calendar.calendar_mock import FakeCalendarAPI
 
 TOKEN = "ya29.cal-test-token"
 CAL = "primary"

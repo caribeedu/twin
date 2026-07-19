@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 import pytest
 
 from twin.cognition.sessions import (
@@ -14,9 +16,6 @@ from twin.cognition.sessions import (
     start_session,
 )
 from twin.memory.models import ConsolidationStatus, SessionStatus
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
-
 
 def test_ensure_project_creates_and_reuses(store):
     project = ensure_project(store, "Atlas", repos=["atlas-api"], aliases=["atlas"])

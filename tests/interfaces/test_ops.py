@@ -22,12 +22,11 @@ def test_doctor_reports_all_areas(cfg):
 
 
 def test_doctor_flags_review_backlog(cfg, store, embedder):
-    from pathlib import Path
-
+    from tests.paths import EXAMPLES
     from twin.cognition import extract_pending
     from twin.sensory import sense_paths
 
-    percepts, _ = sense_paths([Path(__file__).parent.parent / "examples"])
+    percepts, _ = sense_paths([EXAMPLES])
     for p in percepts:
         store.insert_percept(p)
     extract_pending(store, cfg, embedder)

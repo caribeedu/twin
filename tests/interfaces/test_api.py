@@ -1,12 +1,11 @@
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 import pytest
 from fastapi.testclient import TestClient
 
 from twin.interfaces.api import create_app
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
-
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):

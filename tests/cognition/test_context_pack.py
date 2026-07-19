@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 from twin.cognition import extract_pending
 from twin.cognition.context_pack import build_context_pack
 from twin.cognition.observer import infer_domain, observe
@@ -15,9 +17,6 @@ def _cli_access(store):
     ensure_local_identity(store)
     return resolve_access(store, surface="cli", persona="individual",
                           purpose="memory_retrieval", audience="self")
-
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
 def _populate(store, cfg, embedder):

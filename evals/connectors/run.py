@@ -207,7 +207,7 @@ def _github_env():
     tests_dir = Path(__file__).resolve().parents[2] / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
-    from github_mock import FakeGitHubAPI, _user
+    from tests.connectors.github.github_mock import FakeGitHubAPI, _user
 
     from twin.connectors.github import client as ghclient
 
@@ -372,7 +372,7 @@ def _slack_env():
     tests_dir = Path(__file__).resolve().parents[2] / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
-    from slack_mock import FakeSlackAPI
+    from tests.connectors.slack.slack_mock import FakeSlackAPI
 
     from twin.connectors.slack import client as slclient
 
@@ -454,7 +454,7 @@ def _gmail_env():
     tests_dir = Path(__file__).resolve().parents[2] / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
-    from gmail_mock import FakeGmailAPI
+    from tests.connectors.gmail.gmail_mock import FakeGmailAPI
     from twin.connectors.gmail import client as gclient
 
     api = FakeGmailAPI()
@@ -476,7 +476,7 @@ def _gmail_env():
 
 def _calendar_env():
     import httpx
-    from calendar_mock import FakeCalendarAPI
+    from tests.connectors.calendar.calendar_mock import FakeCalendarAPI
     from twin.connectors.calendar import client as cclient
 
     api = FakeCalendarAPI()
@@ -498,7 +498,7 @@ def _calendar_env():
 
 def _fireflies_env():
     import httpx
-    from fireflies_mock import FakeFirefliesAPI
+    from tests.connectors.fireflies.fireflies_mock import FakeFirefliesAPI
     from twin.connectors.fireflies import client as fclient
 
     api = FakeFirefliesAPI()

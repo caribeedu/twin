@@ -1337,7 +1337,7 @@ Delivered:
 - context packs evaluate privacy after retrieval (deny/redact before assembly; evidence skipped for redacted items);
 - sessions capture persona/purpose/tool and privacy decision ids;
 - CLI (`twin privacy …`) for simulate, explain, grants, quarantine and delete-preview;
-- `tests/test_privacy.py` covering deny/redact/grant/quarantine/canary invariants.
+- `tests/privacy/test_engine.py` covering deny/redact/grant/quarantine/canary invariants.
 
 ### v0.6 — Professional Connectors
 
@@ -1365,7 +1365,7 @@ Phase 1 — Connector Framework (done):
 - edits (new revision, old retained); deletions resolve prior lineage into a `ConnectorDeletionEvent` for the deletion planner; auth-expiry and rate-limit handling; sanitized persisted errors; dead-letter retry/replay from raw items;
 - `FakeConnector` proving the full path; CLI (`twin connector …`), REST (`/api/connectors`) and MCP tools, all gated by `connector:*` capabilities. Confirmation model: the agent-facing MCP surface is preview/confirm with state-fingerprinted tokens (`connector_sync`), and ownership reclassification is state-fingerprinted on every surface; the authenticated HTTP API is otherwise a direct command surface for administrators — capability-gated, but without preview tokens;
 - per-(connector, stream) leases carry a monotonic fencing token, are renewed after every fetched page, and the finalize transaction re-asserts ownership — a worker that outlived its lease cannot publish results;
-- `tests/test_connectors.py` + `tests/test_connector_authz.py` contract suites (SQLite and Postgres) + `evals/connectors/` scenarios (normalization, replay, partial batch, revision collision, checkpoint failure, quarantine, source deletion). Connectors capture evidence; cognition still creates understanding — no connector path writes confirmed Memory or Judgment.
+- `tests/connectors/test_service.py` + `tests/connectors/test_authz.py` contract suites (SQLite and Postgres) + `evals/connectors/` scenarios (normalization, replay, partial batch, revision collision, checkpoint failure, quarantine, source deletion). Connectors capture evidence; cognition still creates understanding — no connector path writes confirmed Memory or Judgment.
 
 Phase 2 — GitHub Connector (done):
 
@@ -1376,7 +1376,7 @@ Phase 2 — GitHub Connector (done):
 - per-source candidate policy at extraction (`twin/cognition/source_policy.py`): GitHub proposes decisions/constraints/procedures/facts/events/tasks, never preferences or beliefs; tasks are born needing review; instances can narrow the policy via `configuration.ingestion_policy`;
 - setup and backfill preview surfaces: `twin connector github repositories`, `twin connector backfill --preview` / `POST /api/connectors/{id}/backfill?preview=true` / MCP `connector_backfill_preview` (capability `connector:backfill`) — previews report scope, vault, policy and volume signals and never ingest; Phase 2 backfill itself is the first unwatermarked sync bounded by `configuration.backfill_since` (the partitionable BackfillJob is Phase 4);
 - optional webhook receiver `POST /api/webhooks/github/{connector_id}`: HMAC-authenticated (`X-Hub-Signature-256` against a dedicated secret in the CredentialStore, uniform 401 on every failure), it only marks the sync state due with a `targeted_streams` hint the scheduler consumes — the payload never becomes canonical state and polling remains the authoritative reconciliation;
-- `tests/test_github_connector.py` contract suite against an offline API double (`tests/github_mock.py`), a Postgres mirror test, and `evals/connectors/` scenarios `github_pr_lifecycle` and `github_bot_lineage`.
+- `tests/connectors/github/test_adapter.py` contract suite against an offline API double (`tests/connectors/github/github_mock.py`), a Postgres mirror test, and `evals/connectors/` scenarios `github_pr_lifecycle` and `github_bot_lineage`.
 
 Phase 3 — Slack Connector (done):
 
@@ -1387,7 +1387,7 @@ Phase 3 — Slack Connector (done):
 - channel metadata revalidated via `conversations.info` each sync (TTL cache, default 1h); `channel_kind` fails closed — stale metadata with a failed refresh never authorizes as public; `include_private_channels` / `include_direct_messages` enforced at sync time;
 - conservative source trust (human root 0.70 / reply 0.65; bots 0.45 marked `derived=likely_notification`, with GitHub-ref extraction); Slack source policy requires review for every allowed candidate type;
 - setup helpers: `twin connector slack channels`, backfill preview, optional Events API webhook `POST /api/webhooks/slack/{connector_id}` (HMAC `X-Slack-Signature`, url_verification, `event_id` dedupe);
-- `tests/test_slack_connector.py` against `tests/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
+- `tests/connectors/slack/test_adapter.py` against `tests/connectors/slack/slack_mock.py` and `evals/connectors/` scenario `slack_thread_bot_lineage`.
 
 Phase 4 — Professional Email (done):
 
@@ -1396,7 +1396,7 @@ Phase 4 — Professional Email (done):
 - Outlook/Graph adapter (`Mail.Read`): continuous sync bootstraps via delta enumeration (all `value`s processed, never discarded); `@removed`/`changed` resolves current folder membership before global tombstone; attachment discovery + shared nextLink/deltaLink error decoder;
 - partitionable `BackfillJob`: `SyncExecutionContext` bounds; namespaced streams; per-stream partition progress; claim CAS + finalize fence + heartbeat renew (stale workers cannot publish); completes only when every stream is `done`;
 - email source policy stricter than Slack; notifications marked `derived=likely_notification`;
-- `tests/test_gmail_connector.py` + `tests/test_outlook_connector.py` + `tests/test_mail_normalize.py` and eval `gmail_thread_lineage`.
+- `tests/connectors/gmail/test_adapter.py` + `tests/connectors/outlook/test_adapter.py` + `tests/connectors/mail/test_normalize.py` and eval `gmail_thread_lineage`.
 
 Phase 5 — Calendar and meetings (done):
 
@@ -1406,7 +1406,7 @@ Phase 5 — Calendar and meetings (done):
 - Fireflies adapter talks real GraphQL (`POST https://api.fireflies.ai/graphql`); stream `meetings`; `creation_watermark` is meeting-creation only (`fromDate`), not update time — incomplete IDs stay in durable `pending_transcripts` and are re-fetched by ID until terminal; recent completes are periodically reconciled for late edits; page `skip` advances with overlap; processing/live/partial marked incomplete; chunk/summary shrinks emit tombstones; recording artifact id is the transcript id (signed media URLs are not persisted); **deletion feed not offered by provider** (`deletions=false` — retain until offboarding/reconcile);
 - source policies require review for every allowed candidate type; scheduler intervals `calendar: 15m`, `fireflies: 30m`;
 - setup helpers: `twin connector calendar calendars`, `twin connector fireflies meetings`;
-- `tests/test_calendar_connector.py` + `tests/test_fireflies_connector.py` + `tests/test_meeting_normalize.py` and eval `calendar_meeting_correlation`.
+- `tests/connectors/calendar/test_adapter.py` + `tests/connectors/fireflies/test_adapter.py` + `tests/connectors/meeting/test_normalize.py` and eval `calendar_meeting_correlation`.
 
 Phase 6 — Shared documents (done):
 
@@ -1416,7 +1416,7 @@ Phase 6 — Shared documents (done):
 - local folder adapter (`twin/connectors/folder/`): explicit watch roots (empty → `awaiting_configuration`); duplicate root ids and overlapping roots fail closed (`allow_overlapping_roots=true` to permit); include/exclude globs (defaults: md/markdown/txt/rst — json/yaml recognized as text only when included); **full scan** each sync (content-hash skips unchanged files; `max_pages_per_stream` is not a work budget); checkpoint `known_files` capped by `max_known_files` (default 50k); deletes / chunk shrinks → tombstones; `auth_mode=none`; symlinks rejected by default (`follow_symlinks=true` requires target inside the same root); POSIX permission bits inspected (Windows → `permission_inspection=not_evaluated`);
 - source policy requires review for decision/constraint/procedure/fact/task; scheduler interval `folder: 5m`;
 - setup helper: `twin connector folder roots`;
-- `tests/test_folder_connector.py` + `tests/test_document_normalize.py` and eval `folder_document_revisions`.
+- `tests/connectors/folder/test_adapter.py` + `tests/connectors/documents/test_normalize.py` and eval `folder_document_revisions`.
 
 Phase 7 — Cross-source cognition (done):
 
@@ -1431,7 +1431,7 @@ Phase 7 — Cross-source cognition (done):
 - conflict findings: true cross-source only (distinct sources must disagree); idempotent via `finding_key` (reuse / supersede / close); never auto-resolved;
 - explainability CLI (read-only): `twin episode explain`, `twin identity why`, `twin project explain` over anchors / links / findings already stored;
 - CLI: `twin correlate`, `twin episode list|show|explain`, `twin identity list|links|confirm|unconfirm|reject|why`, `twin project link|links|confirm|reject|historical|explain`;
-- `tests/test_correlation.py`, `tests/test_correlation_lifecycle.py`, and eval `cross_source_work_episode`.
+- `tests/cognition/correlation/test_service.py`, `tests/cognition/correlation/test_lifecycle.py`, and eval `cross_source_work_episode`.
 
 Still deferred to **Correlation depth** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
 
@@ -1447,7 +1447,7 @@ Phase 8 — Native proof (done):
 - orphan policy: Stop without binding is a no-op; observations without / after an active binding are rejected; duplicate SessionStart reuses the open binding;
 - `InterventionRecommendation` is a display-only *possible decision reversal cue* (heuristic; may false-positive) — no host interruption/action in v0.6; `HostCapabilities` declare what Claude Code can accept;
 - MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories; native path never confirms Memory;
-- CLI: `twin native install|event|bindings`; `tests/test_native_host.py` and eval `evals/native`.
+- CLI: `twin native install|event|bindings`; `tests/interfaces/native/test_service.py` and eval `evals/native`.
 
 Phase 9 — Evals and operations (done):
 
@@ -1456,12 +1456,12 @@ Phase 9 — Evals and operations (done):
 - setup plan (§77): `twin connector setup <type> --source-owner …` prints ownership→authenticate→scope→preview→confirm (never ingests) and surfaces ownership/vault/org warnings; backfill preview remains the historical import gate;
 - scheduler ops: `twin connector due` / `twin connector sync-due`; `twin doctor` resolves credentials (ref must decrypt), classifies due by schedule grace, and reports unhealthy / lagged instances;
 - §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
-- `tests/test_connector_ops.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
+- `tests/connectors/test_ops.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
 
 Phase 10 — Final Review (done):
 
 - attests §93 Critérios de conclusão via evidence-based `completion_matrix()` (`twin/connectors/completion.py`) — criteria cells carry test/eval pointers; `pass` without evidence demoted; `ok` fails closed on `fail` / `not_tested` / `partial`;
-- behavioural proofs live with their modules: lifecycle supersede after meeting candidate (`tests/test_lifecycle.py`); authorized work pack (`tests/test_privacy.py`); completion matrix mechanics (`tests/test_connector_completion.py`);
+- behavioural proofs live with their modules: lifecycle supersede after meeting candidate (`tests/memory/test_lifecycle.py`); authorized work pack (`tests/privacy/test_engine.py`); completion matrix mechanics (`tests/connectors/test_completion.py`);
 - CLI: `twin connector completion` (exit 1 when matrix not ok);
 - documents §94 out-of-scope and §95 thesis alongside the matrix payload;
 - eval `connector_completion`.

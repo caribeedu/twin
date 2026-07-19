@@ -13,7 +13,7 @@ from twin.connectors import (
 from twin.connectors.meeting.correlate import correlation_fingerprint
 from twin.connectors.meeting.speakers import ACTOR_PROMOTE_THRESHOLD
 
-from fireflies_mock import FakeFirefliesAPI
+from tests.connectors.fireflies.fireflies_mock import FakeFirefliesAPI
 
 TOKEN = "ff-test-token"
 

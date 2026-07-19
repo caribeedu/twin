@@ -11,7 +11,7 @@ from twin.connectors import (
     sync_connector,
 )
 
-from github_mock import FakeGitHubAPI, _user
+from tests.connectors.github.github_mock import FakeGitHubAPI, _user
 
 TOKEN = "gh-test-token"
 REPO = "acme/atlas"

@@ -7,13 +7,12 @@ skipped otherwise. Each run uses a fresh schema.
 import os
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 import pytest
 
 PG_URL = os.environ.get("TWIN_TEST_PG_URL")
 pytestmark = pytest.mark.skipif(not PG_URL, reason="TWIN_TEST_PG_URL not set")
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
-
 
 @pytest.fixture()
 def pg_store():
@@ -307,7 +306,7 @@ def test_github_connector_on_postgres(pg_store, tmp_path, monkeypatch):
     lifecycle trust, idempotent replay) holds on Postgres too."""
     import httpx
 
-    from github_mock import FakeGitHubAPI
+    from tests.connectors.github.github_mock import FakeGitHubAPI
     from twin.connectors import (
         add_connector_instance,
         build_credential_store,

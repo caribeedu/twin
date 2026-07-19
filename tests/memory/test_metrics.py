@@ -2,13 +2,12 @@
 
 from pathlib import Path
 
+from tests.paths import EXAMPLES
+
 from twin.cognition import extract_percept
 from twin.memory.metrics import compute_metrics
 from twin.memory.models import MemoryStatus
 from twin.sensory import sense_paths
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
-
 
 def _populate(store, cfg, embedder):
     percepts, _ = sense_paths([EXAMPLES])

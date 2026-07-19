@@ -15,7 +15,7 @@ from twin.connectors import (
 )
 from twin.connectors.mail.streams import format_backfill_stream
 
-from gmail_mock import FakeGmailAPI
+from tests.connectors.gmail.gmail_mock import FakeGmailAPI
 
 TOKEN = "ya29.test-token"
 LABEL = "INBOX"

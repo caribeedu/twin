@@ -24,7 +24,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "register professional GitHub account",
         "status": "pass",
         "evidence": (
-            "tests/test_github_connector.py::test_list_repositories_setup_helper"
+            "tests/connectors/github/test_adapter.py::test_list_repositories_setup_helper"
         ),
         "eval": "evals/connectors/cases/ops_health_metrics.json",
         "note": "register_source_account + setup plan + repository discovery (offline mock)",
@@ -34,8 +34,8 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "classify ownership and choose vault",
         "status": "pass",
         "evidence": (
-            "tests/test_connectors.py::test_org_vault_isolated_and_declared;"
-            "tests/test_connector_ops.py::test_setup_plan_never_ingests"
+            "tests/connectors/test_service.py::test_org_vault_isolated_and_declared;"
+            "tests/connectors/test_ops.py::test_setup_plan_never_ingests"
         ),
         "eval": None,
         "note": "employer → org vault; reclassification preview-first",
@@ -45,7 +45,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "preview shows repositories and backfill estimate",
         "status": "pass",
         "evidence": (
-            "tests/test_github_connector.py::"
+            "tests/connectors/github/test_adapter.py::"
             "test_backfill_preview_reports_scope_and_never_ingests"
         ),
         "eval": "evals/connectors/cases/ops_health_metrics.json",
@@ -56,7 +56,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "incremental ingest of issues/PRs/reviews/commits",
         "status": "pass",
         "evidence": (
-            "tests/test_github_connector.py::"
+            "tests/connectors/github/test_adapter.py::"
             "test_full_object_graph_with_lineage_and_trust"
         ),
         "eval": "evals/connectors/cases/github_pr_lifecycle.json",
@@ -67,7 +67,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "checkpoint advances only after batch commit",
         "status": "pass",
         "evidence": (
-            "tests/test_connectors.py::test_checkpoint_advances_only_after_commit"
+            "tests/connectors/test_service.py::test_checkpoint_advances_only_after_commit"
         ),
         "eval": "evals/connectors/cases/checkpoint_failure.json",
         "note": None,
@@ -76,7 +76,7 @@ CRITERIA: list[dict[str, Any]] = [
         "id": 6,
         "summary": "replay same page does not duplicate artifacts/Percepts",
         "status": "pass",
-        "evidence": "tests/test_connectors.py::test_second_sync_is_idempotent",
+        "evidence": "tests/connectors/test_service.py::test_second_sync_is_idempotent",
         "eval": "evals/connectors/cases/idempotency_replay.json",
         "note": None,
     },
@@ -85,7 +85,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "Slack thread related to PR is correlated",
         "status": "pass",
         "evidence": (
-            "tests/test_correlation.py::"
+            "tests/cognition/correlation/test_service.py::"
             "test_episode_correlates_slack_mention_of_pr"
         ),
         "eval": "evals/connectors/cases/cross_source_work_episode.json",
@@ -96,8 +96,8 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "GitHub email notification is not independent evidence",
         "status": "pass",
         "evidence": (
-            "tests/test_gmail_connector.py::test_github_notification_is_derived;"
-            "tests/test_correlation.py::"
+            "tests/connectors/gmail/test_adapter.py::test_github_notification_is_derived;"
+            "tests/cognition/correlation/test_service.py::"
             "test_independence_group_shared_for_notification"
         ),
         "eval": "evals/connectors/cases/gmail_thread_lineage.json",
@@ -108,7 +108,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "later meeting revises decision and supersedes prior memory",
         "status": "pass",
         "evidence": (
-            "tests/test_lifecycle.py::"
+            "tests/memory/test_lifecycle.py::"
             "test_meeting_candidate_supersedes_prior_decision_after_confirm"
         ),
         "eval": "evals/connectors/cases/connector_completion.json",
@@ -122,7 +122,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "source ownership remains across lineage",
         "status": "pass",
         "evidence": (
-            "tests/test_github_connector.py::"
+            "tests/connectors/github/test_adapter.py::"
             "test_full_object_graph_with_lineage_and_trust"
         ),
         "eval": "evals/connectors/cases/github_pr_lifecycle.json",
@@ -133,7 +133,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "professional context pack uses authorized memory",
         "status": "pass",
         "evidence": (
-            "tests/test_privacy.py::"
+            "tests/privacy/test_engine.py::"
             "test_professional_pack_includes_authorized_work_memory"
         ),
         "eval": None,
@@ -144,8 +144,8 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "personal persona does not receive employer content",
         "status": "pass",
         "evidence": (
-            "tests/test_privacy.py::test_vault_persona_enforced;"
-            "tests/test_privacy.py::test_context_pack_applies_privacy"
+            "tests/privacy/test_engine.py::test_vault_persona_enforced;"
+            "tests/privacy/test_engine.py::test_context_pack_applies_privacy"
         ),
         "eval": None,
         "note": None,
@@ -158,8 +158,8 @@ CRITERIA: list[dict[str, Any]] = [
         ),
         "status": "pass",
         "evidence": (
-            "tests/test_privacy.py::test_artifact_delete_preserves_partial_memory;"
-            "tests/test_connectors.py::test_tombstone_builds_lineage_impact_event"
+            "tests/privacy/test_engine.py::test_artifact_delete_preserves_partial_memory;"
+            "tests/connectors/test_service.py::test_tombstone_builds_lineage_impact_event"
         ),
         "eval": "evals/connectors/cases/source_deletion.json",
         "note": (
@@ -172,7 +172,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "revoked credential stops new syncs",
         "status": "pass",
         "evidence": (
-            "tests/test_connectors.py::test_revoke_removes_secret_and_stops_sync"
+            "tests/connectors/test_service.py::test_revoke_removes_secret_and_stops_sync"
         ),
         "eval": None,
         "note": None,
@@ -181,7 +181,7 @@ CRITERIA: list[dict[str, Any]] = [
         "id": 15,
         "summary": "native adapter observes session and uses same core",
         "status": "pass",
-        "evidence": "tests/test_native_host.py",
+        "evidence": "tests/interfaces/native/test_service.py",
         "eval": "evals/native/cases/host_session_proactive_pack.json",
         "note": None,
     },
@@ -189,7 +189,7 @@ CRITERIA: list[dict[str, Any]] = [
         "id": 16,
         "summary": "MCP remains available simultaneously",
         "status": "pass",
-        "evidence": "tests/test_mcp.py",
+        "evidence": "tests/interfaces/test_mcp_server.py",
         "eval": "evals/native/cases/host_session_proactive_pack.json",
         "note": "native eval opens parallel MCP/CLI session alongside host binding",
     },
@@ -198,9 +198,9 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "no source auto-creates confirmed Memory or Judgment",
         "status": "pass",
         "evidence": (
-            "tests/test_connectors.py::"
+            "tests/connectors/test_service.py::"
             "test_no_confirmed_memory_or_judgment_written;"
-            "tests/test_native_host.py::test_no_confirmed_memory_delta"
+            "tests/interfaces/native/test_service.py::test_no_confirmed_memory_delta"
         ),
         "eval": "evals/connectors/cases/github_pr_lifecycle.json",
         "note": None,
