@@ -241,9 +241,15 @@ CREATE TABLE IF NOT EXISTS review_findings (
     resolved BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TEXT NOT NULL,
     resolved_at TEXT,
-    metadata JSONB NOT NULL DEFAULT '{}'
+    metadata JSONB NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open',
+    analyzer_version TEXT NOT NULL DEFAULT 'quality-v1',
+    resolution_operation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(memory_id);
+ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';
+ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS analyzer_version TEXT NOT NULL DEFAULT 'quality-v1';
+ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS resolution_operation_id TEXT;
 
 CREATE TABLE IF NOT EXISTS review_batches (
     id TEXT PRIMARY KEY,
@@ -1343,18 +1349,71 @@ class PostgresStore(
 
     def insert_finding(self, finding: ReviewFinding, commit: bool = True) -> str:
         finding.created_at = finding.created_at or now_iso()
+        status = getattr(finding.status, "value", finding.status) or "open"
+        resolved = bool(finding.resolved or status != "open")
         self._exec(
             "INSERT INTO review_findings (id, memory_id, type, related_memory_id,"
             " confidence, reason, suggested_action, requires_human_review, resolved,"
-            " created_at, resolved_at, metadata) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " created_at, resolved_at, metadata, status, analyzer_version,"
+            " resolution_operation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 finding.id, finding.memory_id, finding.type.value, finding.related_memory_id,
                 finding.confidence, finding.reason, finding.suggested_action.value,
-                finding.requires_human_review, finding.resolved,
+                finding.requires_human_review, resolved,
                 finding.created_at, finding.resolved_at, json.dumps(finding.metadata),
+                status, finding.analyzer_version, finding.resolution_operation_id,
             ),
         )
         return finding.id
+
+    def update_finding(self, finding: ReviewFinding, commit: bool = True) -> None:
+        status = getattr(finding.status, "value", finding.status) or "open"
+        resolved = bool(finding.resolved or status != "open")
+        self._exec(
+            "UPDATE review_findings SET memory_id = %s, type = %s, related_memory_id = %s,"
+            " confidence = %s, reason = %s, suggested_action = %s, requires_human_review = %s,"
+            " resolved = %s, resolved_at = %s, metadata = %s, status = %s, analyzer_version = %s,"
+            " resolution_operation_id = %s WHERE id = %s",
+            (
+                finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.confidence, finding.reason, finding.suggested_action.value,
+                finding.requires_human_review, resolved, finding.resolved_at,
+                json.dumps(finding.metadata), status, finding.analyzer_version,
+                finding.resolution_operation_id, finding.id,
+            ),
+        )
+
+    def get_findings(self, memory_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
+        q = "SELECT * FROM review_findings WHERE memory_id = %s"
+        if unresolved_only:
+            q += " AND (status = 'open' OR (status IS NULL AND resolved = FALSE))"
+        rows = self._exec(q, (memory_id,))
+        return [self._row_to_finding(r) for r in rows]
+
+    @staticmethod
+    def _row_to_finding(row) -> ReviewFinding:
+        keys = set(row.keys())
+        meta = row["metadata"]
+        if isinstance(meta, str):
+            meta = json.loads(meta or "{}")
+        status = row["status"] if "status" in keys and row["status"] else (
+            "resolved" if row["resolved"] else "open"
+        )
+        return ReviewFinding(
+            id=row["id"], memory_id=row["memory_id"], type=row["type"],
+            related_memory_id=row["related_memory_id"],
+            confidence=row["confidence"], reason=row["reason"] or "",
+            suggested_action=row["suggested_action"] or "none",
+            requires_human_review=bool(row["requires_human_review"]),
+            status=status,
+            resolved=bool(row["resolved"]), created_at=row["created_at"],
+            resolved_at=row["resolved_at"],
+            analyzer_version=(row["analyzer_version"] if "analyzer_version" in keys
+                              else "quality-v1"),
+            resolution_operation_id=(row["resolution_operation_id"]
+                                     if "resolution_operation_id" in keys else None),
+            metadata=meta or {},
+        )
 
     def insert_review_batch(self, batch: ReviewBatch) -> str:
         self._exec(

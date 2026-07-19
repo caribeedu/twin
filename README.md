@@ -1421,11 +1421,14 @@ Phase 6 — Shared documents (done):
 Phase 7 — Cross-source cognition (done):
 
 - cognitive correlation layer (`twin/cognition/correlation/`): `ExternalIdentity` / `IdentityLink`, `ProjectLink`, `WorkEpisode` / `EpisodeLink` — connectors still only capture evidence; correlation proposes structure, never confirmed Memory or Judgment;
-- independence groups: evidence attaches via `lineage_root` / `notification_of` / `derived_from` / fingerprint / `thread_key` so GitHub bot notifications and provider summaries do not count as independent corroboration; derived content gets lower `directness`;
-- identity: upsert from actor ids; email-across-providers → candidate links (not auto-confirmed); never merge by display name alone;
+- vault partition: every correlation pass clusters per `vault_id`; anchors and `correlation_key` are vault-qualified — no WorkEpisode / IdentityLink / finding may mix vaults without explicit cross-domain action;
+- episode identity: idempotent via `correlation_key` + `episode_anchors` (lineage, calendar id, fingerprint, thread) — repeated passes attach sources, do not duplicate episodes;
+- reconciliation: EpisodeLinks carry `active|removed` lifecycle; tombstones drop membership and rebuild participants / dates / source_refs from active links only;
+- independence: per-`EpisodeLink` `independence_group` + `directness` (episode keeps aggregate count / primary lineage); derived notifications/summaries do not inflate corroboration;
+- identity: upsert from actor ids within the same vault; email → candidate links only inside a vault; never merge by display name; cross-vault confirm refused without explicit flag;
 - project mapping: exact `Project.repos` / aliases → `ProjectLink` (unconfirmed until `twin project link`); soft hint matches stay candidates;
-- WorkEpisode clustering on strong keys only (shared lineage, PR/issue refs, calendar ids/fingerprints, threads); soft temporal co-occurrence alone does not merge;
-- conflict findings: `FindingType.cross_source_temporal_conflict` when ship vs postpone (or distinct dates) appear across episode sources — never auto-resolved;
+- clustering: merge anchors (lineage, PR/issue refs, calendar ids) form components; fingerprint / thread are contextual (attach or candidate-only, no transitive overmerge of distinct merge components); soft temporal co-occurrence alone does not merge;
+- conflict findings: true cross-source only (distinct sources must disagree); idempotent via `finding_key` (reuse / supersede / close); never auto-resolved;
 - CLI: `twin correlate`, `twin episode list|show`, `twin identity list|links|confirm`, `twin project link|links`;
 - `tests/test_correlation_phase7.py` and eval `cross_source_work_episode`.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from .models import ProjectLink
+from .partition import account_meta
 
 # Exact repo / allowlisted channel match — strong enough to attach episode
 # project_id, but ProjectLink.confirmed stays False until user confirms.
@@ -107,9 +108,11 @@ def resolve_project_for_record(store, record: Any) -> tuple[Optional[str], Optio
         return None, None
 
     proj, conf, reason = best
+    meta = account_meta(store, record)
     link = ProjectLink(
         project_id=proj.id,
         source_account_id=account_id,
+        vault_id=meta["vault_id"],
         external_type=ext_type,
         external_id=ext_id,
         confidence=conf,

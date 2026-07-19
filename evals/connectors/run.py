@@ -830,6 +830,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
                 content=content,
                 actor_ids=list(actor_ids or ["github:alice"]),
                 source_metadata=dict(meta),
+                ownership={"vault_id": "vault_work_acme", "source_owner": "employer"},
                 occurred_at=occurred_at or "2026-07-10T10:00:00Z",
             )
             rec.idempotency_key = idempotency_key(
@@ -876,10 +877,18 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
         ep = episodes[0]
         if len(ep.source_refs) < exp["min_episode_refs"]:
             return False, f"episode refs {len(ep.source_refs)} < {exp['min_episode_refs']}"
+        if ep.vault_id != "vault_work_acme":
+            return False, f"episode vault wrong: {ep.vault_id}"
+        if not ep.correlation_key:
+            return False, "episode missing correlation_key"
         if ep.independence_group != f"lineage:{root}":
             return False, f"bad episode independence_group: {ep.independence_group}"
         if not ep.project_id:
             return False, "episode missing project mapping"
+        # Idempotent second pass
+        report2 = run_correlation_pass(store, connector_ids=[inst.id])
+        if report2.episodes_created != 0:
+            return False, "second pass created duplicate episodes"
         findings = store.get_findings(f"episode:{ep.id}", unresolved_only=False)
         if not any(f.type.value == exp["conflict_type"] for f in findings):
             # also accept findings keyed only by type across all open findings

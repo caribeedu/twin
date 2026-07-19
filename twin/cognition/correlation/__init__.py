@@ -13,6 +13,7 @@ from .independence import (
 from .models import (
     EpisodeLink,
     EpisodeLinkKind,
+    EpisodeLinkStatus,
     EpisodeStatus,
     ExternalIdentity,
     IdentityLink,
@@ -20,12 +21,14 @@ from .models import (
     ProjectLink,
     WorkEpisode,
 )
+from .partition import partition_records, vault_for_record
 from .service import CorrelationReport, run_correlation_pass
 
 __all__ = [
     "CorrelationReport",
     "EpisodeLink",
     "EpisodeLinkKind",
+    "EpisodeLinkStatus",
     "EpisodeStatus",
     "ExternalIdentity",
     "IdentityLink",
@@ -35,5 +38,7 @@ __all__ = [
     "evidence_directness_for",
     "independence_group_for",
     "is_derived_evidence",
+    "partition_records",
     "run_correlation_pass",
+    "vault_for_record",
 ]

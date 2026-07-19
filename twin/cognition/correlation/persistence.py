@@ -8,6 +8,7 @@ from typing import Any
 from .models import (
     EpisodeLink,
     EpisodeLinkKind,
+    EpisodeLinkStatus,
     EpisodeStatus,
     ExternalIdentity,
     IdentityLink,
@@ -33,6 +34,7 @@ def identity_to_row(ident: ExternalIdentity) -> dict[str, Any]:
         "provider": ident.provider,
         "external_id": ident.external_id,
         "source_account_id": ident.source_account_id or "",
+        "vault_id": ident.vault_id or "",
         "actor_id": ident.actor_id or "",
         "payload": _dump(ident),
     }
@@ -50,6 +52,7 @@ def identity_link_to_row(link: IdentityLink) -> dict[str, Any]:
         "id": link.id,
         "left_identity_id": link.left_identity_id,
         "right_identity_id": link.right_identity_id or "",
+        "vault_id": link.vault_id or "",
         "status": link.status.value if isinstance(link.status, IdentityStatus) else link.status,
         "payload": _dump(link),
     }
@@ -69,6 +72,7 @@ def project_link_to_row(link: ProjectLink) -> dict[str, Any]:
         "external_type": link.external_type,
         "external_id": link.external_id,
         "source_account_id": link.source_account_id or "",
+        "vault_id": link.vault_id or "",
         "payload": _dump(link),
     }
 
@@ -83,6 +87,8 @@ def row_to_project_link(row: Any, decrypt=None) -> ProjectLink:
 def episode_to_row(ep: WorkEpisode) -> dict[str, Any]:
     return {
         "id": ep.id,
+        "vault_id": ep.vault_id or "",
+        "correlation_key": ep.correlation_key or "",
         "project_id": ep.project_id or "",
         "status": ep.status.value if isinstance(ep.status, EpisodeStatus) else ep.status,
         "independence_group": ep.independence_group or "",
@@ -101,9 +107,14 @@ def episode_link_to_row(link: EpisodeLink) -> dict[str, Any]:
     return {
         "id": link.id,
         "episode_id": link.episode_id,
+        "vault_id": link.vault_id or "",
         "external_type": link.external_type or "",
         "external_id": link.external_id or "",
         "kind": link.kind.value if isinstance(link.kind, EpisodeLinkKind) else link.kind,
+        "status": (
+            link.status.value if isinstance(link.status, EpisodeLinkStatus)
+            else link.status
+        ),
         "payload": _dump(link),
     }
 

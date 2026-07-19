@@ -926,12 +926,19 @@ def cmd_correlate(args) -> None:
         detect_conflicts=not args.no_conflicts,
     )
     print(
-        f"scanned={report.records_scanned} identities={report.identities} "
-        f"identity_links={report.identity_links} project_links={report.project_links} "
-        f"episodes={report.episodes} conflicts={report.conflicts}"
+        f"scanned={report.records_scanned} "
+        f"identities=+{report.identities_created}/~{report.identities_updated} "
+        f"id_links=+{report.identity_links_created} "
+        f"proj_links=+{report.project_links_created}/~{report.project_links_reused} "
+        f"episodes=+{report.episodes_created}/~{report.episodes_updated}/"
+        f"x{report.episodes_closed} "
+        f"conflicts=+{report.conflicts_created}/~{report.conflicts_reused}/"
+        f"x{report.conflicts_resolved}"
     )
     for eid in report.episode_ids:
-        print(f"  episode {eid}")
+        ep = ws.store.get_work_episode(eid)
+        vault = ep.vault_id if ep else "?"
+        print(f"  episode {eid} vault={vault}")
 
 
 def cmd_episode(args) -> None:

@@ -1584,6 +1584,25 @@ class SqliteStore(
             self._maybe_commit()
         return finding.id
 
+    def update_finding(self, finding: ReviewFinding, commit: bool = True) -> None:
+        status = getattr(finding.status, "value", finding.status) or "open"
+        resolved = int(finding.resolved or status != "open")
+        self.conn.execute(
+            "UPDATE review_findings SET memory_id = ?, type = ?, related_memory_id = ?,"
+            " confidence = ?, reason = ?, suggested_action = ?, requires_human_review = ?,"
+            " resolved = ?, resolved_at = ?, metadata = ?, status = ?, analyzer_version = ?,"
+            " resolution_operation_id = ? WHERE id = ?",
+            (
+                finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.confidence, finding.reason, finding.suggested_action.value,
+                int(finding.requires_human_review), resolved, finding.resolved_at,
+                json.dumps(finding.metadata), status, finding.analyzer_version,
+                finding.resolution_operation_id, finding.id,
+            ),
+        )
+        if commit:
+            self._maybe_commit()
+
     def get_findings(self, memory_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
         q = "SELECT * FROM review_findings WHERE memory_id = ?"
         if unresolved_only:
