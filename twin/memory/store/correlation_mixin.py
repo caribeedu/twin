@@ -252,20 +252,18 @@ class CorrelationStoreMixin:
         *,
         external_type: str,
         external_id: str,
-        source_account_id: Optional[str] = None,
+        source_account_id: str = "",
     ) -> Optional[ProjectLink]:
-        if source_account_id:
-            row = self._j_fetchone(
-                "SELECT * FROM project_links WHERE external_type = ? AND "
-                "external_id = ? AND source_account_id = ?",
-                (external_type, external_id, source_account_id),
-            )
-        else:
-            row = self._j_fetchone(
-                "SELECT * FROM project_links WHERE external_type = ? AND "
-                "external_id = ? ORDER BY id LIMIT 1",
-                (external_type, external_id),
-            )
+        """Exact account match — including legacy unscoped ``""``.
+
+        Never wildcards across accounts. Pass ``source_account_id=""`` to find
+        only links created without an account scope.
+        """
+        row = self._j_fetchone(
+            "SELECT * FROM project_links WHERE external_type = ? AND "
+            "external_id = ? AND source_account_id = ?",
+            (external_type, external_id, source_account_id or ""),
+        )
         return row_to_project_link(row, decrypt=self._corr_dec) if row else None
 
     def list_project_links(

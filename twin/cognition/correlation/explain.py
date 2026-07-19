@@ -111,22 +111,49 @@ def explain_identity_link(store, link_id: str) -> dict[str, Any]:
         store.get_external_identity(link.right_identity_id)
         if link.right_identity_id else None
     )
+    signals = list(link.signals or [])
     return {
         "link_id": link.id,
         "status": getattr(link.status, "value", link.status),
         "confidence": link.confidence,
         "vault_id": link.vault_id,
         "cross_domain": link.cross_domain,
-        "signals": list(link.signals or []),
+        "signals": signals,
         "entity_id": link.entity_id,
         "left": _ident_brief(left),
         "right": _ident_brief(right),
-        "why": (
-            "Proposed from shared email / same-provider id within one vault; "
-            "never display-name-only. Confirmation is manual."
-        ),
+        "why": _identity_why(signals),
         "metadata": dict(link.metadata or {}),
     }
+
+
+def _identity_why(signals: list[str]) -> str:
+    """Derive why-text from stored signals only — never overclaim."""
+    kinds = set()
+    for s in signals:
+        if s == "shared_email" or s.startswith("email:"):
+            kinds.add("shared_email")
+        elif s == "same_provider_external_id":
+            kinds.add("same_provider_external_id")
+        elif s.startswith("vault:"):
+            kinds.add("vault_scoped")
+        elif s:
+            kinds.add(s)
+    if not kinds:
+        return "Identity link recorded; no automatic signals stored (manual or legacy)."
+    parts = []
+    if "shared_email" in kinds:
+        parts.append("shared email within one vault")
+    if "same_provider_external_id" in kinds:
+        parts.append("same provider external id across accounts in one vault")
+    extras = sorted(
+        k for k in kinds
+        if k not in ("shared_email", "same_provider_external_id", "vault_scoped")
+    )
+    for k in extras:
+        parts.append(k.replace("_", " "))
+    body = "; ".join(parts) if parts else "vault-scoped signals"
+    return f"Proposed from {body}. Never display-name-only. Confirmation is manual."
 
 
 def explain_project_link(store, link_id: str) -> dict[str, Any]:

@@ -133,6 +133,121 @@ def test_identity_unconfirm_and_reject(store):
     reject_identity_link(store, link.id)
     assert store.get_identity_link(link.id).status == IdentityStatus.rejected
 
+    import pytest
+    with pytest.raises(ValueError, match="unconfirm requires confirmed"):
+        unconfirm_identity_link(store, link.id)
+
+
+def test_confirm_identity_without_entity_id_marks_identities(store):
+    a = upsert_external_identity(
+        store, actor_id="mail:b@acme.test", vault_id="vault_work_acme",
+        source_account_id="acc1", email="b@acme.test",
+    )
+    b = upsert_external_identity(
+        store, actor_id="github:bob", vault_id="vault_work_acme",
+        source_account_id="acc1", email="b@acme.test",
+    )
+    links = propose_identity_links(store, [a, b])
+    assert links
+    link = confirm_identity_link(store, links[0].id)
+    assert link.status == IdentityStatus.confirmed
+    assert link.entity_id is None
+    left = store.get_external_identity(a.id)
+    right = store.get_external_identity(b.id)
+    assert left.confirmed is True
+    assert right.confirmed is True
+    assert left.linked_entity_id is None
+    assert right.linked_entity_id is None
+
+
+def test_unconfirm_one_edge_keeps_identity_confirmed_via_other(store):
+    a = upsert_external_identity(
+        store, actor_id="mail:c@acme.test", vault_id="vault_work_acme",
+        source_account_id="acc1", email="c@acme.test",
+    )
+    b = upsert_external_identity(
+        store, actor_id="github:carol", vault_id="vault_work_acme",
+        source_account_id="acc1", email="c@acme.test",
+    )
+    c = upsert_external_identity(
+        store, actor_id="slack:Ucarol", vault_id="vault_work_acme",
+        source_account_id="acc1", email="c@acme.test",
+    )
+    links = propose_identity_links(store, [a, b, c])
+    assert len(links) >= 2
+    confirm_identity_link(store, links[0].id, entity_id="entity_carol")
+    confirm_identity_link(store, links[1].id)
+    assert store.get_external_identity(a.id).confirmed is True
+
+    unconfirm_identity_link(store, links[0].id)
+    left = store.get_external_identity(a.id)
+    assert left.confirmed is True
+    # entity may clear if only the remaining edge lacks entity_id
+    remaining = store.get_identity_link(links[1].id)
+    if remaining.entity_id:
+        assert left.linked_entity_id == remaining.entity_id
+    else:
+        assert left.linked_entity_id is None
+
+
+def test_project_link_rejected_on_account_a_does_not_block_account_b(store):
+    proj = ensure_project(store, "Atlas", repos=["acme/atlas"])
+    link_a = link_project(
+        store, project_id=proj.id,
+        external_type="github_repository", external_id="acme/atlas",
+        source_account_id="acct_a", confirmed=True,
+    )
+    reject_project_link(store, link_a.id)
+
+    project_id, resolved = resolve_project_for_record(
+        store, _rec(source_account_id="acct_b"),
+    )
+    assert resolved is not None
+    assert resolved.id != link_a.id
+    assert resolved.source_account_id == "acct_b"
+    assert resolved.status == ProjectLinkStatus.candidate
+    assert project_id == proj.id
+
+
+def test_legacy_unscoped_project_link_still_fallback(store):
+    proj = ensure_project(store, "Atlas", repos=["acme/atlas"])
+    link = link_project(
+        store, project_id=proj.id,
+        external_type="github_repository", external_id="acme/atlas",
+        source_account_id="", confirmed=True,
+    )
+    assert link.source_account_id == ""
+    project_id, resolved = resolve_project_for_record(
+        store, _rec(source_account_id="acct_new"),
+    )
+    assert resolved is not None
+    assert resolved.id == link.id
+    assert project_id == proj.id
+
+
+def test_distinct_accounts_resolve_own_project_links(store):
+    alpha = ensure_project(store, "Alpha", repos=["acme/shared"])
+    beta = ensure_project(store, "Beta", repos=[])
+    link_a = link_project(
+        store, project_id=alpha.id,
+        external_type="slack_channel", external_id="C123",
+        source_account_id="ws_a", confirmed=True,
+    )
+    link_b = link_project(
+        store, project_id=beta.id,
+        external_type="slack_channel", external_id="C123",
+        source_account_id="ws_b", confirmed=True,
+    )
+    from twin.cognition.correlation.projects import find_project_for_external
+    assert find_project_for_external(
+        store, external_type="slack_channel", external_id="C123",
+        source_account_id="ws_a",
+    ).id == link_a.id
+    assert find_project_for_external(
+        store, external_type="slack_channel", external_id="C123",
+        source_account_id="ws_b",
+    ).id == link_b.id
+
 
 def test_episode_confidence_downgrades_when_membership_shrinks(store):
     from twin.cognition.correlation.models import EpisodeLink
@@ -174,6 +289,38 @@ def test_episode_confidence_downgrades_when_membership_shrinks(store):
     ep = _rebuild_episode_from_active_links(store, store.get_work_episode(ep.id))
     assert ep.confidence == 0.0
     assert ep.status == EpisodeStatus.closed
+
+
+def test_episode_reopens_when_active_links_return(store):
+    from twin.cognition.correlation.models import EpisodeLink
+
+    ep = WorkEpisode(
+        vault_id="vault_work_acme",
+        correlation_key="vault_work_acme:lineage:github:acme/atlas#reopen",
+        title="reopen",
+        confidence=0.9,
+        status=EpisodeStatus.active,
+    )
+    store.insert_work_episode(ep)
+    link = EpisodeLink(
+        episode_id=ep.id, vault_id=ep.vault_id,
+        external_type="issue", external_id="9",
+        kind=EpisodeLinkKind.explicit, confidence=0.9,
+        status=EpisodeLinkStatus.active,
+    )
+    store.insert_episode_link(link)
+
+    link.status = EpisodeLinkStatus.removed
+    store.update_episode_link(link)
+    ep = _rebuild_episode_from_active_links(store, store.get_work_episode(ep.id))
+    assert ep.status == EpisodeStatus.closed
+    assert ep.confidence == 0.0
+
+    link.status = EpisodeLinkStatus.active
+    store.update_episode_link(link)
+    ep = _rebuild_episode_from_active_links(store, store.get_work_episode(ep.id))
+    assert ep.status == EpisodeStatus.candidate
+    assert ep.confidence == 0.9
 
 
 def test_explain_episode_and_links(store):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ...clock import now_iso
 from .models import ProjectLink, ProjectLinkStatus
 from .partition import account_meta
 
@@ -71,10 +72,11 @@ def find_project_for_external(
     external_id: str,
     source_account_id: str = "",
 ) -> Optional[ProjectLink]:
-    """Prefer account-scoped link; fall back to any link for the container.
+    """Prefer account-scoped link; fall back only to legacy unscoped (``""``).
 
-    Lifecycle decisions (``historical`` / ``rejected``) must stick even when
-    the original link was created without a source_account_id.
+    Never returns another account's link for the same external container —
+    account/vault partition is structural. Lifecycle decisions on a legacy
+    unscoped link still stick when the caller has an account id.
     """
     if source_account_id:
         hit = store.find_project_link(
@@ -87,7 +89,7 @@ def find_project_for_external(
     return store.find_project_link(
         external_type=external_type,
         external_id=external_id,
-        source_account_id=None,
+        source_account_id="",
     )
 
 
@@ -178,13 +180,19 @@ def set_project_link_status(
             f"invalid project link status {status!r}; "
             f"allowed={[s.value for s in ProjectLinkStatus]}"
         ) from exc
+    prev = _status_val(link)
     link.status = new_status
     link.confirmed = new_status == ProjectLinkStatus.confirmed
     if new_status == ProjectLinkStatus.confirmed:
         link.confidence = max(link.confidence, 0.99)
     meta = dict(link.metadata or {})
+    # Operational history (not a full audit log): from/to + wall clock.
     meta["status_history"] = list(meta.get("status_history") or []) + [{
-        "status": new_status.value,
+        "from": prev,
+        "to": new_status.value,
+        "changed_at": now_iso(),
+        "actor": "user",
+        "reason": None,
     }]
     link.metadata = meta
     store.update_project_link(link)
