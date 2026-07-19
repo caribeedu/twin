@@ -1455,7 +1455,16 @@ Phase 9 — Evals and operations (done):
 - §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
 - `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
 
-Deferred after Phase 7 merge (accepted debt + path — see **Correlation depth** below): episode phases, multi-factor confidence, ProjectLink lifecycle, identity graphs, intra-episode causality, incremental correlation, explainability CLI/API, scale/replay evals.
+Phase 7.1 — Correlation lifecycle & explain (done, v0.6 closeout):
+
+- closes the Phase 7 debt that fits v0.6 without inventing episode phases, incremental correlation, or Entity graphs;
+- `ProjectLinkStatus`: `candidate | confirmed | historical | rejected` (`confirmed` bool kept as mirror); `historical`/`rejected` never attach `episode.project_id`; CLI `twin project confirm|reject|historical|explain`;
+- identity undo: `twin identity unconfirm|reject` (+ `unconfirm_identity_link` / `reject_identity_link`); clears `ExternalIdentity.confirmed` when no confirmed edges remain;
+- episode confidence recomputed on membership rebuild as `max(active EpisodeLink.confidence)` (downgrades when evidence leaves; empty → `closed` + 0.0) — still not full multi-factor scoring;
+- explainability CLI (read-only): `twin episode explain`, `twin identity why`, `twin project explain` over anchors / links / findings already stored;
+- `tests/test_correlation_depth_v06.py`.
+
+Still deferred to **Correlation depth** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
 
 ### Correlation depth (planned vX — after Phase 7)
 
@@ -1463,31 +1472,27 @@ Goal: deepen the correlation layer from “clustered evidence” into an explain
 
 **Slot.** Later `v0.x` (naturally before or alongside [v0.8 Parallel Memory](#v08--parallel-memory-and-consolidation); feeds [v2 Extended Brain](#v2--extended-brain) episodic/autobiographical memory). Not a blocker for Personal Domains.
 
-Phase 7 correctly established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; true cross-source conflicts. What follows is debt accepted at merge plus the intended path.
+Phase 7 correctly established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; true cross-source conflicts. Phase 7.1 closed lifecycle + thin explain CLI. What remains is the deeper path.
 
-#### Accepted debt (what Phase 7 still is)
+#### Accepted debt (what Phase 7 / 7.1 still is)
 
 - **WorkEpisode = one cluster.** An episode is still a correlated set of `ConnectorRecord`s, not a structured arc (goal → decision → execution → outcome). PR + Slack + meeting + deploy collapse into one node.
-- **Confidence ≈ link type.** Episode/link confidence mostly follows anchor kind (lineage / fingerprint / thread), not source diversity, temporal spread, evidence quality, or independent-group count.
-- **ProjectLink is binary.** Only `candidate | confirmed`. No “historically belonged” (or equivalent) when a project closes but artifacts remain.
-- **IdentityLink is pairwise.** Email/candidate edges exist; there is no first-class identity graph that consolidates GitHub ↔ email ↔ Slack ↔ meeting ↔ calendar into one Entity-facing structure.
+- **Confidence ≈ link type (+ rebuild max).** Episode/link confidence still follows anchor kind / max active link; not source diversity × independence × source trust as a composed score.
+- **IdentityLink is pairwise.** Email/candidate edges + confirm/unconfirm/reject exist; there is no first-class identity graph that consolidates GitHub ↔ email ↔ Slack ↔ meeting ↔ calendar into one Entity-facing structure.
 - **No causality inside an episode.** Membership says “same episode,” not “A caused B / B motivated C / C resolved D.”
 - **Correlation is a batch pass.** `run_correlation_pass()` rescans records; there is no incremental path driven only by new/changed/tombstoned records.
-- **Explainability is partial.** Anchors and finding metadata exist, but there is no public “why this episode / why this link / why this conflict” API or CLI surface.
-- **Eval / load gaps.** Missing: full rebuild replay, incremental-only passes, multi-vault / multi-org stress, confidence downgrade, episode close, conflict resolve, manual identity merge + confirmation rollback, large ConnectorRecord volumes.
+- **Explainability is CLI-first.** Anchors/links/findings are inspectable via `episode explain` / `identity why` / `project explain`; no HTTP/MCP graph API yet.
+- **Eval / load gaps.** Missing: full rebuild replay, incremental-only passes, multi-vault / multi-org stress, large ConnectorRecord volumes.
 
 #### Path forward
 
 1. **Episode phases** — `WorkEpisode → EpisodePhase → Evidence` (or equivalent) so the system can answer when a decision changed and when a plan became execution, without splitting every phase into a separate episode by default.
-2. **Multi-factor confidence** — compose link strength × source diversity × independence-group count × evidence quality / source trust; allow explicit downgrade when membership shrinks or anchors weaken.
-3. **ProjectLink lifecycle** — at least `candidate | confirmed | historical | rejected` (names flexible) so closed projects keep provenance without implying current ownership.
-4. **Identity as a small graph** — keep conservative auto-propose rules; let confirmed `IdentityLink`s form a vault-scoped graph that Entity resolution can consume later; support manual merge and undo of confirmation.
-5. **Causal / narrative edges (optional layer)** — after membership is stable, propose revisable “motivated / resolved / superseded” links between sources or phases; never auto-write Judgment.
-6. **Incremental correlation** — index dirty records / tombstones; update only affected partitions and episodes; keep full rebuild as the correctness oracle.
-7. **Explainability as product surface** — every cognitive hypothesis answers why it exists:
-   - CLI: `twin episode graph`, `twin episode explain`, `twin identity why`, `twin project explain`;
-   - stable API/metadata: anchors used, merge vs contextual edges, independence groups, finding_key claim set, vault partition.
-8. **Hardening tests / evals** — rebuild ≡ replay; incremental ≡ batch; multi-vault isolation under load; episode close + conflict resolve; identity confirm/rollback; confidence downgrade when evidence leaves.
+2. **Multi-factor confidence** — compose link strength × source diversity × independence-group count × evidence quality / source trust beyond today’s rebuild max.
+3. **Identity as a small graph** — keep conservative auto-propose rules; let confirmed `IdentityLink`s form a vault-scoped graph that Entity resolution can consume later.
+4. **Causal / narrative edges (optional layer)** — after membership is stable, propose revisable “motivated / resolved / superseded” links between sources or phases; never auto-write Judgment.
+5. **Incremental correlation** — index dirty records / tombstones; update only affected partitions and episodes; keep full rebuild as the correctness oracle.
+6. **Explainability as broader product surface** — `twin episode graph`; stable HTTP/MCP metadata for anchors, merge vs contextual edges, independence groups, finding_key claim set, vault partition.
+7. **Hardening tests / evals** — rebuild ≡ replay; incremental ≡ batch; multi-vault isolation under load; large ConnectorRecord volumes.
 
 #### Non-goals for that vX
 

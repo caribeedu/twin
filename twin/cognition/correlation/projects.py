@@ -1,16 +1,36 @@
-"""Project mapping from external containers (v0.6 Phase 7 §18)."""
+"""Project mapping from external containers (v0.6 Phase 7 §18 + lifecycle)."""
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from .models import ProjectLink
+from .models import ProjectLink, ProjectLinkStatus
 from .partition import account_meta
 
 # Exact repo / allowlisted channel match — strong enough to attach episode
-# project_id, but ProjectLink.confirmed stays False until user confirms.
+# project_id, but ProjectLink stays candidate until user confirms.
 STRONG_MATCH = 0.90
 HINT_MATCH = 0.70
+
+# Statuses that may attach an episode to a project (current ownership).
+_ATTACHABLE = frozenset({
+    ProjectLinkStatus.candidate,
+    ProjectLinkStatus.confirmed,
+    ProjectLinkStatus.candidate.value,
+    ProjectLinkStatus.confirmed.value,
+})
+
+
+def _status_val(link: ProjectLink) -> str:
+    st = getattr(link, "status", None)
+    if st is None:
+        return (ProjectLinkStatus.confirmed.value if link.confirmed
+                else ProjectLinkStatus.candidate.value)
+    return getattr(st, "value", st)
+
+
+def _is_attachable(link: ProjectLink) -> bool:
+    return _status_val(link) in _ATTACHABLE
 
 
 def _repo_from_record(record: Any) -> Optional[str]:
@@ -18,8 +38,6 @@ def _repo_from_record(record: Any) -> Optional[str]:
     repo = sm.get("repo")
     if isinstance(repo, str) and repo.strip():
         return repo.strip()
-    hint = getattr(record, "project_hint", None)
-    # GitHub project_hint is often the short repo name; prefer full repo.
     return None
 
 
@@ -53,10 +71,23 @@ def find_project_for_external(
     external_id: str,
     source_account_id: str = "",
 ) -> Optional[ProjectLink]:
+    """Prefer account-scoped link; fall back to any link for the container.
+
+    Lifecycle decisions (``historical`` / ``rejected``) must stick even when
+    the original link was created without a source_account_id.
+    """
+    if source_account_id:
+        hit = store.find_project_link(
+            external_type=external_type,
+            external_id=external_id,
+            source_account_id=source_account_id,
+        )
+        if hit is not None:
+            return hit
     return store.find_project_link(
         external_type=external_type,
         external_id=external_id,
-        source_account_id=source_account_id or None,
+        source_account_id=None,
     )
 
 
@@ -64,7 +95,9 @@ def resolve_project_for_record(store, record: Any) -> tuple[Optional[str], Optio
     """Map a ConnectorRecord onto a Project id when evidence is strong enough.
 
     Returns (project_id, link). Never invents a Project — only links to
-    existing ones via Project.repos / aliases / confirmed ProjectLinks.
+    existing ones via Project.repos / aliases / ProjectLinks.
+    ``historical`` / ``rejected`` links are never attached to episodes and
+    block auto-creating a fresh candidate for the same container.
     """
     account_id = getattr(record, "source_account_id", "") or ""
     ext_type, ext_id = _external_container(record)
@@ -76,7 +109,11 @@ def resolve_project_for_record(store, record: Any) -> tuple[Optional[str], Optio
         source_account_id=account_id,
     )
     if existing is not None:
-        if existing.confirmed or existing.confidence >= STRONG_MATCH:
+        if not _is_attachable(existing):
+            return None, existing
+        if (_status_val(existing) == ProjectLinkStatus.confirmed.value
+                or existing.confirmed
+                or existing.confidence >= STRONG_MATCH):
             return existing.project_id, existing
         return None, existing
 
@@ -116,6 +153,7 @@ def resolve_project_for_record(store, record: Any) -> tuple[Optional[str], Optio
         external_type=ext_type,
         external_id=ext_id,
         confidence=conf,
+        status=ProjectLinkStatus.candidate,
         confirmed=False,
         metadata={"signal": reason},
     )
@@ -125,14 +163,45 @@ def resolve_project_for_record(store, record: Any) -> tuple[Optional[str], Optio
     return None, link
 
 
-def confirm_project_link(store, link_id: str) -> ProjectLink:
+def set_project_link_status(
+    store, link_id: str, status: ProjectLinkStatus | str,
+) -> ProjectLink:
+    """Set lifecycle status. Only ``candidate|confirmed`` attach episodes."""
     link = store.get_project_link(link_id)
     if link is None:
         raise ValueError(f"project link {link_id} not found")
-    link.confirmed = True
-    link.confidence = max(link.confidence, 0.99)
+    try:
+        new_status = status if isinstance(status, ProjectLinkStatus) \
+            else ProjectLinkStatus(status)
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid project link status {status!r}; "
+            f"allowed={[s.value for s in ProjectLinkStatus]}"
+        ) from exc
+    link.status = new_status
+    link.confirmed = new_status == ProjectLinkStatus.confirmed
+    if new_status == ProjectLinkStatus.confirmed:
+        link.confidence = max(link.confidence, 0.99)
+    meta = dict(link.metadata or {})
+    meta["status_history"] = list(meta.get("status_history") or []) + [{
+        "status": new_status.value,
+    }]
+    link.metadata = meta
     store.update_project_link(link)
     return link
+
+
+def confirm_project_link(store, link_id: str) -> ProjectLink:
+    return set_project_link_status(store, link_id, ProjectLinkStatus.confirmed)
+
+
+def reject_project_link(store, link_id: str) -> ProjectLink:
+    return set_project_link_status(store, link_id, ProjectLinkStatus.rejected)
+
+
+def archive_project_link(store, link_id: str) -> ProjectLink:
+    """Mark link historical — provenance kept, not current ownership."""
+    return set_project_link_status(store, link_id, ProjectLinkStatus.historical)
 
 
 def link_project(
@@ -144,14 +213,21 @@ def link_project(
     source_account_id: str = "",
     confirmed: bool = True,
     confidence: float = 1.0,
+    status: Optional[ProjectLinkStatus | str] = None,
 ) -> ProjectLink:
+    if status is None:
+        status = (ProjectLinkStatus.confirmed if confirmed
+                  else ProjectLinkStatus.candidate)
+    elif not isinstance(status, ProjectLinkStatus):
+        status = ProjectLinkStatus(status)
     existing = find_project_for_external(
         store, external_type=external_type, external_id=external_id,
         source_account_id=source_account_id,
     )
     if existing is not None:
         existing.project_id = project_id
-        existing.confirmed = confirmed
+        existing.status = status
+        existing.confirmed = status == ProjectLinkStatus.confirmed
         existing.confidence = confidence
         store.update_project_link(existing)
         return existing
@@ -161,7 +237,8 @@ def link_project(
         external_type=external_type,
         external_id=external_id,
         confidence=confidence,
-        confirmed=confirmed,
+        status=status,
+        confirmed=status == ProjectLinkStatus.confirmed,
     )
     store.insert_project_link(link)
     return link

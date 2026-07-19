@@ -13,7 +13,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ... import ids
 from ...clock import now_iso
@@ -22,6 +22,18 @@ from ...clock import now_iso
 class IdentityStatus(str, Enum):
     candidate = "candidate"
     confirmed = "confirmed"
+    rejected = "rejected"
+
+
+class ProjectLinkStatus(str, Enum):
+    """Lifecycle for ProjectLink (Phase 7 debt closed in v0.6).
+
+    ``historical`` keeps provenance after a project closes without implying
+    current ownership; ``rejected`` is an explicit negative decision.
+    """
+    candidate = "candidate"
+    confirmed = "confirmed"
+    historical = "historical"
     rejected = "rejected"
 
 
@@ -68,9 +80,26 @@ class ProjectLink(BaseModel):
     external_type: str                  # github_repository | slack_channel | ...
     external_id: str
     confidence: float = 0.5
+    status: ProjectLinkStatus = ProjectLinkStatus.candidate
+    # Deprecated mirror of ``status == confirmed`` — kept so Phase 7 callers
+    # and persisted payloads keep working.
     confirmed: bool = False
     created_at: str = Field(default_factory=now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_confirmed_to_status(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        status = data.get("status")
+        confirmed = data.get("confirmed")
+        if status is None and confirmed:
+            data["status"] = ProjectLinkStatus.confirmed.value
+        elif status is not None:
+            sval = getattr(status, "value", status)
+            data["confirmed"] = sval == ProjectLinkStatus.confirmed.value
+        return data
 
 
 class EpisodeStatus(str, Enum):

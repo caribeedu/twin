@@ -322,6 +322,30 @@ class CorrelationStoreMixin:
         eid = row["episode_id"] if hasattr(row, "keys") else row[0]
         return self.get_work_episode(eid)
 
+    def list_episode_anchors(self, episode_id: str) -> list[dict[str, Any]]:
+        rows = self._j_fetchall(
+            "SELECT episode_id, vault_id, anchor_type, anchor_value "
+            "FROM episode_anchors WHERE episode_id = ?",
+            (episode_id,),
+        )
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            if hasattr(r, "keys"):
+                out.append({
+                    "episode_id": r["episode_id"],
+                    "vault_id": r["vault_id"],
+                    "anchor_type": r["anchor_type"],
+                    "anchor_value": r["anchor_value"],
+                })
+            else:
+                out.append({
+                    "episode_id": r[0],
+                    "vault_id": r[1],
+                    "anchor_type": r[2],
+                    "anchor_value": r[3],
+                })
+        return out
+
     def upsert_episode_anchor(
         self,
         *,
