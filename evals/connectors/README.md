@@ -43,6 +43,7 @@ evals/connectors/
     calendar_meeting_correlation.json  # Phase 5 calendar↔meeting fingerprint
     folder_document_revisions.json     # Phase 6 local folder revisions + delete
     cross_source_work_episode.json     # Phase 7 WorkEpisode + independence + conflict
+    ops_health_metrics.json            # Phase 9 §57 health + §58 metrics + setup/preview safe
   run.py                        # tiny runner over Fake + real adapters
 ```
 

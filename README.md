@@ -1446,6 +1446,15 @@ Phase 8 — Native proof (done):
 - MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories; native path never confirms Memory;
 - CLI: `twin native install|event|bindings`; `tests/test_native_host_phase8.py` and eval `evals/native`.
 
+Phase 9 — Evals and operations (done):
+
+- connector observability (§58): `compute_connector_metrics` aggregates fetch/normalize/dedupe/quarantine/DLQ/deletion/lag counters by type/vault/instance (no content in labels); nested under `twin stats` / `GET /api/metrics`;
+- health snapshot (§57): `connector_health` / `snapshot_health` expose `lag_seconds`, `pending_items`, `last_checkpoint_at`, `rate_limit_remaining` (+ retry/backoff/next_run) alongside status, last batch and checkpoints;
+- setup plan (§77): `twin connector setup <type> --source-owner …` prints an ordered authenticate→ownership→scope→preview→confirm plan and never ingests; backfill preview remains the historical import gate;
+- scheduler ops: `twin connector due` / `twin connector sync-due` wrap the local interval scheduler; `twin doctor` reports schedule, credential store, instance health and due count;
+- §88 contract matrix: `twin connector contract` / `contract_matrix()` checks every registered adapter’s manifest + protocol surface and documents per-adapter gaps (large attachment, deletion feed, …);
+- `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; existing Fake/GitHub/Slack/… contract suites and `evals/connectors/` scenarios remain the behavioural proof.
+
 Deferred after Phase 7 merge (accepted debt + path — see **Correlation depth** below): episode phases, multi-factor confidence, ProjectLink lifecycle, identity graphs, intra-episode causality, incremental correlation, explainability CLI/API, scale/replay evals.
 
 ### Correlation depth (planned vX — after Phase 7)

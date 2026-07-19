@@ -28,7 +28,15 @@ from .credentials import (
     generate_token,
 )
 from .errors import sanitize_error
+from .contract import check_adapter_contract, contract_matrix
 from .health import connector_health, snapshot_health
+from .metrics import compute_connector_metrics
+from .ops import (
+    doctor_connector_checks,
+    list_due_connectors,
+    plan_connector_setup,
+    run_sync_due,
+)
 from .models import (
     BackfillJob,
     BackfillJobStatus,
@@ -151,17 +159,23 @@ __all__ = [
     "build_adapter",
     "build_credential_store",
     "build_percept",
+    "check_adapter_contract",
+    "compute_connector_metrics",
     "connector_health",
+    "contract_matrix",
     "create_backfill_job",
     "default_vault_for",
     "discard_dead_letter",
+    "doctor_connector_checks",
     "ensure_org_vault",
     "generate_token",
     "get_adapter_class",
     "get_manifest",
     "idempotency_key",
     "list_adapters",
+    "list_due_connectors",
     "pause_connector",
+    "plan_connector_setup",
     "reclassify_source_account",
     "register_adapter",
     "register_source_account",
@@ -171,6 +185,7 @@ __all__ = [
     "revoke_connector",
     "run_backfill_partition",
     "run_sync",
+    "run_sync_due",
     "sanitize_error",
     "set_credential",
     "snapshot_health",

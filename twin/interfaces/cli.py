@@ -735,6 +735,35 @@ def cmd_connector(args) -> None:
         for e in ws.store.list_connector_deletion_events(args.connector_id):
             print(f"{e.id}  {e.status.value:9}  {e.external_type}:{e.external_id}  "
                   f"prior={len(e.prior_record_ids)}  percepts={len(e.affected_percept_ids)}")
+    elif cmd == "setup":
+        from ..connectors import plan_connector_setup
+        plan = plan_connector_setup(
+            ws.store,
+            connector_type=args.connector_type,
+            source_owner=args.source_owner,
+            vault_id=args.vault_id,
+            org_key=args.org_key,
+            display_name=args.name or "",
+            configuration=_json.loads(args.config) if args.config else None,
+            home=ws.cfg.home,
+        )
+        print(_json.dumps(plan, indent=2, ensure_ascii=False))
+        if not plan.get("ok"):
+            raise SystemExit(1)
+    elif cmd == "due":
+        from ..connectors import list_due_connectors
+        print(_json.dumps(list_due_connectors(ws.store, ws.cfg.home),
+                          indent=2, default=str))
+    elif cmd == "sync-due":
+        from ..connectors import run_sync_due
+        rows = run_sync_due(
+            ws.store, creds, ws.cfg.home,
+            emit_percepts=not getattr(args, "no_percepts", False),
+        )
+        print(_json.dumps({"results": rows, "count": len(rows)}, indent=2))
+    elif cmd == "contract":
+        from ..connectors import contract_matrix
+        print(_json.dumps(contract_matrix(), indent=2, default=str))
     else:
         raise SystemExit(f"unknown connector command: {cmd}")
 
@@ -1410,6 +1439,26 @@ def main(argv: list[str] | None = None) -> None:
     creplay = cs.add_parser("replay", help="retry one dead letter from its raw item")
     creplay.add_argument("dead_letter_id")
     creplay.set_defaults(func=cmd_connector)
+    csetup = cs.add_parser(
+        "setup",
+        help="guided setup plan (no ingest) — ownership → auth → scope → preview",
+    )
+    csetup.add_argument("connector_type")
+    csetup.add_argument("--source-owner", required=True,
+                        choices=["personal", "employer", "client",
+                                 "opensource", "shared", "unknown"])
+    csetup.add_argument("--vault-id", default=None)
+    csetup.add_argument("--org-key", default=None)
+    csetup.add_argument("--name", default=None)
+    csetup.add_argument("--config", default=None, help="JSON instance configuration")
+    csetup.set_defaults(func=cmd_connector)
+    cs.add_parser("due", help="list connectors the local scheduler would run now"
+                  ).set_defaults(func=cmd_connector)
+    csyncdue = cs.add_parser("sync-due", help="run one scheduler pass over due connectors")
+    csyncdue.add_argument("--no-percepts", action="store_true")
+    csyncdue.set_defaults(func=cmd_connector)
+    cs.add_parser("contract", help="print §88 adapter contract matrix"
+                  ).set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")

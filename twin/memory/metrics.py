@@ -160,7 +160,17 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
                 used_pairs / supplied_pairs, 3
             ) if supplied_pairs else None,
         },
+        **_connector_block(store),
     }
+
+
+def _connector_block(store: MemoryStore) -> dict[str, Any]:
+    """Phase 9 §58 — connector counters nested under the same metrics payload."""
+    try:
+        from ..connectors.metrics import compute_connector_metrics
+    except Exception:
+        return {"connectors": {"available": False}}
+    return compute_connector_metrics(store)
 
 
 def _count(items, key) -> dict[str, int]:
