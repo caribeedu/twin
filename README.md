@@ -1448,7 +1448,7 @@ Phase 8 — Native proof (done):
 
 Phase 9 — Evals and operations (done):
 
-- connector observability (§58): durable monotonic `*_total` counters on `ConnectorSyncState` (bumped per terminal batch; never a sliding window of the last N batches); summary metrics separated from high-cardinality `instances_detail` (ids are diagnostics, not TSDB labels); `connector_percepts_total` counts Percepts (not Memory candidates); nested under `twin stats` / `GET /api/metrics`;
+- connector observability (§58): durable `*_total` counters on `ConnectorSyncState`, applied **exactly once per `batch.id`** via `connector_counter_batches` ledger (claim + bump in one transaction); `reconcile_connector_counters` recovers crash undercounts and can repair divergence with audit; summary metrics separated from high-cardinality `instances_detail`; `connector_percepts_total` counts Percepts (not Memory candidates); nested under `twin stats` / `GET /api/metrics`;
 - health snapshot (§57): `lag_seconds` ≡ `schedule_lag_seconds` (`max(0, now - next_run_at)`, `null` when unscheduled); `checkpoint_age_seconds` and optional `source_lag_seconds` are separate; never-run connectors report `health=unknown`; `pending_items` counts DLQ + backlog queues only (not `targeted_streams` scope);
 - setup plan (§77): `twin connector setup <type> --source-owner …` prints ownership→authenticate→scope→preview→confirm (never ingests) and surfaces ownership/vault/org warnings; backfill preview remains the historical import gate;
 - scheduler ops: `twin connector due` / `twin connector sync-due`; `twin doctor` resolves credentials (ref must decrypt), classifies due by schedule grace, and reports unhealthy / lagged instances;

@@ -255,6 +255,8 @@ def doctor_connector_checks(store, home: Path) -> list[dict[str, str]]:
 
     unhealthy = 0
     lagged = 0
+    from .counters import reconcile_connector_counters
+
     for inst in instances:
         h = connector_health(store, inst.id)
         if h.get("health") in ("failed", "unauthorized", "degraded"):
@@ -266,6 +268,26 @@ def doctor_connector_checks(store, home: Path) -> list[dict[str, str]]:
             grace = max(60, int(interval))
             if lag is not None and lag > grace:
                 lagged += 1
+
+        try:
+            report = reconcile_connector_counters(
+                store, inst.id, apply_missing=False, repair=False,
+            )
+            if not report.get("ok"):
+                checks.append({
+                    "name": f"connectors:counters:{inst.id}",
+                    "status": "warn",
+                    "detail": (
+                        "persisted counters differ from batch ledger; "
+                        f"diverged={sorted((report.get('diverged') or {}).keys())}"
+                    ),
+                })
+        except Exception as exc:
+            checks.append({
+                "name": f"connectors:counters:{inst.id}",
+                "status": "warn",
+                "detail": f"counter check failed: {type(exc).__name__}",
+            })
 
         if inst.status in SYNCABLE_STATUSES:
             if not inst.credential_ref:

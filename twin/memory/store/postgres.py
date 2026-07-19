@@ -631,6 +631,15 @@ CREATE TABLE IF NOT EXISTS connector_backfill_jobs (
 );
 ALTER TABLE connector_backfill_jobs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id);
+-- Phase 9: exactly-once counter contributions per terminal batch
+CREATE TABLE IF NOT EXISTS connector_counter_batches (
+    connector_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    counted_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (connector_id, batch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ccb_conn ON connector_counter_batches(connector_id);
 """
 
 _EMBEDDINGS_PGVECTOR = """

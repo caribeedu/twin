@@ -30,6 +30,11 @@ from .credentials import (
 from .errors import sanitize_error
 from .contract import check_adapter_contract, contract_matrix
 from .health import connector_health, snapshot_health
+from .counters import (
+    ensure_counters,
+    reconcile_connector_counters,
+    record_batch_counters,
+)
 from .metrics import compute_connector_metrics
 from .ops import (
     doctor_connector_checks,
@@ -167,6 +172,7 @@ __all__ = [
     "default_vault_for",
     "discard_dead_letter",
     "doctor_connector_checks",
+    "ensure_counters",
     "ensure_org_vault",
     "generate_token",
     "get_adapter_class",
@@ -177,6 +183,8 @@ __all__ = [
     "pause_connector",
     "plan_connector_setup",
     "reclassify_source_account",
+    "reconcile_connector_counters",
+    "record_batch_counters",
     "register_adapter",
     "register_source_account",
     "resolve_dead_letter",

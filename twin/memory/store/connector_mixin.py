@@ -355,6 +355,91 @@ class ConnectorStoreMixin:
         )
         return [row_to_batch(r) for r in rows]
 
+    def list_all_connector_batches(self, connector_id: str) -> list[ConnectorBatch]:
+        """Every batch for a connector — no sliding window (counter reconcile)."""
+        rows = self._j_fetchall(
+            "SELECT * FROM connector_batches WHERE connector_id = ?"
+            " ORDER BY created_at ASC",
+            (connector_id,),
+        )
+        return [row_to_batch(r) for r in rows]
+
+    # -- counter ledger (exactly-once per batch.id) -----------------------
+
+    def claim_connector_counter_batch(
+        self,
+        connector_id: str,
+        batch_id: str,
+        contribution: dict[str, Any],
+    ) -> bool:
+        """Insert ledger row for ``batch_id``. True iff this caller claimed it.
+
+        PRIMARY KEY (connector_id, batch_id) makes concurrent claims safe —
+        only one INSERT succeeds. Uses INSERT OR IGNORE / ON CONFLICT DO
+        NOTHING so a conflict does not poison an open transaction (SQLite).
+        Must run inside the same transaction as the matching counter bump.
+        """
+        counted_at = now_iso()
+        payload = json.dumps(contribution, default=str)
+        # Dialect: PostgresStore exposes .conn with psycopg; Sqlite uses sqlite3.
+        is_pg = type(self).__name__ == "PostgresStore"
+        if is_pg:
+            sql = (
+                "INSERT INTO connector_counter_batches"
+                " (connector_id, batch_id, counted_at, payload)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (connector_id, batch_id) DO NOTHING"
+            )
+        else:
+            sql = (
+                "INSERT OR IGNORE INTO connector_counter_batches"
+                " (connector_id, batch_id, counted_at, payload)"
+                " VALUES (?, ?, ?, ?)"
+            )
+        cur = self._j_exec(
+            sql, (connector_id, batch_id, counted_at, payload),
+        )
+        self._j_commit()
+        return getattr(cur, "rowcount", 0) > 0
+
+    def connector_counter_batch_claimed(
+        self, connector_id: str, batch_id: str,
+    ) -> bool:
+        row = self._j_fetchone(
+            "SELECT batch_id FROM connector_counter_batches"
+            " WHERE connector_id = ? AND batch_id = ?",
+            (connector_id, batch_id),
+        )
+        return row is not None
+
+    def list_connector_counter_batch_ids(self, connector_id: str) -> list[str]:
+        rows = self._j_fetchall(
+            "SELECT batch_id FROM connector_counter_batches"
+            " WHERE connector_id = ?",
+            (connector_id,),
+        )
+        return [r["batch_id"] if isinstance(r, dict) else r[0] for r in rows]
+
+    def list_connector_counter_contributions(
+        self, connector_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = self._j_fetchall(
+            "SELECT batch_id, counted_at, payload FROM connector_counter_batches"
+            " WHERE connector_id = ?",
+            (connector_id,),
+        )
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            payload = r["payload"] if not isinstance(r, tuple) else r[2]
+            if isinstance(payload, str):
+                payload = json.loads(payload) if payload else {}
+            out.append({
+                "batch_id": r["batch_id"] if not isinstance(r, tuple) else r[0],
+                "counted_at": r["counted_at"] if not isinstance(r, tuple) else r[1],
+                "contribution": payload or {},
+            })
+        return out
+
     # -- raw items (encrypted payload) ------------------------------------
 
     def insert_connector_raw_item(self, item: RawConnectorItem) -> str:

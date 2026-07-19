@@ -25,7 +25,12 @@ from twin.connectors import (
     register_source_account,
     sync_connector,
 )
-from twin.connectors.counters import record_batch_counters, seed_counters_from_batches
+from twin.connectors.counters import (
+    ensure_counters,
+    reconcile_connector_counters,
+    record_batch_counters,
+    seed_counters_from_batches,
+)
 from twin.connectors.models import (
     BatchStatus,
     ConnectorBatch,
@@ -190,7 +195,6 @@ def test_stats_includes_connector_block(store, creds):
 
 def test_counters_monotonic_beyond_500_batches(store, creds):
     _, inst = _make(store, creds)
-    # seed with 510 synthetic terminal batches then bump one more
     for i in range(510):
         b = ConnectorBatch(
             connector_id=inst.id, stream="issues",
@@ -211,18 +215,110 @@ def test_counters_monotonic_beyond_500_batches(store, creds):
     record_batch_counters(store, inst.id, extra)
     after = compute_connector_metrics(store)["connectors"]["connector_fetch_total"]
     assert after == before + 7
-    assert after >= before  # never decreases
 
 
-def test_counters_survive_reseed_max(store, creds):
+def test_same_batch_counted_only_once(store, creds):
     _, inst = _make(store, creds)
-    sync_connector(store, creds, inst.id)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=10, normalized_count=10, percept_count=10,
+    )
+    store.insert_connector_batch(batch)
+    record_batch_counters(store, inst.id, batch)
+    record_batch_counters(store, inst.id, batch)
+    record_batch_counters(store, inst.id, batch)
     state = store.get_connector_sync_state(inst.id)
-    first = state.fetch_total
-    # re-seed must not lower
-    seed_counters_from_batches(store, inst.id)
-    again = store.get_connector_sync_state(inst.id).fetch_total
-    assert again >= first
+    assert state.fetch_total == 10
+    assert state.percepts_total == 10
+    assert store.connector_counter_batch_claimed(inst.id, batch.id)
+
+
+def test_crash_before_counters_recovered_on_ensure(store, creds):
+    """Batch persisted, counters never applied → ensure/reconcile includes it."""
+    _, inst = _make(store, creds)
+    # Initialize counters as if a prior successful path ran
+    def _init(state: ConnectorSyncState) -> None:
+        state.counters_initialized = True
+        state.fetch_total = 0
+    store.apply_connector_sync_state(inst.id, _init)
+
+    orphan = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=5, normalized_count=5, percept_count=5,
+    )
+    store.insert_connector_batch(orphan)
+    # Simulate crash: no record_batch_counters call
+    assert not store.connector_counter_batch_claimed(inst.id, orphan.id)
+
+    ensure_counters(store, inst.id)
+    state = store.get_connector_sync_state(inst.id)
+    assert state.fetch_total == 5
+    assert store.connector_counter_batch_claimed(inst.id, orphan.id)
+
+
+def test_aborted_and_partial_counted_once(store, creds):
+    _, inst = _make(store, creds)
+    aborted = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.aborted, raw_count=3, failed_count=1,
+    )
+    partial = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.partially_failed, raw_count=4, failed_count=1,
+    )
+    store.insert_connector_batch(aborted)
+    store.insert_connector_batch(partial)
+    record_batch_counters(store, inst.id, aborted)
+    record_batch_counters(store, inst.id, aborted)
+    record_batch_counters(store, inst.id, partial)
+    record_batch_counters(store, inst.id, partial)
+    state = store.get_connector_sync_state(inst.id)
+    assert state.fetch_total == 7
+    assert state.failed_batches_total == 2
+
+
+def test_reconcile_detects_and_repairs_overcount(store, creds):
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed,
+        raw_count=10, normalized_count=10, percept_count=10,
+    )
+    store.insert_connector_batch(batch)
+    record_batch_counters(store, inst.id, batch)
+
+    def _inflate(state: ConnectorSyncState) -> None:
+        state.fetch_total = 999
+    store.apply_connector_sync_state(inst.id, _inflate)
+
+    report = reconcile_connector_counters(
+        store, inst.id, apply_missing=False, repair=False,
+    )
+    assert report["ok"] is False
+    assert "fetch_total" in report["diverged"]
+
+    fixed = reconcile_connector_counters(store, inst.id, repair=True)
+    assert fixed["repaired"] is True
+    assert fixed["ok"] is True
+    state = store.get_connector_sync_state(inst.id)
+    assert state.fetch_total == 10
+    audit = (state.metadata or {}).get("counter_reconcile_audit") or []
+    assert audit
+
+
+def test_doctor_warns_on_counter_divergence(store, creds, tmp_path):
+    _, inst = _make(store, creds)
+    batch = ConnectorBatch(
+        connector_id=inst.id, stream="issues",
+        status=BatchStatus.committed, raw_count=3, normalized_count=3,
+    )
+    store.insert_connector_batch(batch)
+    # leave uncounted → doctor detects
+    checks = doctor_connector_checks(store, tmp_path / "creds-home")
+    counter = [c for c in checks if c["name"] == f"connectors:counters:{inst.id}"]
+    assert counter and counter[0]["status"] == "warn"
 
 
 # -- setup / preview / scheduler -----------------------------------------------
