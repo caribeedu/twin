@@ -44,6 +44,73 @@ def test_supersede_closes_old_memory(store, embedder):
     assert result.action == "supersede"
 
 
+def test_meeting_candidate_supersedes_prior_decision_after_confirm(store, embedder):
+    """Later meeting evidence can supersede a prior decision — only after confirm.
+
+    Candidates from connectors stay candidates until review confirms; supersede
+    is an explicit Memory lifecycle action.
+    """
+    from twin.clock import now_iso
+    from twin.memory.models import Evidence, MemoryStatus
+    from twin.sensory.percept import Percept
+
+    pr = Percept(
+        id=ids.new_id("pct"),
+        percept_type="pull_request",
+        source_sensor="github",
+        occurred_at="2026-07-10T10:00:00Z",
+        ingested_at=now_iso(),
+        content="Decision: ship Atlas Friday.",
+        source_trust=0.85,
+        source_scope="work",
+        source_confidentiality="internal",
+    )
+    pr.seal()
+    store.insert_percept(pr)
+    meeting = Percept(
+        id=ids.new_id("pct"),
+        percept_type="meeting_transcript_chunk",
+        source_sensor="fireflies",
+        occurred_at="2026-07-11T15:00:00Z",
+        ingested_at=now_iso(),
+        content="Postpone the Atlas ship to next sprint.",
+        source_trust=0.80,
+        source_scope="work",
+        source_confidentiality="internal",
+    )
+    meeting.seal()
+    store.insert_percept(meeting)
+
+    old = _mem(
+        store, embedder, type="decision", title="Ship Atlas Friday",
+        summary="Decision: ship Atlas Friday.", status="candidate",
+        confidence=0.75,
+    )
+    store.insert_evidence(Evidence(
+        id=ids.new_id("ev"), memory_id=old.id, quote="ship Atlas Friday",
+        percept_id=pr.id, artifact_id="github:pr:atlas#8",
+        independence_group="lineage:github:acme/atlas#8",
+    ))
+    new = _mem(
+        store, embedder, type="decision", title="Postpone Atlas ship",
+        summary="Postpone the Atlas ship to next sprint.", status="candidate",
+        confidence=0.80,
+    )
+    store.insert_evidence(Evidence(
+        id=ids.new_id("ev"), memory_id=new.id, quote="postpone the Atlas ship",
+        percept_id=meeting.id, artifact_id="fireflies:meeting:m1",
+        independence_group="meeting:m1",
+    ))
+
+    assert store.get_memory(old.id).status == MemoryStatus.candidate
+    assert store.get_memory(new.id).status == MemoryStatus.candidate
+    store.update_memory(new.id, status=MemoryStatus.confirmed.value)
+    result = supersede(store, new.id, old.id)
+    assert result.action == "supersede"
+    assert store.get_memory(old.id).status == MemoryStatus.deprecated
+    assert store.get_memory(new.id).status == MemoryStatus.confirmed
+
+
 def test_contradict_flags_both_for_review(store, embedder):
     a = _mem(store, embedder, title="usa tabs", summary="Prefere tabs.")
     b = _mem(store, embedder, title="usa espaços", summary="Prefere espaços.")

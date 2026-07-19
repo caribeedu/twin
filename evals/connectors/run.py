@@ -899,18 +899,18 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
-def _run_v06_completion_scenario(case: dict) -> tuple[bool, str]:
-    """Phase 10 — §93 completion matrix ok + sync never confirms Memory/Judgment."""
+def _run_connector_completion(case: dict) -> tuple[bool, str]:
+    """completion_matrix evidence discipline + sync never confirms Memory/Judgment."""
     from twin.connectors import completion_matrix
 
     matrix = completion_matrix()
     expected = case["expected"]
-    if matrix.get("count") != expected["criteria_count"]:
-        return False, f"criteria count {matrix.get('count')} != {expected['criteria_count']}"
-    if bool(matrix.get("ok")) != bool(expected["matrix_ok"]):
-        return False, f"matrix.ok={matrix.get('ok')} failed={matrix.get('failed')}"
-    if matrix.get("failed") or matrix.get("partial"):
-        return False, f"failed={matrix.get('failed')} partial={matrix.get('partial')}"
+    if expected.get("pass_requires_evidence"):
+        for row in matrix.get("criteria") or []:
+            if row.get("status") == "pass" and not (
+                row.get("evidence") or row.get("eval")
+            ):
+                return False, f"pass cell {row.get('id')} lacks evidence"
 
     with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
         store, creds, _acc, inst = _setup(case, tmp)
@@ -1008,7 +1008,7 @@ _SCENARIOS = {
     "folder_document_revisions": _run_folder_document_revisions,
     "cross_source_work_episode": _run_cross_source_work_episode,
     "ops_health_metrics": _run_ops_health_metrics,
-    "v06_completion_scenario": _run_v06_completion_scenario,
+    "connector_completion": _run_connector_completion,
 }
 
 

@@ -1,5 +1,4 @@
-"""v0.6 Phase 3 — Slack connector against the offline API double."""
-
+"""Slack connector against the offline API double."""
 from __future__ import annotations
 
 import hashlib

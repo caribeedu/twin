@@ -1,5 +1,4 @@
-"""v0.6 Phase 5 — Calendar connector against the offline API double."""
-
+"""Calendar connector against the offline API double."""
 from __future__ import annotations
 
 import httpx

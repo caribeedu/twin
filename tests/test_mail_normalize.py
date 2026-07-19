@@ -1,5 +1,4 @@
-"""Shared mail normalize / classification unit tests."""
-
+"""Shared mail MIME / normalize helpers."""
 from twin.connectors.mail.classification import (
     CLASS_CODE_REVIEW,
     CLASS_HUMAN,

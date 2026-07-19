@@ -1,4 +1,4 @@
-"""v0.6 correlation-depth slice — lifecycle, confidence downgrade, explain."""
+"""Correlation lifecycle, confidence rebuild, and explain surfaces."""
 
 from __future__ import annotations
 

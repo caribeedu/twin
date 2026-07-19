@@ -1,5 +1,4 @@
-"""Offline Gmail API double for Phase 4 connector tests."""
-
+"""Offline Gmail API double for connector tests."""
 from __future__ import annotations
 
 import base64

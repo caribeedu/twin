@@ -1,5 +1,4 @@
-"""Unit tests for shared meeting model / speakers / correlation (Phase 5)."""
-
+"""Shared meeting model, speakers, and correlation helpers."""
 from __future__ import annotations
 
 from twin.connectors.meeting import (

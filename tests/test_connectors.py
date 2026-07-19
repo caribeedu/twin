@@ -1,23 +1,4 @@
-"""v0.6 Phase 1 — connector framework contract suite (on FakeConnector).
-
-Proves the framework invariants without any real provider:
-
-- nothing becomes cognitively visible before a consistent commit: a partial
-  batch persists no Records and no Percepts, and the retry lands everything
-  together;
-- batch committed ⇔ checkpoint references that batch — fault injection
-  between the two cannot produce a divergent state;
-- one worker per (connector, stream): leases, not hope;
-- an external revision is immutable — same key + different content is a
-  collision (DLQ), never an overwrite;
-- credentials fail closed (no crypto backend → no connector), are written
-  atomically under a lock, and survive corruption via backup;
-- provisioning and revocation are compensable/resumable;
-- MCP/API connector surfaces demand connector:* capabilities;
-- deletions resolve lineage into a deletion event instead of silently
-  keeping (or dropping) derived memory.
-"""
-
+"""Connector framework contract suite (FakeConnector)."""
 from __future__ import annotations
 
 import json
@@ -1085,7 +1066,7 @@ def test_manifest_and_adapter_registration():
     assert manifest.auth_mode == "generated_local_token"
 
 
-# -- v0.6 phase 2 framework deltas -------------------------------------------------
+# -- framework deltas (dynamic streams / plan_streams) -----------------------------
 
 
 def test_adapter_plan_streams_drives_dynamic_streams(store, creds, monkeypatch):

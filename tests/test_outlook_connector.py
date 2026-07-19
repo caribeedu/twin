@@ -1,5 +1,4 @@
-"""v0.6 Phase 4 — Outlook connector against the offline Graph double."""
-
+"""Outlook connector against the offline Graph double."""
 from __future__ import annotations
 
 import httpx

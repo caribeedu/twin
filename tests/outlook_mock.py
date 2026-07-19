@@ -1,5 +1,4 @@
-"""Offline Microsoft Graph mail double for Phase 4 connector tests."""
-
+"""Offline Microsoft Graph mail double for connector tests."""
 from __future__ import annotations
 
 from typing import Any, Optional

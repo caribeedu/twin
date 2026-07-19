@@ -1,8 +1,4 @@
-"""Offline Fireflies GraphQL double for Phase 5 connector tests.
-
-Imitates ``POST https://api.fireflies.ai/graphql`` — not a fictional REST API.
-"""
-
+"""Offline Fireflies GraphQL double for connector tests."""
 from __future__ import annotations
 
 import json

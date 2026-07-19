@@ -1,4 +1,4 @@
-"""v0.6 Phase 7 — cross-source cognition (vault-partitioned, idempotent)."""
+"""Cross-source correlation — vault partition, episodes, identity, conflicts."""
 
 from __future__ import annotations
 

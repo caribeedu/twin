@@ -1507,7 +1507,7 @@ def main(argv: list[str] | None = None) -> None:
                   ).set_defaults(func=cmd_connector)
     cs.add_parser(
         "completion",
-        help="print v0.6 §93 Final Review completion matrix (Phase 10)",
+        help="print connector completion criteria matrix (§93)",
     ).set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")

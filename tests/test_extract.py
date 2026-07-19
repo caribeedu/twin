@@ -68,7 +68,7 @@ def test_source_trust_scales_confidence_and_floors_sensitivity(store, cfg, embed
     store.insert_percept(percept)
     report = extract_percept(store, cfg, embedder, percept)
     mem = store.get_memory(report.inserted[0])
-    # v0.3 soft calibration still reduces confidence under low source trust
+    # soft calibration still reduces confidence under low source trust
     assert mem.confidence < 0.5
     assert mem.confidence == pytest.approx(
         calibrated_confidence("slack", mem.type.value, 0.5, source_trust=0.5,

@@ -1,8 +1,4 @@
-"""v0.6 Phase 9 — evals and operations (review fixes).
-
-Covers durable counters, schedule vs checkpoint lag, evidence-based contract
-matrix, pending_items semantics, unknown health, and doctor credential checks.
-"""
+"""Connector ops — counters, health lag, contract matrix, setup, doctor."""
 
 from __future__ import annotations
 
@@ -40,7 +36,7 @@ from twin.connectors.models import (
 from twin.connectors.ops import doctor_connector_checks
 from twin.memory.metrics import compute_metrics
 
-PRINCIPAL = "principal_phase9"
+PRINCIPAL = "principal_ops"
 
 
 @pytest.fixture()
@@ -54,7 +50,7 @@ def _make(store, creds, *, configuration=None):
         org_key="acme", owner_principal_id=PRINCIPAL,
     )
     inst = add_connector_instance(
-        store, creds, account_id=acc.id, secret="tok-phase9",
+        store, creds, account_id=acc.id, secret="tok-ops",
         configuration=configuration,
     )
     return acc, inst

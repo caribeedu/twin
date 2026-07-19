@@ -1,10 +1,4 @@
-"""Offline GitHub REST v3 double for the connector contract suite.
-
-Serves the same semantics the adapter depends on — ``since`` filtering,
-``sort=updated``, Link-header pagination, rate-limit headers, 401/403 —
-from in-memory fixtures. No test ever touches the network.
-"""
-
+"""Offline GitHub API double for connector tests."""
 from __future__ import annotations
 
 import json

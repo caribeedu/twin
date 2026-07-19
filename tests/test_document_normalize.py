@@ -1,5 +1,4 @@
-"""Unit tests for shared document model / normalize (Phase 6)."""
-
+"""Shared document model and normalize helpers."""
 from __future__ import annotations
 
 from twin.connectors.documents import (

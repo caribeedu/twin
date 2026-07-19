@@ -1,5 +1,4 @@
-"""v0.6 Phase 5 — Fireflies GraphQL connector against the offline double."""
-
+"""Fireflies GraphQL connector against the offline double."""
 from __future__ import annotations
 
 import httpx

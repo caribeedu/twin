@@ -1,5 +1,4 @@
-"""v0.6 Phase 4 — Gmail connector against the offline API double."""
-
+"""Gmail connector against the offline API double."""
 from __future__ import annotations
 
 import httpx

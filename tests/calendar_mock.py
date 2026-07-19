@@ -1,5 +1,4 @@
-"""Offline Google Calendar API v3 double for Phase 5 connector tests."""
-
+"""Offline Google Calendar API v3 double for connector tests."""
 from __future__ import annotations
 
 from typing import Any, Optional

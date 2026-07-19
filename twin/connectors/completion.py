@@ -35,7 +35,7 @@ CRITERIA: list[dict[str, Any]] = [
         "status": "pass",
         "evidence": (
             "tests/test_connectors.py::test_org_vault_isolated_and_declared;"
-            "tests/test_connector_ops_phase9.py::test_setup_plan_never_ingests"
+            "tests/test_connector_ops.py::test_setup_plan_never_ingests"
         ),
         "eval": None,
         "note": "employer → org vault; reclassification preview-first",
@@ -85,7 +85,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "Slack thread related to PR is correlated",
         "status": "pass",
         "evidence": (
-            "tests/test_correlation_phase7.py::"
+            "tests/test_correlation.py::"
             "test_episode_correlates_slack_mention_of_pr"
         ),
         "eval": "evals/connectors/cases/cross_source_work_episode.json",
@@ -97,7 +97,7 @@ CRITERIA: list[dict[str, Any]] = [
         "status": "pass",
         "evidence": (
             "tests/test_gmail_connector.py::test_github_notification_is_derived;"
-            "tests/test_correlation_phase7.py::"
+            "tests/test_correlation.py::"
             "test_independence_group_shared_for_notification"
         ),
         "eval": "evals/connectors/cases/gmail_thread_lineage.json",
@@ -108,10 +108,10 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "later meeting revises decision and supersedes prior memory",
         "status": "pass",
         "evidence": (
-            "tests/test_v06_final_review.py::"
-            "test_meeting_revises_decision_via_supersede"
+            "tests/test_lifecycle.py::"
+            "test_meeting_candidate_supersedes_prior_decision_after_confirm"
         ),
-        "eval": "evals/connectors/cases/v06_completion_scenario.json",
+        "eval": "evals/connectors/cases/connector_completion.json",
         "note": (
             "explicit supersede after meeting candidate; connectors never "
             "auto-confirm (criterion 17)"
@@ -133,7 +133,7 @@ CRITERIA: list[dict[str, Any]] = [
         "summary": "professional context pack uses authorized memory",
         "status": "pass",
         "evidence": (
-            "tests/test_v06_final_review.py::"
+            "tests/test_privacy.py::"
             "test_professional_pack_includes_authorized_work_memory"
         ),
         "eval": None,
@@ -181,7 +181,7 @@ CRITERIA: list[dict[str, Any]] = [
         "id": 15,
         "summary": "native adapter observes session and uses same core",
         "status": "pass",
-        "evidence": "tests/test_native_host_phase8.py",
+        "evidence": "tests/test_native_host.py",
         "eval": "evals/native/cases/host_session_proactive_pack.json",
         "note": None,
     },
@@ -200,7 +200,7 @@ CRITERIA: list[dict[str, Any]] = [
         "evidence": (
             "tests/test_connectors.py::"
             "test_no_confirmed_memory_or_judgment_written;"
-            "tests/test_native_host_phase8.py::test_no_confirmed_memory_delta"
+            "tests/test_native_host.py::test_no_confirmed_memory_delta"
         ),
         "eval": "evals/connectors/cases/github_pr_lifecycle.json",
         "note": None,

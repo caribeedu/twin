@@ -1,5 +1,4 @@
-"""v0.6 Phase 6 — local folder / shared documents connector."""
-
+"""Local folder / shared documents connector."""
 from __future__ import annotations
 
 import os

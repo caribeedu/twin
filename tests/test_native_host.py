@@ -1,4 +1,4 @@
-"""v0.6 Phase 8 — native host adapter review fixes."""
+"""Native host adapter — bindings, observations, fail-open hooks."""
 
 from __future__ import annotations
 

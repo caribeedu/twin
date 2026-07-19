@@ -103,7 +103,7 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
         },
         "backfill_preview_safe": {
             "status": "pass",
-            "evidence": "tests/test_connector_ops_phase9.py::test_backfill_preview_still_safe",
+            "evidence": "tests/test_connector_ops.py::test_backfill_preview_still_safe",
         },
         "large_attachment": {
             "status": "not_applicable",

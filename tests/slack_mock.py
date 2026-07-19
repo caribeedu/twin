@@ -1,5 +1,4 @@
-"""Offline Slack Web API double for the Phase 3 connector suite."""
-
+"""Offline Slack Web API double for connector tests."""
 from __future__ import annotations
 
 from typing import Any, Optional

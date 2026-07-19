@@ -66,7 +66,7 @@ async def _call(server, tool, args):
 
 @pytest.mark.anyio
 async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
-    """The complete v0.2 loop over MCP: session opens with project-aware
+    """The complete MCP loop: session opens with project-aware
     context, work happens, completion turns it into reviewable candidates,
     review confirms, feedback lands, and a second MCP client sees the new
     context."""

@@ -1,5 +1,4 @@
-"""v0.5 privacy & governance — contextual access before any LLM."""
-
+"""Privacy and governance — contextual access before any LLM."""
 import pytest
 
 from twin import ids
@@ -226,6 +225,40 @@ def test_context_pack_applies_privacy(store, cfg, embedder):
     assert pack.privacy_decision_id
     # employer content should not appear for personal cloud
     assert "confidential employer roadmap" not in pack.context_pack
+
+
+def test_professional_pack_includes_authorized_work_memory(store, cfg, embedder):
+    """Developer + vault_work access may include employer memory in the pack."""
+    bootstrap_policy_set(store)
+    _ensure_tool_principal(
+        store, "tool_work_cli",
+        domains=["technical", "work"],
+        vaults=["vault_general", "vault_work"],
+    )
+    marker = "AUTHORIZED_EMPLOYER_ROADMAP_ATLAS"
+    _mem(
+        store, embedder,
+        title="Atlas roadmap",
+        summary=marker,
+        domain="work",
+        status="confirmed",
+        payload={"source_owner": "employer", "vault_id": "vault_work"},
+        entities=["Atlas"],
+    )
+    pack = build_context_pack(
+        store, cfg, embedder, "Atlas roadmap",
+        target_domain="work",
+        access=AccessRequest(
+            principal_id="tool_work_cli",
+            persona="developer",
+            purpose="coding",
+            audience="self",
+            tool_id="local-cli",
+            requested_domains=["work"],
+        ),
+    )
+    assert pack.privacy_decision_id
+    assert marker in pack.context_pack
 
 
 def test_restricted_mode_unknown_purpose(store, embedder):

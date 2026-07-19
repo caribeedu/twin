@@ -1,11 +1,4 @@
-"""v0.6 Phase 2 — GitHub connector against the offline API double.
-
-Runs the §88 contract suite on the real adapter code path (client →
-fetch → stage → finalize) plus the GitHub-specific guarantees: dynamic
-streams per repository, updated_at watermark + lookback, lifecycle-aware
-trust, bot lineage, and the candidate policy on extraction.
-"""
-
+"""GitHub connector against the offline API double."""
 from __future__ import annotations
 
 import httpx

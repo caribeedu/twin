@@ -1431,7 +1431,7 @@ Phase 7 — Cross-source cognition (done):
 - conflict findings: true cross-source only (distinct sources must disagree); idempotent via `finding_key` (reuse / supersede / close); never auto-resolved;
 - explainability CLI (read-only): `twin episode explain`, `twin identity why`, `twin project explain` over anchors / links / findings already stored;
 - CLI: `twin correlate`, `twin episode list|show|explain`, `twin identity list|links|confirm|unconfirm|reject|why`, `twin project link|links|confirm|reject|historical|explain`;
-- `tests/test_correlation_phase7.py`, `tests/test_correlation_depth_v06.py`, and eval `cross_source_work_episode`.
+- `tests/test_correlation.py`, `tests/test_correlation_lifecycle.py`, and eval `cross_source_work_episode`.
 
 Still deferred to **Correlation depth** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
 
@@ -1447,7 +1447,7 @@ Phase 8 — Native proof (done):
 - orphan policy: Stop without binding is a no-op; observations without / after an active binding are rejected; duplicate SessionStart reuses the open binding;
 - `InterventionRecommendation` is a display-only *possible decision reversal cue* (heuristic; may false-positive) — no host interruption/action in v0.6; `HostCapabilities` declare what Claude Code can accept;
 - MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories; native path never confirms Memory;
-- CLI: `twin native install|event|bindings`; `tests/test_native_host_phase8.py` and eval `evals/native`.
+- CLI: `twin native install|event|bindings`; `tests/test_native_host.py` and eval `evals/native`.
 
 Phase 9 — Evals and operations (done):
 
@@ -1456,17 +1456,17 @@ Phase 9 — Evals and operations (done):
 - setup plan (§77): `twin connector setup <type> --source-owner …` prints ownership→authenticate→scope→preview→confirm (never ingests) and surfaces ownership/vault/org warnings; backfill preview remains the historical import gate;
 - scheduler ops: `twin connector due` / `twin connector sync-due`; `twin doctor` resolves credentials (ref must decrypt), classifies due by schedule grace, and reports unhealthy / lagged instances;
 - §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
-- `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
+- `tests/test_connector_ops.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
 
 Phase 10 — Final Review (done):
 
-- attests §93 Critérios de conclusão via evidence-based `completion_matrix()` (`twin/connectors/completion.py`) — 17 criteria, each with test and/or eval pointers; `pass` without evidence demoted; `ok` fails closed on `fail` / `not_tested` / `partial`;
-- gap-fill proofs: meeting revises decision via explicit `supersede` (never auto-confirm from connector); professional Context Pack includes authorized `vault_work` memory; personal persona denied; multi-evidence memory survives single-artifact deletion;
+- attests §93 Critérios de conclusão via evidence-based `completion_matrix()` (`twin/connectors/completion.py`) — criteria cells carry test/eval pointers; `pass` without evidence demoted; `ok` fails closed on `fail` / `not_tested` / `partial`;
+- behavioural proofs live with their modules: lifecycle supersede after meeting candidate (`tests/test_lifecycle.py`); authorized work pack (`tests/test_privacy.py`); completion matrix mechanics (`tests/test_connector_completion.py`);
 - CLI: `twin connector completion` (exit 1 when matrix not ok);
 - documents §94 out-of-scope and §95 thesis alongside the matrix payload;
-- `tests/test_v06_final_review.py` and eval `v06_completion_scenario`.
+- eval `connector_completion`.
 
-v0.6 is complete when `twin connector completion` reports `ok: true` and the Phase 1–9 suites remain green. Correlation depth (episode phases, multi-factor confidence, identity graphs, causality, incremental correlation, HTTP/MCP explain, scale evals) stays deferred to later `vX` — not a Phase 10 blocker.
+v0.6 is complete when `twin connector completion` reports `ok: true` and the connector/correlation/native suites remain green. Correlation depth (episode phases, multi-factor confidence, identity graphs, causality, incremental correlation, HTTP/MCP explain, scale evals) stays deferred to later `vX` — not a Phase 10 blocker.
 
 ### Correlation depth (planned vX — after Phase 7)
 
