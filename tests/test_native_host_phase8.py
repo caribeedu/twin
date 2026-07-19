@@ -203,6 +203,104 @@ def test_idempotent_hook_delivery(store, cfg, embedder):
     assert len(tool_arts) == 1
 
 
+def test_identical_text_without_event_id_preserved(store, cfg, embedder):
+    """Same content ≠ same delivery — do not fingerprint-collapse."""
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="dup_txt", text="x", domain="technical",
+    ))
+    a = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="dup_txt", text="sim",
+    ))
+    b = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="dup_txt", text="sim",
+    ))
+    assert a.ok and b.ok
+    assert not b.extras.get("duplicated")
+    ses = store.get_session(a.session_id)
+    sims = [x for x in ses.artifacts if x.get("note") == "sim"]
+    assert len(sims) == 2
+
+
+def test_same_tool_text_different_call_ids_preserved(store, cfg, embedder):
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="tools", text="x", domain="technical",
+    ))
+    a = svc.handle(HostEvent(
+        kind="tool_completed", host_type="claude-code",
+        external_session_id="tools", text="Bash: pytest passed",
+        tool_call_id="call_a", tool_phase="after",
+    ))
+    b = svc.handle(HostEvent(
+        kind="tool_completed", host_type="claude-code",
+        external_session_id="tools", text="Bash: pytest passed",
+        tool_call_id="call_b", tool_phase="after",
+    ))
+    assert a.ok and b.ok
+    assert not b.extras.get("duplicated")
+    # Same tool_call_id+phase retries collapse
+    c = svc.handle(HostEvent(
+        kind="tool_completed", host_type="claude-code",
+        external_session_id="tools", text="Bash: pytest passed",
+        tool_call_id="call_a", tool_phase="after",
+    ))
+    assert c.extras.get("duplicated") is True
+
+
+def test_fail_open_protocol_hides_traceback(store, cfg, embedder):
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="tb", text="x", domain="technical",
+    ))
+    with patch.object(store, "append_session_artifact", side_effect=RuntimeError("boom")):
+        r = svc.handle(HostEvent(
+            kind="user_message", host_type="claude-code",
+            external_session_id="tb", text="hi",
+        ))
+    payload = r.to_dict(include_pack=False)
+    assert payload["ok"] is False
+    assert payload["error"] == "native observation failed"
+    assert "error_id" in payload
+    assert "traceback" not in json.dumps(payload).lower()
+    assert "error_class" not in payload
+
+
+def test_transcript_path_normalized():
+    from twin.interfaces.native.claude_code import normalize_transcript_identity
+    a = normalize_transcript_identity("/home/edu/.claude/./session.jsonl")
+    b = normalize_transcript_identity("/home/edu/.claude/session.jsonl")
+    assert a == b
+    assert a.startswith("transcript:")
+    assert "/home/edu" not in a
+
+
+def test_frozen_vault_on_binding(store, cfg, embedder):
+    svc = NativeHostService(store, cfg, embedder)
+    r = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="vault1", text="tech work", domain="technical",
+    ))
+    assert r.ok
+    assert r.binding.vault_id
+    assert r.binding.metadata.get("host_capabilities")
+    # Capabilities not repeated on observation artifacts
+    svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="vault1", text="hi",
+    ))
+    ses = store.get_session(r.session_id)
+    user_arts = [a for a in ses.artifacts if a.get("kind") == "user_message"]
+    assert user_arts
+    host_meta = (user_arts[0].get("host") or {})
+    assert "host_capabilities" not in host_meta
+
+
 def test_tool_input_redacted_in_normalize():
     ev = normalize_claude_code_hook({
         "hook_event_name": "PreToolUse",

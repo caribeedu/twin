@@ -12,11 +12,11 @@ Binding contract:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .. import ids
 from ..clock import now_iso
 from ..config import Config
 from ..memory.embeddings import Embedder
@@ -24,8 +24,10 @@ from ..memory.models import (
     HostSessionBinding,
     InterventionRecommendation,
     MemoryStatus,
+    SessionStatus,
 )
 from ..memory.store.base import MemoryStore
+from ..memory.store.host_binding_mixin import is_unique_violation
 from .context_pack import ContextPack, build_context_pack
 from .sessions import SessionStart, complete_session, observe_session, start_session
 
@@ -46,6 +48,8 @@ ALLOWED_OBSERVE_KINDS = frozenset({
     "project_context",
 })
 
+_TOOL_KINDS = frozenset({"tool_requested", "tool_completed", "tool_failed"})
+
 
 @dataclass
 class NativeSessionStart:
@@ -63,25 +67,35 @@ class BindingScopeError(ValueError):
     """Host tried to widen frozen security scope on an open binding."""
 
 
-def _event_id(
+def resolve_observation_event_id(
     *,
-    event_id: Optional[str],
-    kind: str,
-    tool_call_id: Optional[str],
-    note: str,
-    ref: Optional[str],
-    phase: Optional[str],
+    event_id: Optional[str] = None,
+    delivery_id: Optional[str] = None,
+    tool_call_id: Optional[str] = None,
+    tool_phase: Optional[str] = None,
+    kind: str = "",
+    sequence: Optional[int] = None,
 ) -> str:
+    """Stable idempotency key — never fingerprint content alone.
+
+    Preference:
+    1. host ``event_id``
+    2. ``delivery_id``
+    3. ``tool_call_id`` + phase (same tool call = same delivery)
+    4. host ``sequence``
+    5. allocate a unique id (identical text stays distinct; retries may dup)
+    """
     if event_id:
         return str(event_id)
-    raw = "|".join([
-        kind,
-        tool_call_id or "",
-        phase or "",
-        ref or "",
-        hashlib.sha256((note or "").encode("utf-8")).hexdigest()[:16],
-    ])
-    return f"fp:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:24]}"
+    if delivery_id:
+        return f"delivery:{delivery_id}"
+    if tool_call_id and kind in _TOOL_KINDS:
+        phase = tool_phase or kind
+        return f"tool:{tool_call_id}:{phase}"
+    if sequence is not None:
+        return f"seq:{int(sequence)}:{kind}"
+    # No trustworthy identity → do not collapse equal payloads.
+    return ids.new_id("hostevent")
 
 
 def _assert_frozen_scope(
@@ -174,6 +188,20 @@ def bind_and_start(
         )
         return NativeSessionStart(binding=existing, started=started)
 
+    # Re-check under race: peer may have won between lookup and create.
+    existing = store.find_active_host_session_binding(
+        host_type=host_type, external_session_id=external_session_id,
+    )
+    if existing is not None:
+        return bind_and_start(
+            store, cfg, embedder,
+            host_type=host_type, external_session_id=external_session_id,
+            query=query, cwd=cwd, domain=domain, project=project,
+            task_profile=task_profile, max_tokens=max_tokens,
+            persona=persona, purpose=purpose, audience=audience,
+            metadata=metadata,
+        )
+
     occurrence = store.next_host_binding_occurrence(
         host_type=host_type, external_session_id=external_session_id,
     )
@@ -190,6 +218,10 @@ def bind_and_start(
         proj = store.get_project(started.session.project_id)
         if proj is not None:
             vault_id = (proj.metadata or {}).get("vault_id")
+    if not vault_id and started.session.domain == "work":
+        vault_id = "vault_work"
+    elif not vault_id:
+        vault_id = "vault_general"
     binding = HostSessionBinding(
         host_type=host_type,
         external_session_id=external_session_id,
@@ -206,7 +238,47 @@ def bind_and_start(
         started_at=started.session.started_at or now_iso(),
         metadata=dict(metadata or {}),
     )
-    store.insert_host_session_binding(binding)
+    try:
+        store.insert_host_session_binding(binding)
+    except Exception as exc:
+        if not is_unique_violation(exc):
+            raise
+        # Peer won the race — abandon orphan CognitiveSession, return winner.
+        logger.info(
+            "host binding race lost host=%s ext=%s occ=%s; abandoning %s",
+            host_type, external_session_id, occurrence, started.session.id,
+        )
+        try:
+            store.transition_session(
+                started.session.id,
+                SessionStatus.active.value,
+                SessionStatus.abandoned.value,
+                ended_at=now_iso(),
+            )
+        except Exception:
+            logger.exception("failed to abandon orphan session %s", started.session.id)
+        winner = store.find_active_host_session_binding(
+            host_type=host_type, external_session_id=external_session_id,
+        )
+        if winner is None:
+            raise
+        pack = request_context_pack(
+            store, cfg, embedder,
+            query=query, binding=winner, cwd=cwd,
+            max_tokens=max_tokens, client=host_type,
+        )
+        session = store.get_session(winner.cognitive_session_id)
+        if session is None:
+            raise ValueError(
+                f"winning binding {winner.id} points at missing session"
+            )
+        return NativeSessionStart(
+            binding=winner,
+            started=SessionStart(
+                session=session, pack=pack,
+                reading_confidences={}, observer_mode="native",
+            ),
+        )
     return NativeSessionStart(binding=binding, started=started)
 
 
@@ -232,6 +304,8 @@ def observe_host_event(
     note: str = "",
     ref: Optional[str] = None,
     event_id: Optional[str] = None,
+    delivery_id: Optional[str] = None,
+    sequence: Optional[int] = None,
     tool_call_id: Optional[str] = None,
     tool_phase: Optional[str] = None,
     extra: Optional[dict[str, Any]] = None,
@@ -248,9 +322,13 @@ def observe_host_event(
         raise ValueError(
             f"no active binding for {host_type}:{external_session_id}"
         )
-    eid = _event_id(
-        event_id=event_id, kind=event_kind, tool_call_id=tool_call_id,
-        note=note, ref=ref, phase=tool_phase,
+    eid = resolve_observation_event_id(
+        event_id=event_id,
+        delivery_id=delivery_id,
+        tool_call_id=tool_call_id,
+        tool_phase=tool_phase,
+        kind=event_kind,
+        sequence=sequence,
     )
     inserted = store.insert_host_observed_event(
         host_type=host_type,
@@ -357,6 +435,16 @@ def request_context_pack(
         session_id=session_id,
         requested_domains=[session_domain] if session_domain else [],
     )
+    # Frozen vault is an explicit pack invariant: session/project resolve the
+    # same vault; binding.vault_id is the audit anchor and cannot widen silently.
+    if binding is not None and binding.vault_id:
+        access = access.model_copy(update={
+            "metadata": {
+                **(access.metadata or {}),
+                "frozen_vault_id": binding.vault_id,
+                "frozen_domain": binding.domain,
+            },
+        })
     return build_context_pack(
         store, cfg, embedder, query,
         target_domain=session_domain,

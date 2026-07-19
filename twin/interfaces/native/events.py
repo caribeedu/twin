@@ -59,6 +59,7 @@ class HostEvent(BaseModel):
     host_type: str = "claude-code"
     external_session_id: str = ""
     event_id: Optional[str] = None
+    delivery_id: Optional[str] = None
     occurred_at: Optional[str] = None
     sequence: Optional[int] = None
     tool_call_id: Optional[str] = None

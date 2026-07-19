@@ -10,6 +10,7 @@ hooks to the user. Tool inputs are redacted before persistence.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -37,6 +38,31 @@ _HOOK_KIND = {
 
 class MissingExternalSessionId(ValueError):
     """Host payload lacked a trustworthy conversation identity."""
+
+
+def normalize_transcript_identity(path: str) -> str:
+    """Stable conversation id from a transcript path (no raw path leakage)."""
+    raw = (path or "").strip()
+    if not raw:
+        raise MissingExternalSessionId("empty transcript_path")
+    p = Path(raw).expanduser()
+    try:
+        p = p.resolve()
+    except Exception:
+        p = Path(str(p).replace("\\", "/"))
+        parts = []
+        for part in p.parts:
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if parts:
+                    parts.pop()
+                continue
+            parts.append(part)
+        p = Path(*parts) if parts else p
+    key = str(p).replace("\\", "/").lower()
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return f"transcript:{digest}"
 
 
 def normalize_claude_code_hook(
@@ -80,9 +106,9 @@ def normalize_claude_code_hook(
         or data.get("external_session_id")
         or ""
     ).strip()
-    # transcript_path can be a stable conversation handle when session_id missing
+    # transcript_path is a fallback identity — normalize to a stable hash key.
     if not session_id and data.get("transcript_path"):
-        session_id = str(data["transcript_path"]).strip()
+        session_id = normalize_transcript_identity(str(data["transcript_path"]))
     if not session_id:
         raise MissingExternalSessionId(
             "external_session_id required — cwd/project must not identify conversations"
@@ -156,18 +182,32 @@ def normalize_claude_code_hook(
 
     meta = {
         k: data[k]
-        for k in ("transcript_path", "permission_mode", "model", "tool_name")
+        for k in ("permission_mode", "model", "tool_name")
         if k in data
     }
     if not known:
         meta["unrecognized_hook"] = str(name) or True
-    meta["host_capabilities"] = CLAUDE_CODE_CAPABILITIES.model_dump()
+    if data.get("transcript_path"):
+        meta["transcript_identity"] = session_id if session_id.startswith("transcript:") else (
+            normalize_transcript_identity(str(data["transcript_path"]))
+        )
+
+    delivery_id = data.get("delivery_id") or data.get("hook_delivery_id")
+    sequence = data.get("sequence") or data.get("message_index")
+    if sequence is not None:
+        try:
+            sequence = int(sequence)
+        except (TypeError, ValueError):
+            sequence = None
 
     return HostEvent(
         kind=kind,
         host_type="claude-code",
         external_session_id=session_id,
         event_id=str(event_id) if event_id else None,
+        delivery_id=str(delivery_id) if delivery_id else None,
+        sequence=sequence,
+        occurred_at=data.get("occurred_at") or data.get("timestamp"),
         tool_call_id=str(tool_call_id) if tool_call_id else None,
         tool_phase=tool_phase,
         text=text,

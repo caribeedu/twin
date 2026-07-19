@@ -1437,8 +1437,10 @@ Phase 8 — Native proof (done):
 - one host-native adapter: Claude Code Hooks (`twin/interfaces/native/claude_code/`) — observes session start, user messages, tool request/completion, file/project context, session end; does **not** assemble Context Packs or create a parallel memory store;
 - `HostSessionBinding` (`hsb_…`) links `(host_type, external_session_id, occurrence)` ↔ `CognitiveSession`; after Stop, the same external id opens occurrence N+1 (history preserved); **cwd never identifies a conversation** — missing session id is rejected;
 - security freeze: domain / project / persona / purpose / audience / vault captured at bind; refresh cannot widen scope silently;
-- observations are idempotent (`host_observed_events` + `event_id`); tool inputs pass redaction; unknown hooks → `unsupported_host_event` (never forged `user_message`);
-- fail-open hooks: Twin failures return `ok=false` + `error_id` and exit 0 with `--fail-open` so Claude Code is not blocked; stdout = protocol JSON (Context Pack only for SessionStart/pack_request), stderr = diagnostics;
+- observations are idempotent only with a trustworthy id (`event_id` / `delivery_id` / `tool_call_id+phase` / `sequence`); equal text alone never collapses events; races on insert return `duplicated`, not errors;
+- concurrent SessionStart: unique binding wins; loser abandons its orphan `CognitiveSession` and returns the winner;
+- tool inputs pass redaction; unknown hooks → `unsupported_host_event` (never forged `user_message`); `transcript_path` → `transcript:{hash}` identity;
+- fail-open hooks: Twin failures return `ok=false` + `error_id` (no traceback on stdout) and exit 0 with `--fail-open`; stderr/logger hold diagnostics; Context Pack only for SessionStart/pack_request;
 - orphan policy: Stop without binding is a no-op; observations without / after an active binding are rejected; duplicate SessionStart reuses the open binding;
 - `InterventionRecommendation` is a display-only *possible decision reversal cue* (heuristic; may false-positive) — no host interruption/action in v0.6; `HostCapabilities` declare what Claude Code can accept;
 - MCP remains simultaneous: `native_bindings` / `native_session_status` expose the same Sessions/Projects/Memories; native path never confirms Memory;

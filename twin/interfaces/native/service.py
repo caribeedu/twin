@@ -8,10 +8,13 @@ explicit policy (documented on each branch below).
 from __future__ import annotations
 
 import logging
-import traceback
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+_PROTO_DENY_EXTRAS = frozenset({
+    "traceback", "traceback_tail", "stack", "error_class",
+})
 
 from ...cognition.host_session import (
     BindingScopeError,
@@ -65,7 +68,10 @@ class NativeEventResult:
         if self.interventions:
             out["interventions"] = [i.model_dump() for i in self.interventions]
         if self.extras:
-            out.update(self.extras)
+            for k, v in self.extras.items():
+                if k in _PROTO_DENY_EXTRAS:
+                    continue
+                out[k] = v
         return out
 
 
@@ -82,8 +88,9 @@ class NativeHostService:
             return self._handle(event)
         except (ValueError, BindingScopeError) as exc:
             return NativeEventResult(ok=False, error=str(exc))
-        except Exception as exc:  # fail-open for host hooks
+        except Exception:  # fail-open for host hooks
             error_id = uuid.uuid4().hex[:12]
+            # Diagnostics stay in the logger / stderr — never on host stdout.
             logger.exception(
                 "native observation failed error_id=%s kind=%s host=%s",
                 error_id, getattr(event, "kind", "?"), getattr(event, "host_type", "?"),
@@ -92,10 +99,6 @@ class NativeHostService:
                 ok=False,
                 error="native observation failed",
                 error_id=error_id,
-                extras={
-                    "error_class": type(exc).__name__,
-                    "traceback_tail": traceback.format_exc()[-500:],
-                },
             )
 
     def _handle(self, event: HostEvent) -> NativeEventResult:
@@ -169,6 +172,8 @@ class NativeHostService:
             note=event.text,
             ref=event.ref,
             event_id=event.event_id,
+            delivery_id=event.delivery_id,
+            sequence=event.sequence,
             tool_call_id=event.tool_call_id,
             tool_phase=event.tool_phase,
             extra=event.metadata or None,
@@ -185,6 +190,13 @@ class NativeHostService:
         self, event: HostEvent, *, observe_start: bool,
     ) -> NativeEventResult:
         query = event.text or event.summary or "native host session"
+        meta = dict(event.metadata or {})
+        # Capabilities belong on the binding, not every observation artifact.
+        if observe_start:
+            from .events import CLAUDE_CODE_CAPABILITIES
+            meta.setdefault(
+                "host_capabilities", CLAUDE_CODE_CAPABILITIES.model_dump(),
+            )
         started: NativeSessionStart = bind_and_start(
             self.store, self.cfg, self.embedder,
             host_type=event.host_type,
@@ -197,7 +209,7 @@ class NativeHostService:
             persona=event.persona or "individual",
             purpose=event.purpose or "task_execution",
             audience=event.audience or "self",
-            metadata=event.metadata,
+            metadata=meta,
         )
         if observe_start:
             observe_host_event(

@@ -8,6 +8,23 @@ from typing import Any, Optional
 from twin import ids
 from twin.memory.models import HostSessionBinding
 
+
+def is_unique_violation(exc: BaseException) -> bool:
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    pgcode = getattr(exc, "pgcode", None)
+    if pgcode is None:
+        diag = getattr(exc, "diag", None)
+        pgcode = getattr(diag, "sqlstate", None) if diag is not None else None
+    return (
+        pgcode == "23505"
+        or "uniqueviolation" in name
+        or "integrityerror" in name
+        or "unique constraint" in msg
+        or "duplicate key" in msg
+    )
+
+
 HOST_BINDING_SCHEMA = """
 DROP INDEX IF EXISTS uq_hsb_host_ext;
 CREATE TABLE IF NOT EXISTS host_session_bindings (
@@ -225,22 +242,20 @@ class HostBindingStoreMixin:
         kind: str,
         created_at: str,
     ) -> bool:
-        """Insert idempotency row. Returns False if already present."""
-        if self.has_host_observed_event(
-            host_type=host_type,
-            external_session_id=external_session_id,
-            occurrence=occurrence,
-            event_id=event_id,
-        ):
-            return False
-        self._c_insert("host_observed_events", {
-            "id": ids.new_id("hevt"),
-            "host_type": host_type,
-            "external_session_id": external_session_id,
-            "occurrence": occurrence,
-            "event_id": event_id,
-            "binding_id": binding_id,
-            "kind": kind,
-            "created_at": created_at,
-        })
-        return True
+        """Insert idempotency row. Returns False if already present (incl. races)."""
+        try:
+            self._c_insert("host_observed_events", {
+                "id": ids.new_id("hevt"),
+                "host_type": host_type,
+                "external_session_id": external_session_id,
+                "occurrence": occurrence,
+                "event_id": event_id,
+                "binding_id": binding_id,
+                "kind": kind,
+                "created_at": created_at,
+            })
+            return True
+        except Exception as exc:
+            if is_unique_violation(exc):
+                return False
+            raise
