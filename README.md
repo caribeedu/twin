@@ -1423,14 +1423,17 @@ Phase 7 — Cross-source cognition (done):
 - cognitive correlation layer (`twin/cognition/correlation/`): `ExternalIdentity` / `IdentityLink`, `ProjectLink`, `WorkEpisode` / `EpisodeLink` — connectors still only capture evidence; correlation proposes structure, never confirmed Memory or Judgment;
 - vault partition: every correlation pass clusters per `vault_id`; anchors and `correlation_key` are vault-qualified — no WorkEpisode / IdentityLink / finding may mix vaults without explicit cross-domain action;
 - episode identity: idempotent via `correlation_key` + `episode_anchors` (lineage, calendar id, fingerprint, thread) — repeated passes attach sources, do not duplicate episodes;
-- reconciliation: EpisodeLinks carry `active|removed` lifecycle; tombstones drop membership and rebuild participants / dates / source_refs from active links only;
+- reconciliation: EpisodeLinks carry `active|removed` lifecycle; tombstones drop membership and rebuild participants / dates / source_refs / confidence from active links only (`max(active EpisodeLink.confidence)`; empty → `closed` + 0.0) — still not full multi-factor scoring;
 - independence: per-`EpisodeLink` `independence_group` + `directness` (episode keeps aggregate count / primary lineage); derived notifications/summaries do not inflate corroboration;
-- identity: upsert from actor ids within the same vault; email → candidate links only inside a vault; never merge by display name; cross-vault confirm refused without explicit flag;
-- project mapping: exact `Project.repos` / aliases → `ProjectLink` (unconfirmed until `twin project link`); soft hint matches stay candidates;
+- identity: upsert from actor ids within the same vault; email → candidate links only inside a vault; never merge by display name; cross-vault confirm refused without explicit flag; confirm / unconfirm / reject with `ExternalIdentity.confirmed` cleared when no confirmed edges remain;
+- project mapping: exact `Project.repos` / aliases → `ProjectLink` with lifecycle `candidate | confirmed | historical | rejected` (`confirmed` bool kept as mirror); soft hint matches stay candidates; `historical` / `rejected` never attach `episode.project_id` and block auto-recreating a fresh candidate for the same container;
 - clustering: merge anchors (lineage, PR/issue refs, calendar ids) form components; fingerprint / thread are contextual (attach or candidate-only, no transitive overmerge of distinct merge components); soft temporal co-occurrence alone does not merge;
 - conflict findings: true cross-source only (distinct sources must disagree); idempotent via `finding_key` (reuse / supersede / close); never auto-resolved;
-- CLI: `twin correlate`, `twin episode list|show`, `twin identity list|links|confirm`, `twin project link|links`;
-- `tests/test_correlation_phase7.py` and eval `cross_source_work_episode`.
+- explainability CLI (read-only): `twin episode explain`, `twin identity why`, `twin project explain` over anchors / links / findings already stored;
+- CLI: `twin correlate`, `twin episode list|show|explain`, `twin identity list|links|confirm|unconfirm|reject|why`, `twin project link|links|confirm|reject|historical|explain`;
+- `tests/test_correlation_phase7.py`, `tests/test_correlation_depth_v06.py`, and eval `cross_source_work_episode`.
+
+Still deferred to **Correlation depth** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
 
 Phase 8 — Native proof (done):
 
@@ -1455,26 +1458,15 @@ Phase 9 — Evals and operations (done):
 - §88 contract matrix: evidence-based cells (`pass|fail|not_supported|not_applicable|not_tested|partial|framework_only`) with test pointers; framework Fake proof is a separate layer and never auto-passes real adapters; `ok` fails closed on required `not_tested`/`fail`/`partial`;
 - `tests/test_connector_ops_phase9.py` and eval `ops_health_metrics`; per-adapter behavioural suites remain the real proof.
 
-Phase 7.1 — Correlation lifecycle & explain (done, v0.6 closeout):
-
-- closes the Phase 7 debt that fits v0.6 without inventing episode phases, incremental correlation, or Entity graphs;
-- `ProjectLinkStatus`: `candidate | confirmed | historical | rejected` (`confirmed` bool kept as mirror); `historical`/`rejected` never attach `episode.project_id`; CLI `twin project confirm|reject|historical|explain`;
-- identity undo: `twin identity unconfirm|reject` (+ `unconfirm_identity_link` / `reject_identity_link`); clears `ExternalIdentity.confirmed` when no confirmed edges remain;
-- episode confidence recomputed on membership rebuild as `max(active EpisodeLink.confidence)` (downgrades when evidence leaves; empty → `closed` + 0.0) — still not full multi-factor scoring;
-- explainability CLI (read-only): `twin episode explain`, `twin identity why`, `twin project explain` over anchors / links / findings already stored;
-- `tests/test_correlation_depth_v06.py`.
-
-Still deferred to **Correlation depth** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
-
 ### Correlation depth (planned vX — after Phase 7)
 
 Goal: deepen the correlation layer from “clustered evidence” into an explainable, incrementally maintained work-episode model — without turning correlation into Memory or Judgment.
 
 **Slot.** Later `v0.x` (naturally before or alongside [v0.8 Parallel Memory](#v08--parallel-memory-and-consolidation); feeds [v2 Extended Brain](#v2--extended-brain) episodic/autobiographical memory). Not a blocker for Personal Domains.
 
-Phase 7 correctly established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; true cross-source conflicts. Phase 7.1 closed lifecycle + thin explain CLI. What remains is the deeper path.
+Phase 7 correctly established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; project/identity lifecycle; true cross-source conflicts; thin explain CLI. What remains is the deeper path.
 
-#### Accepted debt (what Phase 7 / 7.1 still is)
+#### Accepted debt (what Phase 7 still is)
 
 - **WorkEpisode = one cluster.** An episode is still a correlated set of `ConnectorRecord`s, not a structured arc (goal → decision → execution → outcome). PR + Slack + meeting + deploy collapse into one node.
 - **Confidence ≈ link type (+ rebuild max).** Episode/link confidence still follows anchor kind / max active link; not source diversity × independence × source trust as a composed score.
