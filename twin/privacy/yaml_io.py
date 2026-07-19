@@ -24,6 +24,12 @@ DEFAULT_TOOLS: dict[str, ToolIdentity] = {
     "local-cli": ToolIdentity(id="local-cli", execution_location="local", trusted_level="local"),
     "local-ollama": ToolIdentity(id="local-ollama", execution_location="local", trusted_level="local"),
     "cursor": ToolIdentity(id="cursor", execution_location="local", provider="Cursor", trusted_level="trusted"),
+    "claude-code": ToolIdentity(
+        id="claude-code", execution_location="local", provider="Anthropic", trusted_level="trusted",
+    ),
+    "codex": ToolIdentity(
+        id="codex", execution_location="local", provider="OpenAI", trusted_level="trusted",
+    ),
     "claude-desktop": ToolIdentity(
         id="claude-desktop", execution_location="cloud", provider="Anthropic", trusted_level="external",
     ),

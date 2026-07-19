@@ -117,7 +117,12 @@ def start_session(
     from ..privacy.yaml_io import bootstrap_policy_set
     # Surface identity is resolved server-side. Missing/unknown client →
     # restricted mode — never silently elevate to local-cli.
-    surface = "cli" if client in ("cli", "local-cli", "twin-cli") else "mcp"
+    # Native host adapters (Phase 8) run as local hook/CLI processes: the
+    # CognitiveSession.client still records the host, but auth surface is cli.
+    _native = frozenset({
+        "claude-code", "codex", "codex-app-server", "native",
+    })
+    surface = "cli" if client in ("cli", "local-cli", "twin-cli") or client in _native else "mcp"
     if client in ("unknown", "", None) and not tool_id:
         surface = "unknown"
     if surface == "cli":
@@ -126,8 +131,9 @@ def start_session(
     access = resolve_access(
         store,
         surface=surface,
-        client=client if client not in ("unknown", "") else None,
-        tool_id=tool_id,
+        client=("cli" if client in _native else client)
+        if client not in ("unknown", "") else None,
+        tool_id=tool_id or (client if client in _native else None),
         persona=persona,
         purpose=purpose,
         audience=audience,

@@ -25,6 +25,7 @@ from ..models import (
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
+from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
 
@@ -661,7 +662,7 @@ def _vec_literal(vector: list[float]) -> str:
 
 class PostgresStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
-    ConnectorStoreMixin, MemoryStore,
+    HostBindingStoreMixin, ConnectorStoreMixin, MemoryStore,
 ):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
@@ -682,6 +683,7 @@ class PostgresStore(
             cur.execute(_SCHEMA_BASE)
             cur.execute(_CONNECTOR_SCHEMA)
             cur.execute(CORRELATION_SCHEMA)
+            cur.execute(HOST_BINDING_SCHEMA)
             cur.execute(_EMBEDDINGS_PGVECTOR if self.has_pgvector else _EMBEDDINGS_FALLBACK)
 
     def _begin_transaction(self) -> None:

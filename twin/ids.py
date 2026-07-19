@@ -103,3 +103,7 @@ def judgment_revision_id() -> str:
 
 def tradeoff_id() -> str:
     return new_id("toff")
+
+
+def host_session_binding_id() -> str:
+    return new_id("hsb")

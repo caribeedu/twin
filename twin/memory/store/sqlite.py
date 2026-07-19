@@ -19,6 +19,7 @@ from ..models import (
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
+from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
 
@@ -638,7 +639,7 @@ CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id)
 
 class SqliteStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
-    ConnectorStoreMixin, MemoryStore,
+    HostBindingStoreMixin, ConnectorStoreMixin, MemoryStore,
 ):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()
@@ -658,6 +659,7 @@ class SqliteStore(
         self.conn.executescript(PRIVACY_SCHEMA)
         self.conn.executescript(CONNECTOR_SCHEMA)
         self.conn.executescript(CORRELATION_SCHEMA)
+        self.conn.executescript(HOST_BINDING_SCHEMA)
         self._migrate()
 
     def _begin_transaction(self) -> None:

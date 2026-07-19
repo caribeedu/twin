@@ -375,6 +375,53 @@ def create_server(home: Optional[str] = None):
         }, ensure_ascii=False)
 
     @mcp.tool()
+    def native_bindings(host_type: Optional[str] = None, limit: int = 50) -> str:
+        """List HostSessionBindings from the Phase 8 native adapter.
+
+        Proves MCP and native observation share the same store: bindings
+        point at CognitiveSession ids that session_* tools already use.
+        Credentials and host payloads are never returned."""
+        if not hasattr(ws.store, "list_host_session_bindings"):
+            return json.dumps({"error": "host bindings unsupported"})
+        rows = ws.store.list_host_session_bindings(host_type=host_type, limit=limit)
+        return json.dumps([
+            {
+                "id": b.id,
+                "host_type": b.host_type,
+                "external_session_id": b.external_session_id,
+                "cognitive_session_id": b.cognitive_session_id,
+                "project_id": b.project_id,
+                "started_at": b.started_at,
+                "ended_at": b.ended_at,
+            }
+            for b in rows
+        ], ensure_ascii=False)
+
+    @mcp.tool()
+    def native_session_status(external_session_id: str, host_type: str = "claude-code") -> str:
+        """Look up the CognitiveSession bound to a host conversation.
+
+        Same Projects / Memories / Sessions as MCP — no parallel native store."""
+        if not hasattr(ws.store, "find_host_session_binding"):
+            return json.dumps({"error": "host bindings unsupported"})
+        binding = ws.store.find_host_session_binding(
+            host_type=host_type, external_session_id=external_session_id,
+        )
+        if binding is None:
+            return json.dumps({"error": "not found"})
+        session = ws.store.get_session(binding.cognitive_session_id)
+        return json.dumps({
+            "binding": {
+                "id": binding.id,
+                "host_type": binding.host_type,
+                "external_session_id": binding.external_session_id,
+                "cognitive_session_id": binding.cognitive_session_id,
+                "ended_at": binding.ended_at,
+            },
+            "session": _session_dict(session) if session else None,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
     def memory_observe(current_text: str, target_domain: Optional[str] = None) -> str:
         """Memory Observer: pass the user's current message/task and receive
         memories that look relevant (suggested_context) plus what was withheld

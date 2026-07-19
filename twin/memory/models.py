@@ -10,6 +10,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from twin import ids
+
 
 class MemoryType(str, Enum):
     event = "event"
@@ -382,3 +384,33 @@ class CognitiveSession(BaseModel):
     privacy_decision_ids: list[str] = Field(default_factory=list)
     grant_ids: list[str] = Field(default_factory=list)
     policy_snapshot_id: Optional[str] = None
+
+
+class HostSessionBinding(BaseModel):
+    """Link an external host session to a Twin CognitiveSession (v0.6 Phase 8).
+
+    Native adapters observe the host; they never create a parallel memory store.
+    """
+
+    id: str = Field(default_factory=ids.host_session_binding_id)
+    host_type: str                          # claude-code | codex | ...
+    external_session_id: str
+    cognitive_session_id: str
+    project_id: Optional[str] = None
+    principal_id: Optional[str] = None
+    connector_id: Optional[str] = None      # optional host connector handle
+    started_at: str = ""
+    ended_at: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class InterventionRecommendation(BaseModel):
+    """Display-only host intervention — Phase 8 does not act on the host."""
+
+    type: str = "warning"                   # warning | info
+    reason: str = ""
+    urgency: str = "medium"                 # low | medium | high
+    session_id: Optional[str] = None
+    supported_actions: list[str] = Field(default_factory=lambda: ["display"])
+    requires_confirmation: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)

@@ -1,0 +1,7 @@
+{
+  "id": "host_session_proactive_pack",
+  "description": "Claude Code-style host events bind a CognitiveSession, return a core-built Context Pack, observe tools/files, end without confirmed Memory, and remain visible alongside another session on the same store.",
+  "host_type": "claude-code",
+  "external_session_id": "eval_cc_1",
+  "domain": "technical"
+}

@@ -23,6 +23,7 @@
     twin setup ollama|postgres|mcp     bootstrap local infrastructure
     twin serve [--port 8765]           local API + review UI
     twin mcp                           MCP server over stdio
+    twin native event|install|bindings host-native observation (Phase 8)
     twin export                        dump memories/entities/judgment as JSON
 """
 
@@ -916,6 +917,74 @@ def cmd_project(args) -> None:
                   f" repos: {', '.join(p.repos) or '—'}")
 
 
+def cmd_native(args) -> None:
+    """Phase 8 — host-native observation (Claude Code hooks proof)."""
+    import sys
+    from pathlib import Path
+
+    from .native.claude_code import normalize_claude_code_hook, write_hooks_config
+    from .native.events import HostEvent
+    from .native.service import NativeHostService
+
+    ws = Workspace(args.home)
+    if args.native_command == "install":
+        target = args.dir or str(ws.home / "native" / "claude-code")
+        path = write_hooks_config(
+            Path(target),
+            twin_bin=args.twin_bin or "twin",
+            home=str(ws.home),
+        )
+        print(f"wrote {path}")
+        print("Merge the `hooks` object into Claude Code settings, then restart.")
+        return
+
+    if args.native_command == "bindings":
+        host = args.host
+        for b in ws.store.list_host_session_bindings(host_type=host, limit=args.limit):
+            print(
+                f"{b.id}  {b.host_type}:{b.external_session_id}  "
+                f"ses={b.cognitive_session_id}  "
+                f"{'ended' if b.ended_at else 'active'}"
+            )
+        return
+
+    # event
+    raw = args.payload
+    if args.stdin or raw in (None, "-", ""):
+        raw = sys.stdin.read()
+    host = (args.host or "claude-code").lower()
+    if host == "claude-code":
+        try:
+            data = json.loads(raw) if isinstance(raw, str) and raw.strip().startswith("{") else {}
+        except json.JSONDecodeError:
+            data = {"text": raw}
+        if isinstance(raw, str) and raw.strip() and not data:
+            data = {"prompt": raw}
+        event = normalize_claude_code_hook(
+            data if data else raw,
+            hook_name=args.hook,
+            default_cwd=args.cwd,
+        )
+        if args.external_session:
+            event.external_session_id = args.external_session
+        if args.kind:
+            event.kind = args.kind
+    else:
+        event = HostEvent(
+            kind=args.kind or "user_message",
+            host_type=host,
+            external_session_id=args.external_session or "native:default",
+            text=raw if isinstance(raw, str) else "",
+            cwd=args.cwd,
+            project=args.project,
+            domain=args.domain,
+        )
+    result = NativeHostService(ws.store, ws.cfg, ws.embedder).handle(event)
+    _print(result.to_dict())
+    if not result.ok:
+        raise SystemExit(1)
+
+
 def cmd_correlate(args) -> None:
     from ..cognition.correlation import run_correlation_pass
 
@@ -1431,6 +1500,32 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_setup)
 
     sub.add_parser("mcp", help="run MCP server (stdio)").set_defaults(func=cmd_mcp)
+
+    p = sub.add_parser(
+        "native",
+        help="host-native observation (Claude Code hooks — Phase 8)",
+    )
+    nat = p.add_subparsers(dest="native_command", required=True)
+    ni = nat.add_parser("install", help="write Claude Code hooks snippet")
+    ni.add_argument("--dir", default=None, help="output directory")
+    ni.add_argument("--twin-bin", default="twin")
+    ni.set_defaults(func=cmd_native)
+    ni = nat.add_parser("bindings", help="list HostSessionBindings")
+    ni.add_argument("--host", default=None)
+    ni.add_argument("--limit", type=int, default=50)
+    ni.set_defaults(func=cmd_native)
+    ni = nat.add_parser("event", help="ingest a host event (JSON or --stdin)")
+    ni.add_argument("payload", nargs="?", default=None)
+    ni.add_argument("--stdin", action="store_true")
+    ni.add_argument("--host", default="claude-code")
+    ni.add_argument("--hook", default=None, help="Claude Code hook name")
+    ni.add_argument("--kind", default=None, help="override HostEvent.kind")
+    ni.add_argument("--external-session", default=None)
+    ni.add_argument("--cwd", default=None)
+    ni.add_argument("--project", default=None)
+    ni.add_argument("--domain", default=None)
+    ni.set_defaults(func=cmd_native)
+
     sub.add_parser("export", help="export everything as JSON").set_defaults(func=cmd_export)
 
     args = parser.parse_args(argv)
