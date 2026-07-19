@@ -44,7 +44,7 @@ evals/connectors/
     folder_document_revisions.json     # Phase 6 local folder revisions + delete
     cross_source_work_episode.json     # Phase 7 WorkEpisode + independence + conflict
     ops_health_metrics.json            # Phase 9 §57 health + §58 metrics + setup/preview safe
-    connector_completion.json          # completion_matrix evidence + no auto-confirm
+    connector_completion.json          # live completion_matrix ok + evidence + no auto-confirm
   run.py                        # tiny runner over Fake + real adapters
 ```
 

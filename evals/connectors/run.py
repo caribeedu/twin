@@ -900,11 +900,17 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
 
 
 def _run_connector_completion(case: dict) -> tuple[bool, str]:
-    """completion_matrix evidence discipline + sync never confirms Memory/Judgment."""
+    """Live completion_matrix ok + evidence discipline + sync never confirms."""
     from twin.connectors import completion_matrix
 
     matrix = completion_matrix()
     expected = case["expected"]
+    if expected.get("matrix_ok", True) and not matrix.get("ok"):
+        return False, (
+            f"completion matrix not ok: "
+            f"failed={matrix.get('failed')} "
+            f"partial={matrix.get('partial')}"
+        )
     if expected.get("pass_requires_evidence"):
         for row in matrix.get("criteria") or []:
             if row.get("status") == "pass" and not (

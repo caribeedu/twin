@@ -21,6 +21,14 @@ def test_pass_cells_require_evidence_pointer():
             assert row["evidence"] or row["eval"], row
 
 
+def test_current_completion_matrix_is_ok():
+    """Live matrix must stay satisfied — mechanics alone do not prove readiness."""
+    matrix = completion_matrix()
+    assert matrix["ok"] is True
+    assert matrix["failed"] == []
+    assert matrix["partial"] == []
+
+
 def test_pass_without_evidence_demoted_to_not_tested(monkeypatch):
     from twin.connectors import completion as mod
 

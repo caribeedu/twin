@@ -1,7 +1,7 @@
 {
   "id": "connector_completion",
   "scenario": "connector_completion",
-  "description": "completion_matrix pass cells carry evidence; Fake sync never confirms Memory or Judgment.",
+  "description": "Live completion_matrix is ok; pass cells carry evidence; Fake sync never confirms Memory or Judgment.",
   "connector_type": "fake",
   "source_owner": "employer",
   "org_key": "acme",
@@ -20,6 +20,7 @@
   "expected": {
     "confirmed_memories": 0,
     "judgments": 0,
+    "matrix_ok": true,
     "pass_requires_evidence": true
   }
 }
