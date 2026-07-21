@@ -1472,7 +1472,7 @@ v0.6 is complete when `twin connector completion` reports `ok: true` and the con
 
 Goal: deepen the correlation layer from “clustered evidence” into an explainable, incrementally maintained work-episode model — without turning correlation into Memory or Judgment.
 
-**Slot.** Later `v0.x` (naturally before or alongside [v0.8 Parallel Memory](#v08--parallel-memory-and-consolidation); feeds [v2 Extended Brain](#v2--extended-brain) episodic/autobiographical memory). Not a blocker for Personal Domains.
+**Slot.** Later `v0.x` or v2, naturally before or alongside [v0.8 Parallel Memory](#v08--parallel-memory-and-consolidation), and feeding [v2 Extended Brain](#v2--extended-brain) episodic and autobiographical memory. It is not a blocker for cognitive interpretation or parallel consolidation.
 
 Phase 7 correctly established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; project/identity lifecycle; true cross-source conflicts; thin explain CLI. What remains is the deeper path.
 
@@ -1502,63 +1502,60 @@ Phase 7 correctly established: connectors capture evidence; correlation proposes
 - Cross-vault merge without an explicit, audited cross-domain action (Phase 7 invariant stays).
 - Forming episodes from temporal proximity alone.
 
-### v0.7 — Personal Domains
+### v0.7 — Cognitive Interpretation
 
-Goal: expand carefully from technical memory into a compartmentalized representation of personal life.
+Goal: ensure that meaning is identified and catalogued by a cognitive interpreter rather than inferred from shallow lexical patterns.
 
-Potential domains:
+Connectors and sensors already normalize heterogeneous sources into Percepts while preserving provenance, ownership, confidentiality and lineage. This version strengthens the next boundary: cognition must interpret what a Percept means before proposing any change to memory.
 
-- finance;
-- home;
-- personal goals;
-- relationships;
-- family;
-- health;
-- social identity.
+Build:
 
-This version requires the governance work from v0.5, stronger PII/entity handling, explicit consent, stricter review and preferably physically separate vaults. It should not assume that information about third parties is automatically authorized for unrestricted ingestion or use.
+- an LLM-based cognitive interpreter as the production path for semantic identification and cataloguing;
+- explicit interpretation outcomes for decisions, tasks, facts, events, preferences, beliefs, constraints, procedures and rejected alternatives;
+- correct distinction between statements, questions, hypotheses, proposals, decisions, opinions and third-party claims;
+- participant, speaker, entity, temporal and project references grounded in source evidence;
+- evidence spans linking every interpreted item back to the Percept;
+- unresolved-reference and ambiguity reporting instead of unsupported semantic guesses;
+- interpretation metadata identifying model, prompt version, schema version and execution status;
+- deferred and retryable interpretation when the configured cognitive interpreter is unavailable;
+- clear separation between semantic interpretation and deterministic governance;
+- evaluation fixtures for semantic classification, speaker attribution, evidence grounding and proposal-versus-decision distinction.
+
+The interpreter may use source metadata, session context, project context, participants and related evidence to understand a Percept. Deterministic code remains responsible for authorization, quarantine, confidentiality floors, provenance, persistence integrity, idempotency and review policy.
+
+Lexical rules may support routing, operational optimization and conservative detection signals, but they must not independently establish semantic memory types, domains, entities or cognitive confidence.
+
+A Percept that has not been interpreted remains pending or deferred. It must not be treated as successfully understood merely because a cognitive model was temporarily unavailable.
 
 ### v0.8 — Parallel Memory and Consolidation
 
 Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model.
 
-Build on the fast/deep observer introduced in v0.2 with:
+Build on the fast/deep observer introduced in v0.2 and the cognitive interpretation established in v0.7 with:
 
 - real-time observation of supported sessions;
 - proactive but non-intrusive memory suggestions;
 - confidence-aware spontaneous recall;
-- parallel extraction of what changed during conversation;
+- parallel interpretation of what changed during conversation;
 - daily and weekly consolidation cycles;
 - temporal belief and goal updates;
 - salience, novelty and contradiction detection;
 - silent blocking of forbidden memories;
-- clear separation between suggestion, memory candidate and durable consolidation.
+- clear separation between interpretation, suggestion, memory candidate and durable consolidation.
 
 Natural consumer of [Correlation depth](#correlation-depth-planned-vx--after-phase-7): incremental correlation passes and episode-phase updates should feed consolidation without full rescans.
-
-### v0.9 — Voice Companion
-
-Goal: reduce the distance between thought and the external cognitive layer.
-
-Possibilities:
-
-- local voice notes and transcription;
-- low-latency conversational capture;
-- daily reflection and memory review;
-- meeting and environmental capture with explicit controls;
-- hands-free memory queries;
-- a conversational interface that complements rather than replaces existing tools.
 
 ### v1.0 — Personal Cognitive OS
 
 A trustworthy, daily-usable version of the infrastructure with:
 
 - closed cognitive sessions;
-- reliable memory extraction and consolidation;
+- reliable cognitive interpretation, memory formation and consolidation;
+- evidence-grounded identification and cataloguing of relevant perceptions;
 - evolving judgment with human control;
 - persona-aware privacy and auditability;
 - mature MCP interoperability;
-- professional and selected personal connectors;
+- mature professional connectors;
 - parallel observation and controlled consolidation;
 - export, backup, deletion and recovery;
 - measurable reduction in context re-explanation;
@@ -1570,17 +1567,42 @@ A trustworthy, daily-usable version of the infrastructure with:
 
 ### v2 — Extended Brain
 
-Deepen the cognitive model beyond the initial memory lifecycle:
+Expand the stable cognitive substrate beyond professional and technical memory into a broader, compartmentalized and continuously available representation of the user's life.
 
-- robust episodic memory and autobiographical timelines (builds on WorkEpisode phases, causality edges and explainability from [Correlation depth](#correlation-depth-planned-vx--after-phase-7));
+Deepen the cognitive model with:
+
+- robust episodic memory and autobiographical timelines, building on WorkEpisode phases, causality edges and explainability from [Correlation depth](#correlation-depth-planned-vx--after-phase-7);
 - consolidated semantic memory;
 - procedural memory and learned workflows;
 - goals, routines and hierarchical plans;
 - active personas with controlled shared context;
-- daily/weekly reflection and consolidation;
+- daily and weekly reflection and consolidation;
 - uncertainty-aware mental-model evolution;
 - attention and salience mechanisms;
 - counterfactual reasoning over prior decisions.
+
+Expand into carefully governed personal domains such as:
+
+- finance;
+- home;
+- personal goals;
+- relationships;
+- family;
+- health;
+- social identity.
+
+Personal-domain ingestion must build on persona-aware governance, stronger PII and entity handling, explicit consent, stricter review and physically separable vaults where appropriate. Information about third parties must not be assumed to be authorized for unrestricted ingestion, correlation or use.
+
+Reduce the distance between thought and the external cognitive layer through:
+
+- local voice notes and transcription;
+- low-latency conversational capture;
+- daily reflection and memory review;
+- meeting and environmental capture with explicit controls;
+- hands-free memory queries;
+- a conversational interface that complements rather than replaces existing tools.
+
+The Extended Brain must preserve the same architectural boundaries established before v1: sensors capture evidence, the cognitive layer interprets meaning, deterministic governance controls use, and no personal-domain or voice path may bypass authorization, provenance or human control.
 
 ### v3 — Cognitive Automation
 
@@ -1663,7 +1685,9 @@ Inspiration for continuous local capture of screen/audio/context. Not an MVP pri
 
 The MVP is successful if it:
 
-- extracts real decisions from docs/meetings;
+- identifies and catalogues real decisions from docs and meetings;
+- distinguishes decisions from proposals, questions, hypotheses and rejected alternatives;
+- attributes claims to the correct participant or source;
 - produces evidence for every memory;
 - retrieves useful context via MCP;
 - does not leak sensitive domains;
@@ -1673,10 +1697,15 @@ The MVP is successful if it:
 
 ### Possible metrics
 
-- extraction precision;
+- semantic interpretation precision;
+- decision and task recall;
+- proposal-versus-decision accuracy;
+- speaker and participant attribution accuracy;
+- evidence-span accuracy;
 - duplicate rate;
 - useless-memory rate;
 - correct-block rate;
+- deferred-interpretation recovery rate;
 - average context pack size;
 - response time;
 - number of manual reviews per week;
@@ -1749,11 +1778,14 @@ Mitigation:
 
 ```text
 local-first > cloud-first
+cognitive interpretation > lexical classification
+deferred understanding > simulated understanding
 structured memory > raw text
 explicit judgment > implicit imitation
 temporal graph > infinite markdown
 vectors as index > vectors as truth
 MCP > mandatory own UI
+deterministic governance > policy delegated to the LLM
 firewall before the LLM > trusting the LLM
 selective review > total manual curation
 mandatory evidence > sourceless memory
