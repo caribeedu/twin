@@ -14,7 +14,7 @@ from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import (
     Artifact, CognitiveSession, Entity, Evidence, MemoryItem, MemoryOperation,
-    Project, Relation, ReviewBatch, ReviewFinding,
+    PerceptInterpretation, Project, Relation, ReviewBatch, ReviewFinding,
 )
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
@@ -42,6 +42,22 @@ CREATE TABLE IF NOT EXISTS percepts (
     source_confidentiality TEXT NOT NULL DEFAULT 'internal',
     project_id TEXT,
     content_hash TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS percept_interpretations (
+    percept_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'deferred',
+    interpreter TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    prompt_version TEXT NOT NULL DEFAULT '',
+    schema_version TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    items_catalogued INTEGER NOT NULL DEFAULT 0,
+    unresolved_count INTEGER NOT NULL DEFAULT 0,
+    detail TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -943,6 +959,81 @@ class SqliteStore(
             "SELECT p.* FROM percepts p"
             " WHERE NOT EXISTS (SELECT 1 FROM evidence e WHERE e.percept_id = p.id)"
             " ORDER BY p.ingested_at"
+        ).fetchall()
+        return [self._row_to_percept(r) for r in rows]
+
+    # -- interpretation state (v0.7) --------------------------------------
+
+    def _row_to_interpretation(self, row: sqlite3.Row) -> PerceptInterpretation:
+        return PerceptInterpretation(
+            percept_id=row["percept_id"], status=row["status"],
+            interpreter=row["interpreter"], model=row["model"],
+            prompt_version=row["prompt_version"], schema_version=row["schema_version"],
+            attempts=row["attempts"], items_catalogued=row["items_catalogued"],
+            unresolved_count=row["unresolved_count"], detail=row["detail"],
+            content_hash=row["content_hash"], created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def record_interpretation(self, state: PerceptInterpretation) -> None:
+        ts = now_iso()
+        state.updated_at = ts
+        state.created_at = state.created_at or ts
+        self.conn.execute(
+            "INSERT INTO percept_interpretations (percept_id, status, interpreter,"
+            " model, prompt_version, schema_version, attempts, items_catalogued,"
+            " unresolved_count, detail, content_hash, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(percept_id) DO UPDATE SET status=excluded.status,"
+            " interpreter=excluded.interpreter, model=excluded.model,"
+            " prompt_version=excluded.prompt_version,"
+            " schema_version=excluded.schema_version, attempts=excluded.attempts,"
+            " items_catalogued=excluded.items_catalogued,"
+            " unresolved_count=excluded.unresolved_count, detail=excluded.detail,"
+            " content_hash=excluded.content_hash, updated_at=excluded.updated_at",
+            (
+                state.percept_id, state.status, state.interpreter, state.model,
+                state.prompt_version, state.schema_version, state.attempts,
+                state.items_catalogued, state.unresolved_count, state.detail,
+                state.content_hash, state.created_at, state.updated_at,
+            ),
+        )
+        self._maybe_commit()
+
+    def get_interpretation(self, percept_id: str) -> Optional[PerceptInterpretation]:
+        row = self.conn.execute(
+            "SELECT * FROM percept_interpretations WHERE percept_id = ?",
+            (percept_id,),
+        ).fetchone()
+        return self._row_to_interpretation(row) if row else None
+
+    def list_interpretations(
+        self, status: Optional[str] = None, limit: int = 200,
+    ) -> list[PerceptInterpretation]:
+        if status:
+            rows = self.conn.execute(
+                "SELECT * FROM percept_interpretations WHERE status = ?"
+                " ORDER BY updated_at DESC LIMIT ?", (status, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM percept_interpretations"
+                " ORDER BY updated_at DESC LIMIT ?", (limit,),
+            ).fetchall()
+        return [self._row_to_interpretation(r) for r in rows]
+
+    def percepts_pending_interpretation(
+        self, *, max_attempts: int, limit: int = 500,
+    ) -> list[Percept]:
+        rows = self.conn.execute(
+            "SELECT p.* FROM percepts p"
+            " LEFT JOIN percept_interpretations i ON i.percept_id = p.id"
+            " WHERE i.percept_id IS NULL"
+            "    OR (i.status IN ('deferred','error')"
+            "        AND i.attempts < ?"
+            "        AND (i.content_hash = '' OR i.content_hash = p.content_hash))"
+            " ORDER BY p.ingested_at LIMIT ?",
+            (max_attempts, limit),
         ).fetchall()
         return [self._row_to_percept(r) for r in rows]
 

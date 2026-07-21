@@ -419,3 +419,53 @@ def test_connector_counter_claim_bump_atomic_on_postgres(pg_store, tmp_path):
     record_batch_counters(pg_store, inst.id, batch)
     state = pg_store.get_connector_sync_state(inst.id)
     assert state is not None and state.fetch_total == 9
+
+
+def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
+    """The v0.7 interpretation spine holds on Postgres: an unavailable
+    interpreter defers (nothing catalogued, retryable), and a later run
+    interprets the same percept and marks it terminal."""
+    from twin.cognition import (
+        extract_percept,
+        set_interpreter_override,
+    )
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct,
+        InterpretationResult,
+        InterpretationStatus,
+        InterpretedItem,
+    )
+    from twin.sensory.percept import Percept
+
+    cfg.extractor = "auto"
+    cfg.ollama_url = "http://127.0.0.1:1"  # unreachable → defer
+    p = Percept(percept_type="document", source_sensor="document",
+                content="We decided to use PostgreSQL advisory locks.",
+                source_trust=0.95).seal()
+    pg_store.insert_percept(p)
+
+    try:
+        report = extract_percept(pg_store, cfg, embedder, p)
+        assert report.deferred is True
+        assert pg_store.list_memories() == []
+        state = pg_store.get_interpretation(p.id)
+        assert state.status == "deferred" and state.attempts == 1
+        pending = pg_store.percepts_pending_interpretation(max_attempts=6)
+        assert p.id in [x.id for x in pending]
+
+        set_interpreter_override(lambda percept, text, c: InterpretationResult(
+            items=[InterpretedItem(
+                memory_type="decision", cognitive_act=CognitiveAct.decision,
+                title="Use PostgreSQL advisory locks",
+                summary="The team decided to use PostgreSQL advisory locks.",
+                domain="technical", confidence=0.9,
+                evidence_span="We decided to use PostgreSQL advisory locks.")],
+            status=InterpretationStatus.interpreted, interpreter="ollama:test",
+            model="test", prompt_version="interpret-v1", schema_version="1"))
+        report = extract_percept(pg_store, cfg, embedder, p)
+        assert report.inserted and report.deferred is False
+        state = pg_store.get_interpretation(p.id)
+        assert state.status == "interpreted" and state.attempts == 2
+        assert pg_store.percepts_pending_interpretation(max_attempts=6) == []
+    finally:
+        set_interpreter_override(None)

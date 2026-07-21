@@ -1,15 +1,23 @@
-"""Extraction pipeline: PII mask → extractor → classification checks →
-dedupe → persist (memory + entities + relations + evidence + embedding).
+"""Interpretation pipeline (v0.7): quarantine → cognitive interpreter →
+classification checks → dedupe → persist (memory + entities + relations +
+evidence + embedding).
 
-Extractor selection (``TWIN_EXTRACTOR``):
-    auto      → ollama (local, if reachable) → heuristic
-    ollama    → force local LLM (falls back to heuristic on failure)
-    heuristic → rule-based only, fully offline
+Mode selection (``TWIN_EXTRACTOR``):
+    auto      → cognitive interpreter if the local model is reachable,
+                otherwise DEFER (retry later — never fabricate conclusions)
+    ollama    → cognitive interpreter; DEFER when the model is unreachable
+    heuristic → explicit offline detection mode (rule-based, fully offline);
+                its output is detection-only and always review-bound
+
+The load-bearing v0.7 rule: a Percept is understood only when a cognitive
+interpreter actually ran. When no interpreter is available the Percept is
+recorded ``deferred`` and retried; lexical rules never independently establish
+semantic memory types, domains, entities or cognitive confidence in the
+production path.
 """
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 
 from .. import ids
@@ -17,15 +25,27 @@ from ..config import SENSITIVITY_ORDER, Config
 from ..judgment.pii import mask
 from ..memory.calibration import calibrated_confidence, load_calibration
 from ..memory.embeddings import Embedder
-from ..memory.models import Evidence, ExtractorVersion, MemoryItem, Relation
+from ..memory.models import (
+    Evidence, ExtractorVersion, MemoryItem, PerceptInterpretation, Relation,
+)
 from ..memory.provenance import ensure_artifact_from_percept
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
 from .dedupe import check as dedupe_check
 from .extractors import heuristic as heuristic_extractor
-from .extractors import ollama as ollama_extractor
+from .interpreter import service as interp_service
+from .interpreter.schema import UNSETTLED_ACTS, InterpretationStatus
 from .quality import analyze_memory
-from .schema import ExtractedMemory, ExtractionResult
+from .schema import ExtractedMemory
+
+# Cognitive acts (as stored in payload) that are never settled knowledge on
+# their own — a proposal is not a decision, a question is not a fact.
+_UNSETTLED_ACT_VALUES = frozenset(a.value for a in UNSETTLED_ACTS)
+# Non-terminal interpretation states — a deferred/errored Percept produced no
+# memory and must be retried.
+_RETRYABLE_STATES = frozenset({
+    InterpretationStatus.deferred.value, InterpretationStatus.error.value,
+})
 
 
 @dataclass
@@ -37,31 +57,82 @@ class ExtractReport:
     flagged_for_review: int = 0
     pii_findings: int = 0
     policy_dropped: int = 0  # candidates blocked by the source policy (§70)
+    deferred: bool = False   # interpreter unavailable — nothing catalogued, retryable
+    interpretation_status: str = ""
+    unresolved_references: int = 0
 
 
-def _choose_extractor(cfg: Config) -> str:
-    if cfg.extractor in ("ollama", "heuristic"):
-        return cfg.extractor
-    # auto: local LLM first, rules as offline fallback
-    if ollama_extractor.available(cfg.ollama_url):
-        return "ollama"
-    return "heuristic"
+@dataclass
+class _Interpretation:
+    """Normalized interpreter/heuristic output plus execution metadata."""
+    memories: list[ExtractedMemory]
+    extractor: str
+    status: str            # interpreted|empty|deferred|error|heuristic
+    model: str
+    prompt_version: str
+    schema_version: str
+    unresolved: int = 0
+    pii: int = 0
+    detail: str = ""
 
 
-def _run_extractor(cfg: Config, percept: Percept) -> tuple[ExtractionResult, int]:
+def _interpret(cfg: Config, percept: Percept) -> _Interpretation:
+    """Run the production cognitive interpreter, or — in explicit offline
+    mode — the heuristic detector. Never falls back from one to the other:
+    when interpreting, an unavailable model DEFERS."""
     masked_text, findings = mask(percept.content)
-    which = _choose_extractor(cfg)
-    try:
-        if which == "ollama":
-            # local model → nothing leaves the machine; mask anyway for
-            # defense in depth (extraction output should never carry PII)
-            return ollama_extractor.extract(
-                percept, masked_text, base_url=cfg.ollama_url, model=cfg.ollama_model
-            ), len(findings)
-    except Exception as exc:  # server down / network error → degrade gracefully
-        print(f"twin: {which} extraction failed ({exc!r}); falling back to heuristic",
-              file=sys.stderr)
-    return heuristic_extractor.extract(percept), len(findings)
+    pii = len(findings)
+
+    if interp_service.interpreting_mode(cfg):
+        result = interp_service.run_interpreter(cfg, percept, masked_text)
+        if result.deferred or result.status == InterpretationStatus.error:
+            return _Interpretation(
+                memories=[], extractor=result.interpreter, status=result.status.value,
+                model=result.model, prompt_version=result.prompt_version,
+                schema_version=result.schema_version,
+                unresolved=len(result.unresolved_references), pii=pii,
+                detail=result.detail,
+            )
+        grounded = result.grounded_items()
+        memories = [it.to_extracted() for it in grounded]
+        # a healthy interpreter that grounded nothing understood the Percept
+        # and found nothing to catalogue — that is 'empty', not 'deferred'
+        status = (InterpretationStatus.interpreted.value if grounded
+                  else InterpretationStatus.empty.value)
+        unresolved = len(result.unresolved_references) + sum(
+            len(it.unresolved_references) for it in grounded)
+        return _Interpretation(
+            memories=memories, extractor=result.interpreter, status=status,
+            model=result.model, prompt_version=result.prompt_version,
+            schema_version=result.schema_version, unresolved=unresolved, pii=pii,
+        )
+
+    # explicit offline detection: rule-based, review-bound, detection-only
+    hresult = heuristic_extractor.extract(percept)
+    return _Interpretation(
+        memories=hresult.memories, extractor=hresult.extractor, status="heuristic",
+        model="heuristic", prompt_version="extract-v3", schema_version="2", pii=pii,
+    )
+
+
+def _persist_interpretation_state(store: MemoryStore, percept: Percept,
+                                  outcome: _Interpretation, *,
+                                  status: str, items: int) -> None:
+    prev = store.get_interpretation(percept.id)
+    store.record_interpretation(PerceptInterpretation(
+        percept_id=percept.id,
+        status=status,
+        interpreter=outcome.extractor,
+        model=outcome.model,
+        prompt_version=outcome.prompt_version,
+        schema_version=outcome.schema_version,
+        attempts=(prev.attempts if prev else 0) + 1,
+        items_catalogued=items,
+        unresolved_count=outcome.unresolved,
+        detail=outcome.detail,
+        content_hash=percept.content_hash,
+        created_at=prev.created_at if prev else "",
+    ))
 
 
 def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept,
@@ -114,11 +185,29 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     )
     if q is not None or is_quarantined(store, percept_id=percept.id):
         report.extractor = "quarantined"
+        report.interpretation_status = "quarantined"
+        _persist_interpretation_state(
+            store, percept,
+            _Interpretation([], "quarantine", "quarantined", "", "", ""),
+            status="quarantined", items=0,
+        )
         return report
 
-    result, pii_count = _run_extractor(cfg, percept)
-    report.extractor = result.extractor
-    report.pii_findings = pii_count
+    outcome = _interpret(cfg, percept)
+    report.extractor = outcome.extractor
+    report.pii_findings = outcome.pii
+    report.interpretation_status = outcome.status
+    report.unresolved_references = outcome.unresolved
+
+    # v0.7 core invariant: an unavailable/failed interpreter DEFERS. Nothing is
+    # catalogued and the Percept stays retryable — it was never understood, so
+    # it must not be treated as understood-and-empty.
+    if outcome.status in _RETRYABLE_STATES:
+        report.deferred = True
+        _persist_interpretation_state(store, percept, outcome,
+                                      status=outcome.status, items=0)
+        return report
+
     artifact_id = ensure_artifact_from_percept(store, percept)
 
     # v0.6: connector-fed percepts obey a per-source candidate policy —
@@ -127,9 +216,9 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     from .source_policy import policy_for_percept
     source_policy = policy_for_percept(percept)
 
-    for extracted in result.memories:
+    for extracted in outcome.memories:
         extracted = _apply_source_qualification(
-            extracted.normalized(), percept, extractor_name=result.extractor,
+            extracted.normalized(), percept, extractor_name=outcome.extractor,
         )
         policy_decision = policy_evaluate(source_policy, extracted.type)
         if policy_decision.action == "drop":
@@ -155,6 +244,14 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             continue
 
         review_reason = _needs_review(cfg, extracted, percept)
+        # v0.7 cognitive-act governance: only a settled decision/statement is
+        # standalone knowledge. A proposal, question, hypothesis, opinion or
+        # third-party claim is born needing review no matter how confident the
+        # interpreter was about the classification — a proposal is not a
+        # decision, and a third party's claim is not the user's own.
+        act = extracted.payload.get("cognitive_act")
+        if act in _UNSETTLED_ACT_VALUES:
+            review_reason = review_reason or f"unsettled cognitive act: {act}"
         if policy_decision.action == "review":
             review_reason = review_reason or policy_decision.reason
         if verdict.action == "review" and verdict.existing_id:
@@ -177,10 +274,10 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             entities=extracted.entities,
             project_id=percept.project_id,
             extractor_version=ExtractorVersion(
-                extractor=result.extractor,
-                model=cfg.ollama_model if result.extractor == "ollama" else "heuristic",
-                prompt_version="extract-v3",
-                schema_version="2",
+                extractor=outcome.extractor,
+                model=outcome.model,
+                prompt_version=outcome.prompt_version,
+                schema_version=outcome.schema_version,
                 created_at=percept.ingested_at or "",
             ),
         )
@@ -232,12 +329,24 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
         elif review_reason:
             report.flagged_for_review += 1
 
+    # Terminal interpretation state: the Percept was understood (whether or not
+    # anything survived governance). ``empty`` and ``interpreted`` are settled
+    # outcomes — neither is re-interpreted until the Percept's content changes.
+    _persist_interpretation_state(store, percept, outcome,
+                                  status=outcome.status,
+                                  items=len(report.inserted))
     return report
 
 
 def extract_pending(store: MemoryStore, cfg: Config, embedder: Embedder) -> list[ExtractReport]:
-    """Extract every percept no memory has been derived from yet."""
+    """Interpret every Percept still pending interpretation.
+
+    Selection is by interpretation state, not by "has evidence yet": a
+    deferred Percept is retried, while one already interpreted (even to an
+    empty result) is left alone. This is what lets a temporarily unavailable
+    model resume cleanly without re-interpreting settled Percepts."""
     return [
         extract_percept(store, cfg, embedder, percept)
-        for percept in store.unprocessed_percepts()
+        for percept in store.percepts_pending_interpretation(
+            max_attempts=interp_service.MAX_INTERPRETATION_ATTEMPTS)
     ]

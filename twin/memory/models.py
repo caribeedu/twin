@@ -122,6 +122,34 @@ class ExtractorVersion(BaseModel):
     created_at: str = ""
 
 
+class PerceptInterpretation(BaseModel):
+    """v0.7 execution record of interpreting one Percept.
+
+    Lightweight, metadata-only: it tracks *whether and how* a Percept was
+    understood (status + model/prompt/schema versions + attempt count), not
+    the interpreted semantics themselves — those still flow into memories and
+    evidence. It exists so the pipeline can tell three states apart that the
+    old "no evidence yet" heuristic conflated: never interpreted, interpreted
+    and legitimately empty, and deferred because no model was available.
+
+    ``content_hash`` pins the record to the exact Percept content, so an
+    edited Percept is re-interpreted instead of being considered done."""
+
+    percept_id: str
+    status: str = "deferred"   # interpreted|empty|deferred|error|quarantined|heuristic
+    interpreter: str = ""
+    model: str = ""
+    prompt_version: str = ""
+    schema_version: str = ""
+    attempts: int = 0
+    items_catalogued: int = 0
+    unresolved_count: int = 0
+    detail: str = ""
+    content_hash: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class MemoryItem(BaseModel):
     id: str
     type: MemoryType

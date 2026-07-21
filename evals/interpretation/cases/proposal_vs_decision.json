@@ -1,0 +1,43 @@
+{
+  "id": "proposal_vs_decision",
+  "description": "A settled decision and a mere proposal appear in the same source. Both are catalogued, but only the proposal is born needing review — a proposal is not a decision, no matter how confident the classifier is.",
+  "input": {
+    "percept_type": "meeting_transcript",
+    "source_sensor": "meeting",
+    "actors": ["Marina", "Bruno"],
+    "content": "Marina: we decided to use PostgreSQL advisory locks for the queue. Bruno: I propose we also add a Redis cache later.",
+    "source_trust": 0.95
+  },
+  "interpreter_output": [
+    {
+      "memory_type": "decision",
+      "cognitive_act": "decision",
+      "title": "Use PostgreSQL advisory locks for the queue",
+      "summary": "The team decided to use PostgreSQL advisory locks for the queue.",
+      "domain": "technical",
+      "confidence": 0.9,
+      "attributed_to": "Marina",
+      "speaker_is_owner": true,
+      "evidence_span": "we decided to use PostgreSQL advisory locks for the queue"
+    },
+    {
+      "memory_type": "decision",
+      "cognitive_act": "proposal",
+      "title": "Add a Redis cache later",
+      "summary": "Bruno proposed adding a Redis cache later.",
+      "domain": "technical",
+      "confidence": 0.9,
+      "attributed_to": "Bruno",
+      "speaker_is_owner": false,
+      "evidence_span": "I propose we also add a Redis cache later"
+    }
+  ],
+  "expected": {
+    "status": "interpreted",
+    "catalogued": 2,
+    "memories": [
+      {"title_contains": "PostgreSQL advisory locks", "cognitive_act": "decision", "review_reason_excludes": "unsettled cognitive act"},
+      {"title_contains": "Redis cache", "cognitive_act": "proposal", "needs_review": true, "attributed_to": "Bruno", "review_reason_contains": "unsettled cognitive act"}
+    ]
+  }
+}

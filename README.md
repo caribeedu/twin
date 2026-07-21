@@ -1527,6 +1527,15 @@ Lexical rules may support routing, operational optimization and conservative det
 
 A Percept that has not been interpreted remains pending or deferred. It must not be treated as successfully understood merely because a cognitive model was temporarily unavailable.
 
+Implemented:
+
+- a cognitive interpreter (`twin/cognition/interpreter/`) as the production path: the local LLM reads a Percept and emits grounded, act-aware `InterpretedItem`s — each with a cognitive act (statement, question, hypothesis, proposal, decision, opinion, third-party claim), a memory type (including rejected alternatives), a speaker/attribution, and a verbatim `evidence_span`; items the model cannot ground in the source are dropped rather than stored;
+- deferral as a first-class outcome: in interpreting modes (`auto`/`ollama`) an unavailable or failing model records the Percept as `deferred` (or `error`) and catalogues nothing — lexical rules never fabricate cognitive conclusions in the production path. A `percept_interpretations` record tracks execution status, model, prompt and schema versions and attempt count, so *never interpreted*, *interpreted and empty*, and *deferred* are three distinct, non-conflated states; `extract_pending` selects by interpretation state, so a returning model resumes cleanly and settled Percepts are never re-interpreted (bounded retries via `MAX_INTERPRETATION_ATTEMPTS`);
+- cognitive-act governance: a proposal is not a decision, and a question, hypothesis, opinion or third-party claim is born needing review regardless of the classifier's confidence; deterministic gates (quarantine, source policy, confidentiality floor, dedupe, calibration, review) still run exactly as before — the interpreter decides meaning, deterministic code decides use;
+- an explicit `heuristic` mode remains for fully offline detection, but its output is review-bound and marked detection-only; `TWIN_EXTRACTOR` is now honoured at Config construction;
+- surfaces: `twin extract` reports deferrals, `twin interpret status` / `twin interpret deferred` inspect the queue, and `POST /api/extract` returns `deferred`/`interpretation_status`/`unresolved_references`;
+- `tests/cognition/test_interpreter.py`, a Postgres mirror test, and `evals/interpretation/` scenarios (semantic classification, speaker attribution, evidence grounding, proposal-versus-decision) driven by a deterministic scripted interpreter — no model or network in CI. Connectors and sensors still capture evidence; the interpreter now creates the understanding, and no interpretation path writes confirmed Memory or Judgment on its own.
+
 ### v0.8 — Parallel Memory and Consolidation
 
 Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model.

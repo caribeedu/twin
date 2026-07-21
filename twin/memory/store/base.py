@@ -16,7 +16,7 @@ from ...sensory.percept import Percept
 from ..embeddings import cosine, from_blob
 from ..models import (
     CognitiveSession, Entity, Evidence, MemoryItem, MemoryStatus,
-    Project, Relation,
+    PerceptInterpretation, Project, Relation,
 )
 
 __all__ = ["MemoryStore", "now_iso"]
@@ -39,6 +39,30 @@ class MemoryStore(ABC):
     @abstractmethod
     def unprocessed_percepts(self) -> list[Percept]:
         """Percepts no memory/evidence has been derived from yet."""
+
+    # -- interpretation state (v0.7) --------------------------------------
+
+    @abstractmethod
+    def record_interpretation(self, state: PerceptInterpretation) -> None:
+        """Upsert the interpretation record for a Percept (keyed by
+        percept_id). Increments nothing itself — callers set ``attempts``."""
+
+    @abstractmethod
+    def get_interpretation(self, percept_id: str) -> Optional[PerceptInterpretation]: ...
+
+    @abstractmethod
+    def list_interpretations(
+        self, status: Optional[str] = None, limit: int = 200,
+    ) -> list[PerceptInterpretation]: ...
+
+    @abstractmethod
+    def percepts_pending_interpretation(
+        self, *, max_attempts: int, limit: int = 500,
+    ) -> list[Percept]:
+        """Percepts that still need interpreting: never interpreted, or left
+        ``deferred``/``error`` with attempts below ``max_attempts`` and whose
+        content still matches the recorded hash. Terminal states
+        (interpreted/empty/heuristic/quarantined) are excluded."""
 
     # -- memories ----------------------------------------------------------
 

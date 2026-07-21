@@ -1,0 +1,50 @@
+{
+  "id": "semantic_classification",
+  "description": "Distinct memory types are catalogued from one source, and a rejected alternative is catalogued as a decision carrying payload.rejected_alternative rather than being lost.",
+  "input": {
+    "percept_type": "meeting_transcript",
+    "source_sensor": "meeting",
+    "actors": ["Marina"],
+    "content": "Marina: we will ship the billing service on Friday. We decided against MongoDB because of licensing. Note: production runs on Postgres 16.",
+    "source_trust": 0.9
+  },
+  "interpreter_output": [
+    {
+      "memory_type": "task",
+      "cognitive_act": "decision",
+      "title": "Ship the billing service on Friday",
+      "summary": "The billing service will ship on Friday.",
+      "domain": "work",
+      "confidence": 0.9,
+      "attributed_to": "Marina",
+      "evidence_span": "we will ship the billing service on Friday"
+    },
+    {
+      "memory_type": "rejected_alternative",
+      "cognitive_act": "decision",
+      "title": "MongoDB rejected due to licensing",
+      "summary": "The team decided against MongoDB because of licensing.",
+      "domain": "technical",
+      "confidence": 0.9,
+      "evidence_span": "We decided against MongoDB because of licensing"
+    },
+    {
+      "memory_type": "fact",
+      "cognitive_act": "statement",
+      "title": "Production runs on Postgres 16",
+      "summary": "Production runs on Postgres 16.",
+      "domain": "technical",
+      "confidence": 0.88,
+      "evidence_span": "production runs on Postgres 16"
+    }
+  ],
+  "expected": {
+    "status": "interpreted",
+    "catalogued": 3,
+    "memories": [
+      {"type": "task", "title_contains": "billing service"},
+      {"type": "decision", "title_contains": "MongoDB", "rejected_alternative": true},
+      {"type": "fact", "title_contains": "Postgres 16"}
+    ]
+  }
+}
