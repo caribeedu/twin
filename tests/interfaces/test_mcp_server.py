@@ -9,7 +9,7 @@ from twin.interfaces.mcp_server import create_server
 
 @pytest.fixture()
 def server(tmp_path, monkeypatch):
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = tmp_path / "twin-home"
     srv = create_server(str(home))
@@ -69,7 +69,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     context, work happens, completion turns it into reviewable candidates,
     review confirms, feedback lands, and a second MCP client sees the new
     context."""
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = tmp_path / "twin-home"
 

@@ -298,7 +298,7 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
             from twin.config import Config
             from twin.memory.embeddings import get_embedder
             cfg = Config(home=Path(tmp) / "twin-home")
-            cfg.extractor = "heuristic"
+            cfg.extractor = "stub"
             cfg.embedder = "hash"
             cfg.ensure_home()
             extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
@@ -352,7 +352,7 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
             from twin.config import Config
             from twin.memory.embeddings import get_embedder
             cfg = Config(home=Path(tmp) / "twin-home")
-            cfg.extractor = "heuristic"
+            cfg.extractor = "stub"
             cfg.embedder = "hash"
             cfg.ensure_home()
             extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))

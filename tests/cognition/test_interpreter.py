@@ -263,3 +263,178 @@ def test_source_policy_still_applies_over_interpreter(store, interpreting_cfg, e
     assert "preference" not in types            # dropped by source policy
     assert "decision" in types
     assert report.policy_dropped >= 1
+
+
+# -- Blocker 2: deterministic evidence grounding ---------------------------------
+
+
+def test_nonempty_but_invented_evidence_span_is_dropped(store, interpreting_cfg,
+                                                        embedder):
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="constraint", cognitive_act=CognitiveAct.statement,
+                        title="Tabs", summary="Indentation is tabs.",
+                        domain="technical", confidence=0.85,
+                        evidence_span="The team standardized on tabs."),
+        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.statement,
+                        title="Invented", summary="They run on Kubernetes.",
+                        domain="technical", confidence=0.9,
+                        evidence_span="The team runs everything on Kubernetes."),
+    ]))
+    p = _percept("The team standardized on tabs.")
+    store.insert_percept(p)
+    report = extract_percept(store, interpreting_cfg, embedder, p)
+    summaries = [m.summary for m in store.list_memories()]
+    assert any("tabs" in s for s in summaries)
+    assert all("Kubernetes" not in s for s in summaries)   # invented span rejected
+    assert report.ungrounded == 1
+
+
+def test_paraphrase_is_not_accepted_as_verbatim_evidence(store, interpreting_cfg,
+                                                         embedder):
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+                        title="PG", summary="PostgreSQL was chosen.",
+                        domain="technical", confidence=0.9,
+                        evidence_span="PostgreSQL was selected by the team."),
+    ]))
+    p = _percept("We chose PostgreSQL.")
+    store.insert_percept(p)
+    report = extract_percept(store, interpreting_cfg, embedder, p)
+    assert store.list_memories() == []       # paraphrase is not verbatim evidence
+    assert report.ungrounded == 1
+    # nothing grounded → understood-empty, terminal
+    assert store.get_interpretation(p.id).status == "empty"
+
+
+def test_evidence_grounding_uses_masked_source(store, interpreting_cfg, embedder):
+    """The span is checked against the MASKED text the interpreter read, so an
+    item quoting a PII placeholder is accepted and no removed PII returns."""
+    from twin.judgment.pii import mask
+
+    content = "Contact alice@example.com to confirm we decided to use PostgreSQL."
+    masked, _ = mask(content)
+    # the interpreter only ever saw `masked`; quote a slice of it
+    span = masked.split("confirm ")[-1].rstrip(".")
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+                        title="PG", summary=span, domain="technical",
+                        confidence=0.9, evidence_span=span),
+    ]))
+    p = _percept(content)
+    store.insert_percept(p)
+    extract_percept(store, interpreting_cfg, embedder, p)
+    mems = store.list_memories()
+    assert mems                                   # grounded against masked text
+    assert "alice@example.com" not in mems[0].summary
+
+
+# -- Adjustments 3/4: outage vs poison input -------------------------------------
+
+
+def test_model_outage_does_not_permanently_abandon_percept(store, interpreting_cfg,
+                                                            embedder):
+    interpreting_cfg.ollama_url = "http://127.0.0.1:1"    # unreachable
+    p = _percept("We decided to use PostgreSQL.")
+    store.insert_percept(p)
+    # defer far more than MAX_INTERPRETATION_ATTEMPTS times
+    for _ in range(10):
+        extract_pending(store, interpreting_cfg, embedder)
+    state = store.get_interpretation(p.id)
+    assert state.status == "deferred" and state.failure_class == "unavailable"
+    assert state.terminal is False
+    # outage never consumes the budget → still selected
+    assert p.id in [x.id for x in store.percepts_pending_interpretation(max_attempts=6)]
+
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+                        title="PG", summary="Use PostgreSQL.", domain="technical",
+                        confidence=0.9, evidence_span="We decided to use PostgreSQL."),
+    ]))
+    reports = extract_pending(store, interpreting_cfg, embedder)
+    assert reports and reports[0].inserted
+    assert store.get_interpretation(p.id).status == "interpreted"
+
+
+def test_poison_input_has_bounded_retries(store, interpreting_cfg, embedder):
+    def boom(percept, text, cfg):
+        raise ValueError("bad body")             # reachable but schema-failing
+    set_interpreter_override(boom)
+    p = _percept("We decided to use PostgreSQL.")
+    store.insert_percept(p)
+    for _ in range(interp_max := 6):
+        # next_attempt_at backoff would gate real time; drive directly
+        extract_percept(store, interpreting_cfg, embedder, p)
+    state = store.get_interpretation(p.id)
+    assert state.status == "error"
+    assert state.terminal is True                # bounded, not retried forever
+    assert state.attempts >= interp_max
+
+
+# -- Adjustment 6: no silent invalid type/domain fallback ------------------------
+
+
+def test_invalid_memory_type_is_dropped_not_coerced_to_fact(store, interpreting_cfg,
+                                                            embedder):
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="wizardry", cognitive_act=CognitiveAct.statement,
+                        title="Bogus", summary="Some bogus type.", domain="technical",
+                        confidence=0.9, evidence_span="Some bogus type."),
+    ]))
+    p = _percept("Some bogus type.")
+    store.insert_percept(p)
+    report = extract_percept(store, interpreting_cfg, embedder, p)
+    assert store.list_memories() == []           # never silently a 'fact'
+    assert report.invalid == 1
+
+
+def test_invalid_domain_goes_to_review_as_unknown_not_technical(store,
+                                                                interpreting_cfg,
+                                                                embedder):
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.statement,
+                        title="Fact", summary="A grounded fact.", domain="wonderland",
+                        confidence=0.95, evidence_span="A grounded fact."),
+    ]))
+    p = _percept("A grounded fact.", source_trust=0.95)
+    store.insert_percept(p)
+    extract_percept(store, interpreting_cfg, embedder, p)
+    [mem] = store.list_memories()
+    assert mem.domain == "unknown"               # not silently 'technical'
+    assert mem.payload["invalid_domain"] == "wonderland"
+    assert mem.needs_review is True
+
+
+# -- Adjustment 8: attribution grounded against known actors ---------------------
+
+
+def test_invented_speaker_is_flagged_unresolved(store, interpreting_cfg, embedder):
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+                        title="PG", summary="Use PostgreSQL.", domain="technical",
+                        confidence=0.9, attributed_to="Nonexistent Person",
+                        evidence_span="We decided to use PostgreSQL."),
+    ]))
+    p = _percept("Marina: we decided to use PostgreSQL.",
+                 actors=["Marina"], source_trust=0.95)
+    store.insert_percept(p)
+    extract_percept(store, interpreting_cfg, embedder, p)
+    [mem] = store.list_memories()
+    assert mem.payload["attribution_unresolved"] is True
+    assert mem.needs_review is True
+
+
+def test_known_speaker_attribution_resolves(store, interpreting_cfg, embedder):
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+                        title="PG", summary="Use PostgreSQL.", domain="technical",
+                        confidence=0.9, attributed_to="Marina",
+                        evidence_span="we decided to use PostgreSQL"),
+    ]))
+    p = _percept("Marina: we decided to use PostgreSQL.",
+                 percept_type="meeting_transcript", source_sensor="meeting",
+                 actors=["Marina"], source_trust=0.95)
+    store.insert_percept(p)
+    extract_percept(store, interpreting_cfg, embedder, p)
+    [mem] = store.list_memories()
+    assert "attribution_unresolved" not in mem.payload
+    assert "unsettled cognitive act" not in (mem.review_reason or "")

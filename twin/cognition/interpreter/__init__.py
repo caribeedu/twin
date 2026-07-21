@@ -13,6 +13,7 @@ from .schema import (
 )
 from .service import (
     MAX_INTERPRETATION_ATTEMPTS,
+    InterpretationRuntime,
     interpreter_available,
     interpreting_mode,
     run_interpreter,
@@ -22,6 +23,7 @@ from .service import (
 __all__ = [
     "CognitiveAct",
     "InterpretationResult",
+    "InterpretationRuntime",
     "InterpretationStatus",
     "InterpretedItem",
     "MAX_INTERPRETATION_ATTEMPTS",

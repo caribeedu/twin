@@ -71,7 +71,17 @@ def cmd_interpret(args) -> None:
             return
         for p in deferred:
             st = ws.store.get_interpretation(p.id)
-            print(f"{p.id}  {st.status}  attempts={st.attempts}  {st.detail}")
+            print(f"{p.id}  {st.status}/{st.failure_class or '-'}  "
+                  f"attempts={st.attempts}  next={st.next_attempt_at or 'now'}  "
+                  f"{st.detail}")
+        return
+    if args.interpret_command == "signals":
+        signals = ws.store.list_detection_signals(limit=10000)
+        if not signals:
+            print("no detection signals (heuristic mode records hints, not memories)")
+            return
+        for s in signals:
+            print(f"{s.percept_id}  {s.kind:20}  {s.span[:70]}")
         return
     # status
     counts = Counter(i.status for i in ws.store.list_interpretations(limit=10000))
@@ -79,9 +89,11 @@ def cmd_interpret(args) -> None:
         max_attempts=MAX_INTERPRETATION_ATTEMPTS)
         if ws.store.get_interpretation(p.id) is None])
     print(f"never interpreted : {never}")
-    for status in ("interpreted", "empty", "deferred", "error", "heuristic",
-                   "quarantined"):
-        print(f"{status:17}: {counts.get(status, 0)}")
+    for status in ("interpreted", "empty", "deferred", "error",
+                   "heuristic_detection", "quarantined"):
+        print(f"{status:20}: {counts.get(status, 0)}")
+    signal_count = len(ws.store.list_detection_signals(limit=10000))
+    print(f"{'detection_signals':20}: {signal_count} (routing hints, not memories)")
 
 
 def cmd_extract(args) -> None:
@@ -1276,6 +1288,8 @@ def main(argv: list[str] | None = None) -> None:
     pistatus.set_defaults(func=cmd_interpret)
     pisd = pis.add_parser("deferred", help="percepts awaiting a cognitive interpreter")
     pisd.set_defaults(func=cmd_interpret)
+    pisig = pis.add_parser("signals", help="heuristic detection hints (never memories)")
+    pisig.set_defaults(func=cmd_interpret)
 
     p = sub.add_parser("review", help="interactive priority review queue")
     p.add_argument("--priority", choices=["high"], default=None)

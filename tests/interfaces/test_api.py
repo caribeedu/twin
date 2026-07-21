@@ -9,7 +9,7 @@ from twin.interfaces.api import create_app
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     app = create_app(home=str(tmp_path / "twin-home"))
     return TestClient(app)

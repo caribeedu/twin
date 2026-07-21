@@ -20,11 +20,20 @@
     {
       "memory_type": "fact",
       "cognitive_act": "statement",
-      "title": "Unsupported guess about deploy cadence",
+      "title": "Empty-span guess",
       "summary": "They probably deploy every Friday.",
       "domain": "technical",
       "confidence": 0.4,
       "evidence_span": ""
+    },
+    {
+      "memory_type": "fact",
+      "cognitive_act": "statement",
+      "title": "Invented-span guess",
+      "summary": "The team runs on Kubernetes.",
+      "domain": "technical",
+      "confidence": 0.7,
+      "evidence_span": "The team runs everything on Kubernetes in production."
     }
   ],
   "expected": {
@@ -33,6 +42,6 @@
     "memories": [
       {"title_contains": "tabs", "evidence_grounded": true}
     ],
-    "must_not_catalogue": ["deploy every Friday", "Unsupported guess"]
+    "must_not_catalogue": ["deploy every Friday", "Kubernetes", "Invented", "Empty-span"]
   }
 }

@@ -34,7 +34,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
         home.mkdir()
         store = SqliteStore(home / "twin.db")
         cfg = Config(home=home)
-        cfg.extractor = "heuristic"
+        cfg.extractor = "stub"   # deterministic offline interpreter (no LLM)
         cfg.embedder = "hash"
         cfg.db_url = f"sqlite:///{home / 'twin.db'}"
         cfg.ensure_home()

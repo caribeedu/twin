@@ -156,6 +156,10 @@ class InterpretationResult(BaseModel):
 
     items: list[InterpretedItem] = Field(default_factory=list)
     status: InterpretationStatus = InterpretationStatus.interpreted
+    # why a deferral/error happened, so a service outage is never confused with
+    # a Percept-specific failure: unavailable | transient | input | schema |
+    # permanent | "" (success)
+    failure_class: str = ""
     interpreter: str = "unknown"          # e.g. "ollama:qwen3.6"
     model: str = ""
     prompt_version: str = ""
@@ -166,12 +170,6 @@ class InterpretationResult(BaseModel):
     @property
     def deferred(self) -> bool:
         return self.status == InterpretationStatus.deferred
-
-    def grounded_items(self) -> list[InterpretedItem]:
-        """Only items with a real evidence span survive — an interpreted item
-        the model could not ground in the source is an unsupported guess, and
-        v0.7 reports the gap instead of storing the guess."""
-        return [it for it in self.items if (it.evidence_span or "").strip()]
 
 
 # JSON schema handed to the local LLM via Ollama structured outputs.

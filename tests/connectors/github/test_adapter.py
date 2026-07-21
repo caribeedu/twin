@@ -373,16 +373,20 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
 
 def test_rejected_alternative_becomes_decision_with_payload():
-    from twin.cognition.extractors.heuristic import extract
+    # v0.7: the stub interpreter (offline LLM double) catalogues rejected
+    # alternatives as decisions carrying payload.rejected_alternative.
+    from twin.config import Config
+    from twin.cognition.interpreter import stub
     from twin.sensory.percept import Percept
 
-    result = extract(Percept(
+    percept = Percept(
         content="Instead of Redis we will use PostgreSQL advisory locks. "
                 "We also decided against MongoDB because of licensing.",
         source_sensor="test", percept_type="document",
-    ))
-    rejected = [m for m in result.memories
-                if m.payload.get("rejected_alternative")]
+    )
+    result = stub.interpret(percept, percept.content, Config())
+    items = [it.to_extracted() for it in result.items]
+    rejected = [m for m in items if m.payload.get("rejected_alternative")]
     assert rejected and all(m.type == "decision" for m in rejected)
     assert len(rejected) == 2              # both phrasings caught
 

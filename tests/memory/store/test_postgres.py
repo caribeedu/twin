@@ -449,7 +449,11 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
         assert report.deferred is True
         assert pg_store.list_memories() == []
         state = pg_store.get_interpretation(p.id)
-        assert state.status == "deferred" and state.attempts == 1
+        assert state.status == "deferred" and state.failure_class == "unavailable"
+        assert state.terminal is False and state.interpretation_attempted is True
+        # outage never consumes the budget: still eligible after many defers
+        for _ in range(8):
+            extract_percept(pg_store, cfg, embedder, p)
         pending = pg_store.percepts_pending_interpretation(max_attempts=6)
         assert p.id in [x.id for x in pending]
 
@@ -465,7 +469,27 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
         report = extract_percept(pg_store, cfg, embedder, p)
         assert report.inserted and report.deferred is False
         state = pg_store.get_interpretation(p.id)
-        assert state.status == "interpreted" and state.attempts == 2
+        assert state.status == "interpreted"
         assert pg_store.percepts_pending_interpretation(max_attempts=6) == []
     finally:
         set_interpreter_override(None)
+
+
+def test_detection_signals_on_postgres(pg_store, cfg, embedder):
+    """Heuristic mode records DetectionSignals (never memories) on Postgres."""
+    from twin.cognition import extract_percept
+    from twin.sensory.percept import Percept
+
+    cfg.extractor = "heuristic"
+    p = Percept(percept_type="document", source_sensor="document",
+                content="We decided to use PostgreSQL for the queue.",
+                source_trust=0.9).seal()
+    pg_store.insert_percept(p)
+    report = extract_percept(pg_store, cfg, embedder, p)
+    assert report.interpretation_status == "heuristic_detection"
+    assert pg_store.list_memories() == []
+    signals = pg_store.list_detection_signals(p.id)
+    assert signals and all(s.span for s in signals)
+    state = pg_store.get_interpretation(p.id)
+    assert state.status == "heuristic_detection" and state.terminal is True
+    assert state.interpretation_attempted is False

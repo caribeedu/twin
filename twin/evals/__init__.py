@@ -80,7 +80,7 @@ def _eval_runtime(
     if mode != "deterministic":
         raise ValueError(f"unknown eval mode: {mode!r} (use deterministic|configured)")
     eval_cfg = Config(home=iso_home)
-    eval_cfg.extractor = "heuristic"
+    eval_cfg.extractor = "stub"   # deterministic offline interpreter (no LLM)
     eval_cfg.embedder = "hash"
     return eval_cfg, get_embedder("hash", 64)
 

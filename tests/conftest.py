@@ -8,7 +8,7 @@ from twin.memory.store.sqlite import SqliteStore
 @pytest.fixture()
 def cfg(tmp_path):
     c = Config(home=tmp_path / "twin-home")
-    c.extractor = "heuristic"   # tests never call an LLM by default
+    c.extractor = "stub"        # deterministic offline interpreter (no LLM)
     c.embedder = "hash"         # deterministic, no server required
     c.db_url = f"sqlite:///{tmp_path / 'twin-home' / 'twin.db'}"
     c.ensure_home()

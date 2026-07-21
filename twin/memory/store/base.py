@@ -15,7 +15,7 @@ from ...clock import now_iso  # re-export for backends
 from ...sensory.percept import Percept
 from ..embeddings import cosine, from_blob
 from ..models import (
-    CognitiveSession, Entity, Evidence, MemoryItem, MemoryStatus,
+    CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem, MemoryStatus,
     PerceptInterpretation, Project, Relation,
 )
 
@@ -60,9 +60,23 @@ class MemoryStore(ABC):
         self, *, max_attempts: int, limit: int = 500,
     ) -> list[Percept]:
         """Percepts that still need interpreting: never interpreted, or left
-        ``deferred``/``error`` with attempts below ``max_attempts`` and whose
-        content still matches the recorded hash. Terminal states
-        (interpreted/empty/heuristic/quarantined) are excluded."""
+        non-terminal and due for retry. A service outage (``deferred``) is
+        always eligible and never consumes the attempt budget; a
+        reachable-but-failing interpreter (``error``) is bounded by
+        ``max_attempts`` and ``next_attempt_at`` backoff. Terminal and
+        settled states (interpreted/empty/quarantined/heuristic_detection) are
+        excluded."""
+
+    # -- detection signals (v0.7 heuristic mode) --------------------------
+
+    @abstractmethod
+    def insert_detection_signal(self, signal: DetectionSignal) -> str:
+        """Persist a conservative lexical detection hint (never a memory)."""
+
+    @abstractmethod
+    def list_detection_signals(
+        self, percept_id: Optional[str] = None, limit: int = 500,
+    ) -> list[DetectionSignal]: ...
 
     # -- memories ----------------------------------------------------------
 

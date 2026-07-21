@@ -610,7 +610,7 @@ def test_contract_missing_method_fails(monkeypatch):
 def test_cli_setup_and_contract_smoke(tmp_path, monkeypatch, capsys):
     from twin.interfaces import cli as cli_mod
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = tmp_path / "twin-home"
 

@@ -122,6 +122,27 @@ class ExtractorVersion(BaseModel):
     created_at: str = ""
 
 
+class DetectionSignal(BaseModel):
+    """v0.7 conservative lexical detection — explicitly NOT a memory.
+
+    The heuristic detector may say "this span looks like it could contain a
+    decision/task" to prioritize a Percept, seed a review queue or drive
+    operational metrics. It may NOT establish a memory type, domain, entity,
+    title, summary or cognitive confidence — only a cognitive interpreter can.
+    A DetectionSignal therefore carries a *candidate category*, the source
+    span that triggered it and a detection confidence, and never becomes a
+    MemoryItem on its own."""
+
+    id: str
+    percept_id: str
+    kind: str                 # candidate category (decision|task|…) — a hint, not a type
+    span: str                 # the source span that triggered detection
+    reason: str = ""
+    confidence: float = 0.0   # detection confidence, NOT cognitive confidence
+    created_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class PerceptInterpretation(BaseModel):
     """v0.7 execution record of interpreting one Percept.
 
@@ -136,7 +157,22 @@ class PerceptInterpretation(BaseModel):
     edited Percept is re-interpreted instead of being considered done."""
 
     percept_id: str
-    status: str = "deferred"   # interpreted|empty|deferred|error|quarantined|heuristic
+    # interpretation execution status:
+    #   interpreted | empty | deferred | error
+    # pipeline/governance terminals that did NOT interpret:
+    #   quarantined | heuristic_detection | not_attempted
+    status: str = "deferred"
+    # v0.7: distinguishes a service outage from a Percept-specific failure so a
+    # prolonged outage never consumes a Percept's retry budget:
+    #   unavailable | transient | input | schema | permanent | ""
+    failure_class: str = ""
+    # whether the cognitive interpreter was actually invoked (False for
+    # quarantine and heuristic detection — those never interpret)
+    interpretation_attempted: bool = False
+    # a terminal record is never retried (poison input exhausted its budget)
+    terminal: bool = False
+    # earliest time this Percept should be retried (backoff); "" = immediately
+    next_attempt_at: str = ""
     interpreter: str = ""
     model: str = ""
     prompt_version: str = ""
@@ -146,6 +182,9 @@ class PerceptInterpretation(BaseModel):
     unresolved_count: int = 0
     detail: str = ""
     content_hash: str = ""
+    # per-stage counters for observability (§v0.7 metrics): emitted, grounded,
+    # ungrounded, policy_dropped, deduplicated, inserted, review_bound, invalid
+    stage_counts: dict[str, int] = Field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
 

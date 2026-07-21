@@ -13,8 +13,9 @@ from ...sensory.percept import Percept
 from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import (
-    Artifact, CognitiveSession, Entity, Evidence, MemoryItem, MemoryOperation,
-    PerceptInterpretation, Project, Relation, ReviewBatch, ReviewFinding,
+    Artifact, CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem,
+    MemoryOperation, PerceptInterpretation, Project, Relation, ReviewBatch,
+    ReviewFinding,
 )
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
@@ -47,6 +48,10 @@ CREATE TABLE IF NOT EXISTS percepts (
 CREATE TABLE IF NOT EXISTS percept_interpretations (
     percept_id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'deferred',
+    failure_class TEXT NOT NULL DEFAULT '',
+    interpretation_attempted INTEGER NOT NULL DEFAULT 0,
+    terminal INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL DEFAULT '',
     interpreter TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     prompt_version TEXT NOT NULL DEFAULT '',
@@ -56,8 +61,20 @@ CREATE TABLE IF NOT EXISTS percept_interpretations (
     unresolved_count INTEGER NOT NULL DEFAULT 0,
     detail TEXT NOT NULL DEFAULT '',
     content_hash TEXT NOT NULL DEFAULT '',
+    stage_counts TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS detection_signals (
+    id TEXT PRIMARY KEY,
+    percept_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    span TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -967,12 +984,16 @@ class SqliteStore(
     def _row_to_interpretation(self, row: sqlite3.Row) -> PerceptInterpretation:
         return PerceptInterpretation(
             percept_id=row["percept_id"], status=row["status"],
+            failure_class=row["failure_class"],
+            interpretation_attempted=bool(row["interpretation_attempted"]),
+            terminal=bool(row["terminal"]), next_attempt_at=row["next_attempt_at"],
             interpreter=row["interpreter"], model=row["model"],
             prompt_version=row["prompt_version"], schema_version=row["schema_version"],
             attempts=row["attempts"], items_catalogued=row["items_catalogued"],
             unresolved_count=row["unresolved_count"], detail=row["detail"],
-            content_hash=row["content_hash"], created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            content_hash=row["content_hash"],
+            stage_counts=json.loads(row["stage_counts"] or "{}"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
         )
 
     def record_interpretation(self, state: PerceptInterpretation) -> None:
@@ -980,25 +1001,63 @@ class SqliteStore(
         state.updated_at = ts
         state.created_at = state.created_at or ts
         self.conn.execute(
-            "INSERT INTO percept_interpretations (percept_id, status, interpreter,"
+            "INSERT INTO percept_interpretations (percept_id, status, failure_class,"
+            " interpretation_attempted, terminal, next_attempt_at, interpreter,"
             " model, prompt_version, schema_version, attempts, items_catalogued,"
-            " unresolved_count, detail, content_hash, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " unresolved_count, detail, content_hash, stage_counts, created_at,"
+            " updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(percept_id) DO UPDATE SET status=excluded.status,"
+            " failure_class=excluded.failure_class,"
+            " interpretation_attempted=excluded.interpretation_attempted,"
+            " terminal=excluded.terminal, next_attempt_at=excluded.next_attempt_at,"
             " interpreter=excluded.interpreter, model=excluded.model,"
             " prompt_version=excluded.prompt_version,"
             " schema_version=excluded.schema_version, attempts=excluded.attempts,"
             " items_catalogued=excluded.items_catalogued,"
             " unresolved_count=excluded.unresolved_count, detail=excluded.detail,"
-            " content_hash=excluded.content_hash, updated_at=excluded.updated_at",
+            " content_hash=excluded.content_hash, stage_counts=excluded.stage_counts,"
+            " updated_at=excluded.updated_at",
             (
-                state.percept_id, state.status, state.interpreter, state.model,
+                state.percept_id, state.status, state.failure_class,
+                int(state.interpretation_attempted), int(state.terminal),
+                state.next_attempt_at, state.interpreter, state.model,
                 state.prompt_version, state.schema_version, state.attempts,
                 state.items_catalogued, state.unresolved_count, state.detail,
-                state.content_hash, state.created_at, state.updated_at,
+                state.content_hash, json.dumps(state.stage_counts),
+                state.created_at, state.updated_at,
             ),
         )
         self._maybe_commit()
+
+    # -- detection signals (v0.7 heuristic mode) --------------------------
+
+    def insert_detection_signal(self, signal: DetectionSignal) -> str:
+        signal.created_at = signal.created_at or now_iso()
+        self.conn.execute(
+            "INSERT INTO detection_signals (id, percept_id, kind, span, reason,"
+            " confidence, created_at, metadata) VALUES (?,?,?,?,?,?,?,?)",
+            (signal.id, signal.percept_id, signal.kind, signal.span,
+             signal.reason, signal.confidence, signal.created_at,
+             json.dumps(signal.metadata)),
+        )
+        self._maybe_commit()
+        return signal.id
+
+    def list_detection_signals(self, percept_id: Optional[str] = None,
+                               limit: int = 500) -> list[DetectionSignal]:
+        if percept_id:
+            rows = self.conn.execute(
+                "SELECT * FROM detection_signals WHERE percept_id = ?"
+                " ORDER BY created_at LIMIT ?", (percept_id, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM detection_signals ORDER BY created_at DESC LIMIT ?",
+                (limit,)).fetchall()
+        return [DetectionSignal(
+            id=r["id"], percept_id=r["percept_id"], kind=r["kind"], span=r["span"],
+            reason=r["reason"], confidence=r["confidence"], created_at=r["created_at"],
+            metadata=json.loads(r["metadata"] or "{}")) for r in rows]
 
     def get_interpretation(self, percept_id: str) -> Optional[PerceptInterpretation]:
         row = self.conn.execute(
@@ -1025,15 +1084,23 @@ class SqliteStore(
     def percepts_pending_interpretation(
         self, *, max_attempts: int, limit: int = 500,
     ) -> list[Percept]:
+        # A Percept is pending when it was never interpreted, or its last run
+        # was non-terminal and is due for retry. A service outage (status
+        # 'deferred') is ALWAYS eligible and never consumes the attempt budget
+        # — only a reachable-but-failing interpreter ('error') is bounded by
+        # max_attempts. next_attempt_at applies backoff to error retries.
+        now = now_iso()
         rows = self.conn.execute(
             "SELECT p.* FROM percepts p"
             " LEFT JOIN percept_interpretations i ON i.percept_id = p.id"
             " WHERE i.percept_id IS NULL"
-            "    OR (i.status IN ('deferred','error')"
-            "        AND i.attempts < ?"
-            "        AND (i.content_hash = '' OR i.content_hash = p.content_hash))"
+            "    OR (i.terminal = 0"
+            "        AND i.status IN ('deferred','error')"
+            "        AND (i.content_hash = '' OR i.content_hash = p.content_hash)"
+            "        AND (i.status = 'deferred' OR i.attempts < ?)"
+            "        AND (i.next_attempt_at = '' OR i.next_attempt_at <= ?))"
             " ORDER BY p.ingested_at LIMIT ?",
-            (max_attempts, limit),
+            (max_attempts, now, limit),
         ).fetchall()
         return [self._row_to_percept(r) for r in rows]
 

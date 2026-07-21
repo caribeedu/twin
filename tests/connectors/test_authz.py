@@ -103,7 +103,7 @@ def anyio_backend():
 async def test_mcp_connector_tools_require_identity_and_capability(tmp_path, monkeypatch):
     from twin.interfaces.mcp_server import create_server
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = str(tmp_path / "twin-home")
     _acc, inst = _make_connector(home)
@@ -162,7 +162,7 @@ async def test_mcp_connector_sync_confirm_token_is_state_aware(tmp_path, monkeyp
     from twin.interfaces.mcp_server import create_server
     from twin.workspace import Workspace
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = str(tmp_path / "twin-home")
     _acc, inst = _make_connector(home)
@@ -205,7 +205,7 @@ def test_api_connector_endpoints_require_capabilities(tmp_path, monkeypatch):
 
     from twin.interfaces.api import create_app
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = str(tmp_path / "twin-home")
     _acc, inst = _make_connector(home)
@@ -255,7 +255,7 @@ def test_api_backfill_preview_capability_and_read_only(tmp_path, monkeypatch):
     from twin.interfaces.api import create_app
     from twin.workspace import Workspace
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = str(tmp_path / "twin-home")
     _acc, inst = _make_connector(home)
@@ -296,7 +296,7 @@ def test_api_github_webhook_authenticates_by_hmac_only(tmp_path, monkeypatch):
     from twin.interfaces.api import create_app
     from twin.workspace import Workspace
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = str(tmp_path / "twin-home")
     _acc, fake_inst = _make_connector(home)
@@ -359,7 +359,7 @@ def test_api_connector_add_binds_to_resolved_principal(tmp_path, monkeypatch):
     from twin.privacy.models import Principal, PrincipalType
     from twin.workspace import Workspace
 
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "stub")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     home = str(tmp_path / "twin-home")
 
