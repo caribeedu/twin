@@ -9,7 +9,7 @@ from twin.interfaces.api import create_app
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("TWIN_EXTRACTOR", "heuristic")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     app = create_app(home=str(tmp_path / "twin-home"))
     return TestClient(app)
@@ -66,7 +66,10 @@ def test_full_flow_over_api(client):
     # judgment + export
     assert client.get("/api/judgment").json()["principles"]
     export = client.get("/api/export").json()
-    assert export["memories"] and export["entities"]
+    # the offline mock grounds content as memories but extracts no entities —
+    # entity resolution is the cognitive interpreter's job, not a mock's
+    assert export["memories"]
+    assert "entities" in export
 
     # UI renders
     assert "twin" in client.get("/").text

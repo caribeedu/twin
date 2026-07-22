@@ -84,17 +84,23 @@ def test_embeddings_from_different_models_never_mix(store):
     assert ids_ollama == ["mem_b"]
 
 
-def test_pipeline_uses_ollama_when_selected(store, cfg, embedder, monkeypatch):
-    """extractor='ollama' routes through the Ollama client; on failure it
-    degrades to the heuristic instead of crashing."""
+def test_pipeline_defers_when_interpreter_unavailable(store, cfg, embedder):
+    """v0.7: extractor='ollama' routes through the cognitive interpreter; when
+    the model is unreachable the Percept is DEFERRED (retryable), never
+    silently handed to lexical rules to fabricate conclusions."""
     from twin.cognition.pipeline import extract_percept
 
     cfg.extractor = "ollama"
-    cfg.ollama_url = "http://127.0.0.1:1"  # unreachable → graceful fallback
+    cfg.ollama_url = "http://127.0.0.1:1"  # unreachable → defer, not fall back
     percept = Percept(percept_type="meeting_transcript", source_sensor="meeting",
                       content="Marina: decidimos usar FastAPI no backend.",
                       actors=["Marina"]).seal()
     store.insert_percept(percept)
     report = extract_percept(store, cfg, embedder, percept)
-    assert report.extractor == "heuristic"
-    assert report.inserted
+    assert report.deferred is True
+    assert report.interpretation_status == "deferred"
+    assert report.inserted == []
+    assert store.list_memories() == []
+    # deferred means retryable — the Percept is still pending
+    assert store.get_interpretation(percept.id).status == "deferred"
+    assert store.percepts_pending_interpretation(max_attempts=6) != []

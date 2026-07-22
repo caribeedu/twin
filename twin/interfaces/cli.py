@@ -56,22 +56,71 @@ def cmd_ingest(args) -> None:
         print(f"  skipped: {s}")
 
 
+def cmd_interpret(args) -> None:
+    from collections import Counter
+
+    from ..cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+
+    ws = Workspace(args.home)
+    if args.interpret_command == "deferred":
+        pending = ws.store.percepts_pending_interpretation(
+            max_attempts=MAX_INTERPRETATION_ATTEMPTS)
+        deferred = [p for p in pending if ws.store.get_interpretation(p.id)]
+        if not deferred:
+            print("no deferred percepts")
+            return
+        for p in deferred:
+            st = ws.store.get_interpretation(p.id)
+            print(f"{p.id}  {st.status}/{st.failure_class or '-'}  "
+                  f"attempts={st.attempts}  next={st.next_attempt_at or 'now'}  "
+                  f"{st.detail}")
+        return
+    if args.interpret_command == "signals":
+        signals = ws.store.list_detection_signals(limit=10000)
+        if not signals:
+            print("no detection signals (heuristic mode records hints, not memories)")
+            return
+        for s in signals:
+            print(f"{s.percept_id}  {s.kind:20}  {s.span[:70]}")
+        return
+    # status
+    counts = Counter(i.status for i in ws.store.list_interpretations(limit=10000))
+    never = len([p for p in ws.store.percepts_pending_interpretation(
+        max_attempts=MAX_INTERPRETATION_ATTEMPTS)
+        if ws.store.get_interpretation(p.id) is None])
+    print(f"never interpreted : {never}")
+    for status in ("interpreted", "empty", "deferred", "error",
+                   "heuristic_detection", "quarantined"):
+        print(f"{status:20}: {counts.get(status, 0)}")
+    signal_count = len(ws.store.list_detection_signals(limit=10000))
+    print(f"{'detection_signals':20}: {signal_count} (routing hints, not memories)")
+
+
 def cmd_extract(args) -> None:
     from ..cognition import extract_pending
 
     ws = Workspace(args.home)
     reports = extract_pending(ws.store, ws.cfg, ws.embedder)
     if not reports:
-        print("nothing to extract (all percepts already processed)")
+        print("nothing to interpret (all percepts already interpreted or deferred)")
         return
     total = sum(len(r.inserted) for r in reports)
     review = sum(r.flagged_for_review for r in reports)
     dups = sum(r.duplicates for r in reports)
+    deferred = sum(1 for r in reports if r.deferred)
     for r in reports:
+        if r.deferred:
+            print(f"{r.percept_id}: DEFERRED ({r.interpretation_status}) — "
+                  "no cognitive interpreter available; will retry")
+            continue
         print(f"{r.percept_id}: {len(r.inserted)} memories via {r.extractor}"
               f" ({r.flagged_for_review} to review, {r.duplicates} duplicates,"
               f" {r.pii_findings} PII findings masked)")
-    print(f"total: {total} new, {review} queued for review, {dups} duplicates")
+    print(f"total: {total} new, {review} queued for review, {dups} duplicates,"
+          f" {deferred} deferred")
+    if deferred:
+        print("  deferred percepts stay pending — re-run once the interpreter "
+              "is reachable ('twin interpret status' to inspect)")
 
 
 def cmd_review(args) -> None:
@@ -1231,7 +1280,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_ingest)
 
-    sub.add_parser("extract", help="extract memories from pending percepts").set_defaults(func=cmd_extract)
+    sub.add_parser("extract", help="interpret pending percepts into memories").set_defaults(func=cmd_extract)
+
+    pi = sub.add_parser("interpret", help="cognitive interpretation status (v0.7)")
+    pis = pi.add_subparsers(dest="interpret_command", required=True)
+    pistatus = pis.add_parser("status", help="counts by interpretation status")
+    pistatus.set_defaults(func=cmd_interpret)
+    pisd = pis.add_parser("deferred", help="percepts awaiting a cognitive interpreter")
+    pisd.set_defaults(func=cmd_interpret)
+    pisig = pis.add_parser("signals", help="heuristic detection hints (never memories)")
+    pisig.set_defaults(func=cmd_interpret)
 
     p = sub.add_parser("review", help="interactive priority review queue")
     p.add_argument("--priority", choices=["high"], default=None)

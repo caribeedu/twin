@@ -116,9 +116,13 @@ def test_pack_includes_confirmed(store, cfg, embedder):
 
 
 def test_pack_is_sectioned_with_evidence(store, cfg, embedder):
-    from twin.cognition import extract_percept
+    from tests.authored import corpus_interpreter
+    from twin.cognition import extract_percept, set_interpreter_override
     from twin.memory.models import MemoryStatus
 
+    # authored interpretation of the standup (a decision + a task) — the pack
+    # sections by memory type, which only a real/authored interpreter provides
+    set_interpreter_override(corpus_interpreter)
     percepts, _ = sense_paths([EXAMPLES / "transcripts"])
     percept = percepts[0]
     store.insert_percept(percept)

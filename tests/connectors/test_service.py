@@ -1110,13 +1110,43 @@ def test_rate_limit_retry_after_drives_backoff(store, creds):
     assert state.backoff_seconds >= 900  # provider window respected
 
 
+# Authored interpretations (recorded LLM output) for the source-policy fixtures:
+# exact test phrases → the memory type a good interpreter would assign.
+_POLICY_AUTHORED = {
+    "We decided to use PostgreSQL for the queue.": ("decision", "decision"),
+    "I prefer dark mode in every editor.": ("preference", "opinion"),
+    "We decided to adopt RabbitMQ for the mail queue.": ("decision", "decision"),
+    "I prefer light mode in every terminal.": ("preference", "opinion"),
+}
+
+
+def _authored_policy_interp(percept, text, _cfg):
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
+    )
+    items = [
+        InterpretedItem(
+            memory_type=mtype, cognitive_act=CognitiveAct(act),
+            title=phrase[:80], summary=phrase, domain="technical",
+            confidence=0.9, evidence_span=phrase)
+        for phrase, (mtype, act) in _POLICY_AUTHORED.items() if phrase in text
+    ]
+    return InterpretationResult(
+        items=items,
+        status=InterpretationStatus.interpreted if items else InterpretationStatus.empty,
+        interpreter="authored", model="authored", prompt_version="test",
+        schema_version="1")
+
+
 def test_source_policy_gates_connector_candidates(store, cfg, embedder):
     """A connector-fed percept only proposes memory types its source policy
     allows: preferences/beliefs are dropped, review-required types come in
     flagged, and local (non-connector) percepts are unaffected."""
+    from twin.cognition import set_interpreter_override
     from twin.cognition.pipeline import extract_percept
     from twin.sensory.percept import Percept
 
+    set_interpreter_override(_authored_policy_interp)
     content = (
         "We decided to use PostgreSQL for the queue.\n"
         "I prefer dark mode in every editor.\n"
@@ -1149,9 +1179,11 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
 def test_source_policy_instance_override(store, cfg, embedder):
     """ingestion_policy on the percept metadata (from instance config)
     narrows the connector-type default — never widens it."""
+    from twin.cognition import set_interpreter_override
     from twin.cognition.pipeline import extract_percept
     from twin.sensory.percept import Percept
 
+    set_interpreter_override(_authored_policy_interp)
     percept = Percept(
         percept_type="connector_issue", source_sensor="github",
         content="We decided to use PostgreSQL for the queue.",

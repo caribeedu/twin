@@ -15,8 +15,8 @@ from ...clock import now_iso  # re-export for backends
 from ...sensory.percept import Percept
 from ..embeddings import cosine, from_blob
 from ..models import (
-    CognitiveSession, Entity, Evidence, MemoryItem, MemoryStatus,
-    Project, Relation,
+    CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem, MemoryStatus,
+    PerceptInterpretation, Project, Relation,
 )
 
 __all__ = ["MemoryStore", "now_iso"]
@@ -39,6 +39,44 @@ class MemoryStore(ABC):
     @abstractmethod
     def unprocessed_percepts(self) -> list[Percept]:
         """Percepts no memory/evidence has been derived from yet."""
+
+    # -- interpretation state (v0.7) --------------------------------------
+
+    @abstractmethod
+    def record_interpretation(self, state: PerceptInterpretation) -> None:
+        """Upsert the interpretation record for a Percept (keyed by
+        percept_id). Increments nothing itself — callers set ``attempts``."""
+
+    @abstractmethod
+    def get_interpretation(self, percept_id: str) -> Optional[PerceptInterpretation]: ...
+
+    @abstractmethod
+    def list_interpretations(
+        self, status: Optional[str] = None, limit: int = 200,
+    ) -> list[PerceptInterpretation]: ...
+
+    @abstractmethod
+    def percepts_pending_interpretation(
+        self, *, max_attempts: int, limit: int = 500,
+    ) -> list[Percept]:
+        """Percepts that still need interpreting: never interpreted, or left
+        non-terminal and due for retry. A service outage (``deferred``) is
+        always eligible and never consumes the attempt budget; a
+        reachable-but-failing interpreter (``error``) is bounded by
+        ``max_attempts`` and ``next_attempt_at`` backoff. Terminal and
+        settled states (interpreted/empty/quarantined/heuristic_detection) are
+        excluded."""
+
+    # -- detection signals (v0.7 heuristic mode) --------------------------
+
+    @abstractmethod
+    def insert_detection_signal(self, signal: DetectionSignal) -> str:
+        """Persist a conservative lexical detection hint (never a memory)."""
+
+    @abstractmethod
+    def list_detection_signals(
+        self, percept_id: Optional[str] = None, limit: int = 500,
+    ) -> list[DetectionSignal]: ...
 
     # -- memories ----------------------------------------------------------
 

@@ -260,16 +260,28 @@ def test_page_budget_produces_multiple_batches(store, creds, slack):
 
 
 def test_slack_source_policy_requires_review(store, cfg, embedder):
+    from twin.cognition import set_interpreter_override
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
+    )
     from twin.cognition.pipeline import extract_percept
     from twin.sensory.percept import Percept
 
+    content = "We decided to postpone the Friday release."
     percept = Percept(
         percept_type="connector_message", source_sensor="slack",
-        content="We decided to postpone the Friday release.",
-        source_trust=0.7,
+        content=content, source_trust=0.7,
         metadata={"connector_type": "slack"},
     ).seal()
     store.insert_percept(percept)
+    # authored interpretation (what a good LLM returns for this message)
+    set_interpreter_override(lambda p, text, c: InterpretationResult(
+        items=[InterpretedItem(
+            memory_type="decision", cognitive_act=CognitiveAct.decision,
+            title="Postpone the Friday release", summary=content,
+            domain="work", confidence=0.9, evidence_span=content)],
+        status=InterpretationStatus.interpreted, interpreter="authored",
+        model="authored", prompt_version="test", schema_version="1"))
     report = extract_percept(store, cfg, embedder, percept)
     assert report.inserted
     mem = store.get_memory(report.inserted[0])

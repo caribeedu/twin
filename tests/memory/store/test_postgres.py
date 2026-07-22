@@ -77,11 +77,12 @@ def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
     pg_store.set_status(inserted[0], MemoryStatus.confirmed)
     assert pg_store.get_memory(inserted[0]).status.value == "confirmed"
 
-    # entities + graph
+    # entities + graph — entity resolution is the cognitive interpreter's job;
+    # the offline mock extracts none, so the graph is simply exercised as empty
     entities = pg_store.list_entities()
-    assert entities
-    memories = pg_store.memories_for_entity(entities[0].id)
-    assert isinstance(memories, list)
+    assert isinstance(entities, list)
+    if entities:
+        assert isinstance(pg_store.memories_for_entity(entities[0].id), list)
 
 
 def test_pgvector_server_side_similarity(pg_store, embedder):
@@ -419,3 +420,77 @@ def test_connector_counter_claim_bump_atomic_on_postgres(pg_store, tmp_path):
     record_batch_counters(pg_store, inst.id, batch)
     state = pg_store.get_connector_sync_state(inst.id)
     assert state is not None and state.fetch_total == 9
+
+
+def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
+    """The v0.7 interpretation spine holds on Postgres: an unavailable
+    interpreter defers (nothing catalogued, retryable), and a later run
+    interprets the same percept and marks it terminal."""
+    from twin.cognition import (
+        extract_percept,
+        set_interpreter_override,
+    )
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct,
+        InterpretationResult,
+        InterpretationStatus,
+        InterpretedItem,
+    )
+    from twin.sensory.percept import Percept
+
+    cfg.extractor = "auto"
+    cfg.ollama_url = "http://127.0.0.1:1"  # unreachable → defer
+    p = Percept(percept_type="document", source_sensor="document",
+                content="We decided to use PostgreSQL advisory locks.",
+                source_trust=0.95).seal()
+    pg_store.insert_percept(p)
+
+    try:
+        report = extract_percept(pg_store, cfg, embedder, p)
+        assert report.deferred is True
+        assert pg_store.list_memories() == []
+        state = pg_store.get_interpretation(p.id)
+        assert state.status == "deferred" and state.failure_class == "unavailable"
+        assert state.terminal is False and state.interpretation_attempted is True
+        # outage never consumes the budget: still eligible after many defers
+        for _ in range(8):
+            extract_percept(pg_store, cfg, embedder, p)
+        pending = pg_store.percepts_pending_interpretation(max_attempts=6)
+        assert p.id in [x.id for x in pending]
+
+        set_interpreter_override(lambda percept, text, c: InterpretationResult(
+            items=[InterpretedItem(
+                memory_type="decision", cognitive_act=CognitiveAct.decision,
+                title="Use PostgreSQL advisory locks",
+                summary="The team decided to use PostgreSQL advisory locks.",
+                domain="technical", confidence=0.9,
+                evidence_span="We decided to use PostgreSQL advisory locks.")],
+            status=InterpretationStatus.interpreted, interpreter="ollama:test",
+            model="test", prompt_version="interpret-v1", schema_version="1"))
+        report = extract_percept(pg_store, cfg, embedder, p)
+        assert report.inserted and report.deferred is False
+        state = pg_store.get_interpretation(p.id)
+        assert state.status == "interpreted"
+        assert pg_store.percepts_pending_interpretation(max_attempts=6) == []
+    finally:
+        set_interpreter_override(None)
+
+
+def test_detection_signals_on_postgres(pg_store, cfg, embedder):
+    """Heuristic mode records DetectionSignals (never memories) on Postgres."""
+    from twin.cognition import extract_percept
+    from twin.sensory.percept import Percept
+
+    cfg.extractor = "heuristic"
+    p = Percept(percept_type="document", source_sensor="document",
+                content="We decided to use PostgreSQL for the queue.",
+                source_trust=0.9).seal()
+    pg_store.insert_percept(p)
+    report = extract_percept(pg_store, cfg, embedder, p)
+    assert report.interpretation_status == "heuristic_detection"
+    assert pg_store.list_memories() == []
+    signals = pg_store.list_detection_signals(p.id)
+    assert signals and all(s.span for s in signals)
+    state = pg_store.get_interpretation(p.id)
+    assert state.status == "heuristic_detection" and state.terminal is True
+    assert state.interpretation_attempted is False

@@ -37,7 +37,9 @@ class ExtractedMemory(BaseModel):
     def normalized(self) -> "ExtractedMemory":
         if self.type not in MEMORY_TYPES:
             self.type = "fact"
-        if self.domain not in ALL_DOMAINS:
+        # Preserve the explicit governance remap 'unknown'; other invalids
+        # still fall back to technical for legacy extractor paths.
+        if self.domain not in ALL_DOMAINS and self.domain != "unknown":
             self.domain = "technical"
         if self.sensitivity not in SENSITIVITIES:
             self.sensitivity = "internal"

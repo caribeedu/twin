@@ -170,6 +170,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 "inserted": r.inserted, "duplicates": r.duplicates,
                 "flagged_for_review": r.flagged_for_review,
                 "pii_findings": r.pii_findings,
+                "deferred": r.deferred,
+                "interpretation_status": r.interpretation_status,
+                "unresolved_references": r.unresolved_references,
             }
             for r in reports
         ]

@@ -1,0 +1,47 @@
+{
+  "id": "evidence_grounding",
+  "description": "An interpreted item the model could not ground in the source (empty evidence span) is dropped, not stored. Only the grounded item is catalogued, and it keeps its evidence.",
+  "input": {
+    "percept_type": "document",
+    "source_sensor": "document",
+    "content": "The team standardized on tabs for indentation across all repositories.",
+    "source_trust": 0.9
+  },
+  "interpreter_output": [
+    {
+      "memory_type": "constraint",
+      "cognitive_act": "statement",
+      "title": "Indentation is tabs across all repositories",
+      "summary": "The team standardized on tabs for indentation in every repository.",
+      "domain": "technical",
+      "confidence": 0.85,
+      "evidence_span": "The team standardized on tabs for indentation across all repositories."
+    },
+    {
+      "memory_type": "fact",
+      "cognitive_act": "statement",
+      "title": "Empty-span guess",
+      "summary": "They probably deploy every Friday.",
+      "domain": "technical",
+      "confidence": 0.4,
+      "evidence_span": ""
+    },
+    {
+      "memory_type": "fact",
+      "cognitive_act": "statement",
+      "title": "Invented-span guess",
+      "summary": "The team runs on Kubernetes.",
+      "domain": "technical",
+      "confidence": 0.7,
+      "evidence_span": "The team runs everything on Kubernetes in production."
+    }
+  ],
+  "expected": {
+    "status": "interpreted",
+    "catalogued": 1,
+    "memories": [
+      {"title_contains": "tabs", "evidence_grounded": true}
+    ],
+    "must_not_catalogue": ["deploy every Friday", "Kubernetes", "Invented", "Empty-span"]
+  }
+}

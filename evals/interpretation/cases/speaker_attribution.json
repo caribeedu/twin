@@ -1,0 +1,31 @@
+{
+  "id": "speaker_attribution",
+  "description": "A claim made by a third party is attributed to that speaker and marked as not the account owner's own knowledge — it is catalogued needing review, never adopted silently.",
+  "input": {
+    "percept_type": "slack_thread",
+    "source_sensor": "slack",
+    "actors": ["Priya", "self"],
+    "content": "Priya: our vendor says the API rate limit is 5000 req/hour.",
+    "source_trust": 0.9
+  },
+  "interpreter_output": [
+    {
+      "memory_type": "fact",
+      "cognitive_act": "third_party_claim",
+      "title": "Vendor API rate limit is 5000 req/hour",
+      "summary": "Priya relayed the vendor's claim that the API rate limit is 5000 requests per hour.",
+      "domain": "technical",
+      "confidence": 0.9,
+      "attributed_to": "Priya",
+      "speaker_is_owner": false,
+      "evidence_span": "our vendor says the API rate limit is 5000 req/hour"
+    }
+  ],
+  "expected": {
+    "status": "interpreted",
+    "catalogued": 1,
+    "memories": [
+      {"type": "fact", "cognitive_act": "third_party_claim", "attributed_to": "Priya", "needs_review": true, "evidence_grounded": true}
+    ]
+  }
+}

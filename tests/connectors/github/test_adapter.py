@@ -341,8 +341,35 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
     assert "Redis" in early.content        # the alternative is never erased
 
     # extraction: both decisions become candidates; the merged one carries
-    # the higher confidence (trust scales it) — consolidation picks it up
-    from twin.cognition import extract_pending
+    # the higher confidence (trust scales it) — consolidation picks it up.
+    # The interpretation is authored ground truth (what a good LLM returns for
+    # these exact bodies), keyed to the fixture content — never a lexical rule.
+    from twin.cognition import extract_pending, set_interpreter_override
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
+    )
+
+    _AUTHORED = {
+        "We decided to use Redis for the queue.": "Use Redis for the queue",
+        "We decided to use PostgreSQL advisory locks for the queue.":
+            "Use PostgreSQL advisory locks for the queue",
+    }
+
+    def _authored_decisions(percept, text, _cfg):
+        items = [
+            InterpretedItem(
+                memory_type="decision", cognitive_act=CognitiveAct.decision,
+                title=title, summary=phrase, domain="technical", confidence=0.9,
+                evidence_span=phrase)
+            for phrase, title in _AUTHORED.items() if phrase in text
+        ]
+        return InterpretationResult(
+            items=items,
+            status=InterpretationStatus.interpreted if items else InterpretationStatus.empty,
+            interpreter="authored", model="authored",
+            prompt_version="test", schema_version="1")
+
+    set_interpreter_override(_authored_decisions)
     extract_pending(store, cfg, embedder)
     decisions = [m for m in store.list_memories() if m.type.value == "decision"]
     assert decisions
@@ -364,7 +391,27 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
     )
     _acc, inst = _mk(store, creds)
     sync_connector(store, creds, inst.id)
-    from twin.cognition import extract_pending
+    # authored interpretation: the LLM reads the comment as a preference; the
+    # deterministic source policy then drops it (GitHub never proposes prefs).
+    from twin.cognition import extract_pending, set_interpreter_override
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
+    )
+
+    phrase = "I prefer tabs over spaces in every repository."
+
+    def _authored_preference(percept, text, _cfg):
+        items = ([InterpretedItem(
+            memory_type="preference", cognitive_act=CognitiveAct.opinion,
+            title="Prefers tabs over spaces", summary=phrase, domain="technical",
+            confidence=0.9, evidence_span=phrase)] if phrase in text else [])
+        return InterpretationResult(
+            items=items,
+            status=InterpretationStatus.interpreted if items else InterpretationStatus.empty,
+            interpreter="authored", model="authored",
+            prompt_version="test", schema_version="1")
+
+    set_interpreter_override(_authored_preference)
     reports = extract_pending(store, cfg, embedder)
     types = {store.get_memory(m).type.value
              for r in reports for m in r.inserted}
@@ -373,18 +420,22 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
 
 def test_rejected_alternative_becomes_decision_with_payload():
-    from twin.cognition.extractors.heuristic import extract
-    from twin.sensory.percept import Percept
+    # v0.7: a rejected alternative interpreted by the LLM is catalogued as a
+    # decision carrying payload.rejected_alternative. The interpretation is
+    # authored ground truth (the LLM's job), not derived from lexical rules.
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct,
+        InterpretedItem,
+    )
 
-    result = extract(Percept(
-        content="Instead of Redis we will use PostgreSQL advisory locks. "
-                "We also decided against MongoDB because of licensing.",
-        source_sensor="test", percept_type="document",
-    ))
-    rejected = [m for m in result.memories
-                if m.payload.get("rejected_alternative")]
-    assert rejected and all(m.type == "decision" for m in rejected)
-    assert len(rejected) == 2              # both phrasings caught
+    item = InterpretedItem(
+        memory_type="rejected_alternative", cognitive_act=CognitiveAct.decision,
+        title="MongoDB rejected", summary="Decided against MongoDB (licensing).",
+        domain="technical", confidence=0.9,
+        evidence_span="We also decided against MongoDB because of licensing.")
+    extracted = item.to_extracted()
+    assert extracted.type == "decision"
+    assert extracted.payload.get("rejected_alternative") is True
 
 
 # -- backfill preview and setup helpers (§77–79) -----------------------------------

@@ -41,6 +41,10 @@ jobs:
         run: pytest -q
       - name: Connector eval scenarios
         run: python -m evals.connectors.run
+      - name: Cognitive interpretation eval scenarios
+        run: python -m evals.interpretation.run
+      - name: Real-model interpretation evals (skips without a local model)
+        run: python -m evals.interpretation_model.run
 
   windows-credentials:
     name: credential store (windows)

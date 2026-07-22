@@ -46,30 +46,37 @@ class Config:
     home: Path = field(default_factory=lambda: DEFAULT_HOME)
 
     # -- storage ---------------------------------------------------------
+    # Environment is read at construction (not import) so a test or caller
+    # that sets TWIN_* before building a Config actually takes effect.
     # postgresql://user:pass@host:port/db  → Postgres + pgvector (primary)
     # sqlite:///path/to/twin.db            → SQLite (dev / tests / fallback)
-    db_url: str = os.environ.get("TWIN_DB_URL", "")
+    db_url: str = field(default_factory=lambda: os.environ.get("TWIN_DB_URL", ""))
 
     # -- local models (Ollama) ---------------------------------------------
-    ollama_url: str = os.environ.get("TWIN_OLLAMA_URL", "http://127.0.0.1:11434")
-    ollama_model: str = os.environ.get("TWIN_OLLAMA_MODEL", "qwen3.6:latest")
-    ollama_embed_model: str = os.environ.get("TWIN_OLLAMA_EMBED_MODEL", "nomic-embed-text-v2-moe")
+    ollama_url: str = field(
+        default_factory=lambda: os.environ.get("TWIN_OLLAMA_URL", "http://127.0.0.1:11434"))
+    ollama_model: str = field(
+        default_factory=lambda: os.environ.get("TWIN_OLLAMA_MODEL", "qwen3.6:latest"))
+    ollama_embed_model: str = field(
+        default_factory=lambda: os.environ.get("TWIN_OLLAMA_EMBED_MODEL", "nomic-embed-text-v2-moe"))
 
     # -- cognition ---------------------------------------------------------
-    # auto → ollama (local, if reachable) → heuristic (rule-based, offline)
-    extractor: str = os.environ.get("TWIN_EXTRACTOR", "auto")
+    # v0.7: auto/ollama → cognitive interpreter (defer when unavailable);
+    # heuristic → explicit offline detection mode.
+    extractor: str = field(default_factory=lambda: os.environ.get("TWIN_EXTRACTOR", "auto"))
     # Memories with confidence below this are always queued for review.
     review_confidence_threshold: float = 0.75
 
     # -- embeddings ---------------------------------------------------------
     # auto → ollama (if reachable) → hash; or force: hash | ollama
-    embedder: str = os.environ.get("TWIN_EMBEDDER", "auto")
-    embedding_dim: int = int(os.environ.get("TWIN_EMBEDDING_DIM", "512"))
+    embedder: str = field(default_factory=lambda: os.environ.get("TWIN_EMBEDDER", "auto"))
+    embedding_dim: int = field(
+        default_factory=lambda: int(os.environ.get("TWIN_EMBEDDING_DIM", "512")))
 
     # -- privacy -------------------------------------------------------------
     # when set, percept content + evidence quotes are encrypted at rest
     # (requires: pip install "twin[crypto]")
-    encryption_key: str = os.environ.get("TWIN_ENCRYPTION_KEY", "")
+    encryption_key: str = field(default_factory=lambda: os.environ.get("TWIN_ENCRYPTION_KEY", ""))
     # sources with trust below this always send their memories to review
     low_trust_threshold: float = 0.65
 
