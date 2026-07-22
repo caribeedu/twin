@@ -5,7 +5,8 @@ Selection follows ``cfg.extractor`` for backward compatibility:
     auto      → cognitive interpreter if the local model is reachable,
                 otherwise DEFER (never fabricate conclusions from lexical rules)
     ollama    → cognitive interpreter; DEFER when unreachable
-    stub      → deterministic offline interpreter (test/CI stand-in for the LLM)
+    echo      → non-interpreting offline mock (test/CI stand-in; makes no
+                semantic classification — see ``echo.py``)
     heuristic → NOT an interpreter — detection-only mode (see ``pipeline``)
 
 The load-bearing rule of v0.7: in an interpreting mode, an unavailable model
@@ -29,7 +30,7 @@ from typing import Callable, Optional
 
 from ...config import Config
 from ...sensory.percept import Percept
-from . import ollama_interpreter, stub
+from . import echo, ollama_interpreter
 from .schema import InterpretationResult, InterpretationStatus
 
 # Bound retries for a reachable-but-failing interpreter (a poison input or a
@@ -51,8 +52,12 @@ def set_interpreter_override(fn: Optional[InterpreterFn]) -> None:
 
 def interpreting_mode(cfg: Config) -> bool:
     """True when the configured mode should run the cognitive interpreter
-    (rather than the explicit offline heuristic detector)."""
-    return cfg.extractor in ("auto", "ollama", "stub") or _OVERRIDE is not None
+    (rather than the explicit offline heuristic detector). ``heuristic`` is
+    always detection-only, even if an override is installed — an explicit
+    offline-detection test must never be silently upgraded to interpretation."""
+    if cfg.extractor == "heuristic":
+        return False
+    return cfg.extractor in ("auto", "ollama", "echo") or _OVERRIDE is not None
 
 
 def _classify_exception(exc: Exception) -> tuple[InterpretationStatus, str]:
@@ -83,8 +88,8 @@ class InterpretationRuntime:
         if _OVERRIDE is not None:
             self.mode = "override"
             self.available = True
-        elif cfg.extractor == "stub":
-            self.mode = "stub"
+        elif cfg.extractor == "echo":
+            self.mode = "echo"
             self.available = True
         else:
             self.mode = "ollama"
@@ -106,8 +111,8 @@ class InterpretationRuntime:
                 return _deferred(f"interpreter override error: {type(exc).__name__}",
                                  status=InterpretationStatus.error,
                                  failure_class="transient")
-        if self.mode == "stub":
-            return stub.interpret(percept, masked_text, self.cfg)
+        if self.mode == "echo":
+            return echo.interpret(percept, masked_text, self.cfg)
 
         # ollama
         if not self.available:
@@ -137,7 +142,7 @@ class InterpretationRuntime:
 
 
 def interpreter_available(cfg: Config) -> bool:
-    if _OVERRIDE is not None or cfg.extractor == "stub":
+    if _OVERRIDE is not None or cfg.extractor == "echo":
         return True
     return ollama_interpreter.available(cfg.ollama_url)
 

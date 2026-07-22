@@ -66,23 +66,28 @@ def test_scan_detects_rejected_alternatives():
     assert all(h.span for h in rejected)
 
 
-# -- the stub interpreter (offline LLM double used by the rest of the suite) ----
+# -- the echo mock (non-interpreting offline stand-in used by the suite) --------
 
 
-def test_stub_interpreter_produces_grounded_reviewed_memories(store, cfg, embedder):
-    """With the default test interpreter (stub), the same transcript yields
-    grounded, review-bound memories through the real interpreter path."""
+def test_echo_mock_makes_no_semantic_classification(store, cfg, embedder):
+    """The default offline mock (echo) grounds content as neutral facts but
+    classifies nothing — every item is a review-bound 'fact'/'statement', so no
+    lexical rule establishes a decision/preference/etc. Meaning comes only from
+    a real (or scripted) interpreter."""
     percept = _percept(store, "transcripts/standup-2026-07-08.txt")
-    report = extract_percept(store, cfg, embedder, percept)   # cfg.extractor == "stub"
-    assert report.extractor == "stub"
+    report = extract_percept(store, cfg, embedder, percept)   # cfg.extractor == "echo"
+    assert report.extractor == "echo"
     memories = [store.get_memory(mid) for mid in report.inserted]
     assert memories
-    types = {m.type.value for m in memories}
-    assert "decision" in types
-    assert all(m.needs_review for m in memories)         # offline double is never trusted
+    # NO semantic categories are invented — everything is the null 'fact'
+    assert {m.type.value for m in memories} == {"fact"}
+    assert all(m.payload.get("cognitive_act") == "statement" for m in memories)
+    assert all(m.needs_review for m in memories)          # mock is never trusted
     for m in memories:
         evidence = store.get_evidence(m.id)
         assert evidence and evidence[0].percept_id == percept.id
+        # the span is a verbatim slice of the source (grounded)
+        assert evidence[0].quote in percept.content
 
 
 def test_extract_pending_processes_each_percept_once(store, cfg, embedder):

@@ -292,16 +292,44 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
                                    for p in percepts):
                 return False, "ownership not sealed on every percept"
 
-            # extraction (offline heuristic): both decisions become
-            # candidates, the merged one outranks, nothing auto-confirms
-            from twin.cognition import extract_pending
+            # extraction: both decisions become candidates, the merged one
+            # outranks (trust scales confidence), nothing auto-confirms. The
+            # interpretation is authored ground truth (recorded LLM output for
+            # these exact bodies), keyed to the fixture content — not lexical.
+            from twin.cognition import extract_pending, set_interpreter_override
+            from twin.cognition.interpreter.schema import (
+                CognitiveAct, InterpretationResult, InterpretationStatus,
+                InterpretedItem,
+            )
             from twin.config import Config
             from twin.memory.embeddings import get_embedder
+            authored = {
+                "We decided to use Redis for the queue.": "Use Redis",
+                "We decided to use PostgreSQL advisory locks for the queue.":
+                    "Use PostgreSQL advisory locks",
+            }
+
+            def _authored(percept, text, _c):
+                items = [InterpretedItem(
+                    memory_type="decision", cognitive_act=CognitiveAct.decision,
+                    title=t, summary=p, domain="technical", confidence=0.9,
+                    evidence_span=p) for p, t in authored.items() if p in text]
+                return InterpretationResult(
+                    items=items,
+                    status=InterpretationStatus.interpreted if items
+                    else InterpretationStatus.empty,
+                    interpreter="authored", model="authored",
+                    prompt_version="eval", schema_version="1")
+
             cfg = Config(home=Path(tmp) / "twin-home")
-            cfg.extractor = "stub"
+            cfg.extractor = "auto"
             cfg.embedder = "hash"
             cfg.ensure_home()
-            extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
+            set_interpreter_override(_authored)
+            try:
+                extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
+            finally:
+                set_interpreter_override(None)
             decisions = [m for m in store.list_memories()
                          if m.type.value == "decision"]
             pg = [m for m in decisions if "PostgreSQL" in m.summary]
@@ -352,7 +380,7 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
             from twin.config import Config
             from twin.memory.embeddings import get_embedder
             cfg = Config(home=Path(tmp) / "twin-home")
-            cfg.extractor = "stub"
+            cfg.extractor = "echo"
             cfg.embedder = "hash"
             cfg.ensure_home()
             extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
