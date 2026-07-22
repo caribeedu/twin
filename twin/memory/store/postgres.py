@@ -735,6 +735,10 @@ class PostgresStore(
             cur.execute(HOST_BINDING_SCHEMA)
             cur.execute(WORKSPACE_OPS_SCHEMA)
             for stmt in (
+                "ALTER TABLE workspace_ticks ADD COLUMN IF NOT EXISTS "
+                "error_stage TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE consolidation_runs ADD COLUMN IF NOT EXISTS "
+                "error_stage TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
                 "occurrence INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "

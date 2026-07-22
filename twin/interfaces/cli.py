@@ -348,6 +348,7 @@ def cmd_workspace(args) -> None:
         input_mode=getattr(args, "input_mode", "snapshot") or "snapshot",
         sequence=getattr(args, "sequence", None),
         idempotency_key=getattr(args, "idempotency_key", None),
+        retry=bool(getattr(args, "retry", False)),
         firewall=ws.firewall,
     )
     _print(result.to_dict())
@@ -363,6 +364,7 @@ def cmd_consolidate(args) -> None:
         kind=kind,
         dry_run=not getattr(args, "apply", False),
         analyze_limit=int(getattr(args, "limit", 200) or 200),
+        retry=bool(getattr(args, "retry", False)),
     )
     _print(result.to_dict())
 
@@ -1433,6 +1435,8 @@ def main(argv: list[str] | None = None) -> None:
                     help="monotonic session sequence for idempotent ticks")
     wt.add_argument("--idempotency-key", default=None,
                     help="explicit idempotency key for retries")
+    wt.add_argument("--retry", action="store_true",
+                    help="reclaim a prior failed (error) tick with the same identity")
     wt.set_defaults(func=cmd_workspace)
 
     p = sub.add_parser("consolidate", help="daily/weekly consolidation cycle (v0.8)")
@@ -1446,6 +1450,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="write changes (default is dry-run)")
         pc.add_argument("--limit", type=int, default=200,
                         help="max candidates to analyze")
+        pc.add_argument("--retry", action="store_true",
+                        help="reclaim a prior failed (error) apply run for this window")
         pc.set_defaults(func=cmd_consolidate)
 
     sub.add_parser("reindex", help="regenerate embeddings").set_defaults(func=cmd_reindex)

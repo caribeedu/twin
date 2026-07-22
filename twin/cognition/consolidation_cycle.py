@@ -17,11 +17,16 @@ from typing import Any, Optional
 
 from ..clock import now_iso
 from ..config import Config
+from ..connectors.errors import sanitize_error
 from ..memory.automation import apply_safe_automations
 from ..memory.embeddings import Embedder
 from ..memory.store.base import MemoryStore
 from ..memory.store.workspace_ops_mixin import ConsolidationRunRecord
 from .quality import analyze_candidates
+
+
+class ConsolidationInvariantError(RuntimeError):
+    """Cycle mutated the confirmed Memory/Judgment set — must not complete."""
 
 
 @dataclass
@@ -32,6 +37,7 @@ class ConsolidationCycleResult:
     window_start: str = ""
     window_end: str = ""
     duplicated: bool = False
+    status: str = ""
     at: str = ""
     stages: list[str] = field(default_factory=list)
     analyzed: int = 0
@@ -42,6 +48,8 @@ class ConsolidationCycleResult:
     judgment_proposal_ids: list[str] = field(default_factory=list)
     truncated: bool = False
     notes: list[str] = field(default_factory=list)
+    error: str = ""
+    error_stage: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -192,6 +200,7 @@ def run_consolidation_cycle(
     propose_judgment: Optional[bool] = None,
     as_of: Optional[datetime] = None,
     conflict_scan_limit: int = 2_000,
+    retry: bool = False,
 ) -> ConsolidationCycleResult:
     """Run one daily or weekly consolidation cycle for the logical window.
 
@@ -200,7 +209,8 @@ def run_consolidation_cycle(
       → (weekly) judgment_proposals → done
 
     Apply runs persist a ``ConsolidationRun`` keyed by window; repeats return
-    the prior completed result (``duplicated=True``).
+    the prior completed result (``duplicated=True``). Concurrent ``running``
+    is blocked. Prior ``error`` requires ``retry=True`` to reclaim.
     """
     if kind not in ("daily", "weekly"):
         raise ValueError(f"unknown consolidation cycle kind: {kind!r}")
@@ -210,15 +220,45 @@ def run_consolidation_cycle(
     window_start, window_end = logical_window(kind, as_of=as_of)
     window_key = f"{kind}:{window_start}:{window_end}"
 
+    prior = None
     if not dry_run and hasattr(store, "get_consolidation_run_for_window"):
         prior = store.get_consolidation_run_for_window(
             kind=kind, window_start=window_start, window_end=window_end, dry_run=False,
         )
-        if prior is not None and prior.status == "completed" and prior.payload:
-            result = ConsolidationCycleResult.from_dict(prior.payload)
-            result.duplicated = True
-            result.run_id = prior.id
-            return result
+        if prior is not None:
+            if prior.status == "completed" and prior.payload:
+                result = ConsolidationCycleResult.from_dict(prior.payload)
+                result.duplicated = True
+                result.run_id = prior.id
+                result.status = "completed"
+                return result
+            if prior.status == "running":
+                return ConsolidationCycleResult(
+                    kind=kind,
+                    dry_run=False,
+                    run_id=prior.id,
+                    window_start=window_start,
+                    window_end=window_end,
+                    duplicated=True,
+                    status="running",
+                    at=now_iso(),
+                    stages=["blocked_concurrent"],
+                    notes=["another consolidation run owns this window"],
+                )
+            if prior.status == "error" and not retry:
+                result = ConsolidationCycleResult.from_dict(prior.payload) if prior.payload else ConsolidationCycleResult(
+                    kind=kind, dry_run=False, run_id=prior.id,
+                    window_start=window_start, window_end=window_end,
+                )
+                result.duplicated = True
+                result.run_id = prior.id
+                result.status = "error"
+                result.error = prior.error
+                result.error_stage = prior.error_stage
+                result.notes = list(result.notes) + [
+                    "prior cycle failed; pass retry=True to reclaim",
+                ]
+                return result
 
     run = ConsolidationRunRecord(
         kind=kind,
@@ -227,17 +267,30 @@ def run_consolidation_cycle(
         dry_run=dry_run,
         status="running",
         started_at=now_iso(),
+        error="",
+        error_stage="",
     )
     created = True
-    if not dry_run and hasattr(store, "try_begin_consolidation_run"):
+    if not dry_run and prior is not None and prior.status == "error" and retry:
+        run = prior
+        run.status = "running"
+        run.error = ""
+        run.error_stage = ""
+        run.completed_at = ""
+        run.payload = {}
+        run.started_at = now_iso()
+        if hasattr(store, "update_consolidation_run"):
+            store.update_consolidation_run(run)
+        created = True
+    elif not dry_run and hasattr(store, "try_begin_consolidation_run"):
         run, created = store.try_begin_consolidation_run(run)
         if not created and run.status == "completed" and run.payload:
             result = ConsolidationCycleResult.from_dict(run.payload)
             result.duplicated = True
             result.run_id = run.id
+            result.status = "completed"
             return result
         if not created and run.status == "running":
-            # Concurrent worker owns the window — do not double-execute.
             return ConsolidationCycleResult(
                 kind=kind,
                 dry_run=False,
@@ -245,12 +298,36 @@ def run_consolidation_cycle(
                 window_start=window_start,
                 window_end=window_end,
                 duplicated=True,
+                status="running",
                 at=now_iso(),
                 stages=["blocked_concurrent"],
                 notes=["another consolidation run owns this window"],
             )
+        if not created and run.status == "error" and not retry:
+            result = ConsolidationCycleResult.from_dict(run.payload) if run.payload else ConsolidationCycleResult(
+                kind=kind, dry_run=False, run_id=run.id,
+                window_start=window_start, window_end=window_end,
+            )
+            result.duplicated = True
+            result.run_id = run.id
+            result.status = "error"
+            result.error = run.error
+            result.error_stage = run.error_stage
+            result.notes = list(result.notes) + [
+                "prior cycle failed; pass retry=True to reclaim",
+            ]
+            return result
+        if not created and run.status == "error" and retry:
+            run.status = "running"
+            run.error = ""
+            run.error_stage = ""
+            run.completed_at = ""
+            run.payload = {}
+            run.started_at = now_iso()
+            if hasattr(store, "update_consolidation_run"):
+                store.update_consolidation_run(run)
+            created = True
     elif dry_run and hasattr(store, "insert_consolidation_run"):
-        # Dry-runs are recorded for observability but not window-unique.
         store.insert_consolidation_run(run)
 
     before_mems, before_judgments = _confirmed_snapshot(store)
@@ -262,82 +339,109 @@ def run_consolidation_cycle(
         window_start=window_start,
         window_end=window_end,
         duplicated=not created,
+        status="running",
         at=now_iso(),
     )
-    result.stages.append("analyze")
-    if not dry_run:
-        reports = analyze_candidates(store, embedder, limit=analyze_limit)
-        result.analyzed = len(reports)
-    else:
-        queue = store.list_memories(status="candidate", needs_review=True, limit=analyze_limit)
-        if not queue:
-            queue = store.list_memories(status="candidate", limit=analyze_limit)
-        result.analyzed = len(queue)
-        result.notes.append("dry_run skipped quality analyzer writes")
+    stage = "analyze"
 
-    result.stages.append("contradictions")
-    conflict_ids: list[str] = []
-    scanned = store.list_memories(limit=conflict_scan_limit)
-    if len(scanned) >= conflict_scan_limit:
-        result.truncated = True
-        result.notes.append(
-            f"conflict inventory truncated at {conflict_scan_limit} (not silent full scan)"
-        )
-    for mem in scanned:
-        if "possible_conflict" in (mem.quality_flags or []):
-            conflict_ids.append(mem.id)
-    result.contradiction_memory_ids = conflict_ids
-
-    result.stages.append("safe_automation")
-    result.automation = apply_safe_automations(store, dry_run=dry_run)
-
-    result.stages.append("temporal_refresh")
-    updates, goals, belief_trunc = refresh_temporal_beliefs_and_goals(
-        store, dry_run=dry_run, as_of=as_of,
-    )
-    result.temporal_updates = updates
-    result.goals_observed = goals
-    if belief_trunc:
-        result.truncated = True
-        result.notes.append("belief temporal refresh page truncated")
-
-    if propose_judgment:
-        result.stages.append("judgment_proposals")
-        from ..judgment.proposals import propose_from_pattern
-        detector = "simplicity_cluster_demo"
-        if dry_run:
-            result.notes.append("dry_run skipped judgment proposals")
+    try:
+        result.stages.append("analyze")
+        if not dry_run:
+            reports = analyze_candidates(store, embedder, limit=analyze_limit)
+            result.analyzed = len(reports)
         else:
-            existing = _existing_window_proposals(
-                store, window_key=window_key, detector=detector,
+            queue = store.list_memories(status="candidate", needs_review=True, limit=analyze_limit)
+            if not queue:
+                queue = store.list_memories(status="candidate", limit=analyze_limit)
+            result.analyzed = len(queue)
+            result.notes.append("dry_run skipped quality analyzer writes")
+
+        stage = "contradictions"
+        result.stages.append("contradictions")
+        conflict_ids: list[str] = []
+        scanned = store.list_memories(limit=conflict_scan_limit)
+        if len(scanned) >= conflict_scan_limit:
+            result.truncated = True
+            result.notes.append(
+                f"conflict inventory truncated at {conflict_scan_limit} (not silent full scan)"
             )
-            if existing:
-                result.judgment_proposal_ids = existing
-                result.notes.append("reused judgment proposals for window")
+        for mem in scanned:
+            if "possible_conflict" in (mem.quality_flags or []):
+                conflict_ids.append(mem.id)
+        result.contradiction_memory_ids = conflict_ids
+
+        stage = "safe_automation"
+        result.stages.append("safe_automation")
+        result.automation = apply_safe_automations(store, dry_run=dry_run)
+
+        stage = "temporal_refresh"
+        result.stages.append("temporal_refresh")
+        updates, goals, belief_trunc = refresh_temporal_beliefs_and_goals(
+            store, dry_run=dry_run, as_of=as_of,
+        )
+        result.temporal_updates = updates
+        result.goals_observed = goals
+        if belief_trunc:
+            result.truncated = True
+            result.notes.append("belief temporal refresh page truncated")
+
+        if propose_judgment:
+            stage = "judgment_proposals"
+            result.stages.append("judgment_proposals")
+            from ..judgment.proposals import propose_from_pattern
+            detector = "simplicity_cluster_demo"
+            if dry_run:
+                result.notes.append("dry_run skipped judgment proposals")
             else:
-                proposals = propose_from_pattern(store, domain="technical")
-                for p in proposals:
-                    meta = dict(getattr(p, "metadata", None) or {})
-                    meta["consolidation_window"] = window_key
-                    meta["consolidation_run_id"] = run.id
-                    meta.setdefault("detector", detector)
-                    if hasattr(store, "update_judgment_proposal"):
-                        store.update_judgment_proposal(p.id, metadata=meta)
-                    result.judgment_proposal_ids.append(p.id)
+                existing = _existing_window_proposals(
+                    store, window_key=window_key, detector=detector,
+                )
+                if existing:
+                    result.judgment_proposal_ids = existing
+                    result.notes.append("reused judgment proposals for window")
+                else:
+                    proposals = propose_from_pattern(store, domain="technical")
+                    for p in proposals:
+                        meta = dict(getattr(p, "metadata", None) or {})
+                        meta["consolidation_window"] = window_key
+                        meta["consolidation_run_id"] = run.id
+                        meta.setdefault("detector", detector)
+                        if hasattr(store, "update_judgment_proposal"):
+                            store.update_judgment_proposal(p.id, metadata=meta)
+                        result.judgment_proposal_ids.append(p.id)
 
-    result.stages.append("done")
+        stage = "invariant"
+        result.stages.append("done")
 
-    after_mems, after_judgments = _confirmed_snapshot(store)
-    if after_mems != before_mems or after_judgments != before_judgments:
-        result.notes.append("ERROR: cycle mutated confirmed Memory/Judgment set")
-    else:
+        after_mems, after_judgments = _confirmed_snapshot(store)
+        if after_mems != before_mems or after_judgments != before_judgments:
+            raise ConsolidationInvariantError(
+                "cycle mutated confirmed Memory/Judgment set"
+            )
         result.notes.append(
             "invariant_ok: confirmed Memory/Judgment sets unchanged"
         )
+        result.status = "completed"
 
-    run.status = "completed"
-    run.completed_at = now_iso()
-    run.payload = result.to_dict()
-    if hasattr(store, "update_consolidation_run"):
-        store.update_consolidation_run(run)
-    return result
+        run.status = "completed"
+        run.completed_at = now_iso()
+        run.error = ""
+        run.error_stage = ""
+        run.payload = result.to_dict()
+        if hasattr(store, "update_consolidation_run"):
+            store.update_consolidation_run(run)
+        return result
+    except Exception as exc:
+        run.status = "error"
+        run.error = sanitize_error(exc)
+        run.error_stage = stage
+        run.completed_at = now_iso()
+        result.status = "error"
+        result.error = run.error
+        result.error_stage = stage
+        result.stages = list(result.stages) + ["error"]
+        result.notes.append(f"failed at {stage}: {type(exc).__name__}")
+        run.payload = result.to_dict()
+        if hasattr(store, "update_consolidation_run"):
+            store.update_consolidation_run(run)
+        raise

@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS workspace_ticks (
     started_at TEXT NOT NULL DEFAULT '',
     completed_at TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
+    error_stage TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL DEFAULT '{}'
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ws_tick_idem
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
     started_at TEXT NOT NULL DEFAULT '',
     completed_at TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
+    error_stage TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL DEFAULT '{}'
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_consol_window_apply
@@ -81,6 +83,7 @@ class WorkspaceTickRecord:
     started_at: str = ""
     completed_at: str = ""
     error: str = ""
+    error_stage: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self) -> dict[str, Any]:
@@ -98,6 +101,7 @@ class WorkspaceTickRecord:
             "started_at": self.started_at or "",
             "completed_at": self.completed_at or "",
             "error": self.error or "",
+            "error_stage": self.error_stage or "",
             "payload": json.dumps(self.payload or {}, default=str),
         }
 
@@ -121,6 +125,7 @@ def _row_to_tick(row: Any) -> WorkspaceTickRecord:
         started_at=row["started_at"] or "",
         completed_at=row["completed_at"] or "",
         error=row["error"] or "",
+        error_stage=(row["error_stage"] if "error_stage" in keys else "") or "",
         payload=payload or {},
     )
 
@@ -136,6 +141,7 @@ class ConsolidationRunRecord:
     started_at: str = ""
     completed_at: str = ""
     error: str = ""
+    error_stage: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self) -> dict[str, Any]:
@@ -149,6 +155,7 @@ class ConsolidationRunRecord:
             "started_at": self.started_at or "",
             "completed_at": self.completed_at or "",
             "error": self.error or "",
+            "error_stage": self.error_stage or "",
             "payload": json.dumps(self.payload or {}, default=str),
         }
 
@@ -167,6 +174,7 @@ def _row_to_run(row: Any) -> ConsolidationRunRecord:
         started_at=row["started_at"] or "",
         completed_at=row["completed_at"] or "",
         error=row["error"] or "",
+        error_stage=(row["error_stage"] if "error_stage" in keys else "") or "",
         payload=payload or {},
     )
 

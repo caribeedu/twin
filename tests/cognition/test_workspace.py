@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+import pytest
+
 from twin import ids
 from twin.cognition import set_interpreter_override
 from twin.cognition.interpreter.schema import (
@@ -287,3 +289,83 @@ def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monk
     )
     assert result.parallel_interpretation.get("skipped") is True
     assert result.parallel_interpretation.get("reason") == "needs_domain_confirmation"
+
+
+def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
+    from twin.cognition.workspace import text_content_hash
+    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+
+    cfg.extractor = "auto"
+    calls = {"n": 0}
+    text = "concurrent ownership must not double interpret"
+
+    def scripted(*_a, **_k):
+        calls["n"] += 1
+        return InterpretationResult(
+            items=[], status=InterpretationStatus.empty,
+            interpreter="scripted", model="scripted",
+            prompt_version="t", schema_version="1",
+        )
+
+    set_interpreter_override(scripted)
+    before = len([p for p in store.list_percepts() if p.percept_type == "session_delta"])
+    existing = WorkspaceTickRecord(
+        session_id="ses_concurrent",
+        sequence=1,
+        input_mode="delta",
+        content_hash=text_content_hash(text),
+        interpret=True,
+        status="running",
+    )
+    store.try_begin_workspace_tick(existing)
+
+    result = workspace_tick(
+        store, cfg, embedder, text,
+        target_domain="technical",
+        interpret=True,
+        input_mode="delta",
+        session_id="ses_concurrent",
+        sequence=1,
+    )
+    assert result.duplicated is True
+    assert result.stages == ["blocked_concurrent"]
+    assert calls["n"] == 0
+    after = len([p for p in store.list_percepts() if p.percept_type == "session_delta"])
+    assert after == before
+
+
+def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedder, monkeypatch):
+    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+
+    monkeypatch.setattr(
+        "twin.cognition.workspace.read_context",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom observe path")),
+    )
+    with pytest.raises(RuntimeError):
+        workspace_tick(
+            store, cfg, embedder, "fail me",
+            session_id="ses_err", sequence=9, target_domain="technical",
+        )
+    row = store.get_workspace_tick_by_session_sequence("ses_err", 9)
+    assert row is not None
+    assert row.status == "error"
+    assert row.error_stage == "reading"
+    assert "RuntimeError" in row.error
+
+    blocked = workspace_tick(
+        store, cfg, embedder, "fail me",
+        session_id="ses_err", sequence=9, target_domain="technical",
+    )
+    assert blocked.status == "error"
+    assert blocked.duplicated is True
+
+    # retry reclaims; still fails but proves reclaim path
+    with pytest.raises(RuntimeError):
+        workspace_tick(
+            store, cfg, embedder, "fail me",
+            session_id="ses_err", sequence=9, target_domain="technical",
+            retry=True,
+        )
+    row2 = store.get_workspace_tick_by_session_sequence("ses_err", 9)
+    assert row2.status == "error"
+    assert row2.id == row.id

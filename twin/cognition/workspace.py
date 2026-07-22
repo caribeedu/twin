@@ -10,6 +10,10 @@ reading → observe → salience → recall → [parallel_interpretation] → do
 A tick never writes confirmed Memory or Judgment. Optional interpretation
 reuses the v0.7 pipeline and only produces reviewable candidates, and only
 for ``input_mode="delta"`` with an idempotent identity.
+
+Execution exclusivity: only the caller that *creates* the running row may
+execute. Concurrent callers seeing ``running`` get ``blocked_concurrent``.
+Failures persist as ``error`` (sanitized); reclaim with ``retry=True``.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from typing import Any, Literal, Optional
 from .. import ids
 from ..clock import now_iso
 from ..config import UNCLASSIFIED_DOMAIN, Config
+from ..connectors.errors import sanitize_error
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
 from ..memory.store.base import MemoryStore
@@ -49,6 +54,7 @@ class WorkspaceTickResult:
     input_mode: str = "snapshot"
     idempotency_key: str = ""
     duplicated: bool = False
+    status: str = ""
     inferred_domain: str = ""
     reading: dict[str, Any] = field(default_factory=dict)
     suggestions: list[dict[str, Any]] = field(default_factory=list)
@@ -60,6 +66,8 @@ class WorkspaceTickResult:
     candidate_memory_ids: list[str] = field(default_factory=list)
     stages: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    error: str = ""
+    error_stage: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -70,7 +78,7 @@ class WorkspaceTickResult:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def _result_from_record(record: WorkspaceTickRecord) -> WorkspaceTickResult:
+def _result_from_record(record: WorkspaceTickRecord, *, duplicated: bool = True) -> WorkspaceTickResult:
     payload = dict(record.payload or {})
     result = WorkspaceTickResult.from_dict(payload) if payload else WorkspaceTickResult()
     result.tick_id = record.id
@@ -79,7 +87,10 @@ def _result_from_record(record: WorkspaceTickRecord) -> WorkspaceTickResult:
     result.content_hash = record.content_hash
     result.input_mode = record.input_mode
     result.idempotency_key = record.idempotency_key
-    result.duplicated = True
+    result.duplicated = duplicated
+    result.status = record.status
+    result.error = record.error or result.error
+    result.error_stage = record.error_stage or result.error_stage
     if record.percept_id and not result.parallel_interpretation.get("percept_id"):
         result.parallel_interpretation = {
             **result.parallel_interpretation,
@@ -87,6 +98,22 @@ def _result_from_record(record: WorkspaceTickRecord) -> WorkspaceTickResult:
             "reused": True,
         }
     return result
+
+
+def _blocked_concurrent(record: WorkspaceTickRecord) -> WorkspaceTickResult:
+    return WorkspaceTickResult(
+        tick_id=record.id,
+        session_id=record.session_id,
+        sequence=record.sequence,
+        content_hash=record.content_hash,
+        input_mode=record.input_mode,
+        idempotency_key=record.idempotency_key,
+        duplicated=True,
+        status="running",
+        silent=True,
+        stages=["blocked_concurrent"],
+        notes=["another workspace executor owns this tick"],
+    )
 
 
 def _lookup_existing_tick(
@@ -117,6 +144,29 @@ def _lookup_existing_tick(
     return existing
 
 
+def _fail_tick(
+    store: MemoryStore,
+    tick: WorkspaceTickRecord,
+    *,
+    stage: str,
+    exc: BaseException,
+    result: Optional[WorkspaceTickResult] = None,
+) -> None:
+    tick.status = "error"
+    tick.error = sanitize_error(exc)
+    tick.error_stage = stage
+    tick.completed_at = now_iso()
+    if result is not None:
+        result.status = "error"
+        result.error = tick.error
+        result.error_stage = stage
+        result.stages = list(result.stages) + ["error"]
+        result.notes.append(f"failed at {stage}: {type(exc).__name__}")
+        tick.payload = result.to_dict()
+    if hasattr(store, "update_workspace_tick"):
+        store.update_workspace_tick(tick)
+
+
 def workspace_tick(
     store: MemoryStore,
     cfg: Config,
@@ -131,14 +181,14 @@ def workspace_tick(
     input_mode: InputMode = "snapshot",
     sequence: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    retry: bool = False,
     firewall: Optional[Firewall] = None,
 ) -> WorkspaceTickResult:
     """Run one workspace evaluation tick.
 
     ``interpret=True`` only creates a Percept when ``input_mode="delta"``.
-    Snapshots observe/recall only unless a future cursor derives a true delta.
-    Identity: ``idempotency_key``, or ``session_id+sequence``, or
-    ``session_id+content_hash`` for delta interpretation.
+    Concurrent callers that see an existing ``running`` row do not execute.
+    Prior ``error`` rows are returned unless ``retry=True`` reclaims them.
     """
     if input_mode not in ("snapshot", "delta"):
         raise ValueError(f"unknown input_mode: {input_mode!r}")
@@ -157,8 +207,17 @@ def workspace_tick(
         interpret=interpret,
         idempotency_key=key,
     )
-    if existing is not None and existing.status == "completed":
-        return _result_from_record(existing)
+    if existing is not None:
+        if existing.status == "completed":
+            return _result_from_record(existing)
+        if existing.status == "running":
+            return _blocked_concurrent(existing)
+        if existing.status == "error" and not retry:
+            out = _result_from_record(existing)
+            out.notes = list(out.notes) + [
+                "prior tick failed; pass retry=True to reclaim",
+            ]
+            return out
 
     previous_id = ""
     if sid and hasattr(store, "latest_workspace_tick_for_session"):
@@ -176,12 +235,46 @@ def workspace_tick(
         status="running",
         previous_tick_id=previous_id,
         started_at=now_iso(),
+        error="",
+        error_stage="",
     )
     created = True
-    if hasattr(store, "try_begin_workspace_tick"):
+    if existing is not None and existing.status == "error" and retry:
+        # Reclaim the same logical identity.
+        tick = existing
+        tick.status = "running"
+        tick.error = ""
+        tick.error_stage = ""
+        tick.completed_at = ""
+        tick.payload = {}
+        tick.percept_id = ""
+        tick.started_at = now_iso()
+        if hasattr(store, "update_workspace_tick"):
+            store.update_workspace_tick(tick)
+        created = True
+    elif hasattr(store, "try_begin_workspace_tick"):
         tick, created = store.try_begin_workspace_tick(tick)
-        if not created and tick.status == "completed":
-            return _result_from_record(tick)
+        if not created:
+            if tick.status == "completed":
+                return _result_from_record(tick)
+            if tick.status == "running":
+                return _blocked_concurrent(tick)
+            if tick.status == "error" and not retry:
+                out = _result_from_record(tick)
+                out.notes = list(out.notes) + [
+                    "prior tick failed; pass retry=True to reclaim",
+                ]
+                return out
+            if tick.status == "error" and retry:
+                tick.status = "running"
+                tick.error = ""
+                tick.error_stage = ""
+                tick.completed_at = ""
+                tick.payload = {}
+                tick.started_at = now_iso()
+                if hasattr(store, "update_workspace_tick"):
+                    store.update_workspace_tick(tick)
+                created = True
 
     result = WorkspaceTickResult(
         tick_id=tick.id,
@@ -191,128 +284,141 @@ def workspace_tick(
         input_mode=input_mode,
         idempotency_key=key,
         duplicated=not created,
+        status="running",
     )
-    result.stages.append("reading")
+    stage = "reading"
 
-    reading = read_context(store, cfg, text, cwd=cwd)
-    result.reading = {
-        "domain": reading.domain,
-        "task_profile": reading.task_profile,
-        "project_id": reading.project_id,
-        "confidences": dict(reading.confidences or {}),
-        "uncertain": reading.uncertain,
-        "mode": reading.mode,
-        "needs_domain_confirmation": reading.needs_domain_confirmation,
-    }
-    domain = target_domain or reading.domain
-    result.inferred_domain = domain
-
-    result.stages.append("observe")
-    obs = observe(
-        store, cfg, embedder, text,
-        target_domain=domain if domain != UNCLASSIFIED_DOMAIN else None,
-        firewall=firewall,
-    )
-    # Preserve observer retrieval score — never overwrite with confidence.
-    suggested_rows = []
-    for row in obs.suggested_context:
-        suggested_rows.append({
-            **row,
-            "score": float(row["score"]) if row.get("score") is not None else 0.0,
-        })
-
-    result.stages.append("salience")
-    mids = [r["memory_id"] for r in suggested_rows if r.get("memory_id")]
-    scores = score_memories(store, mids, query_text=text)
-    result.contradiction_memory_ids = list(scores.contradiction_ids)
-
-    result.stages.append("recall")
-    recall: RecallResult = apply_recall_policy(
-        suggested_rows, obs.blocked_context,
-        policy=policy,
-        salience_by_id=scores.by_memory,
-        novelty_by_id=scores.novelty,
-    )
-    result.suggestions = [
-        {
-            "memory_id": s.memory_id,
-            "summary": s.summary,
-            "why_relevant": s.why_relevant,
-            "confidence": s.confidence,
-            "score": s.score,
-            "salience": s.salience,
-            "novelty": s.novelty,
-            "stage": s.stage,
+    try:
+        result.stages.append("reading")
+        reading = read_context(store, cfg, text, cwd=cwd)
+        result.reading = {
+            "domain": reading.domain,
+            "task_profile": reading.task_profile,
+            "project_id": reading.project_id,
+            "confidences": dict(reading.confidences or {}),
+            "uncertain": reading.uncertain,
+            "mode": reading.mode,
+            "needs_domain_confirmation": reading.needs_domain_confirmation,
         }
-        for s in recall.suggestions
-    ]
-    result.blocked = list(recall.blocked)
-    result.silent = recall.silent
-    result.silence_reason = recall.silence_reason
+        domain = target_domain or reading.domain
+        result.inferred_domain = domain
 
-    if interpret and text:
-        result.stages.append("parallel_interpretation")
-        if input_mode != "delta":
-            result.parallel_interpretation = {
-                "skipped": True,
-                "reason": "interpret_requires_input_mode_delta",
-            }
-            result.notes.append("snapshot ticks do not invent session deltas")
-        elif reading.needs_domain_confirmation and not target_domain:
-            result.parallel_interpretation = {
-                "skipped": True,
-                "reason": "needs_domain_confirmation",
-            }
-            result.notes.append("refused to interpret while domain is unclassified")
-        else:
-            # Never coerce unclassified → technical.
-            source_scope = (
-                domain if domain and domain != UNCLASSIFIED_DOMAIN
-                else UNCLASSIFIED_DOMAIN
-            )
-            percept = Percept(
-                id=ids.new_id("pct"),
-                percept_type="session_delta",
-                source_sensor="workspace",
-                occurred_at=now_iso(),
-                ingested_at=now_iso(),
-                content=text,
-                source_trust=0.70,
-                source_scope=source_scope,
-                source_confidentiality="internal",
-                project_id=reading.project_id,
-                metadata={
-                    "workspace_tick": True,
-                    "tick_id": tick.id,
-                    "session_id": sid,
-                    "sequence": sequence,
-                    "content_hash": ch,
-                    "input_mode": input_mode,
-                    "stage": "parallel_interpretation",
-                },
-            )
-            percept.seal()
-            store.insert_percept(percept)
-            report = extract_percept(store, cfg, embedder, percept)
-            result.parallel_interpretation = {
-                "percept_id": percept.id,
-                "deferred": report.deferred,
-                "interpretation_status": report.interpretation_status,
-                "inserted": list(report.inserted),
-                "ungrounded": report.ungrounded,
-                "invalid": report.invalid,
-                "policy_dropped": report.policy_dropped,
-                "stage_counts": report.stage_counts(),
-            }
-            result.candidate_memory_ids = list(report.inserted)
-            tick.percept_id = percept.id
+        stage = "observe"
+        result.stages.append("observe")
+        obs = observe(
+            store, cfg, embedder, text,
+            target_domain=domain if domain != UNCLASSIFIED_DOMAIN else None,
+            firewall=firewall,
+        )
+        # Preserve observer retrieval score — never overwrite with confidence.
+        suggested_rows = []
+        for row in obs.suggested_context:
+            suggested_rows.append({
+                **row,
+                "score": float(row["score"]) if row.get("score") is not None else 0.0,
+            })
 
-    result.stages.append("done")
-    result.notes.append("tick never confirms Memory or Judgment")
+        stage = "salience"
+        result.stages.append("salience")
+        mids = [r["memory_id"] for r in suggested_rows if r.get("memory_id")]
+        scores = score_memories(store, mids, query_text=text)
+        result.contradiction_memory_ids = list(scores.contradiction_ids)
 
-    tick.status = "completed"
-    tick.completed_at = now_iso()
-    tick.payload = result.to_dict()
-    if hasattr(store, "update_workspace_tick"):
-        store.update_workspace_tick(tick)
-    return result
+        stage = "recall"
+        result.stages.append("recall")
+        recall: RecallResult = apply_recall_policy(
+            suggested_rows, obs.blocked_context,
+            policy=policy,
+            salience_by_id=scores.by_memory,
+            novelty_by_id=scores.novelty,
+        )
+        result.suggestions = [
+            {
+                "memory_id": s.memory_id,
+                "summary": s.summary,
+                "why_relevant": s.why_relevant,
+                "confidence": s.confidence,
+                "score": s.score,
+                "salience": s.salience,
+                "novelty": s.novelty,
+                "stage": s.stage,
+            }
+            for s in recall.suggestions
+        ]
+        result.blocked = list(recall.blocked)
+        result.silent = recall.silent
+        result.silence_reason = recall.silence_reason
+
+        if interpret and text:
+            stage = "parallel_interpretation"
+            result.stages.append("parallel_interpretation")
+            if input_mode != "delta":
+                result.parallel_interpretation = {
+                    "skipped": True,
+                    "reason": "interpret_requires_input_mode_delta",
+                }
+                result.notes.append("snapshot ticks do not invent session deltas")
+            elif reading.needs_domain_confirmation and not target_domain:
+                result.parallel_interpretation = {
+                    "skipped": True,
+                    "reason": "needs_domain_confirmation",
+                }
+                result.notes.append("refused to interpret while domain is unclassified")
+            else:
+                source_scope = (
+                    domain if domain and domain != UNCLASSIFIED_DOMAIN
+                    else UNCLASSIFIED_DOMAIN
+                )
+                percept = Percept(
+                    id=ids.new_id("pct"),
+                    percept_type="session_delta",
+                    source_sensor="workspace",
+                    occurred_at=now_iso(),
+                    ingested_at=now_iso(),
+                    content=text,
+                    source_trust=0.70,
+                    source_scope=source_scope,
+                    source_confidentiality="internal",
+                    project_id=reading.project_id,
+                    metadata={
+                        "workspace_tick": True,
+                        "tick_id": tick.id,
+                        "session_id": sid,
+                        "sequence": sequence,
+                        "content_hash": ch,
+                        "input_mode": input_mode,
+                        "stage": "parallel_interpretation",
+                    },
+                )
+                percept.seal()
+                store.insert_percept(percept)
+                report = extract_percept(store, cfg, embedder, percept)
+                result.parallel_interpretation = {
+                    "percept_id": percept.id,
+                    "deferred": report.deferred,
+                    "interpretation_status": report.interpretation_status,
+                    "inserted": list(report.inserted),
+                    "ungrounded": report.ungrounded,
+                    "invalid": report.invalid,
+                    "policy_dropped": report.policy_dropped,
+                    "stage_counts": report.stage_counts(),
+                }
+                result.candidate_memory_ids = list(report.inserted)
+                tick.percept_id = percept.id
+
+        stage = "done"
+        result.stages.append("done")
+        result.notes.append("tick never confirms Memory or Judgment")
+        result.status = "completed"
+
+        tick.status = "completed"
+        tick.completed_at = now_iso()
+        tick.error = ""
+        tick.error_stage = ""
+        tick.payload = result.to_dict()
+        if hasattr(store, "update_workspace_tick"):
+            store.update_workspace_tick(tick)
+        return result
+    except Exception as exc:
+        _fail_tick(store, tick, stage=stage, exc=exc, result=result)
+        raise

@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from twin import ids
 from twin.cognition.consolidation_cycle import (
     refresh_temporal_beliefs_and_goals,
@@ -131,3 +133,44 @@ def test_cycle_never_confirms_memory_or_judgment(store, cfg, embedder):
     assert store.get_memory(cand.id).status == MemoryStatus.candidate
     assert _confirmed_ids(store) == before_confirmed
     assert any("invariant_ok" in n for n in result.notes)
+
+
+def test_cycle_invariant_violation_fails_run(store, cfg, embedder, monkeypatch):
+    from twin.cognition.consolidation_cycle import ConsolidationInvariantError
+
+    as_of = datetime(2026, 8, 1, tzinfo=timezone.utc)
+
+    def poison_snapshot(store):
+        # first call = before, second = after with an extra fake id
+        if not hasattr(poison_snapshot, "n"):
+            poison_snapshot.n = 0
+        poison_snapshot.n += 1
+        if poison_snapshot.n == 1:
+            return set(), set()
+        return {"mem_fake_confirmed"}, set()
+
+    monkeypatch.setattr(
+        "twin.cognition.consolidation_cycle._confirmed_snapshot",
+        poison_snapshot,
+    )
+    with pytest.raises(ConsolidationInvariantError):
+        run_consolidation_cycle(
+            store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+        )
+    row = store.get_consolidation_run_for_window(
+        kind="daily",
+        window_start=as_of.date().isoformat(),
+        window_end=as_of.date().isoformat(),
+        dry_run=False,
+    )
+    assert row is not None
+    assert row.status == "error"
+    assert row.error_stage == "invariant"
+    assert "ConsolidationInvariantError" in row.error
+
+    # without retry, stuck on error
+    blocked = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    assert blocked.status == "error"
+    assert blocked.duplicated is True

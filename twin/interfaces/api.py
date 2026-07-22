@@ -65,6 +65,7 @@ class WorkspaceTickRequest(BaseModel):
     input_mode: Literal["snapshot", "delta"] = "snapshot"
     sequence: Optional[int] = None
     idempotency_key: Optional[str] = None
+    retry: bool = False
 
     _domain = field_validator("target_domain")(_validate_domain)
 
@@ -72,6 +73,7 @@ class WorkspaceTickRequest(BaseModel):
 class ConsolidationRequest(BaseModel):
     apply: bool = False
     limit: int = Field(default=200, ge=1, le=5_000)
+    retry: bool = False
 
 
 class PackRequest(BaseModel):
@@ -449,6 +451,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             input_mode=req.input_mode,
             sequence=req.sequence,
             idempotency_key=req.idempotency_key,
+            retry=req.retry,
             firewall=ws.firewall,
         )
         return result.to_dict()
@@ -461,6 +464,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         result = run_consolidation_cycle(
             ws.store, ws.cfg, ws.embedder,
             kind=kind, dry_run=not req.apply, analyze_limit=req.limit,
+            retry=req.retry,
         )
         return result.to_dict()
 
