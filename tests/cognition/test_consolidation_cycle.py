@@ -174,3 +174,60 @@ def test_cycle_invariant_violation_fails_run(store, cfg, embedder, monkeypatch):
     )
     assert blocked.status == "error"
     assert blocked.duplicated is True
+
+
+def test_consolidation_retry_claim_blocks_second_executor(store, cfg, embedder, monkeypatch):
+    as_of = datetime(2026, 11, 1, tzinfo=timezone.utc)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("analyze boom")
+
+    monkeypatch.setattr(
+        "twin.cognition.consolidation_cycle.analyze_candidates", boom,
+    )
+    with pytest.raises(RuntimeError):
+        run_consolidation_cycle(
+            store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+        )
+    row = store.get_consolidation_run_for_window(
+        kind="daily",
+        window_start=as_of.date().isoformat(),
+        window_end=as_of.date().isoformat(),
+        dry_run=False,
+    )
+    assert row is not None and row.status == "error"
+    assert store.try_claim_consolidation_retry(row.id) is True
+    second = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of, retry=True,
+    )
+    assert second.duplicated is True
+    assert second.stages == ["blocked_concurrent"]
+
+
+def test_consolidation_retry_can_complete_after_transient_failure(store, cfg, embedder, monkeypatch):
+    as_of = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    blows = {"n": 0}
+
+    def flaky_analyze(*_a, **_k):
+        blows["n"] += 1
+        if blows["n"] == 1:
+            raise RuntimeError("transient analyze")
+        return []
+
+    monkeypatch.setattr(
+        "twin.cognition.consolidation_cycle.analyze_candidates",
+        flaky_analyze,
+    )
+    with pytest.raises(RuntimeError):
+        run_consolidation_cycle(
+            store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+        )
+    ok = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of, retry=True,
+    )
+    assert ok.status == "completed"
+    assert ok.error == ""
+    assert any("invariant_ok" in n for n in ok.notes)
+    row = store.get_consolidation_run(ok.run_id)
+    assert row.status == "completed"
+    assert row.error == ""

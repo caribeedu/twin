@@ -537,3 +537,30 @@ def test_consolidation_window_unique_on_postgres(pg_store, cfg, embedder):
     assert first.run_id
     assert second.duplicated is True
     assert second.run_id == first.run_id
+
+
+def test_retry_cas_on_postgres(pg_store):
+    from twin.clock import now_iso
+    from twin.memory.store.workspace_ops_mixin import (
+        ConsolidationRunRecord,
+        WorkspaceTickRecord,
+    )
+
+    tick = WorkspaceTickRecord(
+        session_id="ses_pg_cas", sequence=1, content_hash="h",
+        input_mode="delta", interpret=True, status="error",
+        error="RuntimeError: x", error_stage="observe",
+        started_at=now_iso(), completed_at=now_iso(),
+    )
+    pg_store.insert_workspace_tick(tick)
+    assert pg_store.try_claim_workspace_tick_retry(tick.id) is True
+    assert pg_store.try_claim_workspace_tick_retry(tick.id) is False
+
+    run = ConsolidationRunRecord(
+        kind="weekly", window_start="2026-01-01", window_end="2026-01-07",
+        dry_run=False, status="error", error="RuntimeError: y",
+        error_stage="analyze", started_at=now_iso(), completed_at=now_iso(),
+    )
+    pg_store.insert_consolidation_run(run)
+    assert pg_store.try_claim_consolidation_retry(run.id) is True
+    assert pg_store.try_claim_consolidation_retry(run.id) is False

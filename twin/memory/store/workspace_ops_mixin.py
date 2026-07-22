@@ -278,6 +278,20 @@ class WorkspaceOpsStoreMixin:
                 raise
             return existing, False
 
+    def try_claim_workspace_tick_retry(
+        self, tick_id: str, *, started_at: Optional[str] = None,
+    ) -> bool:
+        """Atomic ``error → running`` claim. Only one caller may succeed."""
+        started = started_at or now_iso()
+        cur = self._j_exec(
+            "UPDATE workspace_ticks SET status = ?, error = '', error_stage = '',"
+            " completed_at = '', started_at = ?, payload = ?"
+            " WHERE id = ? AND status = ?",
+            ("running", started, "{}", tick_id, "error"),
+        )
+        self._j_commit()
+        return getattr(cur, "rowcount", 0) == 1
+
     def insert_consolidation_run(self, run: ConsolidationRunRecord) -> str:
         if not run.id:
             run.id = ids.new_id("crun")
@@ -332,3 +346,17 @@ class WorkspaceOpsStoreMixin:
             if existing is None:
                 raise
             return existing, False
+
+    def try_claim_consolidation_retry(
+        self, run_id: str, *, started_at: Optional[str] = None,
+    ) -> bool:
+        """Atomic ``error → running`` claim for a consolidation window run."""
+        started = started_at or now_iso()
+        cur = self._j_exec(
+            "UPDATE consolidation_runs SET status = ?, error = '', error_stage = '',"
+            " completed_at = '', started_at = ?, payload = ?"
+            " WHERE id = ? AND status = ?",
+            ("running", started, "{}", run_id, "error"),
+        )
+        self._j_commit()
+        return getattr(cur, "rowcount", 0) == 1

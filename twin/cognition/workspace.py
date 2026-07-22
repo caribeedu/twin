@@ -240,17 +240,26 @@ def workspace_tick(
     )
     created = True
     if existing is not None and existing.status == "error" and retry:
-        # Reclaim the same logical identity.
-        tick = existing
-        tick.status = "running"
-        tick.error = ""
-        tick.error_stage = ""
-        tick.completed_at = ""
-        tick.payload = {}
-        tick.percept_id = ""
-        tick.started_at = now_iso()
-        if hasattr(store, "update_workspace_tick"):
-            store.update_workspace_tick(tick)
+        # Atomic reclaim: only one caller may flip error → running.
+        claimed = False
+        if hasattr(store, "try_claim_workspace_tick_retry"):
+            claimed = store.try_claim_workspace_tick_retry(
+                existing.id, started_at=now_iso(),
+            )
+        if not claimed:
+            current = store.get_workspace_tick(existing.id) if hasattr(store, "get_workspace_tick") else existing
+            if current is None:
+                current = existing
+            if current.status == "running":
+                return _blocked_concurrent(current)
+            if current.status == "completed":
+                return _result_from_record(current)
+            out = _result_from_record(current)
+            out.notes = list(out.notes) + ["retry claim lost to another executor"]
+            return out
+        tick = store.get_workspace_tick(existing.id)  # type: ignore[assignment]
+        assert tick is not None
+        # Keep percept_id from the failed attempt for reuse.
         created = True
     elif hasattr(store, "try_begin_workspace_tick"):
         tick, created = store.try_begin_workspace_tick(tick)
@@ -266,14 +275,24 @@ def workspace_tick(
                 ]
                 return out
             if tick.status == "error" and retry:
-                tick.status = "running"
-                tick.error = ""
-                tick.error_stage = ""
-                tick.completed_at = ""
-                tick.payload = {}
-                tick.started_at = now_iso()
-                if hasattr(store, "update_workspace_tick"):
-                    store.update_workspace_tick(tick)
+                claimed = False
+                if hasattr(store, "try_claim_workspace_tick_retry"):
+                    claimed = store.try_claim_workspace_tick_retry(
+                        tick.id, started_at=now_iso(),
+                    )
+                if not claimed:
+                    current = store.get_workspace_tick(tick.id) if hasattr(store, "get_workspace_tick") else tick
+                    if current is None:
+                        current = tick
+                    if current.status == "running":
+                        return _blocked_concurrent(current)
+                    if current.status == "completed":
+                        return _result_from_record(current)
+                    out = _result_from_record(current)
+                    out.notes = list(out.notes) + ["retry claim lost to another executor"]
+                    return out
+                tick = store.get_workspace_tick(tick.id)  # type: ignore[assignment]
+                assert tick is not None
                 created = True
 
     result = WorkspaceTickResult(
@@ -369,29 +388,44 @@ def workspace_tick(
                     domain if domain and domain != UNCLASSIFIED_DOMAIN
                     else UNCLASSIFIED_DOMAIN
                 )
-                percept = Percept(
-                    id=ids.new_id("pct"),
-                    percept_type="session_delta",
-                    source_sensor="workspace",
-                    occurred_at=now_iso(),
-                    ingested_at=now_iso(),
-                    content=text,
-                    source_trust=0.70,
-                    source_scope=source_scope,
-                    source_confidentiality="internal",
-                    project_id=reading.project_id,
-                    metadata={
-                        "workspace_tick": True,
-                        "tick_id": tick.id,
-                        "session_id": sid,
-                        "sequence": sequence,
-                        "content_hash": ch,
-                        "input_mode": input_mode,
-                        "stage": "parallel_interpretation",
-                    },
-                )
-                percept.seal()
-                store.insert_percept(percept)
+                # Reuse Percept from a prior failed attempt when present.
+                reused_percept = False
+                percept = None
+                if tick.percept_id:
+                    percept = store.get_percept(tick.percept_id)
+                    if percept is not None:
+                        reused_percept = True
+                if percept is None:
+                    percept = Percept(
+                        id=ids.new_id("pct"),
+                        percept_type="session_delta",
+                        source_sensor="workspace",
+                        occurred_at=now_iso(),
+                        ingested_at=now_iso(),
+                        content=text,
+                        source_trust=0.70,
+                        source_scope=source_scope,
+                        source_confidentiality="internal",
+                        project_id=reading.project_id,
+                        metadata={
+                            "workspace_tick": True,
+                            "tick_id": tick.id,
+                            "session_id": sid,
+                            "sequence": sequence,
+                            "content_hash": ch,
+                            "input_mode": input_mode,
+                            "stage": "parallel_interpretation",
+                        },
+                    )
+                    percept.seal()
+                    store.insert_percept(percept)
+                    # Persist association immediately so retry cannot orphan/duplicate.
+                    tick.percept_id = percept.id
+                    if hasattr(store, "update_workspace_tick"):
+                        store.update_workspace_tick(tick)
+                else:
+                    result.notes.append("reused percept from prior tick attempt")
+
                 report = extract_percept(store, cfg, embedder, percept)
                 result.parallel_interpretation = {
                     "percept_id": percept.id,
@@ -402,6 +436,7 @@ def workspace_tick(
                     "invalid": report.invalid,
                     "policy_dropped": report.policy_dropped,
                     "stage_counts": report.stage_counts(),
+                    "reused_percept": reused_percept,
                 }
                 result.candidate_memory_ids = list(report.inserted)
                 tick.percept_id = percept.id

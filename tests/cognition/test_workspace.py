@@ -335,8 +335,6 @@ def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
 
 
 def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedder, monkeypatch):
-    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
-
     monkeypatch.setattr(
         "twin.cognition.workspace.read_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom observe path")),
@@ -369,3 +367,162 @@ def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedd
     row2 = store.get_workspace_tick_by_session_sequence("ses_err", 9)
     assert row2.status == "error"
     assert row2.id == row.id
+
+
+def test_second_retry_claim_is_blocked_concurrent(store, cfg, embedder):
+    """After one atomic reclaim, a second retry must not execute."""
+    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+
+    text = "retry race"
+    tick = WorkspaceTickRecord(
+        session_id="ses_retry_race",
+        sequence=1,
+        content_hash=__import__(
+            "twin.cognition.workspace", fromlist=["text_content_hash"]
+        ).text_content_hash(text),
+        input_mode="delta",
+        interpret=True,
+        status="error",
+        error="RuntimeError: prior",
+        error_stage="observe",
+    )
+    store.insert_workspace_tick(tick)
+    assert store.try_claim_workspace_tick_retry(tick.id) is True
+
+    result = workspace_tick(
+        store, cfg, embedder, text,
+        target_domain="technical",
+        interpret=True,
+        input_mode="delta",
+        session_id="ses_retry_race",
+        sequence=1,
+        retry=True,
+    )
+    assert result.duplicated is True
+    assert result.stages == ["blocked_concurrent"]
+
+
+def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, embedder, monkeypatch):
+    from twin.cognition.interpreter.schema import (
+        CognitiveAct,
+        InterpretationResult,
+        InterpretationStatus,
+        InterpretedItem,
+    )
+    from twin.cognition.pipeline import extract_percept as real_extract
+
+    cfg.extractor = "auto"
+    span = "We decided to use FastAPI for the Twin HTTP API."
+    calls = {"n": 0}
+
+    def flaky_extract(store, cfg, embedder, percept, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient extract failure")
+        return real_extract(store, cfg, embedder, percept, **kw)
+
+    def scripted(percept, text, cfg):
+        return InterpretationResult(
+            items=[InterpretedItem(
+                memory_type="decision",
+                title="Use FastAPI",
+                summary=span,
+                domain="technical",
+                cognitive_act=CognitiveAct.decision,
+                evidence_span=span,
+                attributed_to="user",
+            )],
+            status=InterpretationStatus.interpreted,
+            interpreter="scripted", model="scripted",
+            prompt_version="test", schema_version="1",
+        )
+
+    set_interpreter_override(scripted)
+    monkeypatch.setattr("twin.cognition.workspace.extract_percept", flaky_extract)
+
+    with pytest.raises(RuntimeError):
+        workspace_tick(
+            store, cfg, embedder, span,
+            target_domain="technical",
+            interpret=True,
+            input_mode="delta",
+            session_id="ses_retry_pct",
+            sequence=1,
+        )
+    row = store.get_workspace_tick_by_session_sequence("ses_retry_pct", 1)
+    assert row is not None
+    assert row.status == "error"
+    assert row.error_stage == "parallel_interpretation"
+    assert row.percept_id  # persisted before extract failed
+    before = [
+        p for p in store.list_percepts()
+        if (p.metadata or {}).get("tick_id") == row.id
+    ]
+    assert len(before) == 1
+
+    ok = workspace_tick(
+        store, cfg, embedder, span,
+        target_domain="technical",
+        interpret=True,
+        input_mode="delta",
+        session_id="ses_retry_pct",
+        sequence=1,
+        retry=True,
+    )
+    assert ok.status == "completed"
+    assert ok.error == ""
+    assert ok.parallel_interpretation.get("reused_percept") is True
+    assert ok.candidate_memory_ids
+    after = [
+        p for p in store.list_percepts()
+        if (p.metadata or {}).get("tick_id") == row.id
+    ]
+    assert len(after) == 1
+    assert after[0].id == before[0].id
+    done = store.get_workspace_tick(row.id)
+    assert done.status == "completed"
+    assert done.percept_id == before[0].id
+
+
+def test_workspace_retry_can_complete_after_transient_failure(store, cfg, embedder, monkeypatch):
+    from twin.cognition.observer import ObserverReading, ObserverSuggestion
+    from twin.cognition.salience import SalienceScores
+
+    blows = {"n": 0}
+
+    def flaky_read(*_a, **_k):
+        blows["n"] += 1
+        if blows["n"] == 1:
+            raise RuntimeError("transient read failure")
+        return ObserverReading(
+            domain="technical",
+            confidences={"domain": 1.0, "task_profile": 1.0, "project": 0.0},
+        )
+
+    monkeypatch.setattr("twin.cognition.workspace.read_context", flaky_read)
+    monkeypatch.setattr(
+        "twin.cognition.workspace.observe",
+        lambda *_a, **_k: ObserverSuggestion(inferred_domain="technical"),
+    )
+    monkeypatch.setattr(
+        "twin.cognition.workspace.score_memories",
+        lambda *_a, **_k: SalienceScores({}, {}, []),
+    )
+
+    with pytest.raises(RuntimeError):
+        workspace_tick(
+            store, cfg, embedder, "retry ok",
+            session_id="ses_ok_retry", sequence=2, target_domain="technical",
+        )
+    ok = workspace_tick(
+        store, cfg, embedder, "retry ok",
+        session_id="ses_ok_retry", sequence=2, target_domain="technical",
+        retry=True,
+    )
+    assert ok.status == "completed"
+    assert ok.error == ""
+    assert ok.stages[-1] == "done"
+    row = store.get_workspace_tick_by_session_sequence("ses_ok_retry", 2)
+    assert row.status == "completed"
+    assert row.error == ""
+    assert row.error_stage == ""

@@ -272,15 +272,40 @@ def run_consolidation_cycle(
     )
     created = True
     if not dry_run and prior is not None and prior.status == "error" and retry:
-        run = prior
-        run.status = "running"
-        run.error = ""
-        run.error_stage = ""
-        run.completed_at = ""
-        run.payload = {}
-        run.started_at = now_iso()
-        if hasattr(store, "update_consolidation_run"):
-            store.update_consolidation_run(run)
+        claimed = False
+        if hasattr(store, "try_claim_consolidation_retry"):
+            claimed = store.try_claim_consolidation_retry(
+                prior.id, started_at=now_iso(),
+            )
+        if not claimed:
+            current = store.get_consolidation_run(prior.id) if hasattr(store, "get_consolidation_run") else prior
+            if current is None:
+                current = prior
+            if current.status == "running":
+                return ConsolidationCycleResult(
+                    kind=kind, dry_run=False, run_id=current.id,
+                    window_start=window_start, window_end=window_end,
+                    duplicated=True, status="running", at=now_iso(),
+                    stages=["blocked_concurrent"],
+                    notes=["another consolidation run owns this window"],
+                )
+            if current.status == "completed" and current.payload:
+                result = ConsolidationCycleResult.from_dict(current.payload)
+                result.duplicated = True
+                result.run_id = current.id
+                result.status = "completed"
+                return result
+            result = ConsolidationCycleResult.from_dict(current.payload) if current.payload else ConsolidationCycleResult(
+                kind=kind, dry_run=False, run_id=current.id,
+                window_start=window_start, window_end=window_end,
+            )
+            result.duplicated = True
+            result.run_id = current.id
+            result.status = current.status
+            result.notes = list(result.notes) + ["retry claim lost to another executor"]
+            return result
+        run = store.get_consolidation_run(prior.id)  # type: ignore[assignment]
+        assert run is not None
         created = True
     elif not dry_run and hasattr(store, "try_begin_consolidation_run"):
         run, created = store.try_begin_consolidation_run(run)
@@ -318,14 +343,40 @@ def run_consolidation_cycle(
             ]
             return result
         if not created and run.status == "error" and retry:
-            run.status = "running"
-            run.error = ""
-            run.error_stage = ""
-            run.completed_at = ""
-            run.payload = {}
-            run.started_at = now_iso()
-            if hasattr(store, "update_consolidation_run"):
-                store.update_consolidation_run(run)
+            claimed = False
+            if hasattr(store, "try_claim_consolidation_retry"):
+                claimed = store.try_claim_consolidation_retry(
+                    run.id, started_at=now_iso(),
+                )
+            if not claimed:
+                current = store.get_consolidation_run(run.id) if hasattr(store, "get_consolidation_run") else run
+                if current is None:
+                    current = run
+                if current.status == "running":
+                    return ConsolidationCycleResult(
+                        kind=kind, dry_run=False, run_id=current.id,
+                        window_start=window_start, window_end=window_end,
+                        duplicated=True, status="running", at=now_iso(),
+                        stages=["blocked_concurrent"],
+                        notes=["another consolidation run owns this window"],
+                    )
+                if current.status == "completed" and current.payload:
+                    result = ConsolidationCycleResult.from_dict(current.payload)
+                    result.duplicated = True
+                    result.run_id = current.id
+                    result.status = "completed"
+                    return result
+                result = ConsolidationCycleResult.from_dict(current.payload) if current.payload else ConsolidationCycleResult(
+                    kind=kind, dry_run=False, run_id=current.id,
+                    window_start=window_start, window_end=window_end,
+                )
+                result.duplicated = True
+                result.run_id = current.id
+                result.status = current.status
+                result.notes = list(result.notes) + ["retry claim lost to another executor"]
+                return result
+            run = store.get_consolidation_run(run.id)  # type: ignore[assignment]
+            assert run is not None
             created = True
     elif dry_run and hasattr(store, "insert_consolidation_run"):
         store.insert_consolidation_run(run)
