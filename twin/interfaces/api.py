@@ -62,6 +62,9 @@ class WorkspaceTickRequest(BaseModel):
     session_id: str = ""
     cwd: Optional[str] = None
     interpret: bool = False
+    input_mode: Literal["snapshot", "delta"] = "snapshot"
+    sequence: Optional[int] = None
+    idempotency_key: Optional[str] = None
 
     _domain = field_validator("target_domain")(_validate_domain)
 
@@ -443,6 +446,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             target_domain=req.target_domain,
             cwd=req.cwd,
             interpret=req.interpret,
+            input_mode=req.input_mode,
+            sequence=req.sequence,
+            idempotency_key=req.idempotency_key,
             firewall=ws.firewall,
         )
         return result.to_dict()

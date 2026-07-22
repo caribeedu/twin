@@ -1560,12 +1560,14 @@ Natural consumer of [Correlation depth](#correlation-depth-planned-vx--after-pha
 
 Implemented:
 
-- `workspace_tick` (`twin/cognition/workspace.py`) — ordered stages `reading → observe → salience → recall → [parallel_interpretation] → done`; reading reuses the fast/deep observer; optional `--interpret` feeds session-delta text through the v0.7 pipeline as **candidates only**;
-- confidence-aware spontaneous recall (`twin/cognition/recall.py`) — speak only when confidence/score/salience clear the bar; otherwise `silent=True` (non-intrusive default); firewall `blocked` stays ids/reasons only and is never promoted into suggestions;
-- salience / novelty / contradiction cues (`twin/cognition/salience.py`) — cheap deterministic scores; open `possible_conflict` findings and quality flags raise pressure;
-- daily / weekly consolidation cycles (`twin/cognition/consolidation_cycle.py`) — distinct from session-close consolidation: analyze candidates → contradiction inventory → safe automation → temporal belief refresh (flag expired/stale confirmed beliefs for review) + project goal observation; weekly may emit judgment **proposals** via `propose_from_pattern`; never confirms Memory or Judgment;
-- surfaces: `twin workspace tick`, `twin consolidate daily|weekly` (dry-run by default, `--apply` to write), `POST /api/workspace/tick`, `POST /api/consolidate/{daily|weekly}`, MCP `workspace_tick` / `consolidate_cycle`, and native `intervene_check` optionally surfaces low-urgency recall infos when a tick is not silent;
-- `tests/cognition/test_recall.py`, `test_workspace.py`, `test_consolidation_cycle.py`, and offline `evals/consolidation/` contract cases.
+- **Workspace and consolidation spine for future continuous execution** — synchronous, invocable evaluation (`workspace_tick`) and windowed maintenance (`run_consolidation_cycle`), not yet a background worker/queue. Continuous / event-driven parallelism remains deferred.
+- `workspace_tick` (`twin/cognition/workspace.py`) — stages `reading → observe → salience → recall → [parallel_interpretation] → done`; preserves observer **retrieval score** separately from memory confidence; optional interpretation only for `input_mode=delta` (snapshots do not invent deltas); refuses to interpret while domain is unclassified (never coerces to `technical`);
+- identity / idempotency — durable `workspace_ticks` keyed by `idempotency_key`, `session_id+sequence`, or `session_id+content_hash` for delta interpretation; repeated calls return the completed tick (`duplicated=True`) without re-interpreting;
+- confidence + relevance recall (`twin/cognition/recall.py`) — eligibility = confidence gate AND retrieval score gate; novelty may reorder eligible suggestions but cannot clear the relevance bar; firewall `blocked` stays ids/reasons only;
+- salience / novelty / contradiction cues (`twin/cognition/salience.py`) — salience excludes novelty; novelty is ranking/inspection only;
+- daily / weekly consolidation (`twin/cognition/consolidation_cycle.py`) — logical windows with durable `consolidation_runs` (unique apply per window); temporal belief flag-for-review + project goal observation; weekly judgment proposals deduped per window; never confirms Memory or Judgment (state invariant checked);
+- surfaces: `twin workspace tick` (`--input-mode`, `--sequence`, `--idempotency-key`), `twin consolidate daily|weekly`, `POST /api/workspace/tick`, `POST /api/consolidate/{daily|weekly}`, MCP `workspace_tick` / `consolidate_cycle`, native `intervene_check` soft recall infos;
+- `tests/cognition/test_recall.py`, `test_workspace.py`, `test_consolidation_cycle.py`, and offline `evals/consolidation/` (including score-vs-confidence and confirmed-set invariants).
 
 ### v1.0 — Personal Cognitive OS
 

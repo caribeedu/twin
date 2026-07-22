@@ -1,9 +1,11 @@
 """Salience, novelty and live contradiction cues (v0.8).
 
 Deterministic, cheap signals for the parallel workspace — not a second
-quality analyzer. Contradiction cues reuse open review findings when present;
-novelty is inverse retrieval familiarity; salience blends confidence, novelty
-and finding pressure.
+quality analyzer.
+
+Salience is an attention signal (confidence + finding pressure). Novelty is
+separate and may boost ranking / inspection priority, but must not substitute
+for retrieval relevance in recall gates.
 """
 
 from __future__ import annotations
@@ -62,19 +64,20 @@ def score_memories(
         if "possible_conflict" in (mem.quality_flags or []):
             conflict_touch.add(mid)
         conf = float(mem.confidence or 0.0)
-        # Novelty: less overlap with query tokens → slightly higher novelty;
-        # brand-new low-retrieval memories also score higher.
         hay = f"{mem.title} {mem.summary}".lower()
         tokens = [t for t in q.replace(",", " ").split() if len(t) >= 4][:20]
         overlap = sum(1 for t in tokens if t in hay) if tokens else 0
         retrieval = float(getattr(mem, "retrieval_count", 0) or 0)
-        nov = _clamp(0.55 + 0.25 * (1.0 if overlap == 0 else 0.0)
-                     - min(0.35, retrieval / 40.0)
-                     + (0.15 if mid in conflict_touch else 0.0))
+        nov = _clamp(
+            0.55
+            + 0.25 * (1.0 if overlap == 0 else 0.0)
+            - min(0.35, retrieval / 40.0)
+            + (0.15 if mid in conflict_touch else 0.0)
+        )
+        # Salience deliberately excludes novelty — relevance gate stays separate.
         sal = _clamp(
-            0.45 * conf
-            + 0.35 * nov
-            + (0.25 if mid in conflict_touch else 0.0)
+            0.55 * conf
+            + (0.30 if mid in conflict_touch else 0.0)
             + min(0.15, float(getattr(mem, "quality_score", 0) or 0) / 2)
         )
         novelty[mid] = nov

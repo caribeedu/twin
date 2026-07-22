@@ -8,7 +8,7 @@ from twin.cognition.consolidation_cycle import (
     run_consolidation_cycle,
 )
 from twin.cognition.sessions import ensure_project
-from twin.memory.models import MemoryItem
+from twin.memory.models import MemoryItem, MemoryStatus
 
 
 def _belief(store, embedder, **kw):
@@ -28,20 +28,25 @@ def _belief(store, embedder, **kw):
     return mem
 
 
+def _confirmed_ids(store):
+    return {m.id for m in store.list_memories(status="confirmed", limit=10_000)}
+
+
 def test_temporal_refresh_flags_expired_belief(store, embedder):
     past = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()
     mem = _belief(store, embedder, valid_until=past)
-    updates, _goals = refresh_temporal_beliefs_and_goals(store, dry_run=False)
+    updates, _goals, _trunc = refresh_temporal_beliefs_and_goals(store, dry_run=False)
     assert any(u["memory_id"] == mem.id for u in updates)
     refreshed = store.get_memory(mem.id)
     assert refreshed.needs_review is True
     assert "stale" in (refreshed.quality_flags or [])
-    assert refreshed.status.value == "confirmed"
+    assert refreshed.status == MemoryStatus.confirmed
 
 
 def test_daily_cycle_dry_run_no_writes(store, cfg, embedder):
     past = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()
     mem = _belief(store, embedder, valid_until=past)
+    before = _confirmed_ids(store)
     result = run_consolidation_cycle(
         store, cfg, embedder, kind="daily", dry_run=True,
     )
@@ -50,8 +55,9 @@ def test_daily_cycle_dry_run_no_writes(store, cfg, embedder):
     assert "analyze" in result.stages
     assert "temporal_refresh" in result.stages
     assert "judgment_proposals" not in result.stages
-    # dry-run must not flag the belief
     assert store.get_memory(mem.id).needs_review is False
+    assert _confirmed_ids(store) == before
+    assert any("invariant_ok" in n for n in result.notes)
 
 
 def test_weekly_cycle_includes_judgment_stage(store, cfg, embedder):
@@ -63,4 +69,65 @@ def test_weekly_cycle_includes_judgment_stage(store, cfg, embedder):
     )
     assert "judgment_proposals" in result.stages
     assert any(g["project_id"] == project.id for g in result.goals_observed)
-    assert any("never confirms" in n for n in result.notes)
+    assert any("invariant_ok" in n for n in result.notes)
+
+
+def test_weekly_rerun_does_not_duplicate_judgment_proposals(store, cfg, embedder):
+    as_of = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+    first = run_consolidation_cycle(
+        store, cfg, embedder, kind="weekly", dry_run=False, as_of=as_of,
+    )
+    second = run_consolidation_cycle(
+        store, cfg, embedder, kind="weekly", dry_run=False, as_of=as_of,
+    )
+    assert second.duplicated is True
+    assert second.run_id == first.run_id
+    proposals = store.list_judgment_proposals(limit=500)
+    # At most one simplicity detector proposal for this window (0 if no cluster).
+    detectors = [
+        p for p in proposals
+        if (p.metadata or {}).get("detector") == "simplicity_cluster_demo"
+        and (p.metadata or {}).get("consolidation_window", "").startswith("weekly:")
+    ]
+    assert len(detectors) <= 1
+
+
+def test_concurrent_cycle_window_has_single_run(store, cfg, embedder):
+    as_of = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+    a = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    b = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    assert a.run_id
+    assert b.duplicated is True
+    assert b.run_id == a.run_id
+    runs = []
+    # one apply row for the window
+    row = store.get_consolidation_run_for_window(
+        kind="daily",
+        window_start=a.window_start,
+        window_end=a.window_end,
+        dry_run=False,
+    )
+    assert row is not None
+    assert row.id == a.run_id
+
+
+def test_cycle_never_confirms_memory_or_judgment(store, cfg, embedder):
+    cand = MemoryItem(
+        id=ids.memory_id(), type="fact", title="Candidate only",
+        summary="Must stay candidate through consolidation.",
+        domain="technical", confidence=0.8, status="candidate",
+        needs_review=True,
+    )
+    store.insert_memory(cand)
+    before_confirmed = _confirmed_ids(store)
+    result = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False,
+        as_of=datetime(2026, 7, 1, tzinfo=timezone.utc),
+    )
+    assert store.get_memory(cand.id).status == MemoryStatus.candidate
+    assert _confirmed_ids(store) == before_confirmed
+    assert any("invariant_ok" in n for n in result.notes)

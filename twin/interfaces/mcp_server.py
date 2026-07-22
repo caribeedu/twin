@@ -448,16 +448,24 @@ def create_server(home: Optional[str] = None):
         target_domain: Optional[str] = None,
         session_id: str = "",
         interpret: bool = False,
+        input_mode: str = "snapshot",
+        sequence: Optional[int] = None,
+        idempotency_key: Optional[str] = None,
     ) -> str:
-        """Parallel memory tick (v0.8): reading → confidence-aware recall →
-        silent blocked → optional parallel interpretation (candidates only).
-        Never confirms Memory or Judgment."""
+        """Workspace evaluation tick (v0.8 spine): reading → recall → optional
+        delta interpretation (candidates only). Idempotent via session+sequence
+        or idempotency_key. Never confirms Memory or Judgment."""
         from ..cognition.workspace import workspace_tick as _tick
+        if input_mode not in ("snapshot", "delta"):
+            return json.dumps({"error": "input_mode must be snapshot or delta"})
         result = _tick(
             ws.store, ws.cfg, ws.embedder, current_text,
             session_id=session_id or "",
             target_domain=target_domain,
             interpret=interpret,
+            input_mode=input_mode,  # type: ignore[arg-type]
+            sequence=sequence,
+            idempotency_key=idempotency_key,
             firewall=ws.firewall,
         )
         return json.dumps(result.to_dict(), ensure_ascii=False, default=str)

@@ -4,12 +4,13 @@
   "input": {
     "text": "hmm vague note",
     "domain": "technical",
-    "interpret": false
+    "interpret": false,
+    "input_mode": "snapshot"
   },
   "seed_memories": [],
   "expected": {
     "silent": true,
     "has_stages": ["reading", "observe", "recall", "done"],
-    "no_confirmed_from_tick": true
+    "confirmed_unchanged": true
   }
 }

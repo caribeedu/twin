@@ -345,6 +345,9 @@ def cmd_workspace(args) -> None:
         target_domain=getattr(args, "domain", None),
         cwd=getattr(args, "cwd", None),
         interpret=bool(getattr(args, "interpret", False)),
+        input_mode=getattr(args, "input_mode", "snapshot") or "snapshot",
+        sequence=getattr(args, "sequence", None),
+        idempotency_key=getattr(args, "idempotency_key", None),
         firewall=ws.firewall,
     )
     _print(result.to_dict())
@@ -1420,8 +1423,16 @@ def main(argv: list[str] | None = None) -> None:
     wt.add_argument("--cwd", default=None)
     wt.add_argument(
         "--interpret", action="store_true",
-        help="also run parallel interpretation → memory candidates only",
+        help="also run parallel interpretation (requires --input-mode delta)",
     )
+    wt.add_argument(
+        "--input-mode", choices=["snapshot", "delta"], default="snapshot",
+        help="snapshot=observe/recall only; delta=may interpret as session_delta",
+    )
+    wt.add_argument("--sequence", type=int, default=None,
+                    help="monotonic session sequence for idempotent ticks")
+    wt.add_argument("--idempotency-key", default=None,
+                    help="explicit idempotency key for retries")
     wt.set_defaults(func=cmd_workspace)
 
     p = sub.add_parser("consolidate", help="daily/weekly consolidation cycle (v0.8)")

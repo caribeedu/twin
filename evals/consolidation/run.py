@@ -1,10 +1,7 @@
-"""Offline eval for v0.8 parallel memory / consolidation spine.
+"""Offline eval for v0.8 workspace / consolidation spine.
 
-Proves stage separation and silence/blocking policy without a live host:
-
-- workspace tick stays silent when nothing clears the recall bar;
-- blocked firewall hits never become suggestions;
-- consolidation cycle is dry-run safe and never confirms Memory.
+Proves stage separation, retrieval-score gates, idempotency, and that cycles
+do not expand the confirmed Memory/Judgment sets — by state, not by notes.
 
     python -m evals.consolidation.run
 """
@@ -45,6 +42,10 @@ def _seed_memory(store, embedder, **kw) -> MemoryItem:
     return mem
 
 
+def _confirmed_ids(store) -> set[str]:
+    return {m.id for m in store.list_memories(status="confirmed", limit=10_000)}
+
+
 def _run_case(case: dict) -> tuple[bool, str]:
     with tempfile.TemporaryDirectory(prefix="twin-consol-eval-") as tmp:
         store = SqliteStore(Path(tmp) / "eval.db")
@@ -63,9 +64,14 @@ def _run_case(case: dict) -> tuple[bool, str]:
                 case.get("blocked", []),
                 policy=RecallPolicy(**(case.get("policy") or {})),
                 salience_by_id=case.get("salience_by_id") or {},
+                novelty_by_id=case.get("novelty_by_id") or {},
             )
             if "silent" in exp and result.silent != exp["silent"]:
                 return False, f"silent {result.silent} != {exp['silent']}"
+            if "suggestion_ids" in exp:
+                got = [s.memory_id for s in result.suggestions]
+                if got != exp["suggestion_ids"]:
+                    return False, f"suggestions {got} != {exp['suggestion_ids']}"
             if "suggestion_count" in exp and len(result.suggestions) != exp["suggestion_count"]:
                 return False, (
                     f"suggestions {len(result.suggestions)} != {exp['suggestion_count']}"
@@ -78,11 +84,15 @@ def _run_case(case: dict) -> tuple[bool, str]:
         if kind == "workspace_tick":
             for row in case.get("seed_memories", []):
                 _seed_memory(store, embedder, **row)
+            before = _confirmed_ids(store)
             tick = workspace_tick(
                 store, cfg, embedder,
                 case["input"]["text"],
                 target_domain=case["input"].get("domain"),
                 interpret=bool(case["input"].get("interpret", False)),
+                input_mode=case["input"].get("input_mode", "snapshot"),
+                session_id=case["input"].get("session_id", ""),
+                sequence=case["input"].get("sequence"),
             )
             if "silent" in exp and tick.silent != exp["silent"]:
                 return False, f"silent {tick.silent} != {exp['silent']}"
@@ -90,14 +100,12 @@ def _run_case(case: dict) -> tuple[bool, str]:
                 for stage in exp["has_stages"]:
                     if stage not in tick.stages:
                         return False, f"missing stage {stage}"
-            if exp.get("no_confirmed_from_tick"):
-                for mid in tick.candidate_memory_ids:
-                    mem = store.get_memory(mid)
-                    if mem and mem.status.value == "confirmed":
-                        return False, f"tick confirmed {mid}"
+            if exp.get("confirmed_unchanged") and _confirmed_ids(store) != before:
+                return False, "confirmed memories changed"
             return True, "ok"
 
         if kind == "consolidation_cycle":
+            before_mem = _confirmed_ids(store)
             result = run_consolidation_cycle(
                 store, cfg, embedder,
                 kind=case["input"].get("cycle", "daily"),
@@ -109,9 +117,10 @@ def _run_case(case: dict) -> tuple[bool, str]:
                 for stage in exp["has_stages"]:
                     if stage not in result.stages:
                         return False, f"missing stage {stage}"
-            if exp.get("never_confirms_note"):
-                if not any("never confirms" in n for n in result.notes):
-                    return False, "missing never-confirms note"
+            if exp.get("confirmed_unchanged") and _confirmed_ids(store) != before_mem:
+                return False, "confirmed memories changed by cycle"
+            if exp.get("invariant_ok") and not any("invariant_ok" in n for n in result.notes):
+                return False, "missing invariant_ok note"
             return True, "ok"
 
         return False, f"unknown kind {kind}"

@@ -8,6 +8,7 @@
   "expected": {
     "kind": "daily",
     "has_stages": ["analyze", "safe_automation", "temporal_refresh", "done"],
-    "never_confirms_note": true
+    "confirmed_unchanged": true,
+    "invariant_ok": true
   }
 }
