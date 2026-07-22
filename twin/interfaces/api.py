@@ -26,6 +26,7 @@ from ..cognition.sessions import (
     record_feedback,
     start_session,
 )
+from ..cognition.workspace import workspace_tick
 from ..config import ALL_DOMAINS, UNCLASSIFIED_DOMAIN
 from ..judgment.profile import load_profile
 from ..memory.models import FeedbackVerdict, MemoryStatus, TaskProfile
@@ -53,6 +54,21 @@ class ObserveRequest(BaseModel):
     target_domain: Optional[str] = None
 
     _domain = field_validator("target_domain")(_validate_domain)
+
+
+class WorkspaceTickRequest(BaseModel):
+    current_text: str = Field(min_length=1, max_length=20_000)
+    target_domain: Optional[str] = None
+    session_id: str = ""
+    cwd: Optional[str] = None
+    interpret: bool = False
+
+    _domain = field_validator("target_domain")(_validate_domain)
+
+
+class ConsolidationRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=200, ge=1, le=5_000)
 
 
 class PackRequest(BaseModel):
@@ -418,6 +434,29 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "suggested_context": s.suggested_context,
             "blocked_context": s.blocked_context,
         }
+
+    @app.post("/api/workspace/tick")
+    def api_workspace_tick(req: WorkspaceTickRequest):
+        result = workspace_tick(
+            ws.store, ws.cfg, ws.embedder, req.current_text,
+            session_id=req.session_id,
+            target_domain=req.target_domain,
+            cwd=req.cwd,
+            interpret=req.interpret,
+            firewall=ws.firewall,
+        )
+        return result.to_dict()
+
+    @app.post("/api/consolidate/{kind}")
+    def api_consolidate(kind: str, req: ConsolidationRequest):
+        from ..cognition.consolidation_cycle import run_consolidation_cycle
+        if kind not in ("daily", "weekly"):
+            raise HTTPException(400, "kind must be daily or weekly")
+        result = run_consolidation_cycle(
+            ws.store, ws.cfg, ws.embedder,
+            kind=kind, dry_run=not req.apply, analyze_limit=req.limit,
+        )
+        return result.to_dict()
 
     # -- v0.3 review / quality / consolidation --------------------------------
 

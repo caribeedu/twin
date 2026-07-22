@@ -1558,6 +1558,15 @@ Build on the fast/deep observer introduced in v0.2 and the cognitive interpretat
 
 Natural consumer of [Correlation depth](#correlation-depth-planned-vx--after-phase-7): incremental correlation passes and episode-phase updates should feed consolidation without full rescans.
 
+Implemented:
+
+- `workspace_tick` (`twin/cognition/workspace.py`) — ordered stages `reading → observe → salience → recall → [parallel_interpretation] → done`; reading reuses the fast/deep observer; optional `--interpret` feeds session-delta text through the v0.7 pipeline as **candidates only**;
+- confidence-aware spontaneous recall (`twin/cognition/recall.py`) — speak only when confidence/score/salience clear the bar; otherwise `silent=True` (non-intrusive default); firewall `blocked` stays ids/reasons only and is never promoted into suggestions;
+- salience / novelty / contradiction cues (`twin/cognition/salience.py`) — cheap deterministic scores; open `possible_conflict` findings and quality flags raise pressure;
+- daily / weekly consolidation cycles (`twin/cognition/consolidation_cycle.py`) — distinct from session-close consolidation: analyze candidates → contradiction inventory → safe automation → temporal belief refresh (flag expired/stale confirmed beliefs for review) + project goal observation; weekly may emit judgment **proposals** via `propose_from_pattern`; never confirms Memory or Judgment;
+- surfaces: `twin workspace tick`, `twin consolidate daily|weekly` (dry-run by default, `--apply` to write), `POST /api/workspace/tick`, `POST /api/consolidate/{daily|weekly}`, MCP `workspace_tick` / `consolidate_cycle`, and native `intervene_check` optionally surfaces low-urgency recall infos when a tick is not silent;
+- `tests/cognition/test_recall.py`, `test_workspace.py`, `test_consolidation_cycle.py`, and offline `evals/consolidation/` contract cases.
+
 ### v1.0 — Personal Cognitive OS
 
 A trustworthy, daily-usable version of the infrastructure with:

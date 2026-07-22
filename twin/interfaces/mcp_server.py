@@ -442,6 +442,40 @@ def create_server(home: Optional[str] = None):
             "blocked_context": suggestion.blocked_context,
         }, ensure_ascii=False)
 
+    @mcp.tool()
+    def workspace_tick(
+        current_text: str,
+        target_domain: Optional[str] = None,
+        session_id: str = "",
+        interpret: bool = False,
+    ) -> str:
+        """Parallel memory tick (v0.8): reading → confidence-aware recall →
+        silent blocked → optional parallel interpretation (candidates only).
+        Never confirms Memory or Judgment."""
+        from ..cognition.workspace import workspace_tick as _tick
+        result = _tick(
+            ws.store, ws.cfg, ws.embedder, current_text,
+            session_id=session_id or "",
+            target_domain=target_domain,
+            interpret=interpret,
+            firewall=ws.firewall,
+        )
+        return json.dumps(result.to_dict(), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def consolidate_cycle(kind: str = "daily", apply: bool = False, limit: int = 200) -> str:
+        """Run a daily or weekly consolidation cycle (quality, safe automation,
+        temporal belief/goal refresh; weekly may propose judgment). Default
+        dry-run; set apply=true to write. Never confirms Memory/Judgment."""
+        from ..cognition.consolidation_cycle import run_consolidation_cycle
+        if kind not in ("daily", "weekly"):
+            return json.dumps({"error": "kind must be daily or weekly"})
+        result = run_consolidation_cycle(
+            ws.store, ws.cfg, ws.embedder,
+            kind=kind, dry_run=not apply, analyze_limit=limit,
+        )
+        return json.dumps(result.to_dict(), ensure_ascii=False, default=str)
+
     # -- v0.3 quality / review (read tools + gated mutations) -----------------
 
     @mcp.tool()

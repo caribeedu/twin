@@ -1,0 +1,21 @@
+{
+  "id": "recall_silence_under_bar",
+  "kind": "recall_policy",
+  "suggested": [
+    {
+      "memory_id": "mem_weak",
+      "summary": "weak",
+      "why_relevant": "x",
+      "confidence": 0.2,
+      "score": 0.1
+    }
+  ],
+  "blocked": [
+    {"memory_id": "mem_blocked", "reason": "domain_gate"}
+  ],
+  "expected": {
+    "silent": true,
+    "suggestion_count": 0,
+    "blocked_preserved": true
+  }
+}

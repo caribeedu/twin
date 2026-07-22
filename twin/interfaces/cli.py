@@ -8,6 +8,8 @@
     twin pack "task" [--domain d]      build a safe context pack (confirmed only;
                                        --include-candidates to loosen)
     twin observe "current text"        memory observer suggestion
+    twin workspace tick "text"         parallel memory tick (recall + optional interpret)
+    twin consolidate daily|weekly      scheduled consolidation cycle
     twin promote <memory_id>           promote a memory into the judgment profile
     twin supersede <new_id> <old_id>   new memory replaces the old one
     twin contradict <id_a> <id_b>      flag two memories as contradictory
@@ -329,6 +331,37 @@ def cmd_observe(args) -> None:
         "suggested_context": s.suggested_context,
         "blocked_context": s.blocked_context,
     })
+
+
+def cmd_workspace(args) -> None:
+    from ..cognition.workspace import workspace_tick
+
+    ws = Workspace(args.home)
+    if args.workspace_command != "tick":
+        raise SystemExit(f"unknown workspace command: {args.workspace_command}")
+    result = workspace_tick(
+        ws.store, ws.cfg, ws.embedder, args.text,
+        session_id=getattr(args, "session_id", "") or "",
+        target_domain=getattr(args, "domain", None),
+        cwd=getattr(args, "cwd", None),
+        interpret=bool(getattr(args, "interpret", False)),
+        firewall=ws.firewall,
+    )
+    _print(result.to_dict())
+
+
+def cmd_consolidate(args) -> None:
+    from ..cognition.consolidation_cycle import run_consolidation_cycle
+
+    ws = Workspace(args.home)
+    kind = args.consolidate_command
+    result = run_consolidation_cycle(
+        ws.store, ws.cfg, ws.embedder,
+        kind=kind,
+        dry_run=not getattr(args, "apply", False),
+        analyze_limit=int(getattr(args, "limit", 200) or 200),
+    )
+    _print(result.to_dict())
 
 
 def cmd_reindex(args) -> None:
@@ -1377,6 +1410,32 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("text")
     p.add_argument("--domain", default=None)
     p.set_defaults(func=cmd_observe)
+
+    p = sub.add_parser("workspace", help="parallel memory workspace (v0.8)")
+    wss = p.add_subparsers(dest="workspace_command", required=True)
+    wt = wss.add_parser("tick", help="one observation/recall tick")
+    wt.add_argument("text")
+    wt.add_argument("--domain", default=None)
+    wt.add_argument("--session-id", default="")
+    wt.add_argument("--cwd", default=None)
+    wt.add_argument(
+        "--interpret", action="store_true",
+        help="also run parallel interpretation → memory candidates only",
+    )
+    wt.set_defaults(func=cmd_workspace)
+
+    p = sub.add_parser("consolidate", help="daily/weekly consolidation cycle (v0.8)")
+    cs = p.add_subparsers(dest="consolidate_command", required=True)
+    for kind, help_text in (
+        ("daily", "daily quality + safe automation + temporal refresh"),
+        ("weekly", "weekly cycle + optional judgment proposals"),
+    ):
+        pc = cs.add_parser(kind, help=help_text)
+        pc.add_argument("--apply", action="store_true",
+                        help="write changes (default is dry-run)")
+        pc.add_argument("--limit", type=int, default=200,
+                        help="max candidates to analyze")
+        pc.set_defaults(func=cmd_consolidate)
 
     sub.add_parser("reindex", help="regenerate embeddings").set_defaults(func=cmd_reindex)
 

@@ -121,6 +121,7 @@ def observe(
             "summary": hit.memory.summary,
             "why_relevant": hit.why,
             "confidence": hit.memory.confidence,
+            "score": float(hit.score),
             "allowed": True,
         })
     suggestion.blocked_context = [

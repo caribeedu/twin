@@ -156,10 +156,48 @@ class NativeHostService:
                 session_id=binding.cognitive_session_id,
                 draft_text=event.text,
             )
+            # Parallel workspace tick: confidence-aware spontaneous recall.
+            # Silent when nothing clears the bar; blocked stay ids-only.
+            try:
+                from ...cognition.workspace import workspace_tick
+                tick = workspace_tick(
+                    self.store, self.cfg, self.embedder, event.text or "",
+                    session_id=binding.cognitive_session_id,
+                    target_domain=binding.domain,
+                    interpret=False,
+                )
+                for sug in tick.suggestions:
+                    recs.append(InterventionRecommendation(
+                        type="info",
+                        reason=(
+                            f"Spontaneous recall: {sug.get('summary') or sug.get('memory_id')}"
+                        ),
+                        urgency="low",
+                        session_id=binding.cognitive_session_id,
+                        supported_actions=["display"],
+                        requires_confirmation=False,
+                        metadata={
+                            "stage": "suggestion",
+                            "memory_id": sug.get("memory_id"),
+                            "confidence": sug.get("confidence"),
+                            "salience": sug.get("salience"),
+                            "why_relevant": sug.get("why_relevant"),
+                            "silent": tick.silent,
+                        },
+                    ))
+                extras = {
+                    "workspace_silent": tick.silent,
+                    "workspace_blocked_count": len(tick.blocked),
+                    "workspace_stages": list(tick.stages),
+                }
+            except Exception as exc:  # fail-open: recall must not break host
+                logger.warning("workspace tick on intervene_check failed: %s", exc)
+                extras = {"workspace_tick_error": type(exc).__name__}
             return NativeEventResult(
                 binding=binding,
                 session_id=binding.cognitive_session_id,
                 interventions=recs,
+                extras=extras,
             )
 
         # Observations require an active binding — never invent one from cwd.
