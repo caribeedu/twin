@@ -404,6 +404,51 @@ def test_invalid_domain_goes_to_review_as_unknown_not_technical(store,
     assert mem.needs_review is True
 
 
+def test_to_extracted_rejects_invalid_type_and_domain():
+    import pytest
+    from twin.cognition.interpreter.schema import CognitiveAct, InterpretedItem
+
+    bad_type = InterpretedItem(
+        memory_type="not_a_type", cognitive_act=CognitiveAct.statement,
+        title="x", summary="y", domain="technical", evidence_span="y",
+    )
+    with pytest.raises(ValueError, match="invalid memory_type"):
+        bad_type.to_extracted()
+
+    bad_domain = InterpretedItem(
+        memory_type="fact", cognitive_act=CognitiveAct.statement,
+        title="x", summary="y", domain="wonderland", evidence_span="y",
+    )
+    with pytest.raises(ValueError, match="invalid domain"):
+        bad_domain.to_extracted()
+
+
+def test_grounded_count_includes_policy_dropped_items(store, interpreting_cfg,
+                                                      embedder):
+    """grounded = passed evidence check, even if later dropped by policy."""
+    set_interpreter_override(_override([
+        InterpretedItem(memory_type="preference", cognitive_act=CognitiveAct.opinion,
+                        title="Prefers tabs", summary="Author prefers tabs.",
+                        domain="technical", confidence=0.9,
+                        evidence_span="I prefer tabs over spaces"),
+        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+                        title="Adopt CI gate", summary="Team adopted a CI gate.",
+                        domain="technical", confidence=0.9,
+                        evidence_span="we adopted a required CI gate"),
+    ]))
+    p = _percept("I prefer tabs over spaces; we adopted a required CI gate.",
+                 metadata={"connector_type": "github"}, source_trust=0.9)
+    store.insert_percept(p)
+    report = extract_percept(store, interpreting_cfg, embedder, p)
+    assert report.grounded == 2
+    assert report.policy_dropped >= 1
+    assert report.stage_counts()["grounded"] == 2
+    # Must count policy-dropped items, not only inserted + duplicates.
+    assert report.stage_counts()["grounded"] > (
+        len(report.inserted) + report.duplicates
+    )
+
+
 # -- Adjustment 8: attribution grounded against known actors ---------------------
 
 

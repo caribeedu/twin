@@ -91,17 +91,38 @@ class InterpretedItem(BaseModel):
     ambiguity: Optional[str] = None
 
     def resolved_type(self) -> tuple[str, bool]:
-        """(memory_type, is_rejected_alternative) after normalization."""
+        """(memory_type, is_rejected_alternative) after normalization.
+
+        Invalid types raise — callers must validate before conversion.
+        """
         if self.memory_type == "rejected_alternative":
             return "decision", True
         if self.memory_type not in MEMORY_TYPES:
-            return "fact", False
+            raise ValueError(
+                f"invalid memory_type {self.memory_type!r}; "
+                f"allowed={list(INTERPRETATION_TYPES)}"
+            )
         return self.memory_type, False
 
     def to_extracted(self) -> ExtractedMemory:
         """Bridge to the persistence-facing schema, preserving the cognitive
         act, attribution and unresolved references in the payload so nothing
-        the interpreter established is lost on the way to storage."""
+        the interpreter established is lost on the way to storage.
+
+        Requires a validated item: invalid ``memory_type`` / ``domain`` raise
+        instead of silently becoming ``fact`` / ``technical``. Governance may
+        remap an unrecognized domain to ``unknown`` *before* calling this.
+        """
+        if self.memory_type not in INTERPRETATION_TYPES:
+            raise ValueError(
+                f"invalid memory_type {self.memory_type!r}; "
+                f"allowed={list(INTERPRETATION_TYPES)}"
+            )
+        if self.domain not in ALL_DOMAINS and self.domain != "unknown":
+            raise ValueError(
+                f"invalid domain {self.domain!r}; "
+                f"allowed={list(ALL_DOMAINS)} or 'unknown'"
+            )
         mem_type, rejected = self.resolved_type()
         payload: dict[str, Any] = {
             "cognitive_act": self.cognitive_act.value,
@@ -121,13 +142,14 @@ class InterpretedItem(BaseModel):
             payload["unresolved_references"] = self.unresolved_references
         if self.ambiguity:
             payload["ambiguity"] = self.ambiguity
-        domain = self.domain if self.domain in ALL_DOMAINS else "technical"
-        sensitivity = self.sensitivity if self.sensitivity in SENSITIVITIES else "internal"
+        sensitivity = (
+            self.sensitivity if self.sensitivity in SENSITIVITIES else "internal"
+        )
         return ExtractedMemory(
             type=mem_type,
             title=self.title,
             summary=self.summary,
-            domain=domain,
+            domain=self.domain,
             sensitivity=sensitivity,
             confidence=max(0.0, min(1.0, self.confidence)),
             valid_from=self.valid_from,

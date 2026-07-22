@@ -79,11 +79,12 @@ class ExtractReport:
     unresolved_references: int = 0
     ungrounded: int = 0      # items with an invented/empty evidence span, dropped
     invalid: int = 0         # items with an out-of-vocabulary memory type, dropped
+    grounded: int = 0        # items that passed evidence grounding (before policy/dedupe)
     detection_signals: int = 0  # heuristic-mode detection hints (never memories)
 
     def stage_counts(self) -> dict[str, int]:
         return {
-            "grounded": len(self.inserted) + self.duplicates,
+            "grounded": self.grounded,
             "inserted": len(self.inserted),
             "deduplicated": self.duplicates,
             "policy_dropped": self.policy_dropped,
@@ -192,15 +193,18 @@ def _prepare_item(item, percept: Percept, report: ExtractReport):
     if item.memory_type not in INTERPRETATION_TYPES:
         report.invalid += 1
         return None, []
-    extracted = item.to_extracted()
     forced: list[str] = []
-    # invalid domain is never silently 'technical': route to review as unknown.
-    # Check the RAW item domain — to_extracted() already coerced it, so the
-    # decision must be made from what the interpreter actually said.
-    if item.domain not in ALL_DOMAINS:
-        extracted.payload["invalid_domain"] = item.domain
-        extracted.domain = "unknown"
+    # invalid domain is never silently 'technical': remap to 'unknown' for the
+    # conversion boundary, then force review. to_extracted() refuses unknowns
+    # other than the explicit 'unknown' governance value.
+    raw_domain = item.domain
+    if raw_domain not in ALL_DOMAINS:
+        item = item.model_copy(update={"domain": "unknown"})
         forced.append("unrecognized domain — needs review before trust")
+    extracted = item.to_extracted()
+    if raw_domain not in ALL_DOMAINS:
+        extracted.payload["invalid_domain"] = raw_domain
+        extracted.domain = "unknown"
     # attribution must be grounded in known actors; an unknown speaker is
     # unresolved, and an owner claim the actors cannot confirm is unverified
     attributed = item.attributed_to
@@ -321,6 +325,7 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     #     excerpt of the masked text (empty OR invented) is dropped here, before
     #     it can become a memory — this closes the hallucinated-evidence path.
     grounded, ungrounded = validate_grounding(result.items, masked_text)
+    report.grounded = len(grounded)
     report.ungrounded = len(ungrounded)
     report.unresolved_references = len(result.unresolved_references) + sum(
         len(it.unresolved_references) for it in grounded)
