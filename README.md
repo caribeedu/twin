@@ -1585,6 +1585,26 @@ A trustworthy, daily-usable version of the infrastructure with:
 - measurable reduction in context re-explanation;
 - enough operational reliability to act as the user's persistent cognitive substrate.
 
+Implemented (v0.9.0 — Durable Cognitive Runtime):
+
+- **`twin-runtime` / `twin runtime start`** — durable background process with local scheduler + worker pool; not an autonomous agent (handlers call the same cognitive core as CLI/MCP/API);
+- durable job queue (`runtime_jobs`) with priority, vault isolation, causal parent, idempotency keys, `not_before` backoff;
+- exclusive CAS claim + worker leases + heartbeat + dead-worker reclaim (expired `running` leases);
+- retries with backoff, dead-letter queue, cancel, explicit retry; model-unavailable failures never dead-letter model-gated kinds;
+- initial job kinds: `interpret_percept`, `workspace_tick`, `consolidate_daily` / `consolidate_weekly`, `reembed_memory`, `integrity_check`, `connector_reconcile`;
+- surfaces: `twin runtime {start,status,schedule,enqueue,job,retry,cancel}`, `POST/GET /api/runtime/jobs…`, `GET /api/runtime/health`, entrypoint `twin-runtime`;
+- `tests/runtime/test_runtime.py` — exclusive claim, lease recovery, idempotent enqueue/schedule, vault isolation, DLQ, worker execution.
+
+Implemented (v0.9.1 — Cognitive Sessions):
+
+- lifecycle statuses: `active` / `paused` / `completed` / `abandoned` / `archived`;
+- ordered `session_events` (deltas) with gap detection; checkpoints; structured `SessionClosure` (never auto-confirms Memory/Judgment);
+- pause / resume / reopen / archive; continuity via `external_session_id` on events across tools;
+- surfaces: `POST /api/sessions/{id}/{events,checkpoint,close,reopen,pause,resume}`, `GET …/closure`;
+- `tests/cognition/test_session_lifecycle.py`.
+
+Still open for later v0.9.x slices: memory-candidate formation pipeline, operational consolidation reports, Judgment/persona maturity, mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+
 ---
 
 ## 24. Future major versions

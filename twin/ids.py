@@ -107,3 +107,27 @@ def tradeoff_id() -> str:
 
 def host_session_binding_id() -> str:
     return new_id("hsb")
+
+
+def runtime_job_id() -> str:
+    return new_id("rjob")
+
+
+def worker_lease_id() -> str:
+    return new_id("wlease")
+
+
+def dead_letter_id() -> str:
+    return new_id("rdlq")
+
+
+def session_event_id() -> str:
+    return new_id("sevt")
+
+
+def session_checkpoint_id() -> str:
+    return new_id("schk")
+
+
+def session_closure_id() -> str:
+    return new_id("scls")

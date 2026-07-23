@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 twin = "twin.interfaces.cli:main"
+twin-runtime = "twin.runtime.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["twin*"]

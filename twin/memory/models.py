@@ -390,8 +390,10 @@ class Project(BaseModel):
 
 class SessionStatus(str, Enum):
     active = "active"
-    completed = "completed"
+    paused = "paused"
+    completed = "completed"   # closed
     abandoned = "abandoned"
+    archived = "archived"
 
 
 class ConsolidationStatus(str, Enum):
