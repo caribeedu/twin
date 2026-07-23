@@ -1659,7 +1659,13 @@ Implemented (v0.9.9 — Reliability and Evals spine):
 - adversarial checks: prompt-injection detection + cross-domain recall deny;
 - `evals/v1/cases/golden_work_loop.json`, `tests/evals/test_golden_work_loop.py`, `tests/evals/test_security_adversarial.py`, `tests/evals/test_v1_completion.py`.
 
-Still open for later slices: remaining adapter contract rows, unified explain UX, encrypted/incremental backups, soak/stress harness, re-explanation KPI dashboard, v1.0.0 stabilization docs.
+Implemented (v1.0.0 — Personal Cognitive OS release):
+
+- package/`__version__` → `1.0.0`;
+- [docs/threat-model.md](docs/threat-model.md), [docs/runbook.md](docs/runbook.md), [docs/v1-release.md](docs/v1-release.md);
+- release gate: `twin eval v1-completion` + `twin connector production-ready` + golden work loop.
+
+Follow-on (not blocking v1.0.0 bar above): remaining adapter contract rows, unified explain UX, encrypted/incremental backups, soak/stress harness, re-explanation KPI dashboard.
 
 ---
 

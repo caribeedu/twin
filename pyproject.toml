@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "twin"
-version = "0.5.0"
+version = "1.0.0"
 description = "Personal Cognitive Operating System — local-first memory, judgment and context layer exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.10"
