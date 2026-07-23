@@ -1618,7 +1618,13 @@ Implemented (v0.9.3 — Consolidation Engine):
 - still never confirms Memory/Judgment; window apply remains idempotent (`duplicated=True` replays the same report);
 - `tests/cognition/test_consolidation_cycle.py` covers operational stages + replay.
 
-Still open for later v0.9.x slices: Judgment/persona maturity, mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+Implemented (v0.9.4 — Judgment and Personas):
+
+- durable `PersonaRecord` (`privacy_personas`) bootstrapped with configurable starter personas; `resolve_access` intersects persona domains/vaults/capabilities with principal∩binding (never amplifies);
+- `POST /api/judgment/versions/{id}/restore`, `GET /api/judgment/snapshots/{id}/explain`, `GET /api/personas`;
+- `tests/privacy/test_personas.py`.
+
+Still open for later v0.9.x slices: mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
 
 ---
 

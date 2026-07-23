@@ -11,6 +11,7 @@ from twin.privacy.models import (
     ExportRecord,
     LeakageCanary,
     PermissionGrant,
+    PersonaRecord,
     PolicySetVersion,
     Principal,
     PrivacyDecision,
@@ -29,6 +30,7 @@ from twin.privacy.persistence import (
     deletion_to_row,
     export_to_row,
     grant_to_row,
+    persona_to_row,
     policy_revision_to_row,
     policy_set_to_row,
     policy_to_row,
@@ -42,6 +44,7 @@ from twin.privacy.persistence import (
     row_to_deletion,
     row_to_export,
     row_to_grant,
+    row_to_persona,
     row_to_policy,
     row_to_policy_revision,
     row_to_policy_set,
@@ -348,6 +351,23 @@ class PrivacyStoreMixin:
     def list_vaults(self) -> list[Vault]:
         rows = self._j_fetchall("SELECT * FROM privacy_vaults", ())
         return [row_to_vault(r) for r in rows]
+
+    def insert_persona(self, persona: PersonaRecord) -> str:
+        self._p_insert("privacy_personas", persona_to_row(persona))
+        return persona.id
+
+    def get_persona(self, persona_id: str) -> Optional[PersonaRecord]:
+        row = self._j_fetchone(
+            "SELECT * FROM privacy_personas WHERE id = ?", (persona_id,),
+        )
+        return row_to_persona(row) if row else None
+
+    def list_personas(self, *, active_only: bool = True) -> list[PersonaRecord]:
+        rows = self._j_fetchall("SELECT * FROM privacy_personas", ())
+        out = [row_to_persona(r) for r in rows]
+        if active_only:
+            out = [p for p in out if p.active]
+        return out
 
     def update_vault(self, vault_id: str, **fields: Any) -> Vault:
         vault = self.get_vault(vault_id)

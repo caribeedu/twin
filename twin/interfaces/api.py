@@ -970,6 +970,29 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_judgment_versions():
         return [v.model_dump(mode="json") for v in ws.store.list_judgment_versions()]
 
+    @app.post("/api/judgment/versions/{version_id}/restore")
+    def api_judgment_restore(version_id: str):
+        from ..judgment.versions import restore_version
+        try:
+            ver = restore_version(ws.store, version_id, actor="api")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return ver.model_dump(mode="json")
+
+    @app.get("/api/judgment/snapshots/{snapshot_id}/explain")
+    def api_judgment_snapshot_explain(snapshot_id: str):
+        from ..judgment.explain import explain_judgment_snapshot
+        try:
+            return explain_judgment_snapshot(ws.store, snapshot_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/personas")
+    def api_personas():
+        from ..privacy.identity import ensure_local_identity
+        ensure_local_identity(ws.store)
+        return [p.model_dump(mode="json") for p in ws.store.list_personas()]
+
     @app.get("/api/judgment/proposals")
     def api_judgment_proposals(status: str = "pending"):
         return [p.model_dump(mode="json") for p in ws.store.list_judgment_proposals(status=status)]

@@ -548,6 +548,10 @@ CREATE TABLE IF NOT EXISTS privacy_vaults (
     id TEXT PRIMARY KEY,
     payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS privacy_personas (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS privacy_client_bindings (
     id TEXT PRIMARY KEY,
     client_id TEXT NOT NULL UNIQUE,

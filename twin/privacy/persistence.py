@@ -12,6 +12,7 @@ from .models import (
     ExportRecord,
     LeakageCanary,
     PermissionGrant,
+    PersonaRecord,
     PolicySetVersion,
     Principal,
     PrivacyDecision,
@@ -218,6 +219,14 @@ def vault_to_row(v: Vault) -> dict[str, Any]:
 
 def row_to_vault(row: Any) -> Vault:
     return Vault.model_validate(_loads(row["payload"], {}))
+
+
+def persona_to_row(p: PersonaRecord) -> dict[str, Any]:
+    return {"id": p.id, "payload": _j(p.model_dump(mode="json"))}
+
+
+def row_to_persona(row: Any) -> PersonaRecord:
+    return PersonaRecord.model_validate(_loads(row["payload"], {}))
 
 
 def binding_to_row(b: ClientBinding) -> dict[str, Any]:
