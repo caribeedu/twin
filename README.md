@@ -1652,7 +1652,14 @@ Implemented (v0.9.8 — Data Sovereignty spine):
 - surfaces: `twin backup {create,validate,restore}`, `POST /api/backup`, `POST /api/backup/validate`, `POST /api/restore`;
 - `tests/sovereignty/test_backup.py`.
 
-Still open for later v0.9.x slices: remaining adapter contract rows, explainability/review UX, encrypted/incremental backups, security evals, golden scenarios, re-explanation metrics.
+Implemented (v0.9.9 — Reliability and Evals spine):
+
+- golden work loop (`twin.evals.golden` / `twin eval golden`) — session→candidate→confirm→recall; injection never auto-confirms;
+- fail-closed `v1_completion_matrix()` + `twin eval v1-completion`;
+- adversarial checks: prompt-injection detection + cross-domain recall deny;
+- `evals/v1/cases/golden_work_loop.json`, `tests/evals/test_golden_work_loop.py`, `tests/evals/test_security_adversarial.py`, `tests/evals/test_v1_completion.py`.
+
+Still open for later slices: remaining adapter contract rows, unified explain UX, encrypted/incremental backups, soak/stress harness, re-explanation KPI dashboard, v1.0.0 stabilization docs.
 
 ---
 

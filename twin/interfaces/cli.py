@@ -243,6 +243,18 @@ def cmd_eval(args) -> None:
     elif args.eval_command == "retrieval":
         run = run_retrieval_eval(ws.store, ws.embedder, root / "retrieval", firewall=ws.firewall)
         print(json.dumps({"id": run.id, "summary": run.summary}, indent=2))
+    elif args.eval_command == "golden":
+        from ..evals.golden import run_golden_work_loop
+        report = run_golden_work_loop(ws.store, ws.cfg, ws.embedder)
+        print(json.dumps(report, indent=2, default=str))
+        if not report.get("ok"):
+            raise SystemExit(1)
+    elif args.eval_command == "v1-completion":
+        from ..evals.v1_completion import v1_completion_matrix
+        matrix = v1_completion_matrix()
+        print(json.dumps(matrix, indent=2, default=str))
+        if not matrix.get("ok"):
+            raise SystemExit(1)
     elif args.eval_command == "compare":
         print("compare requires two prior run payloads; use API /api/evals for now")
 
@@ -1480,6 +1492,12 @@ def main(argv: list[str] | None = None) -> None:
     es = p.add_subparsers(dest="eval_command", required=True)
     es.add_parser("extraction").set_defaults(func=cmd_eval)
     es.add_parser("retrieval").set_defaults(func=cmd_eval)
+    es.add_parser("golden", help="run golden cognitive work-loop scenario"
+                  ).set_defaults(func=cmd_eval)
+    es.add_parser(
+        "v1-completion",
+        help="fail-closed v1.0 cognitive OS completion matrix",
+    ).set_defaults(func=cmd_eval)
     es.add_parser("compare").set_defaults(func=cmd_eval)
 
     p = sub.add_parser("source", help="show source calibration")
