@@ -16,6 +16,11 @@ def render_pack(
     explanation: dict[str, Any],
     uncertainty: dict[str, Any],
 ) -> str:
+    # Unclassified / awaiting domain confirmation: default-deny empty pack.
+    # Scope chrome alone would still look like injectable context.
+    if (active.get("domain") or "") == "unclassified" and not sections_text:
+        return ""
+
     header_bits = []
     if active.get("domain"):
         header_bits.append(f"domain={active['domain']}")

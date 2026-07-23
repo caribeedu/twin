@@ -373,7 +373,17 @@ def _apply_allowlists(
         binding.capabilities if binding else None,
     )
 
-    requested_persona = persona or (allowed_personas[0] if allowed_personas else "unknown")
+    # Prefer individual when the caller did not name a persona. sorted()
+    # intersection would otherwise default to "developer" and strip personal
+    # vaults via PersonaRecord — surprising for connector/MCP tools.
+    if persona:
+        requested_persona = persona
+    elif not allowed_personas:
+        requested_persona = "unknown"
+    elif "individual" in allowed_personas or "*" in allowed_personas:
+        requested_persona = "individual"
+    else:
+        requested_persona = allowed_personas[0]
     requested_purpose = purpose or "memory_retrieval"
     requested_audience = audience or "self"
 

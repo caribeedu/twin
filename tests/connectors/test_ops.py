@@ -575,10 +575,17 @@ def test_contract_matrix_is_evidence_based():
     assert fake["items"]["idempotent_ingest"]["evidence"]
     gh = check_adapter_contract("github")
     assert gh["items"]["source_deletion_event"]["status"] == "not_supported"
-    # framework evidence must not auto-pass other adapters
+    assert gh["ok"] is True
+    # GitHub/Slack close their own cells — Fake evidence must not be reused
     slack = check_adapter_contract("slack")
-    assert slack["items"]["partial_batch_invisible"]["status"] == "not_tested"
-    assert slack["ok"] is False
+    assert slack["items"]["partial_batch_invisible"]["status"] == "pass"
+    assert "test_adapter.py" in (
+        slack["items"]["partial_batch_invisible"].get("evidence") or ""
+    )
+    assert slack["ok"] is True
+    assert "fake" not in (
+        slack["items"]["partial_batch_invisible"].get("evidence") or ""
+    )
 
 
 def test_contract_missing_method_fails(monkeypatch):

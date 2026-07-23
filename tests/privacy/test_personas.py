@@ -12,6 +12,34 @@ def test_bootstrap_personas(store):
     assert "vault_personal" in personas["private_individual"].vault_ids
 
 
+def test_implicit_persona_defaults_to_individual(store):
+    """Alphabetically sorted allowlists put developer first; default must not."""
+    from twin.privacy.identity import register_client_binding
+    from twin.privacy.models import Principal, PrincipalType
+    from twin.privacy.yaml_io import bootstrap_policy_set
+
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    store.insert_principal(Principal(
+        id="principal_dual_persona", type=PrincipalType.tool, name="dual",
+        capabilities=["connector:read", "read_context_pack"],
+        allowed_personas=["individual", "developer"],
+        allowed_vaults=["vault_general", "vault_personal"],
+    ))
+    register_client_binding(
+        store, client_id="dual-client", tool_id="dual-client",
+        principal_id="principal_dual_persona", credential="tok-dual",
+        capabilities=["connector:read"],
+        allowed_personas=["individual", "developer"],
+        allowed_vaults=["vault_general", "vault_personal"],
+    )
+    access = resolve_access(
+        store, surface="mcp", client="dual-client", api_token="tok-dual",
+    )
+    assert access.persona == "individual"
+    assert "vault_personal" in (access.metadata.get("allowed_vaults") or [])
+
+
 def test_persona_restricts_domains_never_amplifies(store):
     ensure_local_identity(store)
     # employee persona + finance request → empty intersect → restricted
