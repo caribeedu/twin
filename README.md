@@ -1611,7 +1611,14 @@ Implemented (v0.9.2 — Memory Formation):
 - surfaces: `GET/POST /api/memory/candidates…`, `GET /api/memory/{id}/explain|history`;
 - `tests/memory/test_formation.py`.
 
-Still open for later v0.9.x slices: operational consolidation reports, Judgment/persona maturity, mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+Implemented (v0.9.3 — Consolidation Engine):
+
+- operational stages on the existing cycle: `closed_sessions`, `open_tasks`, `review_prepare`, `change_report` (+ weekly judgment proposals unchanged);
+- auditable `cognitive_change_report` (counts + low-confidence inventory); review backlog stamps `formation_state=awaiting_review`;
+- still never confirms Memory/Judgment; window apply remains idempotent (`duplicated=True` replays the same report);
+- `tests/cognition/test_consolidation_cycle.py` covers operational stages + replay.
+
+Still open for later v0.9.x slices: Judgment/persona maturity, mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
 
 ---
 
