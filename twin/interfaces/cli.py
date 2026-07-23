@@ -973,6 +973,30 @@ def cmd_mcp(args) -> None:
     mcp_main(args.home)
 
 
+def cmd_backup(args) -> None:
+    from pathlib import Path
+
+    from ..sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
+
+    ws = Workspace(args.home)
+    cmd = args.backup_command
+    if cmd == "create":
+        dest = Path(args.dest)
+        db_path = None
+        if hasattr(ws.store, "path"):
+            db_path = Path(ws.store.path)
+        manifest = create_backup(ws.store, dest, copy_sqlite_db=db_path)
+        _print(manifest.model_dump(mode="json"))
+        return
+    if cmd == "validate":
+        _print(validate_backup(args.bundle))
+        return
+    if cmd == "restore":
+        _print(restore_sqlite_backup(args.bundle, args.target_db))
+        return
+    raise SystemExit(f"unknown backup command: {cmd}")
+
+
 def cmd_export(args) -> None:
     from ..judgment.profile import load_profile
 
@@ -1934,6 +1958,19 @@ def main(argv: list[str] | None = None) -> None:
         help="non-zero exit on Twin errors (admin / CI)",
     )
     ni.set_defaults(func=cmd_native)
+
+    p = sub.add_parser("backup", help="sovereignty backup create/validate/restore (v0.9.8)")
+    bs = p.add_subparsers(dest="backup_command", required=True)
+    bc = bs.add_parser("create", help="write NDJSON + optional sqlite copy")
+    bc.add_argument("dest", help="destination directory")
+    bc.set_defaults(func=cmd_backup)
+    bv = bs.add_parser("validate", help="verify manifest checksums")
+    bv.add_argument("bundle", help="backup bundle directory")
+    bv.set_defaults(func=cmd_backup)
+    br = bs.add_parser("restore", help="restore store.sqlite to isolated path")
+    br.add_argument("bundle")
+    br.add_argument("target_db")
+    br.set_defaults(func=cmd_backup)
 
     sub.add_parser("export", help="export everything as JSON").set_defaults(func=cmd_export)
 

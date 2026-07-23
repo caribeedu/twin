@@ -612,6 +612,44 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "dead_letters_open": len(ws.store.list_runtime_dead_letters(limit=500)),
         }
 
+    class BackupCreateRequest(BaseModel):
+        dest: str
+
+    class BackupValidateRequest(BaseModel):
+        bundle: str
+
+    class BackupRestoreRequest(BaseModel):
+        bundle: str
+        target_db: str
+
+    @app.post("/api/backup")
+    def api_backup_create(req: BackupCreateRequest):
+        from pathlib import Path
+        from ..sovereignty.backup import create_backup
+        db_path = Path(ws.store.path) if hasattr(ws.store, "path") else None
+        manifest = create_backup(ws.store, req.dest, copy_sqlite_db=db_path)
+        return manifest.model_dump(mode="json")
+
+    @app.post("/api/backup/validate")
+    def api_backup_validate(req: BackupValidateRequest):
+        from ..sovereignty.backup import validate_backup
+        return validate_backup(req.bundle)
+
+    @app.post("/api/restore/validate")
+    def api_restore_validate(req: BackupValidateRequest):
+        from ..sovereignty.backup import validate_backup
+        return validate_backup(req.bundle)
+
+    @app.post("/api/restore")
+    def api_restore(req: BackupRestoreRequest):
+        from ..sovereignty.backup import restore_sqlite_backup
+        return restore_sqlite_backup(req.bundle, req.target_db)
+
+    @app.get("/api/health/cognition")
+    def api_health_cognition():
+        from ..sovereignty.integrity import run_integrity_checks
+        return run_integrity_checks(ws.store)
+
     class SessionEventRequest(BaseModel):
         text: str = ""
         kind: str = "delta"

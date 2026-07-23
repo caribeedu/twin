@@ -1638,7 +1638,14 @@ Implemented (v0.9.6 — Attention + MCP runtime surfaces):
 - surfaces: `GET /api/sessions/{id}/attention`, `POST /api/attention/{id}/feedback`, MCP `get_context_pack`, `append_session_delta`, `get_attention`, `provide_feedback`, `capabilities`, `health`;
 - `tests/cognition/test_attention.py`.
 
-Still open for later v0.9.x slices: production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+Implemented (v0.9.8 — Data Sovereignty spine):
+
+- `twin/sovereignty/` — NDJSON export bundle + manifest checksums; `create_backup` copies SQLite; `validate_backup` / `restore_sqlite_backup` to isolated path;
+- integrity checks (confirmed-without-evidence, orphan evidence) via runtime `integrity_check` + `GET /api/health/cognition`;
+- surfaces: `twin backup {create,validate,restore}`, `POST /api/backup`, `POST /api/backup/validate`, `POST /api/restore`;
+- `tests/sovereignty/test_backup.py`.
+
+Still open for later v0.9.x slices: production connectors, explainability/review UX, encrypted/incremental backups, security evals, re-explanation metrics.
 
 ---
 

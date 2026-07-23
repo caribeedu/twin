@@ -133,9 +133,9 @@ def handle_reembed_memory(
 def handle_integrity_check(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    depths = store.runtime_queue_depth() if hasattr(store, "runtime_queue_depth") else {}
-    mem_n = len(store.list_memories(limit=1))
-    return {"queue": depths, "has_memories": mem_n > 0, "ok": True}
+    from twin.sovereignty.integrity import run_integrity_checks
+    report = run_integrity_checks(store)
+    return report
 
 
 def handle_attention_evaluate(
