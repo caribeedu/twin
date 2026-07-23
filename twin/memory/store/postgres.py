@@ -32,6 +32,7 @@ from .privacy_mixin import PrivacyStoreMixin
 from .workspace_ops_mixin import WORKSPACE_OPS_SCHEMA, WorkspaceOpsStoreMixin
 from twin.runtime.store_mixin import RUNTIME_SCHEMA, RuntimeStoreMixin
 from .session_ops_mixin import SESSION_OPS_SCHEMA, SessionOpsStoreMixin
+from .attention_ops_mixin import ATTENTION_OPS_SCHEMA, AttentionOpsStoreMixin
 
 _SCHEMA_BASE = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -717,7 +718,7 @@ def _vec_literal(vector: list[float]) -> str:
 class PostgresStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
     HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
-    RuntimeStoreMixin, SessionOpsStoreMixin, MemoryStore,
+    RuntimeStoreMixin, SessionOpsStoreMixin, AttentionOpsStoreMixin, MemoryStore,
 ):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
@@ -742,6 +743,7 @@ class PostgresStore(
             cur.execute(WORKSPACE_OPS_SCHEMA)
             cur.execute(RUNTIME_SCHEMA)
             cur.execute(SESSION_OPS_SCHEMA)
+            cur.execute(ATTENTION_OPS_SCHEMA)
             for stmt in (
                 "ALTER TABLE workspace_ticks ADD COLUMN IF NOT EXISTS "
                 "error_stage TEXT NOT NULL DEFAULT ''",

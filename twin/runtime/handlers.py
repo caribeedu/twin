@@ -138,6 +138,25 @@ def handle_integrity_check(
     return {"queue": depths, "has_memories": mem_n > 0, "ok": True}
 
 
+def handle_attention_evaluate(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    from twin.cognition.attention import evaluate_attention
+
+    p = job.payload or {}
+    session_id = p.get("session_id") or ""
+    if not session_id:
+        raise HandlerError("missing session_id", error_class=ErrorClass.permanent, stage="validate")
+    outcomes = evaluate_attention(
+        store, cfg, embedder, session_id, text=p.get("text") or None,
+    )
+    return {
+        "session_id": session_id,
+        "outcomes": [o.to_dict() for o in outcomes],
+        "emitted": sum(1 for o in outcomes if o.kind.value != "silence"),
+    }
+
+
 def handle_connector_reconcile(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
@@ -151,6 +170,7 @@ def handle_connector_reconcile(
 HANDLERS: dict[JobKind, Handler] = {
     JobKind.interpret_percept: handle_interpret_percept,
     JobKind.workspace_tick: handle_workspace_tick,
+    JobKind.attention_evaluate: handle_attention_evaluate,
     JobKind.consolidate_daily: handle_consolidate_daily,
     JobKind.consolidate_weekly: handle_consolidate_weekly,
     JobKind.reembed_memory: handle_reembed_memory,

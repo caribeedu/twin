@@ -19,6 +19,7 @@ from twin.clock import now_iso
 class JobKind(str, Enum):
     interpret_percept = "interpret_percept"
     workspace_tick = "workspace_tick"
+    attention_evaluate = "attention_evaluate"
     consolidate_daily = "consolidate_daily"
     consolidate_weekly = "consolidate_weekly"
     reembed_memory = "reembed_memory"

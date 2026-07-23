@@ -648,6 +648,31 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
         return ev.model_dump(mode="json")
 
+    @app.get("/api/sessions/{session_id}/attention")
+    def api_session_attention(session_id: str, evaluate: bool = False):
+        from ..cognition.attention import evaluate_attention
+        if evaluate:
+            outcomes = evaluate_attention(
+                ws.store, ws.cfg, ws.embedder, session_id,
+            )
+            return {"session_id": session_id, "outcomes": [o.to_dict() for o in outcomes]}
+        rows = ws.store.list_attention_emissions(session_id, limit=50)
+        return {
+            "session_id": session_id,
+            "outcomes": [o.to_dict() for o in rows],
+        }
+
+    class AttentionFeedbackRequest(BaseModel):
+        verdict: str = Field(min_length=1, max_length=40)
+
+    @app.post("/api/attention/{emission_id}/feedback")
+    def api_attention_feedback(emission_id: str, req: AttentionFeedbackRequest):
+        from ..cognition.attention import feedback_attention
+        em = feedback_attention(ws.store, emission_id, verdict=req.verdict)
+        if em is None:
+            raise HTTPException(404, "emission not found")
+        return em.to_dict()
+
     @app.post("/api/sessions/{session_id}/checkpoint")
     def api_session_checkpoint(session_id: str, req: SessionCheckpointRequest):
         from ..cognition.session_lifecycle import checkpoint_session

@@ -1545,9 +1545,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     re = rs.add_parser("enqueue", help="enqueue a job")
     re.add_argument("kind", choices=[
-        "interpret_percept", "workspace_tick", "consolidate_daily",
-        "consolidate_weekly", "reembed_memory", "integrity_check",
-        "connector_reconcile",
+        "interpret_percept", "workspace_tick", "attention_evaluate",
+        "consolidate_daily", "consolidate_weekly", "reembed_memory",
+        "integrity_check", "connector_reconcile",
     ])
     re.add_argument("--payload-json", default=None)
     re.add_argument("--idempotency-key", default="")

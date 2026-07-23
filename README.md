@@ -1631,7 +1631,14 @@ Implemented (v0.9.5 — Mature Context Packs):
 - `POST /api/context_pack` accepts `mode`, `session_id`, `request_scope`;
 - `tests/cognition/test_context_pack.py` covers modes + injection exclusion.
 
-Still open for later v0.9.x slices: continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+Implemented (v0.9.6 — Attention + MCP runtime surfaces):
+
+- `twin/cognition/attention.py` — working-memory window, expected_value policy, typed outcomes, cooldown/cap/dedupe/suppress; default silence;
+- `attention_emissions` ledger; `append_session_delta` enqueues `attention_evaluate` runtime job;
+- surfaces: `GET /api/sessions/{id}/attention`, `POST /api/attention/{id}/feedback`, MCP `get_context_pack`, `append_session_delta`, `get_attention`, `provide_feedback`, `capabilities`, `health`;
+- `tests/cognition/test_attention.py`.
+
+Still open for later v0.9.x slices: production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
 
 ---
 

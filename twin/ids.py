@@ -131,3 +131,7 @@ def session_checkpoint_id() -> str:
 
 def session_closure_id() -> str:
     return new_id("scls")
+
+
+def attention_emission_id() -> str:
+    return new_id("attn")

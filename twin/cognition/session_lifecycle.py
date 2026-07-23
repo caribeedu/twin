@@ -162,6 +162,13 @@ def append_session_delta(
     store.insert_session_event(event)
     session.last_activity_at = now_iso()
     store.update_session(session)
+    # Continuous attention: enqueue durable evaluate job (not an agent).
+    if text and hasattr(store, "insert_runtime_job"):
+        try:
+            from twin.cognition.attention import maybe_enqueue_attention_job
+            maybe_enqueue_attention_job(store, session_id, text=text)
+        except Exception:
+            pass
     return event
 
 
