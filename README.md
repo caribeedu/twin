@@ -1624,7 +1624,14 @@ Implemented (v0.9.4 — Judgment and Personas):
 - `POST /api/judgment/versions/{id}/restore`, `GET /api/judgment/snapshots/{id}/explain`, `GET /api/personas`;
 - `tests/privacy/test_personas.py`.
 
-Still open for later v0.9.x slices: mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+Implemented (v0.9.5 — Mature Context Packs):
+
+- structured pack metadata: `active`, `uncertainty`, `provenance_summary`, `token_budget`, `blocked_count`, `explanation`;
+- modes: `compact` / `explainable` / `references_only`; cognitive-act labels; dedupe + type diversity; pack-time prompt-injection screen;
+- `POST /api/context_pack` accepts `mode`, `session_id`, `request_scope`;
+- `tests/cognition/test_context_pack.py` covers modes + injection exclusion.
+
+Still open for later v0.9.x slices: continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
 
 ---
 

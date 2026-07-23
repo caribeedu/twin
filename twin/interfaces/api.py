@@ -98,6 +98,9 @@ class PackRequest(BaseModel):
     purpose: str = "memory_retrieval"
     audience: str = "self"
     api_token: Optional[str] = None
+    mode: Literal["compact", "explainable", "references_only"] = "compact"
+    session_id: Optional[str] = None
+    request_scope: Optional[str] = None
 
     _domain = field_validator("target_domain")(_validate_domain)
 
@@ -362,8 +365,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   task_profile=req.task_profile.value,
                                   project_id=_resolve_project_id(req.project),
                                   firewall=ws.firewall,
-                                  access=access)
-        return pack.__dict__
+                                  access=access,
+                                  session_id=req.session_id,
+                                  mode=req.mode,
+                                  request_scope=req.request_scope)
+        return pack.to_dict()
 
     # -- Cognitive sessions ------------------------------------------------
 
