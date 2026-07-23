@@ -1,12 +1,13 @@
-"""Daily / weekly consolidation cycles (v0.8).
+"""Daily / weekly consolidation cycles (v0.8 spine → v0.9.3 operational).
 
 Distinct from session-close consolidation (``sessions._consolidate``): these
 cycles run on a logical window over the store — quality analysis, safe
-automation, temporal belief/goal refresh, and (weekly) optional judgment
-proposals. They never confirm Memory or Judgment.
+automation, temporal belief/goal refresh, closed-session inventory, open
+tasks, review backlog prep, cognitive change report, and (weekly) optional
+judgment *proposals*. They never confirm Memory or Judgment.
 
-Apply runs are idempotent per ``(kind, window_start, window_end)``. This is a
-synchronous maintenance spine, not a continuous background worker.
+Apply runs are idempotent per ``(kind, window_start, window_end)``. The durable
+runtime may enqueue these as jobs; this module remains the deterministic core.
 """
 
 from __future__ import annotations
@@ -46,6 +47,11 @@ class ConsolidationCycleResult:
     temporal_updates: list[dict[str, Any]] = field(default_factory=list)
     goals_observed: list[dict[str, Any]] = field(default_factory=list)
     judgment_proposal_ids: list[str] = field(default_factory=list)
+    closed_sessions: list[dict[str, Any]] = field(default_factory=list)
+    open_tasks: list[dict[str, Any]] = field(default_factory=list)
+    review_prepared: list[dict[str, Any]] = field(default_factory=list)
+    candidate_stats: dict[str, Any] = field(default_factory=dict)
+    cognitive_change_report: dict[str, Any] = field(default_factory=dict)
     truncated: bool = False
     notes: list[str] = field(default_factory=list)
     error: str = ""
@@ -187,6 +193,142 @@ def _confirmed_snapshot(store: MemoryStore) -> tuple[set[str], set[str]]:
             if status in ("active", "confirmed", "accepted"):
                 judgments.add(item.id)
     return mems, judgments
+
+
+def inventory_closed_sessions(
+    store: MemoryStore, *, limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Summarize completed/abandoned sessions for the cycle report (no confirm)."""
+    out: list[dict[str, Any]] = []
+    if not hasattr(store, "list_sessions"):
+        return out
+    for status in ("completed", "abandoned"):
+        for ses in store.list_sessions(status=status, limit=limit):
+            closure = None
+            if hasattr(store, "get_session_closure"):
+                closure = store.get_session_closure(ses.id)
+            out.append({
+                "session_id": ses.id,
+                "status": status,
+                "domain": ses.domain,
+                "project_id": ses.project_id,
+                "created_memory_ids": list(ses.created_memory_ids or []),
+                "has_closure": closure is not None,
+                "consolidation_status": (
+                    ses.consolidation_status.value
+                    if hasattr(ses.consolidation_status, "value")
+                    else str(ses.consolidation_status)
+                ),
+            })
+    return out
+
+
+def inventory_open_tasks(
+    store: MemoryStore, *, limit: int = 200,
+) -> list[dict[str, Any]]:
+    tasks = store.list_memories(type_="task", status="candidate", limit=limit)
+    tasks += store.list_memories(type_="task", status="confirmed", limit=limit)
+    out: list[dict[str, Any]] = []
+    for mem in tasks:
+        until = _parse_iso(mem.valid_until)
+        out.append({
+            "memory_id": mem.id,
+            "title": mem.title,
+            "status": mem.status.value if hasattr(mem.status, "value") else str(mem.status),
+            "needs_review": mem.needs_review,
+            "expired": bool(until and until < datetime.now(timezone.utc)),
+        })
+    return out[:limit]
+
+
+def prepare_review_backlog(
+    store: MemoryStore, *, limit: int = 100, dry_run: bool = False,
+) -> list[dict[str, Any]]:
+    """List candidates awaiting review; optionally stamp formation_state."""
+    from ..memory.formation import FormationState, as_candidate
+
+    rows = store.list_memories(status="candidate", needs_review=True, limit=limit)
+    if len(rows) < limit:
+        extra = store.list_memories(status="candidate", limit=limit)
+        seen = {r.id for r in rows}
+        for m in extra:
+            if m.id not in seen:
+                rows.append(m)
+            if len(rows) >= limit:
+                break
+    prepared: list[dict[str, Any]] = []
+    for mem in rows:
+        cand = as_candidate(store, mem)
+        item = {
+            "memory_id": mem.id,
+            "formation_state": cand.formation_state.value,
+            "review_reason": mem.review_reason or "",
+            "type": mem.type.value if hasattr(mem.type, "value") else str(mem.type),
+            "priority": mem.review_priority,
+        }
+        prepared.append(item)
+        if dry_run:
+            continue
+        if mem.needs_review or cand.formation_state in (
+            FormationState.candidate, FormationState.awaiting_review,
+        ):
+            payload = dict(mem.payload or {})
+            if payload.get("formation_state") != FormationState.awaiting_review.value:
+                if mem.needs_review:
+                    payload["formation_state"] = FormationState.awaiting_review.value
+                    store.update_memory(mem.id, payload=payload)
+    return prepared
+
+
+def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[str, Any]:
+    from ..memory.formation import derive_formation_state
+
+    counts: dict[str, int] = {}
+    corroborating = 0
+    for mem in store.list_memories(status="candidate", limit=limit):
+        state = derive_formation_state(mem).value
+        counts[state] = counts.get(state, 0) + 1
+        corroborating += int((mem.payload or {}).get("corroboration_count") or 0)
+    return {
+        "by_state": counts,
+        "total_candidates": sum(counts.values()),
+        "corroboration_events": corroborating,
+    }
+
+
+def build_cognitive_change_report(
+    store: MemoryStore,
+    *,
+    kind: str,
+    temporal_updates: list[dict[str, Any]],
+    contradiction_ids: list[str],
+    open_tasks: list[dict[str, Any]],
+    closed_sessions: list[dict[str, Any]],
+    judgment_proposal_ids: list[str],
+) -> dict[str, Any]:
+    """Weekly (or daily) auditable summary — never mutates Memory/Judgment."""
+    superseded = store.list_memories(status="deprecated", limit=100)
+    low_conf = [
+        m for m in store.list_memories(status="confirmed", limit=200)
+        if m.confidence < 0.55
+    ]
+    return {
+        "kind": kind,
+        "closed_sessions": len(closed_sessions),
+        "open_tasks": len(open_tasks),
+        "temporal_flags": len(temporal_updates),
+        "contradictions": len(contradiction_ids),
+        "superseded_or_deprecated": len(superseded),
+        "low_confidence_confirmed": [
+            {"memory_id": m.id, "confidence": m.confidence, "title": m.title}
+            for m in low_conf[:50]
+        ],
+        "judgment_proposals": list(judgment_proposal_ids),
+        "notes": [
+            "report only — no Memory/Judgment confirmation",
+            "correlation is not confirmation",
+        ],
+    }
 
 
 def run_consolidation_cycle(
@@ -436,6 +578,21 @@ def run_consolidation_cycle(
             result.truncated = True
             result.notes.append("belief temporal refresh page truncated")
 
+        stage = "closed_sessions"
+        result.stages.append("closed_sessions")
+        result.closed_sessions = inventory_closed_sessions(store)
+
+        stage = "open_tasks"
+        result.stages.append("open_tasks")
+        result.open_tasks = inventory_open_tasks(store)
+
+        stage = "review_prepare"
+        result.stages.append("review_prepare")
+        result.review_prepared = prepare_review_backlog(
+            store, limit=min(100, analyze_limit), dry_run=dry_run,
+        )
+        result.candidate_stats = candidate_formation_stats(store)
+
         if propose_judgment:
             stage = "judgment_proposals"
             result.stages.append("judgment_proposals")
@@ -460,6 +617,18 @@ def run_consolidation_cycle(
                         if hasattr(store, "update_judgment_proposal"):
                             store.update_judgment_proposal(p.id, metadata=meta)
                         result.judgment_proposal_ids.append(p.id)
+
+        stage = "change_report"
+        result.stages.append("change_report")
+        result.cognitive_change_report = build_cognitive_change_report(
+            store,
+            kind=kind,
+            temporal_updates=result.temporal_updates,
+            contradiction_ids=result.contradiction_memory_ids,
+            open_tasks=result.open_tasks,
+            closed_sessions=result.closed_sessions,
+            judgment_proposal_ids=result.judgment_proposal_ids,
+        )
 
         stage = "invariant"
         result.stages.append("done")

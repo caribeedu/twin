@@ -231,3 +231,41 @@ def test_consolidation_retry_can_complete_after_transient_failure(store, cfg, em
     row = store.get_consolidation_run(ok.run_id)
     assert row.status == "completed"
     assert row.error == ""
+
+
+def test_operational_stages_and_replay_report(store, cfg, embedder):
+    from twin.cognition.sessions import start_session, complete_session
+
+    started = start_session(store, cfg, embedder, "consolidate me", client="cli")
+    complete_session(store, cfg, embedder, started.session.id, summary="shipped runtime")
+    cand = MemoryItem(
+        id=ids.memory_id(), type="task", title="Open task",
+        summary="Still pending work",
+        domain="technical", confidence=0.7, status="candidate",
+        needs_review=True, review_reason="needs human",
+    )
+    store.insert_memory(cand)
+
+    as_of = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+    first = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    assert "closed_sessions" in first.stages
+    assert "open_tasks" in first.stages
+    assert "review_prepare" in first.stages
+    assert "change_report" in first.stages
+    assert any(s["session_id"] == started.session.id for s in first.closed_sessions)
+    assert any(t["memory_id"] == cand.id for t in first.open_tasks)
+    assert first.cognitive_change_report.get("kind") == "daily"
+    assert "no Memory/Judgment confirmation" in " ".join(
+        first.cognitive_change_report.get("notes") or [],
+    )
+    # review stamp
+    assert (store.get_memory(cand.id).payload or {}).get("formation_state") == "awaiting_review"
+
+    second = run_consolidation_cycle(
+        store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    assert second.duplicated is True
+    assert second.cognitive_change_report == first.cognitive_change_report
+    assert second.closed_sessions == first.closed_sessions

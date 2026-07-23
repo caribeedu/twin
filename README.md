@@ -1585,6 +1585,88 @@ A trustworthy, daily-usable version of the infrastructure with:
 - measurable reduction in context re-explanation;
 - enough operational reliability to act as the user's persistent cognitive substrate.
 
+Implemented (v0.9.0 — Durable Cognitive Runtime):
+
+- **`twin-runtime` / `twin runtime start`** — durable background process with local scheduler + worker pool; not an autonomous agent (handlers call the same cognitive core as CLI/MCP/API);
+- durable job queue (`runtime_jobs`) with priority, vault isolation, causal parent, idempotency keys, `not_before` backoff;
+- exclusive CAS claim + worker leases + heartbeat + dead-worker reclaim (expired `running` leases);
+- retries with backoff, dead-letter queue, cancel, explicit retry; model-unavailable failures never dead-letter model-gated kinds;
+- initial job kinds: `interpret_percept`, `workspace_tick`, `consolidate_daily` / `consolidate_weekly`, `reembed_memory`, `integrity_check`, `connector_reconcile`;
+- surfaces: `twin runtime {start,status,schedule,enqueue,job,retry,cancel}`, `POST/GET /api/runtime/jobs…`, `GET /api/runtime/health`, entrypoint `twin-runtime`;
+- `tests/runtime/test_runtime.py` — exclusive claim, lease recovery, idempotent enqueue/schedule, vault isolation, DLQ, worker execution.
+
+Implemented (v0.9.1 — Cognitive Sessions):
+
+- lifecycle statuses: `active` / `paused` / `completed` / `abandoned` / `archived`;
+- ordered `session_events` (deltas) with gap detection; checkpoints; structured `SessionClosure` (never auto-confirms Memory/Judgment);
+- pause / resume / reopen / archive; continuity via `external_session_id` on events across tools;
+- surfaces: `POST /api/sessions/{id}/{events,checkpoint,close,reopen,pause,resume}`, `GET …/closure`;
+- `tests/cognition/test_session_lifecycle.py`.
+
+Implemented (v0.9.2 — Memory Formation):
+
+- `twin/memory/formation.py` — deterministic `formation_identity` / `mem_f…` ids; propose-or-corroborate; formation states (`candidate` → `corroborating` / `conflicting` / `awaiting_review` → `confirmed` / `rejected` / …); per-type policy (belief/procedure always review; never auto-confirm);
+- confirm requires evidence; reject requires reason; restore rejected → re-review; auditable `MemoryOperation`s; explain view;
+- pipeline inserts via `propose_or_corroborate` (idempotent on identity);
+- surfaces: `GET/POST /api/memory/candidates…`, `GET /api/memory/{id}/explain|history`;
+- `tests/memory/test_formation.py`.
+
+Implemented (v0.9.3 — Consolidation Engine):
+
+- operational stages on the existing cycle: `closed_sessions`, `open_tasks`, `review_prepare`, `change_report` (+ weekly judgment proposals unchanged);
+- auditable `cognitive_change_report` (counts + low-confidence inventory); review backlog stamps `formation_state=awaiting_review`;
+- still never confirms Memory/Judgment; window apply remains idempotent (`duplicated=True` replays the same report);
+- `tests/cognition/test_consolidation_cycle.py` covers operational stages + replay.
+
+Implemented (v0.9.4 — Judgment and Personas):
+
+- durable `PersonaRecord` (`privacy_personas`) bootstrapped with configurable starter personas; `resolve_access` intersects persona domains/vaults/capabilities with principal∩binding (never amplifies);
+- `POST /api/judgment/versions/{id}/restore`, `GET /api/judgment/snapshots/{id}/explain`, `GET /api/personas`;
+- `tests/privacy/test_personas.py`.
+
+Implemented (v0.9.5 — Mature Context Packs):
+
+- structured pack metadata: `active`, `uncertainty`, `provenance_summary`, `token_budget`, `blocked_count`, `explanation`;
+- modes: `compact` / `explainable` / `references_only`; cognitive-act labels; dedupe + type diversity; pack-time prompt-injection screen;
+- `POST /api/context_pack` accepts `mode`, `session_id`, `request_scope`;
+- `tests/cognition/test_context_pack.py` covers modes + injection exclusion.
+
+Implemented (v0.9.6 — Attention + MCP runtime surfaces):
+
+- `twin/cognition/attention.py` — working-memory window, expected_value policy, typed outcomes, cooldown/cap/dedupe/suppress; default silence;
+- `attention_emissions` ledger; `append_session_delta` enqueues `attention_evaluate` runtime job;
+- surfaces: `GET /api/sessions/{id}/attention`, `POST /api/attention/{id}/feedback`, MCP `get_context_pack`, `append_session_delta`, `get_attention`, `provide_feedback`, `capabilities`, `health`;
+- `tests/cognition/test_attention.py`.
+
+Implemented (v0.9.7 — Professional Connectors production-ready):
+
+- GitHub + Slack closed on §88 contract (collision DLQ, partial batch, quarantine, unauthorized, unknown schema);
+- `production_ready_adapters()` + `twin connector production-ready` attest ≥2 real adapters (Fake never counts);
+- runtime `connector_reconcile` runs due syncs via `sync_due` (recovery path, not a stub inventory);
+- `tests/connectors/test_production_ready.py` + adapter contract gap tests.
+
+Implemented (v0.9.8 — Data Sovereignty spine):
+
+- `twin/sovereignty/` — NDJSON export bundle + manifest checksums; `create_backup` copies SQLite; `validate_backup` / `restore_sqlite_backup` to isolated path;
+- integrity checks (confirmed-without-evidence, orphan evidence) via runtime `integrity_check` + `GET /api/health/cognition`;
+- surfaces: `twin backup {create,validate,restore}`, `POST /api/backup`, `POST /api/backup/validate`, `POST /api/restore`;
+- `tests/sovereignty/test_backup.py`.
+
+Implemented (v0.9.9 — Reliability and Evals spine):
+
+- golden work loop (`twin.evals.golden` / `twin eval golden`) — session→candidate→confirm→recall; injection never auto-confirms;
+- fail-closed `v1_completion_matrix()` + `twin eval v1-completion`;
+- adversarial checks: prompt-injection detection + cross-domain recall deny;
+- `evals/v1/cases/golden_work_loop.json`, `tests/evals/test_golden_work_loop.py`, `tests/evals/test_security_adversarial.py`, `tests/evals/test_v1_completion.py`.
+
+Implemented (v1.0.0 — Personal Cognitive OS release):
+
+- package/`__version__` → `1.0.0`;
+- [docs/threat-model.md](docs/threat-model.md), [docs/runbook.md](docs/runbook.md), [docs/v1-release.md](docs/v1-release.md);
+- release gate: `twin eval v1-completion` + `twin connector production-ready` + golden work loop.
+
+Follow-on (not blocking v1.0.0 bar above): remaining adapter contract rows, unified explain UX, encrypted/incremental backups, soak/stress harness, re-explanation KPI dashboard.
+
 ---
 
 ## 24. Future major versions

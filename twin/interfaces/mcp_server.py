@@ -167,6 +167,32 @@ def create_server(home: Optional[str] = None):
         return found.id if found else None
 
     @mcp.tool()
+    def get_context_pack(
+        query: str,
+        target_domain: str = "technical",
+        max_tokens: int = 1200,
+        include_judgment: bool = True,
+        include_candidates: bool = False,
+        task_profile: str = "general",
+        project: Optional[str] = None,
+        client: Optional[str] = None,
+        client_token: Optional[str] = None,
+        persona: str = "individual",
+        purpose: str = "memory_retrieval",
+        audience: str = "self",
+        mode: str = "compact",
+        session_id: Optional[str] = None,
+    ) -> str:
+        """Alias of memory_safe_context_pack with mature pack modes (v0.9.5+)."""
+        return memory_safe_context_pack(
+            query=query, target_domain=target_domain, max_tokens=max_tokens,
+            include_judgment=include_judgment, include_candidates=include_candidates,
+            task_profile=task_profile, project=project, client=client,
+            client_token=client_token, persona=persona, purpose=purpose,
+            audience=audience, mode=mode, session_id=session_id,
+        )
+
+    @mcp.tool()
     def memory_safe_context_pack(
         query: str,
         target_domain: str = "technical",
@@ -180,6 +206,8 @@ def create_server(home: Optional[str] = None):
         persona: str = "individual",
         purpose: str = "memory_retrieval",
         audience: str = "self",
+        mode: str = "compact",
+        session_id: Optional[str] = None,
     ) -> str:
         """Returns a compact, privacy-filtered context pack (judgment profile
         + relevant memories, organized in sections: decisions, constraints,
@@ -202,6 +230,8 @@ def create_server(home: Optional[str] = None):
             requested_domains=[target_domain],
             api_token=client_token,
         )
+        if mode not in ("compact", "explainable", "references_only"):
+            mode = "compact"
         pack = build_context_pack(
             ws.store, ws.cfg, ws.embedder, query,
             target_domain=target_domain, max_tokens=max_tokens,
@@ -211,18 +241,26 @@ def create_server(home: Optional[str] = None):
             project_id=_resolve_project_id(project),
             firewall=ws.firewall,
             access=access,
+            session_id=session_id,
+            mode=mode,  # type: ignore[arg-type]
         )
         return json.dumps({
             "context_pack": pack.context_pack,
             "sources": pack.sources,
             "confidence": pack.confidence,
             "blocked": pack.blocked,
+            "blocked_count": pack.blocked_count,
             "task_profile": pack.task_profile,
             "project_id": pack.project_id,
             "privacy_decision_id": pack.privacy_decision_id,
             "privacy_meta": pack.privacy_meta,
             "evidence_included": pack.evidence_included,
             "evidence_omitted_due_to_budget": pack.evidence_omitted_due_to_budget,
+            "mode": pack.mode,
+            "active": pack.active,
+            "provenance_summary": pack.provenance_summary,
+            "token_budget": pack.token_budget,
+            "explanation": pack.explanation,
         }, ensure_ascii=False)
 
     # -- Cognitive session lifecycle --------------------------------------
@@ -312,6 +350,107 @@ def create_server(home: Optional[str] = None):
         return json.dumps({
             "session_id": session.id,
             "artifacts": len(session.artifacts),
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def append_session_delta(
+        session_id: str,
+        text: str,
+        sequence: Optional[int] = None,
+        external_session_id: str = "",
+        client: str = "mcp",
+    ) -> str:
+        """Append an ordered session delta (enqueues attention evaluate job)."""
+        from ..cognition.session_lifecycle import append_session_delta as _append
+        try:
+            ev = _append(
+                ws.store, session_id, text=text, sequence=sequence,
+                external_session_id=external_session_id, client=client,
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        return json.dumps(ev.model_dump(mode="json"), ensure_ascii=False)
+
+    @mcp.tool()
+    def get_active_session(session_id: str) -> str:
+        """Fetch a cognitive session by id."""
+        session = ws.store.get_session(session_id)
+        if session is None:
+            return json.dumps({"error": "not found"})
+        return json.dumps(_session_dict(session), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def get_attention(session_id: str, evaluate: bool = False) -> str:
+        """List or re-evaluate attention outcomes for a session (prefer silence)."""
+        from ..cognition.attention import evaluate_attention
+        if evaluate:
+            outcomes = evaluate_attention(
+                ws.store, ws.cfg, ws.embedder, session_id,
+            )
+            return json.dumps({
+                "session_id": session_id,
+                "outcomes": [o.to_dict() for o in outcomes],
+            }, ensure_ascii=False)
+        rows = ws.store.list_attention_emissions(session_id, limit=50)
+        return json.dumps({
+            "session_id": session_id,
+            "outcomes": [o.to_dict() for o in rows],
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def provide_feedback(
+        emission_id: str = "",
+        session_id: str = "",
+        verdict: str = "useful",
+        memory_id: Optional[str] = None,
+        note: str = "",
+    ) -> str:
+        """Feedback on attention emission or session usefulness."""
+        if emission_id:
+            from ..cognition.attention import feedback_attention
+            em = feedback_attention(ws.store, emission_id, verdict=verdict)
+            if em is None:
+                return json.dumps({"error": "emission not found"})
+            return json.dumps(em.to_dict(), ensure_ascii=False)
+        if session_id:
+            try:
+                session = record_feedback(
+                    ws.store, session_id, verdict,
+                    memory_id=memory_id, note=note,
+                )
+            except ValueError as exc:
+                return json.dumps({"error": str(exc)})
+            return json.dumps(_session_dict(session), ensure_ascii=False, default=str)
+        return json.dumps({"error": "emission_id or session_id required"})
+
+    @mcp.tool()
+    def capabilities() -> str:
+        """Negotiable MCP capability list for Twin cognitive core."""
+        return json.dumps({
+            "schema_version": "1.0",
+            "tools": [
+                "get_context_pack", "memory_safe_context_pack", "memory_observe",
+                "get_active_session", "get_attention", "append_session_delta",
+                "session_start", "session_complete", "provide_feedback",
+                "workspace_tick", "consolidate_cycle", "health", "capabilities",
+            ],
+            "attention": True,
+            "runtime_jobs": True,
+            "formation": True,
+            "personas": True,
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def health() -> str:
+        """Runtime + store health snapshot."""
+        queue = {}
+        if hasattr(ws.store, "runtime_queue_depth"):
+            queue = ws.store.runtime_queue_depth()
+        return json.dumps({
+            "ok": True,
+            "queue": queue,
+            "extractor": ws.cfg.extractor,
+            "embedder": ws.cfg.embedder,
         }, ensure_ascii=False)
 
     @mcp.tool()

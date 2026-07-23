@@ -24,6 +24,7 @@ from ..memory.store.base import MemoryStore
 from .models import (
     AccessRequest,
     ClientBinding,
+    PersonaRecord,
     Principal,
     PrincipalType,
     ToolIdentity,
@@ -37,11 +38,61 @@ EXTERNAL_SURFACES = frozenset({"mcp", "http", "api", "unknown", ""})
 
 # No wildcards — unknown persona on a vault is deny.
 DEFAULT_VAULT_PERSONAS: dict[str, set[str]] = {
-    "vault_general": {"individual", "developer", "employee", "assistant_user"},
-    "vault_work": {"employee", "developer"},
-    "vault_personal": {"individual", "assistant_user"},
-    "vault_restricted": {"individual"},
+    "vault_general": {"individual", "developer", "employee", "assistant_user",
+                      "tech_lead", "personal_project_builder"},
+    "vault_work": {"employee", "developer", "tech_lead"},
+    "vault_personal": {"individual", "assistant_user", "private_individual",
+                       "personal_project_builder"},
+    "vault_restricted": {"individual", "private_individual"},
 }
+
+
+def default_persona_records() -> list[PersonaRecord]:
+    """Configurable starter personas — scope authority, not labels."""
+    return [
+        PersonaRecord(
+            id="global", name="Global",
+            domains=["*"], vault_ids=["vault_general"],
+        ),
+        PersonaRecord(
+            id="individual", name="Individual",
+            domains=["technical", "personal_preferences", "assistant_preferences"],
+            vault_ids=["vault_general", "vault_personal"],
+        ),
+        PersonaRecord(
+            id="developer", name="Developer",
+            domains=["technical", "work"],
+            vault_ids=["vault_general", "vault_work"],
+        ),
+        PersonaRecord(
+            id="tech_lead", name="Tech lead",
+            domains=["technical", "work"],
+            vault_ids=["vault_general", "vault_work"],
+        ),
+        PersonaRecord(
+            id="employee", name="Employee",
+            domains=["work", "technical"],
+            vault_ids=["vault_work", "vault_general"],
+        ),
+        PersonaRecord(
+            id="personal_project_builder", name="Personal-project builder",
+            domains=["technical", "personal_preferences"],
+            vault_ids=["vault_general", "vault_personal"],
+        ),
+        PersonaRecord(
+            id="private_individual", name="Private individual",
+            domains=["personal_preferences"],
+            vault_ids=["vault_personal", "vault_restricted"],
+            capabilities=["read_context_pack", "read:vault:vault_personal",
+                          "read:vault:vault_restricted",
+                          "read:domain:personal_preferences"],
+        ),
+        PersonaRecord(
+            id="assistant_user", name="Assistant user",
+            domains=["assistant_preferences", "technical"],
+            vault_ids=["vault_general", "vault_personal"],
+        ),
+    ]
 
 
 def restricted_access(
@@ -193,6 +244,7 @@ def resolve_access(
                 requested_domains=requested_domains, claims=claims,
             )
         return _apply_allowlists(
+            store=store,
             principal=principal,
             tool_id="local-cli",
             persona=persona,
@@ -229,6 +281,7 @@ def resolve_access(
             requested_domains=requested_domains, claims=claims,
         )
     return _apply_allowlists(
+        store=store,
         principal=principal,
         tool_id=binding.tool_id,
         persona=persona,
@@ -285,6 +338,7 @@ def _find_binding(
 
 def _apply_allowlists(
     *,
+    store: MemoryStore,
     principal: Principal,
     tool_id: str,
     persona: Optional[str],
@@ -319,7 +373,17 @@ def _apply_allowlists(
         binding.capabilities if binding else None,
     )
 
-    requested_persona = persona or (allowed_personas[0] if allowed_personas else "unknown")
+    # Prefer individual when the caller did not name a persona. sorted()
+    # intersection would otherwise default to "developer" and strip personal
+    # vaults via PersonaRecord — surprising for connector/MCP tools.
+    if persona:
+        requested_persona = persona
+    elif not allowed_personas:
+        requested_persona = "unknown"
+    elif "individual" in allowed_personas or "*" in allowed_personas:
+        requested_persona = "individual"
+    else:
+        requested_persona = allowed_personas[0]
     requested_purpose = purpose or "memory_retrieval"
     requested_audience = audience or "self"
 
@@ -347,6 +411,31 @@ def _apply_allowlists(
             requested_domains=requested_domains, claims=claims,
         )
 
+    # PersonaRecord further restricts — never amplifies principal∩binding.
+    persona_rec = None
+    if hasattr(store, "get_persona"):
+        persona_rec = store.get_persona(requested_persona)
+    domains_out = list(requested_domains or [])
+    if persona_rec is not None and persona_rec.active:
+        if persona_rec.vault_ids:
+            allowed_vaults = intersect_allowlists(allowed_vaults, persona_rec.vault_ids)
+        if persona_rec.capabilities:
+            caps = intersect_capabilities(caps, persona_rec.capabilities)
+        if persona_rec.domains and "*" not in persona_rec.domains:
+            if domains_out:
+                domains_out = intersect_allowlists(domains_out, persona_rec.domains)
+            else:
+                # No explicit request: inherit persona domains (still ≤ persona).
+                domains_out = list(persona_rec.domains)
+            # Empty intersection → fail closed (restricted)
+            if not domains_out:
+                return restricted_access(
+                    project_id=project_id, session_id=session_id,
+                    requested_domains=requested_domains, claims={
+                        **claims, "reason": "persona_domain_intersection_empty",
+                    },
+                )
+
     return AccessRequest(
         principal_id=principal.id,
         persona=requested_persona,
@@ -355,7 +444,7 @@ def _apply_allowlists(
         tool_id=tool_id,
         project_id=project_id,
         session_id=session_id,
-        requested_domains=requested_domains or [],
+        requested_domains=domains_out,
         execution_location=None,
         metadata={
             **extra_meta,
@@ -363,6 +452,9 @@ def _apply_allowlists(
             "resolved_capabilities": caps,
             "allowed_personas": allowed_personas,
             "allowed_vaults": allowed_vaults,
+            "persona_id": persona_rec.id if persona_rec else requested_persona,
+            "persona_domains": list(persona_rec.domains) if persona_rec else [],
+            "persona_vault_ids": list(persona_rec.vault_ids) if persona_rec else [],
         },
     )
 
@@ -537,6 +629,10 @@ def ensure_local_identity(store: MemoryStore) -> Principal:
                 name=vid,
                 allowed_personas=sorted(personas),
             ))
+    if hasattr(store, "get_persona") and hasattr(store, "insert_persona"):
+        for rec in default_persona_records():
+            if store.get_persona(rec.id) is None:
+                store.insert_persona(rec)
     existing = store.get_principal("principal_local_cli") if hasattr(store, "get_principal") else None
     if existing:
         return existing
@@ -551,6 +647,8 @@ def ensure_local_identity(store: MemoryStore) -> Principal:
             "read:domain:technical",
             "read:domain:work",
             "read:domain:finance",
+            "read:domain:personal_preferences",
+            "read:domain:assistant_preferences",
             "read:vault:vault_general",
             "read:vault:vault_work",
             "read:vault:vault_personal",
@@ -558,7 +656,10 @@ def ensure_local_identity(store: MemoryStore) -> Principal:
             "session:write",
             "privacy:admin",
         ],
-        allowed_personas=["individual", "developer", "employee", "assistant_user"],
+        allowed_personas=[
+            "individual", "developer", "employee", "assistant_user",
+            "tech_lead", "personal_project_builder", "private_individual", "global",
+        ],
         allowed_purposes=["*", "memory_retrieval", "task_execution", "financial_planning",
                           "personal_planning", "debugging"],
         allowed_audiences=["self", "local"],

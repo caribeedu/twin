@@ -379,6 +379,12 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
                 f"similar to {verdict.existing_id} (cos={verdict.similarity:.2f}) — update or contradiction?"
             )
 
+        from ..memory.formation import propose_or_corroborate
+        from .correlation.independence import (
+            evidence_directness_for,
+            independence_group_for,
+        )
+        igroup = independence_group_for(percept, fallback=artifact_id or percept.id)
         mem = MemoryItem(
             id=ids.memory_id(),
             type=extracted.type,  # type: ignore[arg-type]
@@ -401,22 +407,19 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
                 created_at=percept.ingested_at or "",
             ),
         )
-        store.insert_memory(mem)
-        from .correlation.independence import (
-            evidence_directness_for,
-            independence_group_for,
-        )
-        igroup = independence_group_for(percept, fallback=artifact_id or percept.id)
-        store.insert_evidence(Evidence(
-            id=ids.evidence_id(),
-            memory_id=mem.id,
+        mem, formation_action = propose_or_corroborate(
+            store, mem,
             percept_id=percept.id,
-            quote=extracted.evidence_quote or extracted.summary,
+            evidence_quote=extracted.evidence_quote or extracted.summary,
+            independence_group=igroup,
             source_trust=percept.source_trust,
             directness=evidence_directness_for(percept),
-            independence_group=igroup,
             artifact_id=artifact_id,
-        ))
+        )
+        if formation_action == "corroborated":
+            report.duplicates += 1
+            continue
+
         store.store_embedding(mem.id, "memory", embedder.name, embedder.embed(dedupe_text))
 
         if verdict.action == "review" and verdict.existing_id:

@@ -128,12 +128,20 @@ class ToolIdentity(BaseModel):
 
 
 class PersonaRecord(BaseModel):
+    """Operational persona — scope authority, not just a label.
+
+    Capabilities listed here further *restrict* principal∩binding; they never
+    amplify. Empty domains/vault_ids means inherit (no extra restriction).
+    """
+
     id: str
     name: str = ""
     domains: list[str] = Field(default_factory=list)
     vault_ids: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
     default_policies: list[str] = Field(default_factory=list)
     active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Vault(BaseModel):

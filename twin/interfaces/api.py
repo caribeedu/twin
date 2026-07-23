@@ -76,6 +76,15 @@ class ConsolidationRequest(BaseModel):
     retry: bool = False
 
 
+class RuntimeEnqueueRequest(BaseModel):
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str = ""
+    vault_id: str = "vault_general"
+    priority: int = Field(default=100, ge=0, le=10_000)
+    max_attempts: int = Field(default=8, ge=1, le=100)
+
+
 class PackRequest(BaseModel):
     query: str = Field(min_length=1, max_length=20_000)
     target_domain: str = "technical"
@@ -89,6 +98,9 @@ class PackRequest(BaseModel):
     purpose: str = "memory_retrieval"
     audience: str = "self"
     api_token: Optional[str] = None
+    mode: Literal["compact", "explainable", "references_only"] = "compact"
+    session_id: Optional[str] = None
+    request_scope: Optional[str] = None
 
     _domain = field_validator("target_domain")(_validate_domain)
 
@@ -239,6 +251,84 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, "action must be approve | reject | update")
         return _mem_dict(ws.store.get_memory(memory_id))
 
+    # -- v0.9.2 memory formation ----------------------------------------------
+
+    @app.get("/api/memory/candidates")
+    def api_memory_candidates(state: Optional[str] = None, limit: int = 100):
+        from ..memory.formation import list_candidates
+        return [
+            c.model_dump(mode="json")
+            for c in list_candidates(ws.store, state=state, limit=limit)
+        ]
+
+    class FormationRejectRequest(BaseModel):
+        reason: str = Field(min_length=1, max_length=2000)
+
+    class FormationConfirmRequest(BaseModel):
+        note: str = ""
+
+    class FormationEditRequest(BaseModel):
+        title: Optional[str] = None
+        summary: Optional[str] = None
+        domain: Optional[str] = None
+
+    @app.post("/api/memory/candidates/{memory_id}/confirm")
+    def api_formation_confirm(
+        memory_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
+    ):
+        from ..memory.formation import confirm_candidate
+        try:
+            return confirm_candidate(
+                ws.store, memory_id, note=req.note,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/memory/candidates/{memory_id}/reject")
+    def api_formation_reject(memory_id: str, req: FormationRejectRequest):
+        from ..memory.formation import reject_candidate
+        try:
+            return reject_candidate(
+                ws.store, memory_id, reason=req.reason,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/memory/candidates/{memory_id}/edit")
+    def api_formation_edit(memory_id: str, req: FormationEditRequest):
+        from ..memory.formation import edit_candidate
+        try:
+            return edit_candidate(
+                ws.store, memory_id,
+                title=req.title, summary=req.summary, domain=req.domain,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/memory/candidates/{memory_id}/restore")
+    def api_formation_restore(memory_id: str):
+        from ..memory.formation import restore_candidate
+        try:
+            return restore_candidate(ws.store, memory_id).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/memory/{memory_id}/explain")
+    def api_memory_explain(memory_id: str):
+        from ..memory.formation import explain_memory
+        try:
+            return explain_memory(ws.store, memory_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/memory/{memory_id}/history")
+    def api_memory_history(memory_id: str):
+        from ..memory.formation import explain_memory
+        try:
+            return {"memory_id": memory_id, "history": explain_memory(ws.store, memory_id)["history"]}
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     @app.get("/api/search")
     def api_search(q: str, domain: str = "technical", type: Optional[str] = None,
                    limit: int = 10):
@@ -275,8 +365,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   task_profile=req.task_profile.value,
                                   project_id=_resolve_project_id(req.project),
                                   firewall=ws.firewall,
-                                  access=access)
-        return pack.__dict__
+                                  access=access,
+                                  session_id=req.session_id,
+                                  mode=req.mode,
+                                  request_scope=req.request_scope)
+        return pack.to_dict()
 
     # -- Cognitive sessions ------------------------------------------------
 
@@ -467,6 +560,221 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             retry=req.retry,
         )
         return result.to_dict()
+
+    # -- v1.0 durable cognitive runtime ---------------------------------------
+
+    @app.post("/api/runtime/jobs")
+    def api_runtime_enqueue(req: RuntimeEnqueueRequest):
+        from ..runtime.models import JobKind
+        from ..runtime.queue import RuntimeQueue
+        try:
+            kind = JobKind(req.kind)
+        except ValueError as exc:
+            raise HTTPException(400, f"unknown kind: {req.kind}") from exc
+        job = RuntimeQueue(ws.store).enqueue(
+            kind,
+            payload=req.payload,
+            idempotency_key=req.idempotency_key,
+            vault_id=req.vault_id,
+            priority=req.priority,
+            max_attempts=req.max_attempts,
+        )
+        return job.model_dump(mode="json")
+
+    @app.get("/api/runtime/jobs/{job_id}")
+    def api_runtime_job(job_id: str):
+        job = ws.store.get_runtime_job(job_id)
+        if job is None:
+            raise HTTPException(404, "job not found")
+        return job.model_dump(mode="json")
+
+    @app.post("/api/runtime/jobs/{job_id}/retry")
+    def api_runtime_retry(job_id: str):
+        from ..runtime.queue import RuntimeQueue
+        job = RuntimeQueue(ws.store).retry(job_id)
+        if job is None:
+            raise HTTPException(404, "job not found")
+        return job.model_dump(mode="json")
+
+    @app.post("/api/runtime/jobs/{job_id}/cancel")
+    def api_runtime_cancel(job_id: str):
+        from ..runtime.queue import RuntimeQueue
+        ok = RuntimeQueue(ws.store).cancel(job_id)
+        if not ok:
+            raise HTTPException(409, "job not cancellable")
+        return {"id": job_id, "cancelled": True}
+
+    @app.get("/api/runtime/health")
+    def api_runtime_health():
+        return {
+            "ok": True,
+            "queue": ws.store.runtime_queue_depth(),
+            "dead_letters_open": len(ws.store.list_runtime_dead_letters(limit=500)),
+        }
+
+    class BackupCreateRequest(BaseModel):
+        dest: str
+
+    class BackupValidateRequest(BaseModel):
+        bundle: str
+
+    class BackupRestoreRequest(BaseModel):
+        bundle: str
+        target_db: str
+
+    @app.post("/api/backup")
+    def api_backup_create(req: BackupCreateRequest):
+        from pathlib import Path
+        from ..sovereignty.backup import create_backup
+        db_path = Path(ws.store.path) if hasattr(ws.store, "path") else None
+        manifest = create_backup(ws.store, req.dest, copy_sqlite_db=db_path)
+        return manifest.model_dump(mode="json")
+
+    @app.post("/api/backup/validate")
+    def api_backup_validate(req: BackupValidateRequest):
+        from ..sovereignty.backup import validate_backup
+        return validate_backup(req.bundle)
+
+    @app.post("/api/restore/validate")
+    def api_restore_validate(req: BackupValidateRequest):
+        from ..sovereignty.backup import validate_backup
+        return validate_backup(req.bundle)
+
+    @app.post("/api/restore")
+    def api_restore(req: BackupRestoreRequest):
+        from ..sovereignty.backup import restore_sqlite_backup
+        return restore_sqlite_backup(req.bundle, req.target_db)
+
+    @app.get("/api/health/cognition")
+    def api_health_cognition():
+        from ..sovereignty.integrity import run_integrity_checks
+        return run_integrity_checks(ws.store)
+
+    class SessionEventRequest(BaseModel):
+        text: str = ""
+        kind: str = "delta"
+        sequence: Optional[int] = None
+        external_session_id: str = ""
+        client: str = ""
+        payload: dict[str, Any] = Field(default_factory=dict)
+
+    class SessionCheckpointRequest(BaseModel):
+        summary: str = ""
+        active_goal: str = ""
+        unresolved_items: list[str] = Field(default_factory=list)
+        constraints: list[str] = Field(default_factory=list)
+
+    class SessionCloseRequest(BaseModel):
+        summary: str = ""
+        abandoned: bool = False
+        summary_origin: str = "client"
+        user_confirmed: bool = False
+        closure: dict[str, Any] = Field(default_factory=dict)
+        related_session_ids: list[str] = Field(default_factory=list)
+
+    @app.post("/api/sessions/{session_id}/events")
+    def api_session_event(session_id: str, req: SessionEventRequest):
+        from ..cognition.session_lifecycle import append_session_delta
+        try:
+            ev = append_session_delta(
+                ws.store, session_id,
+                text=req.text, kind=req.kind, sequence=req.sequence,
+                external_session_id=req.external_session_id,
+                client=req.client, payload=req.payload,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return ev.model_dump(mode="json")
+
+    @app.get("/api/sessions/{session_id}/attention")
+    def api_session_attention(session_id: str, evaluate: bool = False):
+        from ..cognition.attention import evaluate_attention
+        if evaluate:
+            outcomes = evaluate_attention(
+                ws.store, ws.cfg, ws.embedder, session_id,
+            )
+            return {"session_id": session_id, "outcomes": [o.to_dict() for o in outcomes]}
+        rows = ws.store.list_attention_emissions(session_id, limit=50)
+        return {
+            "session_id": session_id,
+            "outcomes": [o.to_dict() for o in rows],
+        }
+
+    class AttentionFeedbackRequest(BaseModel):
+        verdict: str = Field(min_length=1, max_length=40)
+
+    @app.post("/api/attention/{emission_id}/feedback")
+    def api_attention_feedback(emission_id: str, req: AttentionFeedbackRequest):
+        from ..cognition.attention import feedback_attention
+        em = feedback_attention(ws.store, emission_id, verdict=req.verdict)
+        if em is None:
+            raise HTTPException(404, "emission not found")
+        return em.to_dict()
+
+    @app.post("/api/sessions/{session_id}/checkpoint")
+    def api_session_checkpoint(session_id: str, req: SessionCheckpointRequest):
+        from ..cognition.session_lifecycle import checkpoint_session
+        try:
+            cp = checkpoint_session(
+                ws.store, session_id,
+                summary=req.summary, active_goal=req.active_goal,
+                unresolved_items=req.unresolved_items,
+                constraints=req.constraints,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return cp.model_dump(mode="json")
+
+    @app.post("/api/sessions/{session_id}/close")
+    def api_session_close(session_id: str, req: SessionCloseRequest):
+        from ..cognition.session_lifecycle import close_session_structured
+        try:
+            session, closure = close_session_structured(
+                ws.store, ws.cfg, ws.embedder, session_id,
+                summary=req.summary, abandoned=req.abandoned,
+                closure=req.closure, related_session_ids=req.related_session_ids,
+                summary_origin=req.summary_origin,
+                user_confirmed=req.user_confirmed,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "session": session.model_dump(mode="json"),
+            "closure": closure.model_dump(mode="json"),
+        }
+
+    @app.post("/api/sessions/{session_id}/reopen")
+    def api_session_reopen(session_id: str):
+        from ..cognition.session_lifecycle import reopen_session
+        try:
+            session = reopen_session(ws.store, session_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return session.model_dump(mode="json")
+
+    @app.post("/api/sessions/{session_id}/pause")
+    def api_session_pause(session_id: str):
+        from ..cognition.session_lifecycle import pause_session
+        try:
+            return pause_session(ws.store, session_id).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/sessions/{session_id}/resume")
+    def api_session_resume(session_id: str):
+        from ..cognition.session_lifecycle import resume_session
+        try:
+            return resume_session(ws.store, session_id).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/closure")
+    def api_session_closure(session_id: str):
+        from ..cognition.session_lifecycle import get_session_closure
+        closure = get_session_closure(ws.store, session_id)
+        if closure is None:
+            raise HTTPException(404, "closure not found")
+        return closure.model_dump(mode="json")
 
     # -- v0.3 review / quality / consolidation --------------------------------
 
@@ -730,6 +1038,29 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.get("/api/judgment/versions")
     def api_judgment_versions():
         return [v.model_dump(mode="json") for v in ws.store.list_judgment_versions()]
+
+    @app.post("/api/judgment/versions/{version_id}/restore")
+    def api_judgment_restore(version_id: str):
+        from ..judgment.versions import restore_version
+        try:
+            ver = restore_version(ws.store, version_id, actor="api")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return ver.model_dump(mode="json")
+
+    @app.get("/api/judgment/snapshots/{snapshot_id}/explain")
+    def api_judgment_snapshot_explain(snapshot_id: str):
+        from ..judgment.explain import explain_judgment_snapshot
+        try:
+            return explain_judgment_snapshot(ws.store, snapshot_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/personas")
+    def api_personas():
+        from ..privacy.identity import ensure_local_identity
+        ensure_local_identity(ws.store)
+        return [p.model_dump(mode="json") for p in ws.store.list_personas()]
 
     @app.get("/api/judgment/proposals")
     def api_judgment_proposals(status: str = "pending"):

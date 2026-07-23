@@ -22,8 +22,11 @@ from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
 from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
 from .workspace_ops_mixin import WORKSPACE_OPS_SCHEMA, WorkspaceOpsStoreMixin
+from twin.runtime.store_mixin import RUNTIME_SCHEMA, RuntimeStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
+from .session_ops_mixin import SESSION_OPS_SCHEMA, SessionOpsStoreMixin
+from .attention_ops_mixin import ATTENTION_OPS_SCHEMA, AttentionOpsStoreMixin
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -546,6 +549,10 @@ CREATE TABLE IF NOT EXISTS privacy_vaults (
     id TEXT PRIMARY KEY,
     payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS privacy_personas (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS privacy_client_bindings (
     id TEXT PRIMARY KEY,
     client_id TEXT NOT NULL UNIQUE,
@@ -683,7 +690,7 @@ CREATE INDEX IF NOT EXISTS idx_ccb_conn ON connector_counter_batches(connector_i
 class SqliteStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
     HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
-    MemoryStore,
+    RuntimeStoreMixin, SessionOpsStoreMixin, AttentionOpsStoreMixin, MemoryStore,
 ):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()
@@ -705,6 +712,9 @@ class SqliteStore(
         self.conn.executescript(CORRELATION_SCHEMA)
         self.conn.executescript(HOST_BINDING_SCHEMA)
         self.conn.executescript(WORKSPACE_OPS_SCHEMA)
+        self.conn.executescript(RUNTIME_SCHEMA)
+        self.conn.executescript(SESSION_OPS_SCHEMA)
+        self.conn.executescript(ATTENTION_OPS_SCHEMA)
         self._migrate()
 
     def _begin_transaction(self) -> None:
@@ -918,6 +928,9 @@ class SqliteStore(
             """
         )
         self.conn.executescript(WORKSPACE_OPS_SCHEMA)
+        self.conn.executescript(RUNTIME_SCHEMA)
+        self.conn.executescript(SESSION_OPS_SCHEMA)
+        self.conn.executescript(ATTENTION_OPS_SCHEMA)
         # Additive columns for DBs created before error_stage existed.
         for table in ("workspace_ticks", "consolidation_runs"):
             cols = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}

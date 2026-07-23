@@ -29,7 +29,11 @@ from .credentials import (
 )
 from .errors import sanitize_error
 from .completion import check_criterion, completion_matrix
-from .contract import check_adapter_contract, contract_matrix
+from .contract import (
+    check_adapter_contract,
+    contract_matrix,
+    production_ready_adapters,
+)
 from .health import connector_health, snapshot_health
 from .counters import (
     ensure_counters,
@@ -185,6 +189,7 @@ __all__ = [
     "list_due_connectors",
     "pause_connector",
     "plan_connector_setup",
+    "production_ready_adapters",
     "reclassify_source_account",
     "reconcile_connector_counters",
     "record_batch_counters",

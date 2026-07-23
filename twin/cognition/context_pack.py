@@ -23,8 +23,8 @@ pass over the best remaining hits.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Optional
 
 from ..config import Config
 from ..judgment.firewall import Firewall
@@ -33,6 +33,15 @@ from ..memory.embeddings import Embedder
 from ..memory.search import SearchHit
 from ..memory.store.base import MemoryStore
 from ..privacy.models import AccessRequest
+from .pack_format import PackMode, render_pack
+from .pack_select import (
+    build_provenance_summary,
+    cognitive_label,
+    dedupe_and_diversify,
+    prefer_current,
+    project_goals,
+    screen_injection,
+)
 from .retrieval import Reranker, retrieve
 from .task_profiles import get_profile
 
@@ -55,9 +64,23 @@ class ContextPack:
     # quotes made it in and, if not, that the budget was the reason
     evidence_included: bool = False
     evidence_omitted_due_to_budget: bool = False
+    # v0.9.5 structured fields
+    mode: str = "compact"
+    request_scope: str = ""
+    active: dict = field(default_factory=dict)
+    uncertainty: dict = field(default_factory=dict)
+    provenance_summary: list = field(default_factory=list)
+    token_budget: dict = field(default_factory=dict)
+    blocked_count: int = 0
+    explanation: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
-def _entry_from_view(view: dict, *, status: Optional[str] = None) -> str:
+def _entry_from_view(
+    view: dict, *, status: Optional[str] = None, label: str = "ok",
+) -> str:
     title = view.get("title") or "[redacted]"
     summary = view.get("summary") or ""
     if view.get("redacted"):
@@ -65,7 +88,7 @@ def _entry_from_view(view: dict, *, status: Optional[str] = None) -> str:
     elif status == "candidate":
         tag = "candidate"
     else:
-        tag = "ok"
+        tag = label or "ok"
     return f"- [{tag}] {title}: {summary}"
 
 
@@ -98,6 +121,10 @@ def build_context_pack(
     firewall: Optional[Firewall] = None,
     reranker: Optional[Reranker] = None,
     access: Optional[AccessRequest] = None,
+    *,
+    session_id: Optional[str] = None,
+    mode: PackMode = "compact",
+    request_scope: Optional[str] = None,
 ) -> ContextPack:
     firewall = firewall or Firewall(cfg.policies_path, store)
     profile = get_profile(task_profile)
@@ -113,6 +140,10 @@ def build_context_pack(
     access = access or restricted_access(
         project_id=project_id, requested_domains=[target_domain],
     )
+    # Persona scope may have narrowed domains — never widen pack target.
+    if access.requested_domains and target_domain not in access.requested_domains:
+        if "*" not in access.requested_domains:
+            target_domain = access.requested_domains[0]
     privacy_decision_id: Optional[str] = None
     privacy_meta: dict = {}
     privacy_blocked: list[dict] = []
@@ -146,6 +177,11 @@ def build_context_pack(
             if v.get("redacted"):
                 redacted_ids.add(v["id"])
         result.hits = [h for h in result.hits if h.memory.id in authorized_views]
+
+    # Pack-time injection screen (stored memories are data, never instructions).
+    result.hits, injection_blocked = screen_injection(result.hits)
+    privacy_blocked.extend(injection_blocked)
+    result.hits, drop_counts = dedupe_and_diversify(prefer_current(result.hits))
 
     budget = max_tokens * CHARS_PER_TOKEN
     sections: list[str] = []
@@ -300,12 +336,16 @@ def build_context_pack(
                 "summary": hit.memory.summary, "redacted": False,
             }
             status = hit.memory.status.value if hasattr(hit.memory.status, "value") else str(hit.memory.status)
-            if not push(_entry_from_view(view, status=status), ceiling=section_ceiling):
+            label = cognitive_label(hit.memory)
+            if not push(
+                _entry_from_view(view, status=status, label=label),
+                ceiling=section_ceiling,
+            ):
                 break
             remaining.remove(hit)
             packed_hits.append(hit)
             confidences.append(hit.memory.confidence)
-            sources.append(_source_meta(hit, view))
+            sources.append(_source_meta(hit, view, label=label))
     leftover = [h for h in sorted(remaining, key=lambda h: h.score, reverse=True)]
     if leftover and used + 100 < memory_cap:
         pushed_header = False
@@ -319,11 +359,15 @@ def build_context_pack(
                 "summary": hit.memory.summary, "redacted": False,
             }
             status = hit.memory.status.value if hasattr(hit.memory.status, "value") else str(hit.memory.status)
-            if not push(_entry_from_view(view, status=status), ceiling=memory_cap):
+            label = cognitive_label(hit.memory)
+            if not push(
+                _entry_from_view(view, status=status, label=label),
+                ceiling=memory_cap,
+            ):
                 break
             packed_hits.append(hit)
             confidences.append(hit.memory.confidence)
-            sources.append(_source_meta(hit, view))
+            sources.append(_source_meta(hit, view, label=label))
 
     evidence_included = False
     evidence_omitted = False
@@ -342,20 +386,21 @@ def build_context_pack(
     elif evidence_wanted:
         evidence_omitted = True
 
-    pack_text = "\n".join(sections) if sections else ""
+    sections_text = "\n".join(sections) if sections else ""
 
     # Leakage + canary scans on the assembled pack
     if hasattr(store, "insert_privacy_decision"):
         from ..privacy.canaries import scan_for_canaries
         from ..privacy.redact import leakage_scan
-        findings = leakage_scan(pack_text)
-        leaked = scan_for_canaries(store, pack_text) if hasattr(store, "list_leakage_canaries") else []
+        findings = leakage_scan(sections_text)
+        leaked = scan_for_canaries(store, sections_text) if hasattr(store, "list_leakage_canaries") else []
         if findings or leaked:
             privacy_meta["leakage_findings"] = findings
             privacy_meta["canary_leak_blocked"] = bool(leaked)
             # Drop pack rather than ship leakage; do not silently pretend success
-            pack_text = ""
+            sections_text = ""
             sources = []
+            packed_hits = []
             privacy_blocked.append({
                 "memory_id": "",
                 "reason": "output_leakage_blocked",
@@ -372,6 +417,48 @@ def build_context_pack(
             "reason": b.get("reason", b.get("rule", "privacy")),
         })
 
+    goals = project_goals(store, project_id)
+    active = {
+        "project": project_id,
+        "domain": target_domain,
+        "persona": access.persona,
+        "session_id": session_id or access.session_id,
+        "goals": goals,
+    }
+    provenance = build_provenance_summary(store, packed_hits)
+    low_conf = [h.memory.id for h in packed_hits if h.memory.confidence < 0.55]
+    uncertainty = {
+        "low_confidence_ids": low_conf,
+        "open_conflicts": [
+            h.memory.id for h in packed_hits
+            if "conflict" in (h.memory.quality_flags or [])
+            or "possible_conflict" in (h.memory.quality_flags or [])
+        ],
+    }
+    explanation = {
+        "profile": profile.name,
+        "dropped": drop_counts,
+        "injection_blocked": [
+            b.get("memory_id") for b in injection_blocked if b.get("memory_id")
+        ],
+        "blocked_count": len(blocked),
+        "mode": mode,
+    }
+    token_budget = {
+        "max": max_tokens,
+        "used_chars": used,
+        "max_chars": budget,
+        "evidence_reserved_chars": evidence_reserve,
+    }
+    pack_text = render_pack(
+        mode=mode,
+        sections_text=sections_text,
+        provenance=provenance,
+        active=active,
+        explanation=explanation,
+        uncertainty=uncertainty,
+    )
+
     return ContextPack(
         context_pack=pack_text,
         sources=sources,
@@ -384,10 +471,18 @@ def build_context_pack(
         privacy_meta=privacy_meta,
         evidence_included=evidence_included,
         evidence_omitted_due_to_budget=evidence_omitted,
+        mode=mode,
+        request_scope=request_scope or query,
+        active=active,
+        uncertainty=uncertainty,
+        provenance_summary=provenance,
+        token_budget=token_budget,
+        blocked_count=len(blocked),
+        explanation=explanation,
     )
 
 
-def _source_meta(hit: SearchHit, view: dict) -> dict:
+def _source_meta(hit: SearchHit, view: dict, *, label: str = "ok") -> dict:
     if view.get("redacted"):
         return {
             "memory_id": f"opaque_{hit.memory.id[-8:]}",
@@ -395,6 +490,7 @@ def _source_meta(hit: SearchHit, view: dict) -> dict:
             "why_relevant": "authorized contextual match",
             "percept_ids": [],
             "status": "redacted",
+            "label": "redacted",
         }
     return {
         "memory_id": hit.memory.id,
@@ -404,4 +500,5 @@ def _source_meta(hit: SearchHit, view: dict) -> dict:
         "percept_ids": hit.memory.percept_ids,
         "why_relevant": hit.why,
         "redacted": False,
+        "label": label,
     }

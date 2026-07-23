@@ -192,6 +192,27 @@ def test_edited_item_creates_new_revision_old_retained(store, creds, gh):
     assert "v2 — edited" in contents["2026-01-03T10:00:00Z"]
 
 
+def test_same_revision_different_content_is_a_collision(store, creds, gh):
+    """Same updated_at with different body must DLQ, never overwrite evidence."""
+    issue = gh.add_issue(REPO, 1, title="Spec",
+                         body="original evidence",
+                         updated_at="2026-01-01T10:00:00Z")
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+
+    issue["body"] = "SILENTLY DIFFERENT"
+    result = sync_connector(store, creds, inst.id)
+    issues = next(s for s in result.streams
+                  if s.stream == f"repo:{REPO}:issues")
+    assert issues.committed is False
+    dead = store.list_connector_dead_letters(inst.id)
+    assert any(d.failure_class.value == "revision_collision" for d in dead)
+    [record] = _records_by_type(store, inst.id)["issue"]
+    assert "original evidence" in record.content
+    [percept] = store.list_percepts()
+    assert "original evidence" in percept.content
+
+
 def test_rate_limit_degrades_with_provider_window(store, creds, gh):
     gh.add_issue(REPO, 1, title="One", updated_at="2026-01-01T10:00:00Z")
     _acc, inst = _mk(store, creds)

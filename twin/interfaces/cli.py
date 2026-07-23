@@ -10,6 +10,7 @@
     twin observe "current text"        memory observer suggestion
     twin workspace tick "text"         parallel memory tick (recall + optional interpret)
     twin consolidate daily|weekly      scheduled consolidation cycle
+    twin runtime start|status|enqueue  durable cognitive runtime (v1.0)
     twin promote <memory_id>           promote a memory into the judgment profile
     twin supersede <new_id> <old_id>   new memory replaces the old one
     twin contradict <id_a> <id_b>      flag two memories as contradictory
@@ -242,6 +243,18 @@ def cmd_eval(args) -> None:
     elif args.eval_command == "retrieval":
         run = run_retrieval_eval(ws.store, ws.embedder, root / "retrieval", firewall=ws.firewall)
         print(json.dumps({"id": run.id, "summary": run.summary}, indent=2))
+    elif args.eval_command == "golden":
+        from ..evals.golden import run_golden_work_loop
+        report = run_golden_work_loop(ws.store, ws.cfg, ws.embedder)
+        print(json.dumps(report, indent=2, default=str))
+        if not report.get("ok"):
+            raise SystemExit(1)
+    elif args.eval_command == "v1-completion":
+        from ..evals.v1_completion import v1_completion_matrix
+        matrix = v1_completion_matrix()
+        print(json.dumps(matrix, indent=2, default=str))
+        if not matrix.get("ok"):
+            raise SystemExit(1)
     elif args.eval_command == "compare":
         print("compare requires two prior run payloads; use API /api/evals for now")
 
@@ -367,6 +380,80 @@ def cmd_consolidate(args) -> None:
         retry=bool(getattr(args, "retry", False)),
     )
     _print(result.to_dict())
+
+
+def cmd_runtime(args) -> None:
+    from ..runtime.models import JobKind
+    from ..runtime.queue import RuntimeQueue
+    from ..runtime.scheduler import RuntimeScheduler
+    from ..runtime.service import TwinRuntime
+
+    ws = Workspace(args.home)
+    cmd = args.runtime_command
+    q = RuntimeQueue(ws.store)
+
+    if cmd == "start":
+        rt = TwinRuntime(
+            ws.store, ws.cfg, ws.embedder,
+            workers=int(getattr(args, "workers", 2) or 2),
+            vault_id=getattr(args, "vault", None) or None,
+            lease_seconds=int(getattr(args, "lease", 60) or 60),
+            schedule_interval=float(getattr(args, "schedule_interval", 30) or 30),
+            offline=bool(getattr(args, "offline", False)),
+        )
+        rt.run()
+        return
+
+    if cmd == "status":
+        _print({
+            "queue": ws.store.runtime_queue_depth(),
+            "dead_letters": len(ws.store.list_runtime_dead_letters(limit=500)),
+            "recent": [j.model_dump(mode="json") for j in ws.store.list_runtime_jobs(limit=20)],
+        })
+        return
+
+    if cmd == "schedule":
+        ids = RuntimeScheduler(
+            q, vault_id=getattr(args, "vault", None) or "vault_general",
+        ).tick()
+        _print({"enqueued": ids})
+        return
+
+    if cmd == "enqueue":
+        kind = JobKind(args.kind)
+        payload = {}
+        if getattr(args, "payload_json", None):
+            payload = json.loads(args.payload_json)
+        job = q.enqueue(
+            kind,
+            payload=payload,
+            idempotency_key=getattr(args, "idempotency_key", "") or "",
+            vault_id=getattr(args, "vault", None) or "vault_general",
+            priority=int(getattr(args, "priority", 100) or 100),
+        )
+        _print(job.model_dump(mode="json"))
+        return
+
+    if cmd == "job":
+        job = ws.store.get_runtime_job(args.job_id)
+        if job is None:
+            raise SystemExit(f"job {args.job_id} not found")
+        _print(job.model_dump(mode="json"))
+        return
+
+    if cmd == "retry":
+        job = q.retry(args.job_id)
+        if job is None:
+            raise SystemExit(f"job {args.job_id} not found")
+        _print(job.model_dump(mode="json"))
+        return
+
+    if cmd == "cancel":
+        ok = q.cancel(args.job_id)
+        _print({"id": args.job_id, "cancelled": ok})
+        return
+
+    raise SystemExit(f"unknown runtime command: {cmd}")
 
 
 def cmd_reindex(args) -> None:
@@ -851,6 +938,12 @@ def cmd_connector(args) -> None:
     elif cmd == "contract":
         from ..connectors import contract_matrix
         print(_json.dumps(contract_matrix(), indent=2, default=str))
+    elif cmd == "production-ready":
+        from ..connectors import production_ready_adapters
+        report = production_ready_adapters()
+        print(_json.dumps(report, indent=2, default=str))
+        if not report.get("ok"):
+            raise SystemExit(1)
     elif cmd == "completion":
         from ..connectors import completion_matrix
         matrix = completion_matrix()
@@ -896,6 +989,30 @@ def cmd_mcp(args) -> None:
     from .mcp_server import main as mcp_main
 
     mcp_main(args.home)
+
+
+def cmd_backup(args) -> None:
+    from pathlib import Path
+
+    from ..sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
+
+    ws = Workspace(args.home)
+    cmd = args.backup_command
+    if cmd == "create":
+        dest = Path(args.dest)
+        db_path = None
+        if hasattr(ws.store, "path"):
+            db_path = Path(ws.store.path)
+        manifest = create_backup(ws.store, dest, copy_sqlite_db=db_path)
+        _print(manifest.model_dump(mode="json"))
+        return
+    if cmd == "validate":
+        _print(validate_backup(args.bundle))
+        return
+    if cmd == "restore":
+        _print(restore_sqlite_backup(args.bundle, args.target_db))
+        return
+    raise SystemExit(f"unknown backup command: {cmd}")
 
 
 def cmd_export(args) -> None:
@@ -1375,6 +1492,12 @@ def main(argv: list[str] | None = None) -> None:
     es = p.add_subparsers(dest="eval_command", required=True)
     es.add_parser("extraction").set_defaults(func=cmd_eval)
     es.add_parser("retrieval").set_defaults(func=cmd_eval)
+    es.add_parser("golden", help="run golden cognitive work-loop scenario"
+                  ).set_defaults(func=cmd_eval)
+    es.add_parser(
+        "v1-completion",
+        help="fail-closed v1.0 cognitive OS completion matrix",
+    ).set_defaults(func=cmd_eval)
     es.add_parser("compare").set_defaults(func=cmd_eval)
 
     p = sub.add_parser("source", help="show source calibration")
@@ -1453,6 +1576,41 @@ def main(argv: list[str] | None = None) -> None:
         pc.add_argument("--retry", action="store_true",
                         help="reclaim a prior failed (error) apply run for this window")
         pc.set_defaults(func=cmd_consolidate)
+
+    p = sub.add_parser("runtime", help="durable cognitive runtime (v1.0)")
+    rs = p.add_subparsers(dest="runtime_command", required=True)
+    rst = rs.add_parser("start", help="run scheduler + workers (twin-runtime)")
+    rst.add_argument("--workers", type=int, default=2)
+    rst.add_argument("--vault", default=None, help="isolate worker to one vault")
+    rst.add_argument("--lease", type=int, default=60, help="lease seconds")
+    rst.add_argument("--schedule-interval", type=float, default=30.0)
+    rst.add_argument("--offline", action="store_true",
+                     help="scheduler only; do not claim jobs")
+    rst.set_defaults(func=cmd_runtime)
+    rs.add_parser("status", help="queue depth + recent jobs").set_defaults(func=cmd_runtime)
+    rs.add_parser("schedule", help="enqueue due temporal jobs once").set_defaults(
+        func=cmd_runtime,
+    )
+    re = rs.add_parser("enqueue", help="enqueue a job")
+    re.add_argument("kind", choices=[
+        "interpret_percept", "workspace_tick", "attention_evaluate",
+        "consolidate_daily", "consolidate_weekly", "reembed_memory",
+        "integrity_check", "connector_reconcile",
+    ])
+    re.add_argument("--payload-json", default=None)
+    re.add_argument("--idempotency-key", default="")
+    re.add_argument("--vault", default="vault_general")
+    re.add_argument("--priority", type=int, default=100)
+    re.set_defaults(func=cmd_runtime)
+    rj = rs.add_parser("job", help="show one job")
+    rj.add_argument("job_id")
+    rj.set_defaults(func=cmd_runtime)
+    rr = rs.add_parser("retry", help="requeue failed/dead-letter job")
+    rr.add_argument("job_id")
+    rr.set_defaults(func=cmd_runtime)
+    rc = rs.add_parser("cancel", help="cancel pending/failed job")
+    rc.add_argument("job_id")
+    rc.set_defaults(func=cmd_runtime)
 
     sub.add_parser("reindex", help="regenerate embeddings").set_defaults(func=cmd_reindex)
 
@@ -1640,6 +1798,10 @@ def main(argv: list[str] | None = None) -> None:
     cs.add_parser("contract", help="print §88 adapter contract matrix"
                   ).set_defaults(func=cmd_connector)
     cs.add_parser(
+        "production-ready",
+        help="attest ≥2 real adapters closed for daily production use",
+    ).set_defaults(func=cmd_connector)
+    cs.add_parser(
         "completion",
         help="print connector completion criteria matrix (§93)",
     ).set_defaults(func=cmd_connector)
@@ -1824,6 +1986,19 @@ def main(argv: list[str] | None = None) -> None:
         help="non-zero exit on Twin errors (admin / CI)",
     )
     ni.set_defaults(func=cmd_native)
+
+    p = sub.add_parser("backup", help="sovereignty backup create/validate/restore (v0.9.8)")
+    bs = p.add_subparsers(dest="backup_command", required=True)
+    bc = bs.add_parser("create", help="write NDJSON + optional sqlite copy")
+    bc.add_argument("dest", help="destination directory")
+    bc.set_defaults(func=cmd_backup)
+    bv = bs.add_parser("validate", help="verify manifest checksums")
+    bv.add_argument("bundle", help="backup bundle directory")
+    bv.set_defaults(func=cmd_backup)
+    br = bs.add_parser("restore", help="restore store.sqlite to isolated path")
+    br.add_argument("bundle")
+    br.add_argument("target_db")
+    br.set_defaults(func=cmd_backup)
 
     sub.add_parser("export", help="export everything as JSON").set_defaults(func=cmd_export)
 
