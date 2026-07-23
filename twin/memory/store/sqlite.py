@@ -21,6 +21,7 @@ from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
 from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
+from .workspace_ops_mixin import WORKSPACE_OPS_SCHEMA, WorkspaceOpsStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
 
@@ -681,7 +682,8 @@ CREATE INDEX IF NOT EXISTS idx_ccb_conn ON connector_counter_batches(connector_i
 
 class SqliteStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
-    HostBindingStoreMixin, ConnectorStoreMixin, MemoryStore,
+    HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
+    MemoryStore,
 ):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()
@@ -702,6 +704,7 @@ class SqliteStore(
         self.conn.executescript(CONNECTOR_SCHEMA)
         self.conn.executescript(CORRELATION_SCHEMA)
         self.conn.executescript(HOST_BINDING_SCHEMA)
+        self.conn.executescript(WORKSPACE_OPS_SCHEMA)
         self._migrate()
 
     def _begin_transaction(self) -> None:
@@ -914,6 +917,14 @@ class SqliteStore(
                 );
             """
         )
+        self.conn.executescript(WORKSPACE_OPS_SCHEMA)
+        # Additive columns for DBs created before error_stage existed.
+        for table in ("workspace_ticks", "consolidation_runs"):
+            cols = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            if cols and "error_stage" not in cols:
+                self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN error_stage TEXT NOT NULL DEFAULT ''"
+                )
         self._maybe_commit()
 
     def close(self) -> None:

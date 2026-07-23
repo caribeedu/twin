@@ -1,0 +1,16 @@
+{
+  "id": "workspace_tick_stages",
+  "kind": "workspace_tick",
+  "input": {
+    "text": "hmm vague note",
+    "domain": "technical",
+    "interpret": false,
+    "input_mode": "snapshot"
+  },
+  "seed_memories": [],
+  "expected": {
+    "silent": true,
+    "has_stages": ["reading", "observe", "recall", "done"],
+    "confirmed_unchanged": true
+  }
+}

@@ -29,6 +29,7 @@ from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
 from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
+from .workspace_ops_mixin import WORKSPACE_OPS_SCHEMA, WorkspaceOpsStoreMixin
 
 _SCHEMA_BASE = """
 CREATE TABLE IF NOT EXISTS percepts (
@@ -709,7 +710,8 @@ def _vec_literal(vector: list[float]) -> str:
 
 class PostgresStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
-    HostBindingStoreMixin, ConnectorStoreMixin, MemoryStore,
+    HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
+    MemoryStore,
 ):
     def __init__(self, url: str, codec: ContentCodec | None = None):
         import psycopg
@@ -731,7 +733,12 @@ class PostgresStore(
             cur.execute(_CONNECTOR_SCHEMA)
             cur.execute(CORRELATION_SCHEMA)
             cur.execute(HOST_BINDING_SCHEMA)
+            cur.execute(WORKSPACE_OPS_SCHEMA)
             for stmt in (
+                "ALTER TABLE workspace_ticks ADD COLUMN IF NOT EXISTS "
+                "error_stage TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE consolidation_runs ADD COLUMN IF NOT EXISTS "
+                "error_stage TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "
                 "occurrence INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE host_session_bindings ADD COLUMN IF NOT EXISTS "

@@ -1,0 +1,14 @@
+{
+  "id": "daily_cycle_dry_run",
+  "kind": "consolidation_cycle",
+  "input": {
+    "cycle": "daily",
+    "dry_run": true
+  },
+  "expected": {
+    "kind": "daily",
+    "has_stages": ["analyze", "safe_automation", "temporal_refresh", "done"],
+    "confirmed_unchanged": true,
+    "invariant_ok": true
+  }
+}

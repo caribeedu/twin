@@ -494,3 +494,73 @@ def test_detection_signals_on_postgres(pg_store, cfg, embedder):
     state = pg_store.get_interpretation(p.id)
     assert state.status == "heuristic_detection" and state.terminal is True
     assert state.interpretation_attempted is False
+
+
+def test_workspace_tick_running_blocks_on_postgres(pg_store, cfg, embedder):
+    from twin.cognition.workspace import text_content_hash, workspace_tick
+    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+
+    text = "postgres concurrent tick must not double-run"
+    existing = WorkspaceTickRecord(
+        session_id="ses_pg_race",
+        sequence=1,
+        input_mode="delta",
+        content_hash=text_content_hash(text),
+        interpret=True,
+        status="running",
+    )
+    pg_store.try_begin_workspace_tick(existing)
+    result = workspace_tick(
+        pg_store, cfg, embedder, text,
+        target_domain="technical",
+        interpret=True,
+        input_mode="delta",
+        session_id="ses_pg_race",
+        sequence=1,
+    )
+    assert result.duplicated is True
+    assert result.stages == ["blocked_concurrent"]
+
+
+def test_consolidation_window_unique_on_postgres(pg_store, cfg, embedder):
+    from datetime import datetime, timezone
+
+    from twin.cognition.consolidation_cycle import run_consolidation_cycle
+
+    as_of = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    first = run_consolidation_cycle(
+        pg_store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    second = run_consolidation_cycle(
+        pg_store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,
+    )
+    assert first.run_id
+    assert second.duplicated is True
+    assert second.run_id == first.run_id
+
+
+def test_retry_cas_on_postgres(pg_store):
+    from twin.clock import now_iso
+    from twin.memory.store.workspace_ops_mixin import (
+        ConsolidationRunRecord,
+        WorkspaceTickRecord,
+    )
+
+    tick = WorkspaceTickRecord(
+        session_id="ses_pg_cas", sequence=1, content_hash="h",
+        input_mode="delta", interpret=True, status="error",
+        error="RuntimeError: x", error_stage="observe",
+        started_at=now_iso(), completed_at=now_iso(),
+    )
+    pg_store.insert_workspace_tick(tick)
+    assert pg_store.try_claim_workspace_tick_retry(tick.id) is True
+    assert pg_store.try_claim_workspace_tick_retry(tick.id) is False
+
+    run = ConsolidationRunRecord(
+        kind="weekly", window_start="2026-01-01", window_end="2026-01-07",
+        dry_run=False, status="error", error="RuntimeError: y",
+        error_stage="analyze", started_at=now_iso(), completed_at=now_iso(),
+    )
+    pg_store.insert_consolidation_run(run)
+    assert pg_store.try_claim_consolidation_retry(run.id) is True
+    assert pg_store.try_claim_consolidation_retry(run.id) is False

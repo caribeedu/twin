@@ -1,0 +1,26 @@
+{
+  "id": "recall_score_not_confidence",
+  "kind": "recall_policy",
+  "suggested": [
+    {
+      "memory_id": "mem_a",
+      "summary": "high conf low score",
+      "why_relevant": "x",
+      "confidence": 0.95,
+      "score": 0.05
+    },
+    {
+      "memory_id": "mem_b",
+      "summary": "ok conf high score",
+      "why_relevant": "y",
+      "confidence": 0.7,
+      "score": 0.9
+    }
+  ],
+  "salience_by_id": {"mem_a": 0.9, "mem_b": 0.4},
+  "novelty_by_id": {"mem_a": 0.99, "mem_b": 0.1},
+  "expected": {
+    "silent": false,
+    "suggestion_ids": ["mem_b"]
+  }
+}

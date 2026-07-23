@@ -1558,6 +1558,17 @@ Build on the fast/deep observer introduced in v0.2 and the cognitive interpretat
 
 Natural consumer of [Correlation depth](#correlation-depth-planned-vx--after-phase-7): incremental correlation passes and episode-phase updates should feed consolidation without full rescans.
 
+Implemented:
+
+- **Workspace and consolidation spine for future continuous execution** — synchronous, invocable evaluation (`workspace_tick`) and windowed maintenance (`run_consolidation_cycle`), not yet a background worker/queue. Continuous / event-driven parallelism remains deferred.
+- `workspace_tick` (`twin/cognition/workspace.py`) — stages `reading → observe → salience → recall → [parallel_interpretation] → done`; preserves observer **retrieval score** separately from memory confidence; optional interpretation only for `input_mode=delta` (snapshots do not invent deltas); refuses to interpret while domain is unclassified (never coerces to `technical`);
+- identity / idempotency — durable `workspace_ticks` keyed by `idempotency_key`, `session_id+sequence`, or `session_id+content_hash` for delta interpretation; repeated completed calls return the tick (`duplicated=True`); concurrent `running` returns `blocked_concurrent` without executing; failed ticks persist `error`/`error_stage` and require `retry=True` with atomic CAS (`error → running`) so only one reclaimer executes; Percept id is persisted immediately and reused on retry;
+- confidence + relevance recall (`twin/cognition/recall.py`) — eligibility = confidence gate AND retrieval score gate; novelty may reorder eligible suggestions but cannot clear the relevance bar; firewall `blocked` stays ids/reasons only;
+- salience / novelty / contradiction cues (`twin/cognition/salience.py`) — salience excludes novelty; novelty is ranking/inspection only;
+- daily / weekly consolidation (`twin/cognition/consolidation_cycle.py`) — logical windows with durable `consolidation_runs` (unique apply per window); concurrent `running` blocked; `error` requires `retry=True` with atomic CAS reclaim; confirmed Memory/Judgment invariant raises `ConsolidationInvariantError` (run marked `error`, never `completed`);
+- surfaces: `twin workspace tick` (`--input-mode`, `--sequence`, `--idempotency-key`), `twin consolidate daily|weekly`, `POST /api/workspace/tick`, `POST /api/consolidate/{daily|weekly}`, MCP `workspace_tick` / `consolidate_cycle`, native `intervene_check` soft recall infos;
+- `tests/cognition/test_recall.py`, `test_workspace.py`, `test_consolidation_cycle.py`, and offline `evals/consolidation/` (including score-vs-confidence and confirmed-set invariants).
+
 ### v1.0 — Personal Cognitive OS
 
 A trustworthy, daily-usable version of the infrastructure with:
