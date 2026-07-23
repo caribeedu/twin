@@ -160,11 +160,29 @@ def handle_attention_evaluate(
 def handle_connector_reconcile(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    # Lightweight stub: report connector sync states when present.
+    """Run due connector syncs via the shared scheduler (recovery path)."""
     if not hasattr(store, "list_connector_instances"):
         return {"reconciled": 0, "note": "connectors unavailable"}
-    instances = store.list_connector_instances(limit=200)  # type: ignore[attr-defined]
-    return {"reconciled": len(instances), "instance_ids": [i.id for i in instances[:50]]}
+    from twin.connectors.credentials import build_credential_store
+    from twin.connectors.scheduler import sync_due
+
+    payload = job.payload or {}
+    emit = bool(payload.get("emit_percepts", True))
+    creds = build_credential_store(cfg.home)
+    results = sync_due(store, creds, cfg.home, emit_percepts=emit)
+    return {
+        "reconciled": len(results),
+        "ok": sum(1 for r in results if r.ok),
+        "results": [
+            {
+                "connector_id": r.connector_id,
+                "ok": r.ok,
+                "health": r.health.value if hasattr(r.health, "value") else str(r.health),
+                "percepts": r.percepts,
+            }
+            for r in results
+        ],
+    }
 
 
 HANDLERS: dict[JobKind, Handler] = {

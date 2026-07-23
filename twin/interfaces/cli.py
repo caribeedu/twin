@@ -926,6 +926,12 @@ def cmd_connector(args) -> None:
     elif cmd == "contract":
         from ..connectors import contract_matrix
         print(_json.dumps(contract_matrix(), indent=2, default=str))
+    elif cmd == "production-ready":
+        from ..connectors import production_ready_adapters
+        report = production_ready_adapters()
+        print(_json.dumps(report, indent=2, default=str))
+        if not report.get("ok"):
+            raise SystemExit(1)
     elif cmd == "completion":
         from ..connectors import completion_matrix
         matrix = completion_matrix()
@@ -1773,6 +1779,10 @@ def main(argv: list[str] | None = None) -> None:
     csyncdue.set_defaults(func=cmd_connector)
     cs.add_parser("contract", help="print §88 adapter contract matrix"
                   ).set_defaults(func=cmd_connector)
+    cs.add_parser(
+        "production-ready",
+        help="attest ≥2 real adapters closed for daily production use",
+    ).set_defaults(func=cmd_connector)
     cs.add_parser(
         "completion",
         help="print connector completion criteria matrix (§93)",

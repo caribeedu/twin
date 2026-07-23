@@ -1638,6 +1638,13 @@ Implemented (v0.9.6 — Attention + MCP runtime surfaces):
 - surfaces: `GET /api/sessions/{id}/attention`, `POST /api/attention/{id}/feedback`, MCP `get_context_pack`, `append_session_delta`, `get_attention`, `provide_feedback`, `capabilities`, `health`;
 - `tests/cognition/test_attention.py`.
 
+Implemented (v0.9.7 — Professional Connectors production-ready):
+
+- GitHub + Slack closed on §88 contract (collision DLQ, partial batch, quarantine, unauthorized, unknown schema);
+- `production_ready_adapters()` + `twin connector production-ready` attest ≥2 real adapters (Fake never counts);
+- runtime `connector_reconcile` runs due syncs via `sync_due` (recovery path, not a stub inventory);
+- `tests/connectors/test_production_ready.py` + adapter contract gap tests.
+
 Implemented (v0.9.8 — Data Sovereignty spine):
 
 - `twin/sovereignty/` — NDJSON export bundle + manifest checksums; `create_backup` copies SQLite; `validate_backup` / `restore_sqlite_backup` to isolated path;
@@ -1645,7 +1652,7 @@ Implemented (v0.9.8 — Data Sovereignty spine):
 - surfaces: `twin backup {create,validate,restore}`, `POST /api/backup`, `POST /api/backup/validate`, `POST /api/restore`;
 - `tests/sovereignty/test_backup.py`.
 
-Still open for later v0.9.x slices: production connectors, explainability/review UX, encrypted/incremental backups, security evals, re-explanation metrics.
+Still open for later v0.9.x slices: remaining adapter contract rows, explainability/review UX, encrypted/incremental backups, security evals, golden scenarios, re-explanation metrics.
 
 ---
 

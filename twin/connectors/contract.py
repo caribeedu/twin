@@ -121,9 +121,11 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
             "evidence": "tests/connectors/github/test_adapter.py::test_partial_batch_failure_exposes_nothing",
         },
         "revision_collision_dlq": {
-            "status": "not_tested",
-            "evidence": None,
-            "note": "relies on framework; no GitHub-specific collision fixture",
+            "status": "pass",
+            "evidence": (
+                "tests/connectors/github/test_adapter.py::"
+                "test_same_revision_different_content_is_a_collision"
+            ),
         },
         "quarantine_no_percept": {
             "status": "pass",
@@ -167,16 +169,25 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
             "evidence": "tests/connectors/slack/test_adapter.py::test_same_sync_twice_is_idempotent",
         },
         "partial_batch_invisible": {
-            "status": "not_tested",
-            "evidence": None,
+            "status": "pass",
+            "evidence": (
+                "tests/connectors/slack/test_adapter.py::"
+                "test_partial_batch_failure_exposes_nothing"
+            ),
         },
         "revision_collision_dlq": {
-            "status": "not_tested",
-            "evidence": None,
+            "status": "pass",
+            "evidence": (
+                "tests/connectors/slack/test_adapter.py::"
+                "test_same_revision_different_content_is_a_collision"
+            ),
         },
         "quarantine_no_percept": {
-            "status": "not_tested",
-            "evidence": None,
+            "status": "pass",
+            "evidence": (
+                "tests/connectors/slack/test_adapter.py::"
+                "test_malicious_message_quarantined_batch_still_commits"
+            ),
         },
         "source_deletion_event": {
             "status": "pass",
@@ -191,13 +202,18 @@ EVIDENCE: dict[str, dict[str, dict[str, str]]] = {
             "evidence": "tests/connectors/slack/test_adapter.py::test_rate_limit_degrades",
         },
         "unauthorized_health": {
-            "status": "not_tested",
-            "evidence": None,
+            "status": "pass",
+            "evidence": (
+                "tests/connectors/slack/test_adapter.py::"
+                "test_auth_expiration_reports_unauthorized"
+            ),
         },
         "unknown_schema_tolerated": {
-            "status": "partial",
-            "evidence": None,
-            "note": "extra event fields ignored; no dedicated test",
+            "status": "pass",
+            "evidence": (
+                "tests/connectors/slack/test_adapter.py::"
+                "test_unknown_schema_fields_are_tolerated"
+            ),
         },
         "backfill_preview_safe": {
             "status": "pass",
@@ -507,5 +523,60 @@ def contract_matrix() -> dict[str, Any]:
             "ok=false means at least one required item is fail/not_tested/partial. "
             "not_supported requires a manifest affordance. Framework evidence "
             "never implies adapter pass."
+        ),
+    }
+
+
+# Capabilities v1.0 requires of a production-ready professional adapter.
+_PRODUCTION_CAPABILITIES = (
+    "idempotent_ingest",
+    "checkpoint_after_commit",
+    "backfill_preview_safe",
+    "source_deletion_event",  # pass or not_supported (declared)
+    "revision_collision_dlq",
+    "unauthorized_health",
+)
+
+
+def production_ready_adapters(
+    *,
+    exclude_fake: bool = True,
+) -> dict[str, Any]:
+    """v0.9.7 attestation: real adapters with closed §88 rows.
+
+    FakeConnector proves the spine only — it never counts toward the
+    "two production-ready connectors" bar.
+    """
+    ready: list[dict[str, Any]] = []
+    not_ready: list[dict[str, Any]] = []
+    for name in list_adapters():
+        if exclude_fake and name == "fake":
+            continue
+        row = check_adapter_contract(name)
+        caps = {
+            cap: (row["items"].get(cap) or {}).get("status", "not_tested")
+            for cap in _PRODUCTION_CAPABILITIES
+        }
+        entry = {
+            "connector_type": name,
+            "ok": row["ok"],
+            "capabilities": caps,
+            "missing_required": row["missing_required"],
+            "partial_items": row["partial_items"],
+        }
+        if row["ok"]:
+            ready.append(entry)
+        else:
+            not_ready.append(entry)
+    return {
+        "ready": ready,
+        "not_ready": not_ready,
+        "ready_count": len(ready),
+        "minimum_required": 2,
+        "ok": len(ready) >= 2,
+        "note": (
+            "ok means ≥2 real adapters have closed required contract cells "
+            "(backfill preview, incremental/idempotent sync, collision DLQ, "
+            "auth failure health, deletions pass or declared not_supported)."
         ),
     }
