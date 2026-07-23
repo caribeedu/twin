@@ -248,6 +248,84 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, "action must be approve | reject | update")
         return _mem_dict(ws.store.get_memory(memory_id))
 
+    # -- v0.9.2 memory formation ----------------------------------------------
+
+    @app.get("/api/memory/candidates")
+    def api_memory_candidates(state: Optional[str] = None, limit: int = 100):
+        from ..memory.formation import list_candidates
+        return [
+            c.model_dump(mode="json")
+            for c in list_candidates(ws.store, state=state, limit=limit)
+        ]
+
+    class FormationRejectRequest(BaseModel):
+        reason: str = Field(min_length=1, max_length=2000)
+
+    class FormationConfirmRequest(BaseModel):
+        note: str = ""
+
+    class FormationEditRequest(BaseModel):
+        title: Optional[str] = None
+        summary: Optional[str] = None
+        domain: Optional[str] = None
+
+    @app.post("/api/memory/candidates/{memory_id}/confirm")
+    def api_formation_confirm(
+        memory_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
+    ):
+        from ..memory.formation import confirm_candidate
+        try:
+            return confirm_candidate(
+                ws.store, memory_id, note=req.note,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/memory/candidates/{memory_id}/reject")
+    def api_formation_reject(memory_id: str, req: FormationRejectRequest):
+        from ..memory.formation import reject_candidate
+        try:
+            return reject_candidate(
+                ws.store, memory_id, reason=req.reason,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/memory/candidates/{memory_id}/edit")
+    def api_formation_edit(memory_id: str, req: FormationEditRequest):
+        from ..memory.formation import edit_candidate
+        try:
+            return edit_candidate(
+                ws.store, memory_id,
+                title=req.title, summary=req.summary, domain=req.domain,
+            ).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/memory/candidates/{memory_id}/restore")
+    def api_formation_restore(memory_id: str):
+        from ..memory.formation import restore_candidate
+        try:
+            return restore_candidate(ws.store, memory_id).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/memory/{memory_id}/explain")
+    def api_memory_explain(memory_id: str):
+        from ..memory.formation import explain_memory
+        try:
+            return explain_memory(ws.store, memory_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/memory/{memory_id}/history")
+    def api_memory_history(memory_id: str):
+        from ..memory.formation import explain_memory
+        try:
+            return {"memory_id": memory_id, "history": explain_memory(ws.store, memory_id)["history"]}
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     @app.get("/api/search")
     def api_search(q: str, domain: str = "technical", type: Optional[str] = None,
                    limit: int = 10):

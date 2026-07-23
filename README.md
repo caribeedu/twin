@@ -1603,7 +1603,15 @@ Implemented (v0.9.1 — Cognitive Sessions):
 - surfaces: `POST /api/sessions/{id}/{events,checkpoint,close,reopen,pause,resume}`, `GET …/closure`;
 - `tests/cognition/test_session_lifecycle.py`.
 
-Still open for later v0.9.x slices: memory-candidate formation pipeline, operational consolidation reports, Judgment/persona maturity, mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
+Implemented (v0.9.2 — Memory Formation):
+
+- `twin/memory/formation.py` — deterministic `formation_identity` / `mem_f…` ids; propose-or-corroborate; formation states (`candidate` → `corroborating` / `conflicting` / `awaiting_review` → `confirmed` / `rejected` / …); per-type policy (belief/procedure always review; never auto-confirm);
+- confirm requires evidence; reject requires reason; restore rejected → re-review; auditable `MemoryOperation`s; explain view;
+- pipeline inserts via `propose_or_corroborate` (idempotent on identity);
+- surfaces: `GET/POST /api/memory/candidates…`, `GET /api/memory/{id}/explain|history`;
+- `tests/memory/test_formation.py`.
+
+Still open for later v0.9.x slices: operational consolidation reports, Judgment/persona maturity, mature context packs, continuous attention, MCP/native runtime sessions, production connectors, explainability/review UX, backup/deletion, security evals, re-explanation metrics.
 
 ---
 
