@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_attention_session
     ON attention_emissions(session_id, status, created_at);
 
 CREATE TABLE IF NOT EXISTS attention_suppressions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
     memory_id TEXT NOT NULL DEFAULT '',
@@ -143,10 +143,12 @@ class AttentionOpsStoreMixin:
     def add_attention_suppression(
         self, session_id: str, *, kind: str = "", memory_id: str = "",
     ) -> None:
+        from twin import ids
+
         self._j_exec(
-            "INSERT INTO attention_suppressions (session_id, kind, memory_id, created_at)"
-            " VALUES (?,?,?,?)",
-            (session_id, kind or "", memory_id or "", now_iso()),
+            "INSERT INTO attention_suppressions"
+            " (id, session_id, kind, memory_id, created_at) VALUES (?,?,?,?,?)",
+            (ids.new_id("asup"), session_id, kind or "", memory_id or "", now_iso()),
         )
         self._j_commit()
 
