@@ -1624,8 +1624,8 @@ def cmd_doctor(args) -> None:
     ux.print_kv([
         ("home", str(ws.cfg.home)),
         ("db", ws.cfg.resolved_db_url),
-        ("ollama", ws.cfg.ollama_url),
-        ("model", ws.cfg.ollama_model),
+        ("llm", f"{ws.cfg.normalized_llm_provider} @ {ws.cfg.resolved_llm_base_url}"),
+        ("model", ws.cfg.resolved_llm_model),
     ])
     ux.print_legend([
         ("✓", "ok — healthy"),

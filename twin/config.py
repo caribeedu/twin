@@ -144,11 +144,13 @@ class Config:
         from .cognition.llm import PROVIDER_PRESETS, normalize_provider
         preset = PROVIDER_PRESETS.get(normalize_provider(self.llm_provider), {})
         kind = preset.get("kind", "ollama")
+        # Ollama's live URL is TWIN_OLLAMA_URL — never prefer the preset
+        # localhost default over an explicit local server (e.g. WSL → Windows host).
+        if kind == "ollama":
+            return self.ollama_url.rstrip("/")
         base = (preset.get("base") or "").rstrip("/")
         if base:
             return base
-        if kind == "ollama":
-            return self.ollama_url.rstrip("/")
         return self.ollama_url.rstrip("/")
 
     @property

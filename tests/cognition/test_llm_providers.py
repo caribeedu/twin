@@ -86,6 +86,16 @@ def test_config_ollama_still_default(monkeypatch):
     assert "11434" in cfg.resolved_llm_base_url
 
 
+def test_config_ollama_url_overrides_preset_localhost(monkeypatch):
+    """WSL → Windows Ollama: TWIN_OLLAMA_URL must win over preset 127.0.0.1."""
+    monkeypatch.delenv("TWIN_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("TWIN_LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("TWIN_OLLAMA_URL", "http://172.25.208.1:11434")
+    cfg = Config()
+    assert cfg.ollama_url == "http://172.25.208.1:11434"
+    assert cfg.resolved_llm_base_url == "http://172.25.208.1:11434"
+
+
 def test_openai_compat_chat_with_mock_transport():
     responses = [
         httpx.Response(400, json={"error": "no schema"}),
