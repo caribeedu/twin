@@ -216,9 +216,8 @@ A well-wired client calls `memory_safe_context_pack` or `session_start` with `ta
   <img src="assets/demo.gif" alt="cursor-agent answering from Twin memory about Atlas webhooks without re-explaining the decision" width="100%">
 </p>
 
-If the model still asks you to explain from scratch: memory must be `confirmed`, MCP tools enabled, and the client must request a pack with the right domain.
-
-**Next:** keep ingesting your docs or complete MCP sessions (`session_start`, work, then `session_complete`); `twin setup postgres` when you outgrow SQLite; daily ops via CLI or `twin serve` — see [docs/SETUP.md](docs/SETUP.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
+> [!NOTE]
+> If the model still asks you to explain from scratch: memory must be `confirmed`, MCP tools enabled, and the client must request a pack with the right domain.
 
 ---
 
