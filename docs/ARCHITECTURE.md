@@ -2,7 +2,9 @@
 
 # Architecture
 
-This document describes how Twin is built: brain analogies, architecture principles, stack, data model, pipeline, privacy, review, judgment, observer and risks. Product shape and roadmap live in [PRODUCT.md](PRODUCT.md). Interfaces: [CONNECTION.md](CONNECTION.md).
+**Source of truth for:** how Twin works — brain analogies, architecture principles, stack, data model, pipeline, privacy, review, judgment, observer and threat model.
+
+Product shape and the **complete roadmap** live in [PRODUCT.md](PRODUCT.md). Interfaces: [CONNECTION.md](CONNECTION.md). Why the shape exists: [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch: [README](../README.md#how-it-works).
 
 ## Brain analogies
 
@@ -235,6 +237,7 @@ mandatory evidence > sourceless memory
 exportability > lock-in
 ```
 
+Continue in: [PRODUCT.md](PRODUCT.md) for roadmap and domain rules · [CONNECTION.md](CONNECTION.md) for MCP / CLI / API · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
 
 ## Stack and technical decisions
 

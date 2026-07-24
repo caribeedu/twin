@@ -2,7 +2,11 @@
 
 # Connection
 
-Twin exposes one cognitive core through three channels. Same store, same firewall, same judgment — different transport.
+> **Native where possible. MCP everywhere. One cognitive core.**
+
+Twin is infrastructure, not a chat app. Hosts should pull memory, judgment and safe context packs into tools you already use — preferably with native hooks when the host allows them, otherwise over MCP. CLI and the local API are the same core with different transport.
+
+This document is the source of truth for **interfaces** (MCP tools, CLI commands, HTTP routes and client setup). It is not a second product manifesto — identity and principles live in the [README](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 | Channel | Transport | Best for |
 |---|---|---|
@@ -10,7 +14,7 @@ Twin exposes one cognitive core through three channels. Same store, same firewal
 | **CLI** | `twin …` process | Ingest, review, ops, scripting |
 | **Local API** | HTTP (+ Review Workbench UI) | Browsers, local integrations, `twin serve` |
 
-Install and models: [SETUP.md](SETUP.md).
+Install and models: [SETUP.md](SETUP.md). Overview narrative: [README](../README.md).
 
 ---
 

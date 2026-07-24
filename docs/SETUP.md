@@ -2,7 +2,9 @@
 
 # Setup
 
-Detailed install, model providers, configuration and tests. For the shortest path, see the [README quickstart](../README.md). How to connect MCP / CLI / API: [CONNECTION.md](CONNECTION.md).
+**Source of truth for:** how you run Twin — install, model providers, configuration, operator runbook and tests.
+
+For the shortest path to a first result, start at the [README quickstart](../README.md#how-to-use-twin). How to connect MCP / CLI / API: [CONNECTION.md](CONNECTION.md).
 
 ## Installation
 

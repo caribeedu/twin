@@ -2,7 +2,9 @@
 
 # Product
 
-Twin is a personal, local-first cognitive layer: structured memory, evolving judgment, domain firewall and interoperable access (MCP / CLI / API) so tools can reason with your context without becoming a chat replacement. The sections below define product layers, domain separation, MVP shape, roadmap and success criteria. Architecture principles and brain analogies live in [ARCHITECTURE.md](ARCHITECTURE.md).
+**Source of truth for:** what Twin delivers — memory / judgment / action layers, domain separation, MVP shape, **full roadmap** (v0.1 → v1.1.0 → future majors) and success criteria.
+
+Twin is a personal, local-first cognitive layer: structured memory, evolving judgment, domain firewall and interoperable access (MCP / CLI / API) so tools can reason with your context without becoming a chat replacement. Architecture principles and brain analogies live in [ARCHITECTURE.md](ARCHITECTURE.md). Overview: [README](../README.md).
 
 ## Central concept: memory is not enough
 
@@ -145,6 +147,8 @@ Deliberately does not include:
 - fully imitating the user's personality.
 
 ## Roadmap
+
+The complete version history lives **only here** — read top to bottom. The [README](../README.md#roadmap-teaser) keeps a short teaser so newcomers see the arc without leaving the overview.
 
 ### v0.1 — Local Technical Memory
 

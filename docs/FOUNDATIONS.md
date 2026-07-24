@@ -2,7 +2,9 @@
 
 # Foundations
 
-Twin rests on ideas from philosophy of mind, cognitive science, neuroscience, psychology, symbolic AI and cognitive architectures. These foundations explain why the system separates memory, judgment, domains and evidence instead of collapsing everything into retrieval. The sections below are the conceptual bases and inspirations behind the design.
+**Source of truth for:** why Twin exists — philosophy and academic inspirations (Extended Mind, 4E, memory systems, GWT, ACT-R, …).
+
+This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built: [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers: [PRODUCT.md](PRODUCT.md). Short narrative: [README](../README.md).
 
 ## Academic and conceptual foundations
 
