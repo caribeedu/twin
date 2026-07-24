@@ -206,7 +206,7 @@ Restart / reload MCP. Twin should appear as a local server running `twin mcp`. F
 
 ### 4. See a first result
 
-Open a **new** chat (or `cursor-agent` in the terminal). Do **not** paste the RFC. Ask something only Twin’s memory can answer:
+Open a **new** chat (or any connected agent in the terminal). Do **not** paste the RFC. Ask something only Twin’s memory can answer:
 
 > For Atlas webhooks, what delivery approach did we already decide on, and what did we reject?
 
