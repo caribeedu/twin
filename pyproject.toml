@@ -34,7 +34,7 @@ twin-runtime = "twin.runtime.__main__:main"
 include = ["twin*"]
 
 [tool.setuptools.package-data]
-twin = ["defaults/*.yaml"]
+twin = ["defaults/*.yaml", "interfaces/web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

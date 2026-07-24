@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Twin — Persistent Cognitive Core</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="mesh" aria-hidden="true"></div>
+
+  <header class="top">
+    <a class="brand" href="#home" data-nav="home">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="brand-text">
+        <strong>Twin</strong>
+        <em>Persistent Cognitive Core</em>
+      </span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#home" data-nav="home">Core</a>
+      <a href="#review" data-nav="review">Review</a>
+      <a href="#search" data-nav="search">Search</a>
+      <a href="#pack" data-nav="pack">Pack</a>
+      <a href="#memories" data-nav="memories">Memories</a>
+      <a href="#status" data-nav="status">Status</a>
+    </nav>
+  </header>
+
+  <main id="app" class="app"></main>
+
+  <footer class="foot">
+    <span class="mark sm" aria-hidden="true"></span>
+    <p>One evolving mind across every interface</p>
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

@@ -1,19 +1,20 @@
-"""Local HTTP API + minimal review UI.
+"""Local HTTP API + Twin review / continuity UI.
 
 Run:  twin serve   →  http://127.0.0.1:8765
 
-The UI is intentionally tiny (server-rendered HTML, no build step): review
-candidate memories, approve/reject, fix domain/sensitivity, inspect evidence,
-export JSON. Everything else happens through the JSON API or MCP.
+JSON API powers MCP, CLI and the static SPA under ``twin/interfaces/web``.
+The UI follows the Twin brand (purple + white) — review, search, pack,
+memories and system status without a build step.
 """
 
 from __future__ import annotations
 
-import html
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from ..cognition import extract_pending
@@ -32,6 +33,7 @@ from ..judgment.profile import load_profile
 from ..memory.models import FeedbackVerdict, MemoryStatus, TaskProfile
 from ..memory.search import search
 from ..workspace import Workspace
+from .web import STATIC_DIR, read_index
 
 # domains accepted at the API edge; unclassified is a valid *target* (it
 # means "operate default-deny"), never a memory domain
@@ -195,8 +197,18 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return {"ingested": new_ids, "skipped": skipped}
 
     @app.post("/api/extract")
-    def api_extract():
+    def api_extract(auto_approve: bool = False):
+        from ..memory.models import MemoryStatus
+
         reports = extract_pending(ws.store, ws.cfg, ws.embedder)
+        auto_approved: list[str] = []
+        if auto_approve:
+            for r in reports:
+                for mid in r.inserted:
+                    mem = ws.store.get_memory(mid)
+                    if mem is not None and mem.status.value == "candidate":
+                        ws.store.set_status(mid, MemoryStatus.confirmed)
+                        auto_approved.append(mid)
         return [
             {
                 "percept_id": r.percept_id, "extractor": r.extractor,
@@ -206,6 +218,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 "deferred": r.deferred,
                 "interpretation_status": r.interpretation_status,
                 "unresolved_references": r.unresolved_references,
+                "auto_approved": [m for m in auto_approved if m in r.inserted],
             }
             for r in reports
         ]
@@ -1481,158 +1494,23 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             "judgment": judgment_export,
         })
 
-    # -- Review Workbench UI (v0.3) ----------------------------------------
+    # -- Twin web UI (static SPA) ------------------------------------------
 
-    _PAGE = """<!doctype html><html><head><meta charset="utf-8">
-    <title>twin — review workbench</title>
-    <style>
-      :root {{ --bg:#0f1419; --panel:#1a2332; --line:#2d3a4d; --text:#e7ecf3;
-               --muted:#8b9bb4; --ok:#3d9a6a; --no:#c44b4b; --warn:#c9a227; --accent:#5b8def; }}
-      * {{ box-sizing: border-box; }}
-      body {{ font-family: "IBM Plex Sans", "Segoe UI", sans-serif; margin: 0;
-              background: linear-gradient(160deg,#0f1419 0%,#15202b 50%,#1a1f2e 100%);
-              color: var(--text); min-height: 100vh; }}
-      header {{ padding: 1rem 1.5rem; border-bottom: 1px solid var(--line);
-                display:flex; gap:1rem; align-items:baseline; flex-wrap:wrap; }}
-      header h1 {{ font-family: "IBM Plex Serif", Georgia, serif; font-size: 1.35rem;
-                   margin:0; letter-spacing:.02em; }}
-      nav a {{ color: var(--muted); text-decoration:none; margin-right:1rem; font-size:.9rem; }}
-      nav a:hover {{ color: var(--accent); }}
-      .wrap {{ max-width: 1100px; margin: 0 auto; padding: 1.25rem; }}
-      .filters {{ display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem; }}
-      .filters select, .filters input {{ background:var(--panel); color:var(--text);
-        border:1px solid var(--line); border-radius:4px; padding:.35rem .5rem; }}
-      .pair {{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }}
-      @media (max-width:800px) {{ .pair {{ grid-template-columns:1fr; }} }}
-      .card {{ background:var(--panel); border:1px solid var(--line); border-radius:6px;
-               padding:1rem; }}
-      .card h3 {{ margin:0 0 .4rem; font-size:1rem; }}
-      .meta {{ color:var(--muted); font-size:.78rem; margin-bottom:.5rem; line-height:1.4; }}
-      .reason {{ color:var(--warn); font-size:.82rem; margin-bottom:.4rem; }}
-      .flags span {{ display:inline-block; background:#243044; color:var(--muted);
-                     font-size:.7rem; padding:.1rem .4rem; margin:.1rem; border-radius:3px; }}
-      blockquote {{ border-left:2px solid var(--line); margin:.4rem 0; padding:.2rem .6rem;
-                    color:var(--muted); font-size:.85rem; }}
-      .actions {{ display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.75rem; }}
-      button, .actions a.btn {{ padding:.4rem .75rem; border-radius:4px; border:1px solid var(--line);
-        cursor:pointer; background:#243044; color:var(--text); font-size:.82rem; text-decoration:none; }}
-      button.ok {{ background:var(--ok); border-color:var(--ok); color:#fff; }}
-      button.no {{ background:var(--no); border-color:var(--no); color:#fff; }}
-      .keys {{ color:var(--muted); font-size:.75rem; margin-top:1rem; }}
-      .prio {{ color:var(--accent); font-weight:600; }}
-    </style></head><body>
-    <header>
-      <h1>twin</h1>
-      <nav><a href="/">workbench</a><a href="/all">all</a><a href="/api/export">export</a>
-           <a href="/api/metrics">metrics</a></nav>
-    </header>
-    <div class="wrap">{body}</div>
-    <script>
-    document.addEventListener('keydown', (e) => {{
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-      const form = document.querySelector('.work-item form');
-      if (!form) return;
-      const map = {{a:'approve',r:'reject',e:'update',d:'defer',m:'merge_hint',s:'supersede_hint',c:'contradict_hint'}};
-      if (map[e.key]) {{
-        const btn = form.querySelector('[value="'+map[e.key]+'"]');
-        if (btn) {{ e.preventDefault(); btn.click(); }}
-      }}
-      if (e.key === 'n') {{ const n = document.querySelector('a.next'); if (n) n.click(); }}
-      if (e.key === 'p') {{ const p = document.querySelector('a.prev'); if (p) p.click(); }}
-    }});
-    </script>
-    </body></html>"""
-
-    def _render_side(mem, evidence, label: str) -> str:
-        quotes = "".join(f"<blockquote>{html.escape(e.quote[:240])}</blockquote>" for e in evidence[:2])
-        flags = "".join(f"<span>{html.escape(f)}</span>" for f in mem.quality_flags[:6])
-        return f"""
-        <div class="card">
-          <div class="meta">{html.escape(label)}</div>
-          <h3>{html.escape(mem.title)}</h3>
-          <div class="meta">{mem.type.value} · {mem.domain} · {mem.sensitivity.value}
-            · conf {mem.confidence:.2f} · prio <span class="prio">{mem.review_priority:.2f}</span>
-            · {html.escape((mem.created_at or '')[:16])}
-            · entities: {html.escape(", ".join(mem.entities) or "—")}</div>
-          <div class="flags">{flags}</div>
-          <p>{html.escape(mem.summary)}</p>
-          {quotes}
-        </div>"""
-
-    def _render_work_item(mem, neighbor, evidence, n_evidence, idx: int, total: int) -> str:
-        domain_opts = "".join(
-            f'<option value="{d}" {"selected" if d == mem.domain else ""}>{d}</option>'
-            for d in ALL_DOMAINS
-        )
-        sens_opts = "".join(
-            f'<option value="{s}" {"selected" if s == mem.sensitivity.value else ""}>{s}</option>'
-            for s in ["public", "internal", "private", "restricted"]
-        )
-        reason = (
-            f'<div class="reason">⚠ {html.escape(mem.review_reason or "")}</div>'
-            if mem.needs_review else ""
-        )
-        pair = _render_side(mem, evidence, "Candidate")
-        if neighbor:
-            pair = f'<div class="pair">{pair}{_render_side(neighbor, n_evidence, "Neighbor")}</div>'
-        else:
-            pair = f'<div class="pair">{pair}<div class="card"><div class="meta">No close neighbor</div></div></div>'
-        prev_href = f"/?i={idx-1}" if idx > 0 else "#"
-        next_href = f"/?i={idx+1}" if idx + 1 < total else "#"
-        return f"""
-        <div class="work-item">
-          <div class="meta">item {idx+1} / {total}
-            <a class="prev" href="{prev_href}">prev</a> ·
-            <a class="next" href="{next_href}">next</a></div>
-          {reason}
-          {pair}
-          <form method="post" action="/review/{mem.id}" class="actions">
-            domain <select name="domain">{domain_opts}</select>
-            sensitivity <select name="sensitivity">{sens_opts}</select>
-            <input type="hidden" name="neighbor_id" value="{neighbor.id if neighbor else ''}">
-            <button class="ok" name="action" value="approve">A approve</button>
-            <button class="no" name="action" value="reject">R reject</button>
-            <button name="action" value="update">E edit/save</button>
-            <button name="action" value="defer">D defer</button>
-            <button name="action" value="supersede_hint">S supersede neighbor</button>
-            <button name="action" value="contradict_hint">C contradict</button>
-            <button name="action" value="merge_hint">M merge</button>
-            <button name="action" value="archive">archive</button>
-          </form>
-          <p class="keys">Keyboard: A approve · R reject · E edit · M merge · S supersede · C contradict · D defer · N/P next/prev</p>
-        </div>"""
+    if STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/", response_class=HTMLResponse)
-    def ui_review_queue(i: int = 0, conflicts: bool = False):
-        from ..cognition.quality import discover_neighbors, review_queue
-        pending = review_queue(ws.store, conflicts_only=conflicts, limit=200)
-        if not pending:
-            return _PAGE.format(body="<p>Nothing to review.</p>")
-        i = max(0, min(i, len(pending) - 1))
-        mem = pending[i]
-        neighbors = discover_neighbors(ws.store, ws.embedder, mem, limit=1)
-        neighbor = neighbors[0][0] if neighbors else None
-        body = f"<h2>{len(pending)} in priority queue</h2>" + _render_work_item(
-            mem, neighbor,
-            ws.store.get_evidence(mem.id),
-            ws.store.get_evidence(neighbor.id) if neighbor else [],
-            i, len(pending),
-        )
-        return _PAGE.format(body=body)
+    def ui_home():
+        return HTMLResponse(read_index())
 
     @app.get("/all", response_class=HTMLResponse)
-    def ui_all():
-        memories = ws.store.list_memories(limit=500)
-        cards = []
-        for mem in memories:
-            cards.append(f"""
-            <div class="card" style="margin-bottom:.6rem">
-              <h3>{html.escape(mem.title)}</h3>
-              <div class="meta">{mem.status.value} · {mem.type.value} · prio {mem.review_priority:.2f}</div>
-              <p>{html.escape(mem.summary[:280])}</p>
-            </div>""")
-        body = "".join(cards) or "<p>No memories yet.</p>"
-        return _PAGE.format(body=body)
+    def ui_all_redirect():
+        return RedirectResponse("/#memories", status_code=302)
+
+    @app.get("/favicon.ico")
+    def favicon():
+        # Tiny inline avoidance of 404 noise in logs
+        return RedirectResponse("/static/app.css", status_code=302)
 
     @app.post("/review/{memory_id}")
     def ui_review(memory_id: str, action: str = Form(...), domain: str = Form(None),
@@ -1665,7 +1543,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             merge_memories(ws.store, [memory_id, neighbor_id], embedder=ws.embedder)
         elif action != "update":
             raise HTTPException(400, "unknown action")
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/#review", status_code=303)
 
     return app
 

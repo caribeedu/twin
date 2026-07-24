@@ -2,7 +2,7 @@
 
     twin init                          create ~/.twin + guided Ollama/model setup
     twin ingest <paths...>             run sensors over docs/transcripts/meetings/slack exports
-    twin extract                       interpret pending percepts (progress + ETA)
+    twin extract [--auto-approve|-A]   interpret pending percepts (+ optional auto-confirm)
     twin review                        interactive review (single-key a/r/s/q)
     twin search "query" [--domain d]   hybrid search
     twin pack "task" [--domain d]      build a safe context pack (confirmed only;
@@ -159,6 +159,7 @@ def cmd_interpret(args) -> None:
 def cmd_extract(args) -> None:
     from ..cognition import extract_pending
     from ..cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+    from ..memory.models import MemoryStatus
     from . import ux
 
     ws = Workspace(args.home)
@@ -170,9 +171,11 @@ def cmd_extract(args) -> None:
         ux.print_warn("nothing to interpret (all percepts already interpreted or deferred)")
         return
 
+    auto = bool(getattr(args, "auto_approve", False))
     ux.print_dim(
         f"{len(pending)} percept(s) · model={ws.cfg.ollama_model} · "
         f"url={ws.cfg.ollama_url}"
+        + (" · auto-approve ON" if auto else "")
     )
 
     details: list[str] = []
@@ -221,6 +224,23 @@ def cmd_extract(args) -> None:
         f"total: {total} new, {review} queued for review, {dups} duplicates, "
         f"{deferred} deferred"
     )
+
+    if auto:
+        approved = 0
+        for r in reports:
+            for mid in r.inserted:
+                mem = ws.store.get_memory(mid)
+                if mem is None:
+                    continue
+                if mem.status.value in ("candidate", "confirmed"):
+                    # confirm candidates; leave already-confirmed alone
+                    if mem.status.value == "candidate":
+                        ws.store.set_status(mid, MemoryStatus.confirmed)
+                        approved += 1
+        ux.print_ok(f"auto-approved {approved} memory(ies) — skipped review queue")
+    elif review:
+        ux.print_dim("next: twin review   (or re-run with --auto-approve / -A)")
+
     if deferred:
         ux.print_dim(
             "pending percepts stay eligible — inspect with "
@@ -1686,7 +1706,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_ingest)
 
-    sub.add_parser("extract", help="interpret pending percepts into memories").set_defaults(func=cmd_extract)
+    p = sub.add_parser(
+        "extract",
+        help="interpret pending percepts into memories",
+    )
+    p.add_argument(
+        "--auto-approve", "-A",
+        action="store_true",
+        help="confirm newly extracted memories immediately (skip review queue)",
+    )
+    p.set_defaults(func=cmd_extract)
 
     pi = sub.add_parser("interpret", help="cognitive interpretation status (v0.7)")
     pis = pi.add_subparsers(dest="interpret_command", required=True)
