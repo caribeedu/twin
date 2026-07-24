@@ -66,17 +66,21 @@ def cmd_interpret(args) -> None:
 
     ws = Workspace(args.home)
     if args.interpret_command == "deferred":
-        pending = ws.store.percepts_pending_interpretation(
-            max_attempts=MAX_INTERPRETATION_ATTEMPTS)
-        deferred = [p for p in pending if ws.store.get_interpretation(p.id)]
-        if not deferred:
-            print("no deferred percepts")
+        # Include backoff / terminal errors — status alone is easy to miss.
+        stuck = [
+            i for i in ws.store.list_interpretations(limit=10000)
+            if i.status in ("deferred", "error")
+        ]
+        if not stuck:
+            print("no deferred/error percepts")
             return
-        for p in deferred:
-            st = ws.store.get_interpretation(p.id)
-            print(f"{p.id}  {st.status}/{st.failure_class or '-'}  "
-                  f"attempts={st.attempts}  next={st.next_attempt_at or 'now'}  "
-                  f"{st.detail}")
+        for st in stuck:
+            flag = "terminal" if st.terminal else "retryable"
+            print(
+                f"{st.percept_id}  {st.status}/{st.failure_class or '-'}  "
+                f"attempts={st.attempts}  {flag}  "
+                f"next={st.next_attempt_at or 'now'}  {st.detail}"
+            )
         return
     if args.interpret_command == "signals":
         signals = ws.store.list_detection_signals(limit=10000)
@@ -113,8 +117,21 @@ def cmd_extract(args) -> None:
     deferred = sum(1 for r in reports if r.deferred)
     for r in reports:
         if r.deferred:
-            print(f"{r.percept_id}: DEFERRED ({r.interpretation_status}) — "
-                  "no cognitive interpreter available; will retry")
+            st = ws.store.get_interpretation(r.percept_id)
+            detail = (st.detail if st else "") or r.interpretation_status
+            fclass = (st.failure_class if st else "") or "-"
+            # 'deferred' = Ollama unreachable; 'error' = reachable but call failed
+            why = (
+                "model unreachable — start Ollama / check TWIN_OLLAMA_URL"
+                if r.interpretation_status == "deferred"
+                else "interpreter call failed (timeout/schema/HTTP) — see detail"
+            )
+            print(
+                f"{r.percept_id}: {r.interpretation_status.upper()} "
+                f"({fclass}) — {why}"
+            )
+            if detail:
+                print(f"  detail: {detail}")
             continue
         print(f"{r.percept_id}: {len(r.inserted)} memories via {r.extractor}"
               f" ({r.flagged_for_review} to review, {r.duplicates} duplicates,"
@@ -122,8 +139,8 @@ def cmd_extract(args) -> None:
     print(f"total: {total} new, {review} queued for review, {dups} duplicates,"
           f" {deferred} deferred")
     if deferred:
-        print("  deferred percepts stay pending — re-run once the interpreter "
-              "is reachable ('twin interpret status' to inspect)")
+        print("  pending percepts stay eligible — inspect with "
+              "'twin interpret deferred' then re-run 'twin extract'")
 
 
 def cmd_review(args) -> None:

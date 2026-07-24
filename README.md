@@ -55,11 +55,114 @@ For an advanced user of AI, RAG, MCP, vectorization, PII, pipelines and agents, 
 
 The central point is that **integration does not just mean low latency**. Latency helps, but what is really missing is **operational understanding**: the AI needs to understand what a given memory means, when it holds, in which domain it may be used and how it should affect a decision.
 
+Twin’s answer to that problem is concrete: store evidence-grounded memory locally, confirm what is trusted, then let any LLM pull a safe context pack instead of asking you to re-explain. The next section is that path end-to-end — from first install to the first chat where the model already knows something you never typed there.
+
 ---
 
-## 3. What the project is not
+## 3. How to use Twin
 
-`twin` must not be understood as:
+This is the shortest practical path: install Twin, load a sample decision, confirm it, connect an MCP client, and ask a new chat a question that only Twin’s memory can answer.
+
+You need Python 3.10+, a clone of this repo, and an MCP-capable client (Cursor, Claude Code, or Claude Desktop). SQLite is enough for the first run — no Postgres or Ollama required.
+
+### 3.1 Install and initialize
+
+```bash
+git clone <this-repo-url>
+cd twin
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[mcp]"     # add ,dev or ,api later if you want tests/API
+
+twin init                   # creates ~/.twin (policies, judgment, SQLite store)
+twin doctor                 # optional: store, policies, MCP client configs
+```
+
+`twin init` is the first required Twin command. Until it runs, there is no home directory and no store for memories.
+
+### 3.2 Put knowledge into Twin (and confirm it)
+
+Twin does not invent durable facts for you. You ingest evidence, extract candidates, then **confirm** what should be trusted. Context packs default to confirmed memories only.
+
+```bash
+# Seed with the sample Atlas webhook RFC (or use your own notes/docs)
+twin ingest ./examples/docs
+
+# Turn percepts into memory candidates
+twin extract
+
+# Confirm at least one solid decision (interactive review)
+twin review
+# In the queue: accept the outbox / Postgres decision (or reject noise)
+```
+
+You can check the store without an LLM:
+
+```bash
+twin search "webhook outbox" --domain technical
+twin pack "retry strategy for Atlas webhooks" --domain technical
+```
+
+`twin pack` should mention the outbox pattern / Postgres decision after you confirmed it. If the pack is empty, nothing confirmed yet — go back to `twin review`.
+
+### 3.3 Connect an LLM client over MCP
+
+```bash
+# Writes/merges the Twin MCP server into the client config
+twin setup mcp cursor          # or: claude-code | claude-desktop
+```
+
+Restart the client (or reload MCP). Twin should appear as a local MCP server running `twin mcp`. Details and troubleshooting: [docs/mcp-clients.md](docs/mcp-clients.md).
+
+Manual equivalent (Cursor `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "twin": {
+      "command": "twin",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Use an absolute path to `twin` if the GUI cannot see your shell `PATH` (`which twin`).
+
+### 3.4 First visible result
+
+Open a **new** chat in the client. Do **not** paste the RFC and do **not** explain the architecture. Ask something that only Twin's memory can answer, for example:
+
+> For Atlas webhooks, what delivery approach did we already decide on, and what did we reject?
+
+A well-integrated client will call Twin (`memory_safe_context_pack` or `session_start`) with a technical domain, receive a pack that includes your confirmed decision, and answer with the outbox/Postgres choice (and Kafka rejected) — even though you never stated that in the conversation.
+
+That is the loop Twin exists for:
+
+```text
+your documents / sessions
+  → ingest + extract
+  → human confirm
+  → MCP context pack
+  → LLM answers with less re-explanation
+```
+
+If the model still asks you to explain from scratch: check that the memory is `confirmed`, that MCP tools are enabled for the chat, and that the client requested a pack with `target_domain=technical`.
+
+### 3.5 What to do next
+
+That first chat is the product promise in miniature: less re-explanation, more operational continuity. From here you can deepen the same loop — or read on for what Twin deliberately refuses to become, so the substrate stays sharp.
+
+- Keep feeding Twin: `twin ingest` on your own docs, or complete sessions via MCP (`session_start` → work → `session_complete`) so new candidates appear for review.
+- Prefer `session_start` for real work units so Twin tracks continuity across tools.
+- When you outgrow SQLite or want a stronger local extractor/embedder: `twin setup postgres`, `twin setup ollama` (see Configuration and Installation later in this README).
+- Daily operations (review workbench, judgment, connectors, backup): covered from the Installation and Basic flow sections onward.
+
+---
+
+## 4. What the project is not
+
+The walkthrough above can look like “another AI app.” It is not. Twin is the substrate those apps consult — not a replacement for the chat, the IDE, or the notes where you already work. In particular, `twin` must not be understood as:
 
 - a chatbot;
 - a note-taking app;
@@ -69,7 +172,7 @@ The central point is that **integration does not just mean low latency**. Latenc
 - a Jarvis clone;
 - its own UI to replace ChatGPT, Claude or Cursor.
 
-### 3.1 Non-goals
+### 4.1 Non-goals
 
 `twin` is not trying to:
 
@@ -84,7 +187,7 @@ The central point is that **integration does not just mean low latency**. Latenc
 
 These non-goals are important because they protect the project from expanding into every adjacent product category. `twin` should remain the cognitive substrate that other tools consult, not the place where all interaction must happen.
 
-### 3.2 Why not RAG?
+### 4.2 Why not RAG?
 
 `twin` is not RAG. RAG retrieves documents; `twin` retrieves cognition.
 
@@ -148,11 +251,11 @@ The main UI can remain external. The user must not lose the convenience of exist
 
 ---
 
-## 4. Academic and conceptual foundations
+## 5. Academic and conceptual foundations
 
 The project draws on several areas: philosophy of mind, cognitive science, neuroscience, psychology, symbolic AI, knowledge graphs, human-computer interaction and cognitive architectures.
 
-### 4.1 Extended Mind — Andy Clark and David Chalmers
+### 5.1 Extended Mind — Andy Clark and David Chalmers
 
 The **extended mind** hypothesis, proposed by Andy Clark and David Chalmers in "The Extended Mind" (1998), argues that external tools can become part of the cognitive process when they are reliable, available and integrated into behavior.
 
@@ -172,7 +275,7 @@ user keeps thinking with the machine
 
 The goal is not just "storing data", but creating a system coupled to the user's cognition.
 
-### 4.2 4E Cognition
+### 5.2 4E Cognition
 
 The **4E cognition** school understands cognition as:
 
@@ -183,7 +286,7 @@ The **4E cognition** school understands cognition as:
 
 This line matters because the project does not treat thinking as something isolated inside the brain. The user thinks with tools, IDEs, documents, meetings, Slack, email, calendar, voice, notes and LLMs. `twin` tries to turn that scattered set into a coherent computational layer.
 
-### 4.3 Memory systems
+### 5.3 Memory systems
 
 Cognitive psychology and neuroscience distinguish multiple memory systems. This inspires the project's internal separation.
 
@@ -197,7 +300,7 @@ Cognitive psychology and neuroscience distinguish multiple memory systems. This 
 
 The hippocampus inspires the episodic capture and temporal consolidation layer. The associative cortex inspires semantic memory. The prefrontal cortex inspires the judgment, inhibition and context selection layer.
 
-### 4.4 Computational Neuroscience Mapping
+### 5.4 Computational Neuroscience Mapping
 
 `twin` does not attempt to reproduce the brain. The mapping below is an engineering analogy: cognitive and neuroscience concepts inspire separations of responsibility inside the system, but the implementation remains pragmatic, auditable and software-native.
 
@@ -215,7 +318,7 @@ The hippocampus inspires the episodic capture and temporal consolidation layer. 
 
 This table connects the philosophical motivation, the academic foundations and the technical architecture. It also gives implementers a quick way to understand why `twin` separates events, graph, firewall, judgment, observer and context packs instead of collapsing everything into one retrieval layer.
 
-### 4.5 Hippocampus, consolidation and temporality
+### 5.5 Hippocampus, consolidation and temporality
 
 The hippocampus is associated with episodic memory, contextual navigation, linking between events and consolidation. Computationally, this suggests the system should not store only raw documents, but events with:
 
@@ -232,7 +335,7 @@ Example:
 ```text
 2026-07-01
 Atlas kickoff meeting
-Participants: Edu, Marina, Rafael
+Participants: Alex, Marina, Rafael
 Decision: use Postgres outbox + dedicated worker
 Rejected alternative: Kafka
 Future condition: revisit Kafka if volume > 50k events/day
@@ -240,7 +343,7 @@ Future condition: revisit Kafka if volume > 50k events/day
 
 This is more useful than an entire transcript dumped into context.
 
-### 4.6 Prefrontal cortex, judgment and inhibition
+### 5.6 Prefrontal cortex, judgment and inhibition
 
 The prefrontal cortex is associated with planning, executive control, inhibition, action selection, goals and decision making. The computational inspiration is clear: memory alone is not enough.
 
@@ -258,7 +361,7 @@ principles:
 
 This is different from a factual memory. It is a decision model.
 
-### 4.7 Amygdala, salience and risk
+### 5.7 Amygdala, salience and risk
 
 The amygdala and limbic circuits are associated with emotional salience, fear, risk, reward and affective relevance. In a future version, `twin` should represent something analogous to **salience**:
 
@@ -270,7 +373,7 @@ The amygdala and limbic circuits are associated with emotional salience, fear, r
 
 In the MVP, this function partially shows up as `sensitivity`, `confidence`, `needs_review` and `review_reason`.
 
-### 4.8 Basal ganglia and action selection
+### 5.8 Basal ganglia and action selection
 
 The basal ganglia are frequently associated with action selection, habits and decision loops. For the project, this inspires future versions with safe automations:
 
@@ -284,7 +387,7 @@ draft / reminder / suggestion / automation with approval
 
 The MVP deliberately does not execute autonomous actions. Before acting, the system needs to learn to remember, filter and judge.
 
-### 4.9 Global Workspace Theory — Bernard Baars, Stanislas Dehaene
+### 5.9 Global Workspace Theory — Bernard Baars, Stanislas Dehaene
 
 **Global Workspace Theory** proposes that several specialized modules operate in parallel, but only some information becomes globally available for attention, language, working memory and action.
 
@@ -304,7 +407,7 @@ suggests context to the main AI
 
 The desired experience resembles "remembering" something: the user does not want to manually query a database. The system should suggest what looks relevant, without leaking forbidden content.
 
-### 4.10 ACT-R — John R. Anderson
+### 5.10 ACT-R — John R. Anderson
 
 ACT-R is a cognitive architecture that separates declarative and procedural components, with activation, retrieval and production mechanisms. The project draws on that separation:
 
@@ -315,21 +418,21 @@ ACT-R is a cognitive architecture that separates declarative and procedural comp
 
 `twin` does not implement ACT-R, but adopts the idea that memory and procedure are distinct categories.
 
-### 4.11 Predictive Processing and Active Inference — Karl Friston
+### 5.11 Predictive Processing and Active Inference — Karl Friston
 
 Predictive processing and active inference models treat the brain as a system that maintains internal models, predicts the world and updates beliefs upon receiving prediction error.
 
-For `twin`, this implies the system should not store only loose sentences like "Edu prefers X". It should track the evolution of mental models:
+For `twin`, this implies the system should not store only loose sentences like "the user prefers X". It should track the evolution of mental models:
 
 ```text
-2023: Edu considered microservices preferable for almost everything.
-2026: Edu came to prefer a modular monolith when maintainability and simplicity matter more.
+2023: the user considered microservices preferable for almost everything.
+2026: the user came to prefer a modular monolith when maintainability and simplicity matter more.
 Reason: hands-on experience with operational complexity.
 ```
 
 This calls for temporality, contradiction, supersedence and belief history.
 
-### 4.12 Self-complexity and social roles
+### 5.12 Self-complexity and social roles
 
 Psychology discusses that a person does not operate with a single homogeneous "self". There are social and contextual roles:
 
@@ -344,10 +447,10 @@ Psychology discusses that a person does not operate with a single homogeneous "s
 
 These roles share some memories, but not all. This point is crucial for privacy.
 
-`twin` must not model only `Edu -> everything`. It must model:
+`twin` must not model only `User -> everything`. It must model:
 
 ```text
-Edu
+User
  ├── persona: developer
  │    └── domain: work/technical
  ├── persona: partner
@@ -360,13 +463,13 @@ Edu
       └── domain: assistant_preferences
 ```
 
-### 4.13 Symbolic AI: semantic networks, frames and scripts
+### 5.13 Symbolic AI: semantic networks, frames and scripts
 
 Before LLMs, symbolic AI already represented knowledge with semantic networks, frames and scripts.
 
 `twin` reuses those ideas:
 
-- triples/edges: `Edu -> prefers -> pt-BR answers`;
+- triples/edges: `User -> prefers -> pt-BR answers`;
 - frames: a technical decision with slots for context, alternatives, risks and consequence;
 - scripts: recurring sequences of how the user decides or works;
 - policies: explicit privacy and judgment rules.
@@ -386,7 +489,7 @@ Frame example:
 
 ---
 
-## 5. Central concept: memory is not enough
+## 6. Central concept: memory is not enough
 
 A memory store can help an LLM retrieve facts. But that does not guarantee it acts as an extension of the user.
 
@@ -396,7 +499,7 @@ The project needs three layers:
 memory → judgment → action
 ```
 
-### 5.1 Memory
+### 6.1 Memory
 
 Memory answers:
 
@@ -406,7 +509,7 @@ Memory answers:
 - which source proves it?
 - when was it true?
 
-### 5.2 Judgment
+### 6.2 Judgment
 
 Judgment answers:
 
@@ -417,7 +520,7 @@ Judgment answers:
 - when does privacy beat convenience?
 - when does simplicity beat elegant architecture?
 
-### 5.3 Action
+### 6.3 Action
 
 Action answers:
 
@@ -432,7 +535,7 @@ The MVP focuses mainly on memory + firewall + initial judgment. Autonomous actio
 
 ---
 
-## 6. Domain separation
+## 7. Domain separation
 
 A core requirement of the project is preventing improper mixing between contexts.
 
@@ -474,7 +577,7 @@ The rule must not be "retrieve everything and trust the LLM". The correct approa
 
 ---
 
-## 7. MVP architecture
+## 8. MVP architecture
 
 The current MVP proves one thing:
 
@@ -504,11 +607,11 @@ MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
 ---
 
 
-## 8. Architecture Principles
+## 9. Architecture Principles
 
 These principles are the constitution of `twin`. Roadmaps can change, backends can change and interfaces can change, but new features should remain compatible with these rules. When an implementation choice is ambiguous, the preferred option is the one that preserves cognition, autonomy, evidence, safety and portability.
 
-### 8.1 Twin is a cognitive infrastructure
+### 9.1 Twin is a cognitive infrastructure
 
 `twin` is not a memory database. It is an attempt to externalize part of a person's cognition without externalizing their autonomy.
 
@@ -516,7 +619,7 @@ That first principle changes the meaning of every technical decision in the proj
 
 Autonomy is the boundary. `twin` may remember, organize, retrieve, suggest and explain, but it must not quietly take ownership of the user's values or decisions. The project succeeds when it gives external tools access to a safer cognitive substrate while keeping the user in control of durable memory, judgment and action.
 
-### 8.2 Knowledge is not understanding
+### 9.2 Knowledge is not understanding
 
 A million perfectly indexed facts do not produce good decisions. Knowledge answers what is known; understanding emerges from the interaction between memory, context, temporal state, constraints, relationships, consequences and judgment.
 
@@ -524,7 +627,7 @@ A million perfectly indexed facts do not produce good decisions. Knowledge answe
 
 This is the difference between a retrieval layer and a cognitive layer. Retrieval can return information; understanding requires organizing information so that future reasoning improves.
 
-### 8.3 Memory is compression
+### 9.3 Memory is compression
 
 The system should never try to store reality itself. The brain does not preserve every signal; it compresses experience into patterns, episodes, concepts, salience and decision-relevant traces. `twin` should do the same.
 
@@ -532,7 +635,7 @@ A memory is worth keeping when it can change future action: a decision, constrai
 
 This principle changes the ingestion pipeline. The goal is not maximum capture. The goal is selective consolidation: preserve what has future cognitive value, keep evidence links for auditability and avoid turning the user's life into an indiscriminate archive.
 
-### 8.4 Artifact ≠ Percept ≠ Memory ≠ Judgment
+### 9.4 Artifact ≠ Percept ≠ Memory ≠ Judgment
 
 The backbone of the project is a pipeline from reality to action:
 
@@ -559,7 +662,7 @@ An artifact is a source object. A percept is what the system notices from that a
 
 Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a percept to action without evidence, firewall and judgment, it is unsafe.
 
-### 8.5 The graph is truth; embeddings are indexes
+### 9.5 The graph is truth; embeddings are indexes
 
 Embeddings answer similarity. They do not answer truth. They cannot explain why a memory exists, when it was true, which source supports it, whether it supersedes another memory or whether it is allowed in the current domain. They are indexes, not memory.
 
@@ -567,7 +670,7 @@ The canonical memory of `twin` is the temporal graph: memory items, entities, re
 
 This is both a technical and philosophical decision. The user must be able to delete every embedding, regenerate indexes with a different model and still preserve the cognitive substrate. Similarity is useful; truth requires structure, evidence and time.
 
-### 8.6 Evidence before memory
+### 9.6 Evidence before memory
 
 Every durable memory must point back to evidence. Evidence can be a source document, transcript segment, commit, issue, note, calendar event, message or explicit user confirmation. Without evidence, the system may hold a hypothesis, but it should not promote it to confirmed memory.
 
@@ -575,7 +678,7 @@ Evidence is what makes the system inspectable. It lets the user correct bad extr
 
 This principle does not mean all evidence must be exposed to every tool. Evidence has its own sensitivity and domain. But the link must exist inside the local system so the user can audit, export, revise or delete it.
 
-### 8.7 Memory evolves
+### 9.7 Memory evolves
 
 `twin` is an evolving cognitive model, not a static database. It is expected to change continuously as projects, preferences, constraints, relationships and beliefs change. Static memories are a bug when they pretend old context is still current.
 
@@ -583,7 +686,7 @@ Memories should carry temporal validity through dates, conditions, supersedence 
 
 This protects the user from stale personalization. A tool that remembers the user well in 2026 but keeps applying 2023 preferences without context is not intelligent; it is outdated with confidence.
 
-### 8.8 Sessions are units of cognition
+### 9.8 Sessions are units of cognition
 
 A session is where context, intention, evidence and interpretation meet. It may be a conversation, work block, meeting, debugging run or planning episode. `twin` should treat sessions as the primary unit for observing cognitive change.
 
@@ -591,7 +694,7 @@ This prevents the system from overreacting to isolated sentences. A single utter
 
 Session-based change also improves auditability. Instead of asking "why does the system believe this?", the user can inspect which session produced the candidate memory or judgment update, what evidence was present and whether the conclusion still holds.
 
-### 8.9 Firewall before reasoning
+### 9.9 Firewall before reasoning
 
 Privacy and domain separation must happen before reasoning, not after. The main LLM should receive only the memories that are allowed for the current target domain, persona, sensitivity level and task.
 
@@ -599,7 +702,7 @@ This is one of the project's hard safety boundaries. Once sensitive context ente
 
 Features that bypass the firewall for convenience are architectural regressions. The right flow is retrieval, classification, filtering, logging and then context packing. The LLM reasons over the safe pack, not over the raw memory universe.
 
-### 8.10 Judgment evolves independently
+### 9.10 Judgment evolves independently
 
 Memory describes what happened, what was decided, what exists and what evidence supports it. Judgment describes how the user tends to decide, prioritize, reject, approve or communicate. They are related, but they should not be collapsed into the same mechanism.
 
@@ -607,7 +710,7 @@ A new memory can be added without changing judgment. Conversely, judgment can ev
 
 This independence makes the system safer and more explainable. Memory can be frequent; judgment should be conservative because it changes how future tools act on behalf of the user.
 
-### 8.11 Native integration where possible, MCP everywhere
+### 9.11 Native integration where possible, MCP everywhere
 
 `twin` should integrate directly into a host application's UI when the host provides supported APIs, hooks or protocols. Native integration offers the best experience because it can surface memory and context within the tool the user is already using.
 
@@ -615,7 +718,7 @@ When native integration is not available, MCP remains the universal and interope
 
 This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces, but to improve them through native integration where possible and MCP everywhere else.
 
-### 8.12 Exportability over lock-in
+### 9.12 Exportability over lock-in
 
 The user must be able to leave. Exportability is not a nice-to-have; it is a moral and architectural requirement for a system that stores personal cognition. Memories, evidence, entities, relations, policies, judgment profiles and index metadata should be representable in formats that can be inspected and migrated.
 
@@ -623,7 +726,7 @@ This protects the user from the project itself. If `twin` succeeds, it may becom
 
 Implementers should prefer boring, documented and portable representations over clever storage tricks that only one runtime understands. Performance optimizations are welcome when they do not compromise export.
 
-### 8.13 Progressive cognition
+### 9.13 Progressive cognition
 
 The system should never jump directly from observation to autonomy. Each cognitive layer must become reliable before the next one exists:
 
@@ -645,7 +748,7 @@ This principle defines the roadmap more clearly than a feature list. A reliable 
 
 Progressive cognition does not reduce the vision; it makes the vision survivable. Each version should create practical value while preserving the path toward deeper cognition and safer action.
 
-### 8.14 Local-first by default
+### 9.14 Local-first by default
 
 The default assumption is that personal memory, judgment, evidence and indexes live locally under user control. Cloud services may be useful for specific extraction, backup or collaboration flows, but they should not become mandatory for the core system to function.
 
@@ -653,7 +756,7 @@ Local-first is not nostalgia; it is a safety and agency requirement. The data in
 
 This principle also improves longevity. A personal cognitive OS should outlive model providers, SaaS pricing changes and product shutdowns. Local data plus open export paths are what make that possible.
 
-### 8.15 Human approval for durable judgment
+### 9.15 Human approval for durable judgment
 
 Judgment changes affect future behavior. They can change what the system recommends, blocks, prioritizes, summarizes or exposes. For that reason, durable changes to judgment should require explicit human approval or a conservative review workflow.
 
@@ -661,7 +764,7 @@ The system may propose judgment updates. It may notice repeated patterns, contra
 
 This principle preserves agency. `twin` can learn with the user, but it should not silently rewrite the user's values, boundaries or decision model.
 
-### 8.16 Memory exists to improve future action
+### 9.16 Memory exists to improve future action
 
 Memory is not archival for its own sake. `twin` remembers because future thinking, decisions and actions can become better when the right context is available at the right moment.
 
@@ -670,9 +773,9 @@ Action does not need to mean autonomous execution. It can mean a better answer, 
 Reducing cognitive latency is one of `twin`'s primary goals. The system should make relevant context feel close to thought without sacrificing evidence, privacy or user control.
 
 
-## 9. Stack and technical decisions
+## 10. Stack and technical decisions
 
-### 9.1 Local-first
+### 10.1 Local-first
 
 Everything lives in `~/.twin` or `$TWIN_HOME`:
 
@@ -686,7 +789,7 @@ Backup = copy the folder.
 
 Full export = `twin export`.
 
-### 9.2 SQLite as a light graph
+### 10.2 SQLite as a light graph
 
 The MVP uses SQLite with tables for:
 
@@ -707,7 +810,7 @@ JSONB) and SQLite remains the zero-config backend for dev/tests.
 Neo4j, FalkorDB or Graphiti may come later, but the canonical memory must
 remain exportable.
 
-### 9.3 Vectors as index, not as memory
+### 10.3 Vectors as index, not as memory
 
 Embeddings are useful for semantic search, but they are not the true memory.
 
@@ -722,7 +825,7 @@ MCP = interface
 
 This avoids lock-in and allows reindexing in the future.
 
-### 9.4 Hybrid search
+### 10.4 Hybrid search
 
 Search combines:
 
@@ -733,7 +836,7 @@ Search combines:
 
 Search must answer not only "what looks semantically similar?", but "what is relevant, allowed and trustworthy for this context?".
 
-### 9.5 MCP-first
+### 10.5 MCP-first
 
 The project must not depend on its own UI. MCP lets external tools query `twin`.
 
@@ -763,9 +866,9 @@ Exposed tools:
 
 ---
 
-## 10. Data model
+## 11. Data model
 
-### 10.1 Memory Item
+### 11.1 Memory Item
 
 A memory item must contain:
 
@@ -790,7 +893,7 @@ A memory item must contain:
 }
 ```
 
-### 10.2 Memory types
+### 11.2 Memory types
 
 | Type | Meaning |
 |---|---|
@@ -805,7 +908,7 @@ A memory item must contain:
 | `communication_act` | communicative act: request, promise, refusal, apology, decision |
 | `constraint` | rule, limit or prohibition |
 
-### 10.3 Mandatory evidence
+### 11.3 Mandatory evidence
 
 Every memory must carry evidence, preferably a verbatim excerpt from the source.
 
@@ -813,15 +916,15 @@ Without evidence, a memory is suspect.
 
 This reduces memory hallucination and enables human review.
 
-### 10.4 Temporality
+### 11.4 Temporality
 
 Memories must have temporal validity.
 
 Example:
 
 ```text
-2025: works at Ambev
-2026: works at Shippo
+2025: works at Acme Corp
+2026: works at Globex
 ```
 
 Both can be true, but not simultaneously.
@@ -836,7 +939,7 @@ Desired future:
 
 ---
 
-## 11. Ingestion and extraction pipeline
+## 12. Ingestion and extraction pipeline
 
 Flow:
 
@@ -880,7 +983,7 @@ Future sources:
 
 ---
 
-## 12. PII and privacy
+## 13. PII and privacy
 
 The project assumes that leaking personal data can cause real harm.
 
@@ -917,7 +1020,7 @@ Rule: sensitive data must be blocked, masked, hashed or kept local.
 
 ---
 
-## 13. Selective review
+## 14. Selective review
 
 The user must not review everything manually. Review should happen by exception.
 
@@ -947,7 +1050,7 @@ contradict, defer, archive and request_more_evidence.
 
 ---
 
-## 14. Evolving judgment model
+## 15. Evolving judgment model
 
 Memories say **what happened**.
 
@@ -986,7 +1089,7 @@ Context packs receive an **applicable** judgment section (scoped by domain, pers
 
 ---
 
-## 15. Memory Observer
+## 16. Memory Observer
 
 The Memory Observer is a parallel AI/module that follows the current text and suggests related memories.
 
@@ -1035,7 +1138,9 @@ Desired format:
 
 ---
 
-## 16. Installation
+## 17. Installation
+
+For the shortest path to a first visible result with an LLM, start at [§3 How to use Twin](#3-how-to-use-twin). This section lists install variants and the fuller command surface.
 
 ```bash
 pip install -e ".[dev]"        # everything (api + mcp + postgres + crypto + tests)
@@ -1047,7 +1152,7 @@ twin init                      # creates ~/.twin (policies.yaml, judgment.yaml)
 
 ---
 
-## 17. Basic flow
+## 18. Basic flow
 
 ```bash
 # 1. Ingestion: markdown, .txt transcripts, .json meetings, Slack .json exports
@@ -1091,7 +1196,7 @@ twin reindex                   # after switching embedders
 
 ---
 
-## 18. MCP
+## 19. MCP
 
 ```bash
 twin mcp
@@ -1124,7 +1229,7 @@ troubleshooting): [docs/mcp-clients.md](docs/mcp-clients.md).
 
 ---
 
-## 19. Local API
+## 20. Local API
 
 `twin serve` starts:
 
@@ -1175,7 +1280,7 @@ Main endpoints:
 
 ---
 
-## 20. Configuration
+## 21. Configuration
 
 | variable | default | effect |
 |---|---|---|
@@ -1194,7 +1299,7 @@ mix across different models.
 
 ---
 
-## 21. Tests
+## 22. Tests
 
 ```bash
 python -m pytest
@@ -1215,7 +1320,7 @@ Expected coverage:
 
 ---
 
-## 22. MVP scope
+## 23. MVP scope
 
 Includes:
 
@@ -1246,7 +1351,7 @@ Deliberately does not include:
 
 ---
 
-## 23. Roadmap
+## 24. Roadmap
 
 ### v0.1 — Local Technical Memory
 
@@ -1669,7 +1774,7 @@ Follow-on (not blocking v1.0.0 bar above): remaining adapter contract rows, unif
 
 ---
 
-## 24. Future major versions
+## 25. Future major versions
 
 ### v2 — Extended Brain
 
@@ -1751,7 +1856,7 @@ Prepare the cognitive substrate for physical agents:
 
 ---
 
-## 25. Related projects
+## 26. Related projects
 
 ### Graphiti / Zep
 
@@ -1785,7 +1890,7 @@ Inspiration for continuous local capture of screen/audio/context. Not an MVP pri
 
 ---
 
-## 26. Success metrics
+## 27. Success metrics
 
 ### MVP
 
@@ -1820,9 +1925,9 @@ The MVP is successful if it:
 
 ---
 
-## 27. Risks
+## 28. Risks
 
-### 27.1 Privacy
+### 28.1 Privacy
 
 Maximum risk. The system may contain intimate and professional information. Mitigations:
 
@@ -1835,7 +1940,7 @@ Maximum risk. The system may contain intimate and professional information. Miti
 - export/delete;
 - future encryption.
 
-### 27.2 Memory hallucination
+### 28.2 Memory hallucination
 
 LLMs can extract false memories. Mitigations:
 
@@ -1846,7 +1951,7 @@ LLMs can extract false memories. Mitigations:
 - blocking candidates in critical contexts;
 - internal citations.
 
-### 27.3 Domain mixing
+### 28.3 Domain mixing
 
 The most dangerous operational risk. Mitigations:
 
@@ -1856,7 +1961,7 @@ The most dangerous operational risk. Mitigations:
 - explicit target_domain;
 - tested policies.
 
-### 27.4 Overengineering
+### 28.4 Overengineering
 
 The risk of trying to build the whole brain before the MVP. Mitigation:
 
@@ -1866,7 +1971,7 @@ The risk of trying to build the whole brain before the MVP. Mitigation:
 - use MCP;
 - measure real usefulness.
 
-### 27.5 Vendor dependency
+### 28.5 Vendor dependency
 
 Mitigation:
 
@@ -1878,7 +1983,7 @@ Mitigation:
 
 ---
 
-## 28. Practical philosophy of the project
+## 29. Practical philosophy of the project
 
 `twin` must follow these principles:
 
@@ -1900,7 +2005,7 @@ exportability > lock-in
 
 ---
 
-## 29. Final definition
+## 30. Final definition
 
 `twin` is a personal, local-first, interoperable and temporal layer of memory, judgment, privacy and context.
 

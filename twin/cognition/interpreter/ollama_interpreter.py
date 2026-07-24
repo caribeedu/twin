@@ -15,10 +15,14 @@ from typing import Optional
 from ...sensory.percept import Percept
 from .schema import (
     INTERPRETATION_JSON_SCHEMA,
+    INTERPRETATION_TYPES,
+    CognitiveAct,
     InterpretationResult,
     InterpretationStatus,
     InterpretedItem,
 )
+from ..schema import SENSITIVITIES
+from ...config import ALL_DOMAINS
 
 PROMPT_VERSION = "interpret-v1"
 SCHEMA_VERSION = "1"
@@ -76,28 +80,268 @@ def _user_content(percept: Percept, text: str) -> str:
     )
 
 
+_ACT_ALIASES = {
+    "statement": CognitiveAct.statement,
+    "assert": CognitiveAct.statement,
+    "assertion": CognitiveAct.statement,
+    "claim": CognitiveAct.third_party_claim,
+    "third_party": CognitiveAct.third_party_claim,
+    "third-party-claim": CognitiveAct.third_party_claim,
+    "third_party_claim": CognitiveAct.third_party_claim,
+    "question": CognitiveAct.question,
+    "hypothesis": CognitiveAct.hypothesis,
+    "proposal": CognitiveAct.proposal,
+    "suggestion": CognitiveAct.proposal,
+    "recommendation": CognitiveAct.proposal,
+    "decision": CognitiveAct.decision,
+    "chose": CognitiveAct.decision,
+    "choice": CognitiveAct.decision,
+    "opinion": CognitiveAct.opinion,
+    "belief": CognitiveAct.opinion,
+    "preference": CognitiveAct.opinion,
+}
+
+_TYPE_ALIASES = {
+    "rejected alternative": "rejected_alternative",
+    "rejected-alternative": "rejected_alternative",
+    "alternative": "rejected_alternative",
+    "note": "fact",
+    "knowledge": "fact",
+    "info": "fact",
+    "information": "fact",
+    "action": "task",
+    "todo": "task",
+    "commitment": "task",
+    "rule": "constraint",
+    "policy": "constraint",
+    "workflow": "procedure",
+    "process": "procedure",
+    "habit": "procedure",
+    "person": "relationship",
+    "people": "relationship",
+    "message": "communication_act",
+    "utterance": "communication_act",
+}
+
+_DOMAIN_ALIASES = {
+    "tech": "technical",
+    "technology": "technical",
+    "engineering": "technical",
+    "architecture": "technical",
+    "professional": "work",
+    "job": "work",
+    "company": "work",
+    "business": "work",
+    "personal": "personal_preferences",
+    "prefs": "personal_preferences",
+    "assistant": "assistant_preferences",
+    "ai": "assistant_preferences",
+}
+
+
+def _as_str_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                out.append(text)
+        return out
+    return []
+
+
+def _as_confidence(value) -> float:
+    if value is None or value == "":
+        return 0.5
+    if isinstance(value, (int, float)):
+        n = float(value)
+        return max(0.0, min(1.0, n / 100.0 if n > 1.0 else n))
+    text = str(value).strip().lower()
+    mapping = {
+        "very high": 0.95, "high": 0.85, "medium": 0.55, "moderate": 0.55,
+        "low": 0.3, "very low": 0.15,
+    }
+    if text in mapping:
+        return mapping[text]
+    try:
+        n = float(text)
+    except ValueError:
+        return 0.5
+    return max(0.0, min(1.0, n / 100.0 if n > 1.0 else n))
+
+
+def _coerce_item(raw: dict) -> Optional[InterpretedItem]:
+    """Normalize messy LLM fields; return None when the item is unusable."""
+    if not isinstance(raw, dict):
+        return None
+    data = dict(raw)
+
+    mem_type = str(data.get("memory_type") or "fact").strip().lower().replace(" ", "_")
+    mem_type = _TYPE_ALIASES.get(mem_type.replace("_", " "), _TYPE_ALIASES.get(mem_type, mem_type))
+    if mem_type not in INTERPRETATION_TYPES:
+        mem_type = "fact"
+    data["memory_type"] = mem_type
+
+    act_raw = str(data.get("cognitive_act") or "statement").strip().lower().replace(" ", "_")
+    act = _ACT_ALIASES.get(act_raw.replace("_", "-"), _ACT_ALIASES.get(act_raw))
+    if act is None:
+        try:
+            act = CognitiveAct(act_raw)
+        except ValueError:
+            act = CognitiveAct.statement
+    data["cognitive_act"] = act
+
+    title = str(data.get("title") or "").strip()
+    summary = str(data.get("summary") or "").strip()
+    if not title and not summary:
+        return None
+    data["title"] = title or summary[:80]
+    data["summary"] = summary or title
+
+    domain = str(data.get("domain") or "technical").strip().lower().replace(" ", "_")
+    domain = _DOMAIN_ALIASES.get(domain, domain)
+    if domain not in ALL_DOMAINS:
+        domain = "technical"
+    data["domain"] = domain
+
+    sensitivity = str(data.get("sensitivity") or "internal").strip().lower()
+    if sensitivity not in SENSITIVITIES:
+        sensitivity = "internal"
+    data["sensitivity"] = sensitivity
+
+    data["confidence"] = _as_confidence(data.get("confidence"))
+    data["entities"] = _as_str_list(data.get("entities"))
+    data["temporal_refs"] = _as_str_list(data.get("temporal_refs"))
+    data["unresolved_references"] = _as_str_list(data.get("unresolved_references"))
+
+    evidence = data.get("evidence_span") or data.get("evidence") or data.get("quote") or ""
+    data["evidence_span"] = str(evidence).strip()
+
+    for key in ("attributed_to", "project_ref", "ambiguity", "valid_from"):
+        if data.get(key) is None:
+            continue
+        data[key] = str(data[key]).strip() or None
+
+    owner = data.get("speaker_is_owner")
+    if isinstance(owner, str):
+        low = owner.strip().lower()
+        data["speaker_is_owner"] = (
+            True if low in ("true", "yes", "1") else
+            False if low in ("false", "no", "0") else None
+        )
+    elif owner is not None and not isinstance(owner, bool):
+        data["speaker_is_owner"] = None
+
+    relations = data.get("relations") or []
+    clean_rels = []
+    if isinstance(relations, list):
+        for rel in relations:
+            if not isinstance(rel, dict):
+                continue
+            sub = str(rel.get("subject") or "").strip()
+            pred = str(rel.get("predicate") or "").strip()
+            obj = str(rel.get("object") or "").strip()
+            if sub and pred and obj:
+                clean_rels.append(
+                    {"subject": sub, "predicate": pred, "object": obj}
+                )
+    data["relations"] = clean_rels
+
+    # Drop unknown keys so future model fields never trip validation.
+    allowed = set(InterpretedItem.model_fields)
+    data = {k: v for k, v in data.items() if k in allowed}
+    try:
+        return InterpretedItem(**data)
+    except Exception:
+        return None
+
+
+def _items_from_payload(data: dict) -> tuple[list[InterpretedItem], int]:
+    raw_items = data.get("items") or []
+    if not isinstance(raw_items, list):
+        return [], 0
+    items: list[InterpretedItem] = []
+    dropped = 0
+    for raw in raw_items:
+        item = _coerce_item(raw if isinstance(raw, dict) else {})
+        if item is None:
+            dropped += 1
+            continue
+        items.append(item)
+    return items, dropped
+
+
+def _parse_model_json(content: str) -> dict:
+    """Parse structured-output JSON; tolerate think-tags / markdown fences.
+
+    Thinking models (e.g. qwen3.x) sometimes wrap or precede the JSON object
+    even when ``format`` is requested. Fail only when no JSON object remains.
+    """
+    import re
+
+    raw = (content or "").strip()
+    if not raw:
+        raise json.JSONDecodeError("empty model content", raw, 0)
+
+    # Drop common chain-of-thought wrappers before parsing.
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r"<thinking>.*?</thinking>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r"```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = raw.replace("```", "").strip()
+
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    start, end = raw.find("{"), raw.rfind("}")
+    if start >= 0 and end > start:
+        data = json.loads(raw[start : end + 1])
+        if isinstance(data, dict):
+            return data
+    raise json.JSONDecodeError("no JSON object in model content", raw, 0)
+
+
 def interpret(percept: Percept, text: str, *,
               base_url: str = "http://127.0.0.1:11434",
               model: str = "qwen3.6:latest", client=None) -> InterpretationResult:
     import httpx
 
     http = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=600)
-    resp = http.post("/api/chat", json={
+    # ``think: false`` is ignored by older Ollama / non-thinking models.
+    payload = {
         "model": model,
         "stream": False,
         "format": INTERPRETATION_JSON_SCHEMA,
+        "think": False,
         "options": {"temperature": 0.1},
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": _user_content(percept, text)},
         ],
-    })
+    }
+    resp = http.post("/api/chat", json=payload)
     resp.raise_for_status()
-    content = resp.json()["message"]["content"]
-    data = json.loads(content)
-    items = [InterpretedItem(**it) for it in data.get("items", [])]
+    body = resp.json()
+    message = body.get("message") or {}
+    content = message.get("content") or ""
+    # Some builds put the structured answer in a sibling field when thinking.
+    if not content.strip() and isinstance(message.get("thinking"), str):
+        content = message.get("thinking") or ""
+    data = _parse_model_json(content)
+    items, dropped = _items_from_payload(data)
     status = (InterpretationStatus.interpreted if items
               else InterpretationStatus.empty)
+    detail = f"dropped {dropped} malformed item(s)" if dropped else ""
     return InterpretationResult(
         items=items,
         status=status,
@@ -105,7 +349,8 @@ def interpret(percept: Percept, text: str, *,
         model=model,
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
-        unresolved_references=list(data.get("unresolved_references", []) or []),
+        unresolved_references=_as_str_list(data.get("unresolved_references")),
+        detail=detail,
     )
 
 
