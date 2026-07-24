@@ -464,25 +464,41 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     return report
 
 
-def extract_pending(store: MemoryStore, cfg: Config, embedder: Embedder) -> list[ExtractReport]:
+def extract_pending(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    on_progress=None,
+) -> list[ExtractReport]:
     """Interpret every Percept still pending interpretation.
 
     Availability and the HTTP client are resolved once for the whole batch via
     an :class:`InterpretationRuntime`, so a single outage never fans out into
     hundreds of health checks. Selection is by interpretation state: a deferred
     Percept is retried (a prolonged outage never abandons it), while one already
-    interpreted — even to an empty result — is left alone."""
+    interpreted — even to an empty result — is left alone.
+
+    ``on_progress(done, total, percept, report)`` is called after each percept
+    when provided (CLI progress / ETA).
+    """
     pending = store.percepts_pending_interpretation(
         max_attempts=interp_service.MAX_INTERPRETATION_ATTEMPTS)
     if not pending:
         return []
     runtime = interp_service.InterpretationRuntime(cfg) \
         if interp_service.interpreting_mode(cfg) else None
+    reports: list[ExtractReport] = []
+    total = len(pending)
     try:
-        return [
-            extract_percept(store, cfg, embedder, percept, runtime=runtime)
-            for percept in pending
-        ]
+        for idx, percept in enumerate(pending, start=1):
+            report = extract_percept(
+                store, cfg, embedder, percept, runtime=runtime,
+            )
+            reports.append(report)
+            if on_progress is not None:
+                on_progress(idx, total, percept, report)
+        return reports
     finally:
         if runtime is not None:
             runtime.close()

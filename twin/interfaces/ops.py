@@ -215,8 +215,26 @@ def setup_mcp(cfg: Config, client: str) -> list[str]:
         return [f"unknown client '{client}'. Options: {', '.join(paths)}"]
     path = paths[client]
     entry: dict = {"command": shutil.which("twin") or "twin", "args": ["mcp"]}
-    if os.environ.get("TWIN_DB_URL"):
-        entry["env"] = {"TWIN_DB_URL": os.environ["TWIN_DB_URL"]}
+    env: dict[str, str] = {}
+    for key in (
+        "TWIN_DB_URL",
+        "TWIN_HOME",
+        "TWIN_OLLAMA_URL",
+        "TWIN_OLLAMA_MODEL",
+        "TWIN_OLLAMA_EMBED_MODEL",
+        "TWIN_EXTRACTOR",
+    ):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    # Prefer values from ~/.twin/env when process env lacks them
+    try:
+        from .ux import load_env_file
+        for key, value in load_env_file(cfg.home / "env").items():
+            env.setdefault(key, value)
+    except Exception:
+        pass
+    if env:
+        entry["env"] = env
     config: dict = {}
     if path.exists():
         try:

@@ -117,9 +117,17 @@ class Config:
 
 
 def load_config(home: str | os.PathLike | None = None) -> Config:
+    home_path = Path(home).expanduser() if home is not None else DEFAULT_HOME
+    # Local dotenv written by `twin init` / setup wizard. Does not override
+    # variables already present in the process environment.
+    try:
+        from .interfaces.ux import apply_env_file
+        apply_env_file(home_path / "env")
+    except Exception:
+        pass
     cfg = Config()
     if home is not None:
-        cfg.home = Path(home).expanduser()
+        cfg.home = home_path
         # an explicit home implies its own sqlite db unless TWIN_DB_URL is set
         if not os.environ.get("TWIN_DB_URL"):
             cfg.db_url = ""
