@@ -24,7 +24,7 @@
   <a href="#vision">Vision</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#principles">Principles</a> ·
-  <a href="#how-to-use-twin">How to use</a> ·
+  <a href="#how-to-use">How to use</a> ·
   <a href="#docs">Docs</a> ·
   <a href="#faq">FAQ</a>
 </p>
@@ -165,6 +165,8 @@ Ownership and vaults keep personal vs work data separable. Auth, config, discove
 
 Python 3.10+, a clone of this repo, and an MCP client (Cursor / Claude Code / Claude Desktop). SQLite is enough for day one — no Postgres required.
 
+### 1. Install and initialize
+
 ```bash
 git clone https://github.com/caribeedu/twin.git
 cd twin
@@ -177,7 +179,7 @@ twin doctor                 # optional: store, policies, LLM, MCP configs
 
 `twin init` is required before anything else — until it runs there is no home and no store. The wizard configures chat + embeddings (Ollama recommended; Anthropic, Gemini and OpenAI-compatible are opt-in). Details in [docs/SETUP.md](docs/SETUP.md).
 
-### Put knowledge in (and confirm it)
+### 2. Put knowledge in (and confirm it)
 
 Twin does not invent durable facts for you. Ingest evidence, extract candidates, **confirm** what should be trusted. Context packs default to confirmed memories only.
 
@@ -194,7 +196,7 @@ twin search "webhook outbox" --domain technical
 twin pack "retry strategy for Atlas webhooks" --domain technical
 ```
 
-### Connect an LLM client over MCP
+### 3. Connect an LLM client over MCP
 
 ```bash
 twin setup mcp cursor          # or: claude-code | claude-desktop
@@ -202,21 +204,17 @@ twin setup mcp cursor          # or: claude-code | claude-desktop
 
 Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Full interfaces with per-client setup in [docs/INTERFACES.md](docs/INTERFACES.md).
 
-### First visible result
+### 4. See a first result
 
-Open a **new** chat. Do **not** paste the RFC. Ask something only Twin’s memory can answer:
+Open a **new** chat (or `cursor-agent` in the terminal). Do **not** paste the RFC. Ask something only Twin’s memory can answer:
 
 > For Atlas webhooks, what delivery approach did we already decide on, and what did we reject?
 
-A well-wired client calls `memory_safe_context_pack` or `session_start` with `target_domain=technical`, receives your confirmed decision, and answers with the outbox/Postgres choice (Kafka rejected) — even though you never typed that in the chat.
+A well-wired client calls `memory_safe_context_pack` or `session_start` with `target_domain=technical`, receives your confirmed decision, and answers with the outbox/Postgres choice (Kafka rejected) — even though you never typed that in the chat. You should see something like:
 
-```text
-documents / sessions
-  → ingest + extract
-  → you confirm what is trusted
-  → MCP context pack
-  → LLM answers with less re-explanation
-```
+<p align="center">
+  <img src="assets/demo.gif" alt="cursor-agent answering from Twin memory about Atlas webhooks without re-explaining the decision" width="100%">
+</p>
 
 If the model still asks you to explain from scratch: memory must be `confirmed`, MCP tools enabled, and the client must request a pack with the right domain.
 

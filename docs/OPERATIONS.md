@@ -4,7 +4,7 @@
 
 **Source of truth for:** day-2 operation — cognitive runtime, health, connectors, backup, release gates and incidents.
 
-Install and providers live in [SETUP.md](SETUP.md). Quickstart in [README](../README.md#quickstart).
+Install and providers live in [SETUP.md](SETUP.md). How to use in [README](../README.md#how-to-use).
 
 ## Start cognitive runtime
 
