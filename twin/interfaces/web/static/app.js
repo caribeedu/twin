@@ -44,6 +44,189 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+function humanizeKey(key) {
+  return String(key ?? "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Friendly UI labels — option values stay as implementation ids. */
+const LABELS = {
+  domain: {
+    work: "Work",
+    technical: "Technical",
+    personal_preferences: "Personal preferences",
+    assistant_preferences: "Assistant preferences",
+    personal: "Personal",
+    relationship: "Relationships",
+    family: "Family",
+    health: "Health",
+    finance: "Finance",
+    social: "Social",
+    legal: "Legal",
+    emotional: "Emotional",
+    general: "General",
+  },
+  type: {
+    event: "Event",
+    fact: "Fact",
+    decision: "Decision",
+    preference: "Preference",
+    belief: "Belief",
+    task: "Task",
+    procedure: "Procedure",
+    relationship: "Relationship",
+    communication_act: "Communication",
+    constraint: "Constraint",
+  },
+  status: {
+    candidate: "Needs review",
+    confirmed: "Confirmed",
+    rejected: "Rejected",
+    deprecated: "Deprecated",
+    contradicted: "Contradicted",
+    merged: "Merged",
+    split: "Split",
+    archived: "Archived",
+    unsupported: "Unsupported",
+    stale: "Stale",
+    deleted: "Deleted",
+  },
+  sensitivity: {
+    public: "Public",
+    internal: "Internal",
+    private: "Private",
+    restricted: "Restricted",
+  },
+  persona: {
+    individual: "Individual",
+    developer: "Developer",
+    manager: "Manager",
+    partner: "Partner",
+    son: "Family",
+    friend: "Friend",
+    "assistant-user": "Assistant user",
+  },
+  flag: {
+    exact_duplicate: "Exact duplicate",
+    near_duplicate: "Near duplicate",
+    possible_conflict: "Possible conflict",
+    conflict: "Conflict",
+    contradiction: "Contradiction",
+    possible_supersedence: "May supersede another",
+    possible_merge: "Possible merge",
+    possibly_related: "Possibly related",
+    related: "Related",
+    scope_difference: "Different scope",
+    weak_evidence: "Weak evidence",
+    high_future_reuse: "High reuse value",
+    evidence_mapping_required: "Needs evidence mapping",
+    claim_match: "Same claim",
+  },
+  why: {
+    "text match": "Text match",
+    "semantic similarity": "Semantic match",
+    "entity match": "Entity match",
+    "weak match": "Weak match",
+    "project match": "Project match",
+  },
+  reason: {
+    deferred: "Deferred for later",
+    formation_conflict: "Formation conflict",
+    "formation conflict": "Formation conflict",
+    temporal_belief_refresh: "Belief may be outdated",
+    "all supporting evidence removed": "Evidence removed",
+    "more evidence requested": "More evidence requested",
+    "restored from reject — re-review required": "Restored — needs re-review",
+    "merged synthesis — confirm": "Merged — confirm synthesis",
+    semantic: "Semantic similarity",
+    entity: "Shared entity",
+    project: "Same project",
+    contradicts: "Contradicts",
+    supersedes: "Supersedes",
+    related_to: "Related",
+    merged_into: "Merged into",
+    split_into: "Split into",
+  },
+  mode: {
+    compact: "Compact",
+    detailed: "Detailed",
+    full: "Full",
+  },
+};
+
+function reasonLabel(raw) {
+  if (!raw) return "";
+  const key = String(raw);
+  if (LABELS.reason[key]) return LABELS.reason[key];
+  if (key.startsWith("contradicted by ")) return "Contradicted by another memory";
+  if (key.startsWith("contradicts ")) return "Contradicts another memory";
+  if (key.startsWith("graph expansion")) return "Related via graph";
+  return humanizeKey(key);
+}
+
+const DOMAIN_OPTIONS = [
+  "technical", "work", "personal_preferences", "assistant_preferences",
+  "personal", "relationship", "family", "health", "finance", "social",
+  "legal", "emotional", "general",
+];
+const SENSITIVITY_OPTIONS = ["public", "internal", "private", "restricted"];
+const STATUS_FILTER_OPTIONS = ["", "candidate", "confirmed", "rejected"];
+const PERSONA_OPTIONS = ["individual", "developer", "manager"];
+const PACK_DOMAIN_OPTIONS = [
+  "technical", "work", "personal_preferences", "assistant_preferences",
+];
+
+function label(kind, value) {
+  if (value == null || value === "") return kind === "status" ? "All" : "—";
+  const map = LABELS[kind] || {};
+  const key = String(value);
+  return map[key] || humanizeKey(key);
+}
+
+function selectOptions(kind, values, selected) {
+  return values.map((v) => {
+    const sel = v === selected || (v === "" && !selected) ? " selected" : "";
+    const text = v === "" ? "All" : label(kind, v);
+    return `<option value="${esc(v)}"${sel}>${esc(text)}</option>`;
+  }).join("");
+}
+
+function pct01(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(Math.max(0, Math.min(1, x)) * 100);
+}
+
+function tag(text, cls = "") {
+  return `<span class="tag ${cls}">${esc(text)}</span>`;
+}
+
+function memTags(mem, { showStatus = true } = {}) {
+  const parts = [];
+  if (showStatus && mem.status) {
+    const st = String(mem.status);
+    const tone = st === "confirmed" ? "ok"
+      : st === "candidate" ? "warn"
+        : st === "rejected" || st === "contradicted" ? "err" : "";
+    parts.push(tag(label("status", st), tone));
+  }
+  if (mem.type) parts.push(tag(label("type", mem.type), "type"));
+  if (mem.domain) parts.push(tag(label("domain", mem.domain), "domain"));
+  if (mem.sensitivity) parts.push(tag(label("sensitivity", mem.sensitivity), "sens"));
+  return `<div class="tags">${parts.join("")}</div>`;
+}
+
+function flagTags(flags) {
+  const list = (flags || []).slice(0, 8);
+  if (!list.length) return "";
+  return `<div class="tags flags">${list.map((f) => {
+    const key = String(f);
+    const tone = /conflict|duplicate|weak|unsupported/i.test(key) ? "warn" : "";
+    return tag(label("flag", key), tone);
+  }).join("")}</div>`;
+}
+
 function setNav(view) {
   document.querySelectorAll(".nav a").forEach((a) => {
     a.classList.toggle("active", a.dataset.nav === view);
@@ -182,33 +365,38 @@ async function renderReviewItem() {
     }
   } catch (_) { /* ignore */ }
 
-  const domains = ["work", "technical", "personal_preferences", "assistant_preferences",
-    "personal", "relationship", "family", "health", "finance", "social", "legal", "emotional", "general"];
-  const sens = ["public", "internal", "private", "restricted"];
+  const neighPct = neighbor != null ? pct01(neighbor.similarity) : null;
+  const neighWhy = neighbor?.reason ? reasonLabel(neighbor.reason) : "";
+  const neighHeading = neighbor
+    ? `Similar memory · ${neighPct}% match${neighWhy ? ` · ${neighWhy}` : ""}`
+    : "";
 
   box.innerHTML = `
-    <div class="meta">Item ${index + 1} / ${queue.length}
-      · <button type="button" class="btn ghost" id="rev-prev">Prev</button>
-      <button type="button" class="btn ghost" id="rev-next">Next</button>
+    <div class="toolbar">
+      <span class="meta">Item ${index + 1} of ${queue.length}</span>
+      <div class="row tight">
+        <button type="button" class="btn ghost" id="rev-prev">Prev</button>
+        <button type="button" class="btn ghost" id="rev-next">Next</button>
+      </div>
     </div>
-    ${mem.review_reason ? `<div class="reason">⚠ ${esc(mem.review_reason)}</div>` : ""}
+    ${mem.review_reason
+      ? `<div class="reason">⚠ ${esc(reasonLabel(mem.review_reason))}</div>` : ""}
     <div class="pair">
       ${memCard(mem, evidence, "Candidate")}
-      ${neighbor ? memCard(neighbor, nEvidence, `Neighbor · sim ${(neighbor.similarity ?? 0).toFixed(2)}`)
-        : `<div class="mem-card"><div class="meta">No close neighbor</div></div>`}
+      ${neighbor
+        ? memCard(neighbor, nEvidence, neighHeading)
+        : `<div class="mem-card empty-card"><div class="meta">No similar memory nearby</div></div>`}
     </div>
     <form class="row" id="review-form">
       <div class="field"><label>Domain</label>
-        <select name="domain">${domains.map((d) =>
-          `<option value="${d}" ${d === mem.domain ? "selected" : ""}>${d}</option>`).join("")}</select>
+        <select name="domain">${selectOptions("domain", DOMAIN_OPTIONS, mem.domain)}</select>
       </div>
       <div class="field"><label>Sensitivity</label>
-        <select name="sensitivity">${sens.map((s) =>
-          `<option value="${s}" ${s === mem.sensitivity ? "selected" : ""}>${s}</option>`).join("")}</select>
+        <select name="sensitivity">${selectOptions("sensitivity", SENSITIVITY_OPTIONS, mem.sensitivity)}</select>
       </div>
       <button type="button" class="btn ok" data-act="approve">A · Approve</button>
       <button type="button" class="btn err" data-act="reject">R · Reject</button>
-      <button type="button" class="btn" data-act="update">E · Save meta</button>
+      <button type="button" class="btn" data-act="update">E · Save details</button>
       <button type="button" class="btn ghost" data-act="skip">S · Skip</button>
     </form>
   `;
@@ -253,22 +441,49 @@ async function renderReviewItem() {
   });
 }
 
-function memCard(mem, evidence, label) {
-  const flags = (mem.quality_flags || []).slice(0, 6)
-    .map((f) => `<span class="chip">${esc(f)}</span>`).join("");
+function fmtWhen(iso) {
+  if (!iso) return "";
+  return String(iso).slice(0, 16).replace("T", " ");
+}
+
+/** Body text only when it adds something beyond the title (CLI does the same). */
+function memBody(mem, { max = 280 } = {}) {
+  const title = String(mem?.title || "").trim();
+  let summary = String(mem?.summary || "").trim();
+  if (!summary || summary === title) return "";
+  // Echo / short extracts: title is truncated summary ("foo…").
+  if (title.endsWith("...") && summary.startsWith(title.slice(0, -3))) {
+    const rest = summary.slice(title.length - 3).trim();
+    if (!rest) return "";
+    // Still mostly the same sentence — prefer full summary only if much longer.
+    if (summary.length <= title.length + 12) return "";
+  }
+  if (max && summary.length > max) summary = summary.slice(0, max);
+  return summary;
+}
+
+function memCard(mem, evidence, heading) {
   const quotes = (evidence || []).slice(0, 2)
-    .map((e) => `<blockquote>${esc((e.quote || "").slice(0, 240))}</blockquote>`).join("");
+    .map((e) => {
+      const q = (e.quote || "").slice(0, 240);
+      return q ? `<blockquote class="evidence">“${esc(q)}”</blockquote>` : "";
+    }).join("");
+  const conf = pct01(mem.confidence);
+  const prio = pct01(mem.review_priority);
+  const when = fmtWhen(mem.created_at);
+  const body = memBody(mem, { max: 0 });
   return `
     <article class="mem-card">
-      <div class="meta">${esc(label)}</div>
+      <div class="card-kicker">${esc(heading)}</div>
+      ${when ? `<div class="card-when">${esc(when)}</div>` : ""}
       <h3>${esc(mem.title)}</h3>
-      <div class="meta">${esc(mem.type)} · ${esc(mem.domain)} · ${esc(mem.sensitivity)}
-        · conf ${(mem.confidence ?? 0).toFixed(2)}
-        · prio <strong style="color:var(--purple)">${(mem.review_priority ?? 0).toFixed(2)}</strong>
-        · ${esc((mem.created_at || "").slice(0, 16))}
+      ${memTags(mem)}
+      <div class="stats-line">
+        <span>Confidence <strong>${conf}%</strong></span>
+        <span>Priority <strong>${prio}%</strong></span>
       </div>
-      <div class="flags">${flags}</div>
-      <p>${esc(mem.summary || "")}</p>
+      ${flagTags(mem.quality_flags)}
+      ${body ? `<p>${esc(body)}</p>` : ""}
       ${quotes}
     </article>`;
 }
@@ -298,12 +513,7 @@ function search() {
         <div class="field" style="flex:2"><label>Query</label>
           <input name="q" required placeholder="e.g. webhook architecture decisions" /></div>
         <div class="field"><label>Domain</label>
-          <select name="domain">
-            <option value="technical">technical</option>
-            <option value="work">work</option>
-            <option value="personal_preferences">personal_preferences</option>
-            <option value="assistant_preferences">assistant_preferences</option>
-          </select>
+          <select name="domain">${selectOptions("domain", PACK_DOMAIN_OPTIONS, "technical")}</select>
         </div>
         <div class="field"><label>Limit</label>
           <input name="limit" type="number" min="1" max="50" value="10" /></div>
@@ -326,21 +536,34 @@ function search() {
         out.innerHTML = `<div class="empty"><strong>No hits</strong>Try another query or domain.</div>`;
         return;
       }
+      // Relative relevance within this result page (top hit = 100%).
+      const maxScore = Math.max(...data.hits.map((h) => Number(h.score) || 0), 1e-9);
       out.innerHTML = data.hits.map((h) => {
-        const score = h.score ?? 0;
+        const pct = Math.round(((Number(h.score) || 0) / maxScore) * 100);
+        const why = String(h.why || "")
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean)
+          .map((p) => {
+            const friendly = LABELS.why[p]
+              || (p.startsWith("graph expansion") ? "Related via graph" : humanizeKey(p));
+            return tag(friendly, "why");
+          });
+        const body = memBody(h, { max: 220 });
         return `<div class="hit">
-          <div><div class="score">${score.toFixed(3)}</div>
-            <div class="bar"><i style="width:${Math.round(Math.min(1, score) * 100)}%"></i></div>
-            <div class="meta">${esc(h.why || "")}</div>
+          <div class="hit-score">
+            <div class="score">${pct}%</div>
+            <div class="bar"><i style="width:${pct}%"></i></div>
+            ${why.length ? `<div class="tags why">${why.join("")}</div>` : ""}
           </div>
           <div>
             <strong>${esc(h.title)}</strong>
-            <div class="meta">[${esc(h.type)}] ${esc(h.domain)} · ${esc(h.status)}</div>
-            <p>${esc((h.summary || "").slice(0, 220))}</p>
+            ${memTags(h)}
+            ${body ? `<p>${esc(body)}</p>` : ""}
           </div>
         </div>`;
       }).join("") + (data.blocked?.length
-        ? `<p class="meta" style="margin-top:1rem">${data.blocked.length} blocked by firewall</p>`
+        ? `<p class="meta" style="margin-top:1rem">${data.blocked.length} blocked by privacy firewall</p>`
         : "");
     } catch (err) {
       out.innerHTML = `<div class="empty"><strong>Search failed</strong>${esc(err.message)}</div>`;
@@ -360,26 +583,17 @@ function pack() {
           <textarea name="query" required placeholder="What are you about to do?"></textarea></div>
         <div class="row" style="margin-top:.75rem">
           <div class="field"><label>Domain</label>
-            <select name="target_domain">
-              <option value="technical">technical</option>
-              <option value="work">work</option>
-              <option value="personal_preferences">personal_preferences</option>
-              <option value="assistant_preferences">assistant_preferences</option>
-            </select>
+            <select name="target_domain">${selectOptions("domain", PACK_DOMAIN_OPTIONS, "technical")}</select>
           </div>
           <div class="field"><label>Persona</label>
-            <select name="persona">
-              <option value="individual">individual</option>
-              <option value="developer">developer</option>
-              <option value="manager">manager</option>
-            </select>
+            <select name="persona">${selectOptions("persona", PERSONA_OPTIONS, "individual")}</select>
           </div>
           <div class="field"><label>Max tokens</label>
             <input name="max_tokens" type="number" value="1200" min="100" max="8000" /></div>
-          <div class="field"><label>Candidates</label>
+          <div class="field"><label>Include</label>
             <select name="include_candidates">
-              <option value="false">confirmed only</option>
-              <option value="true">include candidates</option>
+              <option value="false">Confirmed only</option>
+              <option value="true">Also needs-review</option>
             </select>
           </div>
         </div>
@@ -407,11 +621,12 @@ function pack() {
         include_candidates: fd.get("include_candidates") === "true",
       };
       const data = await api("/api/context_pack", { method: "POST", body: JSON.stringify(body) });
-      meta.innerHTML = `<div class="row">
-        <span class="chip">confidence ${(data.confidence ?? 0).toFixed(2)}</span>
-        <span class="chip">sources ${(data.sources || []).length}</span>
-        <span class="chip">blocked ${data.blocked_count ?? (data.blocked || []).length}</span>
-        <span class="chip">${esc(data.mode || "compact")}</span>
+      const blocked = data.blocked_count ?? (data.blocked || []).length;
+      meta.innerHTML = `<div class="tags">
+        ${tag(`Confidence ${pct01(data.confidence)}%`, "ok")}
+        ${tag(`${(data.sources || []).length} sources`)}
+        ${tag(blocked ? `${blocked} blocked` : "Nothing blocked", blocked ? "warn" : "ok")}
+        ${tag(label("mode", data.mode || "compact"))}
       </div>`;
       out.innerHTML = `<pre class="pack-out">${esc(data.context_pack || "(empty pack)")}</pre>`;
       toast("Pack ready", "ok");
@@ -431,12 +646,7 @@ async function memories() {
       <p class="lede">Browse stored memory items.</p>
       <div class="row" style="margin-bottom:1rem">
         <div class="field"><label>Status</label>
-          <select id="mem-status">
-            <option value="">all</option>
-            <option value="candidate">candidate</option>
-            <option value="confirmed">confirmed</option>
-            <option value="rejected">rejected</option>
-          </select>
+          <select id="mem-status">${selectOptions("status", STATUS_FILTER_OPTIONS, "")}</select>
         </div>
         <button class="btn" id="mem-reload">Refresh</button>
       </div>
@@ -454,13 +664,22 @@ async function memories() {
         list.innerHTML = `<div class="empty"><strong>No memories</strong></div>`;
         return;
       }
-      list.innerHTML = rows.slice(0, 200).map((m) => `
+      list.innerHTML = rows.slice(0, 200).map((m) => {
+        const body = memBody(m, { max: 280 });
+        const when = (m.created_at || "").slice(0, 10);
+        return `
         <article class="mem-card">
           <h3>${esc(m.title)}</h3>
-          <div class="meta">${esc(m.status)} · ${esc(m.type)} · ${esc(m.domain)}
-            · prio ${(m.review_priority ?? 0).toFixed(2)} · ${esc(m.id)}</div>
-          <p>${esc((m.summary || "").slice(0, 280))}</p>
-        </article>`).join("");
+          ${memTags(m)}
+          <div class="stats-line">
+            <span>Priority <strong>${pct01(m.review_priority)}%</strong></span>
+            <span>Confidence <strong>${pct01(m.confidence)}%</strong></span>
+            ${when ? `<span>${esc(when)}</span>` : ""}
+          </div>
+          ${flagTags(m.quality_flags)}
+          ${body ? `<p>${esc(body)}</p>` : ""}
+        </article>`;
+      }).join("");
     } catch (err) {
       list.innerHTML = `<div class="empty"><strong>Failed</strong>${esc(err.message)}</div>`;
     }
@@ -532,12 +751,6 @@ const METRIC_FIELD_LABELS = {
 
 function labelOf(map, key) {
   return map[key]?.title || map[key] || humanizeKey(key);
-}
-
-function humanizeKey(key) {
-  return String(key)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function formatValue(v) {
