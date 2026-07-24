@@ -1,4 +1,4 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Connection
 
@@ -327,7 +327,7 @@ Terminal / scripting surface. Global flag: `--home` → Twin home (default `~/.t
 |---|---|
 | `twin ingest <paths…>` | Run sensors over files/dirs (docs, transcripts, exports). |
 | `twin extract` | Interpret pending percepts into memory candidates. |
-| `twin extract -A` / `--auto-approve` | Extract and immediately confirm new candidates (skip queue). |
+| `twin extract -A` / `--auto-approve` | **Advanced / demos only:** extract and immediately confirm new *memory* candidates (skip queue). Not the recommended path — Judgment stays human-gated; prefer `twin review`. |
 | `twin interpret status\|deferred\|signals` | Cognitive interpretation diagnostics (deferred queue, heuristic signals). |
 | `twin review` | Interactive priority review queue. |
 | `twin review --analyze` | Run quality analyzer on candidates first. |

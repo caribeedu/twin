@@ -1,4 +1,4 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Foundations
 
@@ -215,6 +215,10 @@ Frame example:
   "revisit_when": "volume > 50k events/day"
 }
 ```
+
+## Aesthetic inspiration
+
+The long-term experience can draw on sci-fi and human–machine interfaces (exocortex, continuous coupling with tools). That inspiration belongs here — not in the product pitch. The implementation must stay sober, local-first, auditable and incremental.
 
 ---
 

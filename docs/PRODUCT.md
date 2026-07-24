@@ -1,4 +1,4 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Product
 
@@ -148,7 +148,7 @@ Deliberately does not include:
 
 ## Roadmap
 
-The complete version history lives **only here** — read top to bottom. The [README](../README.md#roadmap-teaser) keeps a short teaser so newcomers see the arc without leaving the overview.
+The complete version history lives **only here** — read top to bottom. The [README](../README.md#what-works-today) keeps a short “what works today” table so newcomers see current capability without leaving the overview.
 
 ### v0.1 — Local Technical Memory
 
@@ -538,7 +538,7 @@ Delivered:
 - durable cognitive runtime (`twin-runtime`) with leases, DLQ and vault isolation;
 - release gates: `twin eval v1-completion`, `twin connector production-ready`, `twin eval golden`;
 - package/`__version__` → `1.0.0`;
-- threat model ([ARCHITECTURE.md](ARCHITECTURE.md#threat-model)) and operator runbook ([SETUP.md](SETUP.md#operator-runbook)).
+- threat model ([ARCHITECTURE.md](ARCHITECTURE.md#threat-model)) and operator runbook ([OPERATIONS.md](OPERATIONS.md)).
 
 Out of scope for v1.0:
 
@@ -565,7 +565,7 @@ Delivered:
 - Search / Pack / Memories: human-readable selects and metadata chips (implementation ids stay on CLI/MCP/API);
 - Search relevance as relative % (top hit = 100%) with match-why chips under the score bar; Memories hides duplicate body when title equals summary;
 - marketing README with banner / vision / before-after visuals; deep material under `docs/` (`FOUNDATIONS`, `PRODUCT`, `ARCHITECTURE`, `CONNECTION`, `SETUP`);
-- MCP client guides folded into CONNECTION; runbook → SETUP; threat model → ARCHITECTURE; v1-release notes → PRODUCT;
+- MCP client guides folded into CONNECTION; operator runbook → OPERATIONS; threat model → ARCHITECTURE; v1-release notes → PRODUCT;
 - root `LICENSE` (MIT); package/`__version__` → `1.1.0`.
 
 

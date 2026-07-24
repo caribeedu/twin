@@ -3,11 +3,13 @@
 </p>
 
 <p align="center">
-  <strong>Personal Cognitive OS</strong> — local-first memory, judgment and context<br/>
-  that any LLM can consult safely via MCP, CLI or API.
+  <strong>Persistent cognitive infrastructure</strong> for LLM-powered tools<br/>
+  — local memory, judgment, privacy and context through one portable core.<br/>
+  For you, that core is a <strong>Personal Cognitive OS</strong>.
 </p>
 
 <p align="center">
+  <em>Change the model. Change the interface. Keep the continuity.</em><br/>
   <em>Native where possible. MCP everywhere. One cognitive core.</em>
 </p>
 
@@ -34,11 +36,11 @@
 
 Modern LLMs are powerful — and still forget who you are every new chat.
 
-You re-explain projects, decisions, rejected alternatives, tone preferences and hard domain boundaries. Product “memory” and RAG help a little; they still retrieve **text**, not **cognition**.
+You re-explain projects, decisions, rejected alternatives, tone preferences and hard domain boundaries. Product “memory” and RAG help a little; they still retrieve **text**, not a durable substrate. The industry keeps solving memory; Twin targets **cognitive continuity** across models, tools and sessions.
 
 Twin’s bet:
 
-> Not building an AI that remembers you — building a personal cognitive infrastructure that any AI can safely consult.
+> Not building an AI that remembers you — building cognitive infrastructure that authorized tools can safely consult.
 
 Philosophically, Twin follows the **extended mind** idea: reliable external tools can become part of how you think — if they stay available, auditable and under your control. Deep roots: [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
 
@@ -56,21 +58,21 @@ For people who already know RAG, MCP and agents, the hard problem is not “stuf
 
 Integration is not only low latency. What is missing is **operational understanding**: what a memory means, when it holds, which domain may use it and how it should affect a decision.
 
-Twin’s concrete answer: store evidence-grounded memory locally, confirm what is trusted, let any LLM pull a safe pack instead of asking you to re-explain.
+Twin’s concrete answer: store evidence-grounded memory locally, confirm what is trusted, let authorized LLM-powered tools pull a safe pack instead of asking you to re-explain.
 
 ---
 
 ## Vision
 
-Long-term, Twin aims to work as a **personal exocortex**: continuity across tools, sessions, models and contexts.
+Long-term, Twin aims to work as a **personal exocortex**: continuity across tools, sessions, models and contexts — sober, local-first, auditable and incremental (aesthetic roots: [FOUNDATIONS](docs/FOUNDATIONS.md#aesthetic-inspiration)).
 
 It should preserve important facts, decisions, rejected alternatives, tasks, preferences, judgment patterns, beliefs that change over time, relationships, evidence, hard domain boundaries, privacy and human control.
 
-The aesthetic inspiration can be sci-fi and human–machine interfaces; the implementation must stay sober, local-first, auditable and incremental.
-
 ### What Twin is
 
-A **local-first** layer of personal memory, judgment, privacy and context — queryable by any LLM/tool via **MCP**, a local HTTP API and a CLI.
+**Infrastructure** first; **Personal Cognitive OS** as the product form; **exocortex** as the long-term experience.
+
+A **local-first** layer of personal memory, judgment, privacy and context — queryable by authorized LLM-powered tools via **MCP**, a local HTTP API and a CLI.
 
 > Not a chatbot. A substrate other tools consult.
 
@@ -84,7 +86,7 @@ Twin must not be understood as a chatbot, note-taking app, generic RAG, autonomo
 
 **Non-goals:** not replacing those apps; not fine-tuning “you”; not archiving your entire life. Twin stays the substrate other tools consult.
 
-**Why not RAG?** RAG retrieves documents; Twin retrieves cognition.
+**Why not RAG?** RAG retrieves relevant text; Twin assembles safe cognitive context for the next decision.
 
 **Why not a vector database?** Vectors are indexes. The graph (memories, evidence, validity, domains, status) is truth. Wipe embeddings, `twin reindex`, keep the substrate.
 
@@ -161,7 +163,6 @@ Twin does not invent durable facts for you. Ingest evidence, extract candidates,
 ```bash
 twin ingest ./examples/docs   # or your own notes/docs
 twin extract                  # needs a reachable chat model, or TWIN_EXTRACTOR=echo
-# twin extract -A             # optional: auto-confirm new candidates
 twin review                   # accept the solid decision; reject noise
 ```
 
@@ -198,7 +199,7 @@ documents / sessions
 
 If the model still asks you to explain from scratch: memory must be `confirmed`, MCP tools enabled, and the client must request a pack with the right domain.
 
-**Next:** keep ingesting your docs or complete MCP sessions (`session_start` → work → `session_complete`); `twin setup postgres` when you outgrow SQLite; daily ops via CLI or `twin serve` — see [docs/SETUP.md](docs/SETUP.md#operator-runbook).
+**Next:** keep ingesting your docs or complete MCP sessions (`session_start` → work → `session_complete`); `twin setup postgres` when you outgrow SQLite; daily ops via CLI or `twin serve` — see [docs/SETUP.md](docs/SETUP.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ---
 
@@ -236,7 +237,8 @@ This README is the **overview**: problem, solution, architecture sketch and quic
 | **[docs/PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, MVP, **full roadmap** |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — principles, pipeline, data model, observer, threat model |
 | **[docs/CONNECTION.md](docs/CONNECTION.md)** | How tools talk to Twin — MCP / CLI / API, native + MCP identity |
-| **[docs/SETUP.md](docs/SETUP.md)** | How you run Twin — install, providers, config, runbook, tests |
+| **[docs/SETUP.md](docs/SETUP.md)** | How you install Twin — providers, config, tests |
+| **[docs/OPERATIONS.md](docs/OPERATIONS.md)** | How you operate Twin — runtime, backup, incidents |
 
 ---
 

@@ -1,14 +1,12 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Setup
 
-**Source of truth for:** how you run Twin — install, model providers, configuration, operator runbook and tests.
+**Source of truth for:** how you install Twin — packages, model providers, configuration and tests.
 
-For the shortest path to a first result, start at the [README quickstart](../README.md#how-to-use-twin). How to connect MCP / CLI / API: [CONNECTION.md](CONNECTION.md).
+For the shortest path to a first result, start at the [README quickstart](../README.md#quickstart). Interfaces: [CONNECTION.md](CONNECTION.md). Day-2 ops (runtime, backup, incidents): [OPERATIONS.md](OPERATIONS.md).
 
 ## Installation
-
-For the shortest path to a first visible result with an LLM, start at the [README quickstart](../README.md). This section lists install variants and fuller setup.
 
 ```bash
 pip install -e ".[dev]"        # everything (api + mcp + postgres + crypto + tests)
@@ -66,85 +64,6 @@ When you outgrow SQLite, run `twin setup postgres` to move to the primary Postgr
 
 Local open models via Ollama are the recommended default (`twin init` steers you there first). Anthropic, Gemini, OpenAI, and other OpenAI-compatible gateways are opt-in. Anthropic chat needs a separate embedding backend. Embeddings are not the source of truth: they are regenerable (`twin reindex`) and never mix across different models.
 
-
-## Operator runbook
-
-## Start cognitive runtime
-
-```bash
-twin-runtime   # or: python -m twin.runtime
-```
-
-Workers claim durable jobs (`interpret_percept`, `workspace_tick`, `attention_evaluate`, `consolidate_*`, `integrity_check`, `connector_reconcile`, …).
-
-## Health
-
-```bash
-twin doctor
-curl -s localhost:PORT/api/runtime/health
-curl -s localhost:PORT/api/health/cognition
-twin connector due
-```
-
-## Connector recovery
-
-```bash
-twin connector sync-due
-# or enqueue via runtime:
-twin runtime enqueue connector_reconcile
-twin connector production-ready   # attest ≥2 real adapters
-```
-
-Paused / unauthorized instances stay out of syncable sets until credentials are fixed and resumed.
-
-## Dead letters
-
-```bash
-twin runtime dead-letters
-twin runtime retry-dead-letter <id>
-# connector DLQ:
-twin connector dead-letters <connector_id>
-twin connector retry-dead-letter <id>
-```
-
-Permanent handler failures land in DLQ. `model_unavailable` must stay pending/retry — never DLQ.
-
-## Backup / restore
-
-```bash
-twin backup create ./backup-dir
-twin backup validate ./backup-dir
-twin backup restore ./backup-dir ./restored.db
-```
-
-Validate before restore. Restored DB is isolated until you point `$TWIN_HOME` / config at it.
-
-## Memory formation (human control)
-
-```bash
-twin memory candidates
-# confirm / reject only with evidence present
-```
-
-Never automate confirmation of Memory or Judgment.
-
-## Release gate
-
-```bash
-twin eval v1-completion
-twin connector production-ready
-pytest -q
-```
-
-`v1-completion` fails closed on required criteria that are untested, partial, or evidence-free.
-
-## Incident: injection suspected
-
-1. Quarantine / reject affected candidates.
-2. Confirm packs exclude injection (`blocked` reasons, not content).
-3. Rotate any secrets that appeared in source text.
-4. Re-run `GET /api/health/cognition` / integrity job.
-
 ## Tests
 
 ```bash
@@ -166,4 +85,4 @@ Expected coverage:
 
 ---
 
-Quickstart: [README.md](../README.md). Interfaces: [CONNECTION.md](CONNECTION.md).
+Quickstart: [README.md](../README.md#quickstart). Day-2 ops: [OPERATIONS.md](OPERATIONS.md). Interfaces: [CONNECTION.md](CONNECTION.md).

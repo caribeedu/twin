@@ -1,4 +1,4 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Architecture
 
@@ -671,4 +671,4 @@ Local-first personal cognitive OS. Assets: memories, judgment, connector secrets
 
 Operators still must: protect `$TWIN_HOME` and backup directories, rotate connector tokens, and treat every external document as adversarial input.
 
-Connect via [CONNECTION.md](CONNECTION.md). Install and configure in [SETUP.md](SETUP.md). Product constitution and roadmap: [PRODUCT.md](PRODUCT.md).
+Connect via [CONNECTION.md](CONNECTION.md). Install in [SETUP.md](SETUP.md). Operate in [OPERATIONS.md](OPERATIONS.md). Product and roadmap: [PRODUCT.md](PRODUCT.md).
