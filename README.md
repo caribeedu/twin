@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="#how-to-use-twin"><img src="https://img.shields.io/badge/quickstart-how_to_use-7c3aed?style=for-the-badge" alt="How to use"></a>
+  <a href="#how-to-use"><img src="https://img.shields.io/badge/quickstart-how_to_use-7c3aed?style=for-the-badge" alt="How to use"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
@@ -93,6 +93,21 @@ Twin must not be understood as a chatbot, note-taking app, generic RAG, autonomo
 
 **Why not a vector database?** Vectors are indexes. The graph (memories, evidence, validity, domains, status) is the canonical store. Wipe embeddings, `twin reindex`, keep the substrate.
 
+### Principles
+
+These are the constitution. Features may change; these should not. Learn more about they in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#architecture-principles).
+
+- **Knowledge is not understanding** — packs should explain *why* a fact matters now, not only that it matched.
+- **Memory is compression** — keep what changes future action; do not archive life indiscriminately.
+- **Artifact ≠ Percept ≠ Memory ≠ Judgment** — never collapse capture, claim, principle and action into one blob.
+- **Evidence before memory** — durable claims need provenance you can inspect and reject.
+- **The graph is canonical; embeddings are indexes** — search aids retrieval; the graph is the source of truth.
+- **Firewall before reasoning** — filter by domain / persona / policy before the main LLM sees content.
+- **Progressive cognition** — observe, remember, understand, judge, suggest, then act; no unsafe jump to autonomy.
+- **Native where possible, MCP everywhere** — one cognitive core; no proprietary silo per host.
+- **Local-first + exportability** — default under `~/.twin`; leaving must stay easy (`twin export`).
+- **Human approval for durable judgment** — memory can be frequent; judgment stays conservative.
+
 ### Final definition
 
 Twin is open-source, local-first cognitive infrastructure: a personal, interoperable and temporal layer of memory, judgment, privacy and context shared across authorized LLM-powered tools — so you do not re-brief every session.
@@ -106,7 +121,7 @@ The initial concepts starts small: reliable technical memory via MCP. The destin
 ## How it works
 
 <p align="center">
-  <img src="assets/vision.png" alt="One evolving mind across every interface — Twin as the persistent cognitive substrate connecting ChatGPT, Claude, Cursor, Codex and local models" width="100%">
+  <img src="assets/how-it-works.png" alt="One evolving mind across every interface — Twin as the persistent cognitive substrate connecting ChatGPT, Claude, Cursor, Codex and local models" width="100%">
 </p>
 
 Twin does not treat raw files as “memory”. Cognition moves through three friendly stages:
@@ -146,24 +161,7 @@ Ownership and vaults keep personal vs work data separable. Auth, config, discove
 
 ---
 
-## Principles
-
-These are the constitution. Features may change; these should not. Full list in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#architecture-principles).
-
-- **Knowledge is not understanding** — packs should explain *why* a fact matters now, not only that it matched.
-- **Memory is compression** — keep what changes future action; do not archive life indiscriminately.
-- **Artifact ≠ Percept ≠ Memory ≠ Judgment** — never collapse capture, claim, principle and action into one blob.
-- **Evidence before memory** — durable claims need provenance you can inspect and reject.
-- **The graph is canonical; embeddings are indexes** — search aids retrieval; the graph is the source of truth.
-- **Firewall before reasoning** — filter by domain / persona / policy before the main LLM sees content.
-- **Progressive cognition** — observe, remember, understand, judge, suggest, then act; no unsafe jump to autonomy.
-- **Native where possible, MCP everywhere** — one cognitive core; no proprietary silo per host.
-- **Local-first + exportability** — default under `~/.twin`; leaving must stay easy (`twin export`).
-- **Human approval for durable judgment** — memory can be frequent; judgment stays conservative.
-
----
-
-## How to use Twin
+## How to use
 
 Python 3.10+, a clone of this repo, and an MCP client (Cursor / Claude Code / Claude Desktop). SQLite is enough for day one — no Postgres required.
 
