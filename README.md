@@ -224,7 +224,7 @@ A well-wired client calls `memory_safe_context_pack` or `session_start` with `ta
 
 ## Docs
 
-This README is the **overview**: problem, solution, architecture sketch and quickstart. Deeper docs do not hide ideas — they expand them. Prefer **one source of truth** per topic; do not fork the same page into four places.
+This README is the **overview**: problem, solution, architecture sketch and quickstart. Deeper docs do not hide ideas — they expand them.
 
 | Doc | Source of truth for |
 |---|---|
