@@ -52,6 +52,10 @@ Integration is not only low latency. What is missing is **operational understand
 
 Twin’s concrete answer: store evidence-grounded memory locally, confirm what is trusted, let any LLM pull a safe pack instead of asking you to re-explain.
 
+<p align="center">
+  <img src="assets/vision.png" alt="One evolving mind across every interface — Twin as the persistent cognitive substrate connecting ChatGPT, Claude, Cursor, Codex and local models" width="100%">
+</p>
+
 ---
 
 ## Vision
@@ -165,28 +169,9 @@ If the model still asks you to explain from scratch: memory must be `confirmed`,
 
 ## Before / After
 
-<table>
-<tr>
-<td width="50%">
-
-**Without Twin**
-
-> “Remind me — for Atlas webhooks, did we go with Kafka or the Postgres outbox? What did we reject and why?”
-
-You paste an RFC. Or half-remember. Or dig Slack. The model invents confidence either way.
-
-</td>
-<td width="50%">
-
-**With Twin**
-
-> Same question in a **new** chat. You paste nothing.
-
-The client calls Twin → firewall → confirmed pack → answer: outbox + dedicated worker; Kafka rejected; revisit if volume spikes.
-
-</td>
-</tr>
-</table>
+<p align="center">
+  <img src="assets/before-and-after.png" alt="Before vs After: LLMs without Twin are isolated and restart every chat; with Twin they share one cognitive core — memory, judgment, privacy, graph, context and evidence" width="100%">
+</p>
 
 That loop is the product promise in miniature.
 
