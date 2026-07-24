@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <strong>Persistent cognitive infrastructure</strong> for LLM-powered tools<br/>
-  — local memory, judgment, privacy and context through one portable core.<br/>
-  For you, that core is a <strong>Personal Cognitive OS</strong>.
+  <strong>Personal Cognitive Layer</strong> for the LLM-powered tools you already use.<br/>
+  One local source of memory, judgment, privacy and context — your cognitive core<br/>
+  across models and interfaces.
 </p>
 
 <p align="center">
@@ -16,13 +16,13 @@
 <p align="center">
   <a href="#how-to-use-twin"><img src="https://img.shields.io/badge/quickstart-how_to_use-7c3aed?style=for-the-badge" alt="How to use"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="docs/CONNECTION.md"><img src="https://img.shields.io/badge/MCP-first-111827?style=for-the-badge" alt="MCP"></a>
+  <a href="docs/INTERFACES.md"><img src="https://img.shields.io/badge/Native_where_possible-111827?style=for-the-badge" alt="Native where possible"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
 
 <p align="center">
   <a href="#why-twin">Why</a> ·
-  <a href="#before--after">Before / After</a> ·
+  <a href="#vision">Vision</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#principles">Principles</a> ·
   <a href="#how-to-use-twin">How to use</a> ·
@@ -42,7 +42,7 @@ Twin’s bet:
 
 > Not building an AI that remembers you — building cognitive infrastructure that authorized tools can safely consult.
 
-Philosophically, Twin follows the **extended mind** idea: reliable external tools can become part of how you think — if they stay available, auditable and under your control. Deep roots: [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
+Twin draws on philosophy of mind, cognitive science, neuroscience, psychology, symbolic AI, knowledge graphs, human-computer interaction and cognitive architectures — a reliable external tool that can become part of how you think, if it stays available, auditable and under your control. More inspiration in [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
 
 Local store. Evidence-backed memories. Domain firewall. Evolving judgment. Context packs over MCP so Cursor, Claude, Codex and friends stop starting from zero.
 
@@ -82,7 +82,7 @@ A **local-first** layer of personal memory, judgment, privacy and context — qu
 
 It preserves facts, decisions, rejected alternatives, preferences, domain boundaries, evidence and human control — then ships **safe context packs** into the tools you already use.
 
-Product shape and full roadmap: [docs/PRODUCT.md](docs/PRODUCT.md). Conceptual roots: [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
+Product shape in [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ### What Twin is not
 
@@ -100,7 +100,7 @@ Twin is open-source, local-first cognitive infrastructure: a personal, interoper
 
 > I don't want to just use an AI. I want to feel integrated with the machine, as if part of my cognition could exist outside my brain, with safety, continuity and control.
 
-The MVP starts small: reliable technical memory via MCP. The destination is bigger: a personal, portable, private and evolving extended brain.
+The initial concepts starts small: reliable technical memory via MCP. The destination is bigger: a personal, portable, private and evolving extended brain.
 
 ---
 
@@ -110,20 +110,39 @@ The MVP starts small: reliable technical memory via MCP. The destination is bigg
   <img src="assets/vision.png" alt="One evolving mind across every interface — Twin as the persistent cognitive substrate connecting ChatGPT, Claude, Cursor, Codex and local models" width="100%">
 </p>
 
-Twin does not treat raw files as “memory”. Cognition is layered:
+Twin does not treat raw files as “memory”. Cognition moves through three friendly stages:
+
+1. **Obtain** — Twin captures sources as *artifacts* (docs you ingest, [connectors](#connectors) like Slack/GitHub, and **session notes** from LLMs). Sensors normalize them into **Percepts**: what was seen, with provenance — not yet trusted knowledge.
+2. **Form** — A cognitive interpreter reads percepts and proposes **Candidate Memories** (decisions, facts, preferences, …) with **Evidence** quotes. You review and confirm what should be trusted. **Judgment** (how you decide) stays separate from facts. The graph is the canonical store; embeddings are only search indexes.
+3. **Serve** — When you work in an LLM-powered tool, Twin builds a **safe context pack** by running hybrid retrieval, applying the **domain firewall** and persona policies, then assembling a compact pack. **Prefer native** when the host can embed Twin. **MCP** is the universal tool surface everywhere else — and still useful mid-task alongside native. CLI and `twin serve` use the same store.
 
 | Concept | Role |
 |---|---|
-| **Percept** | Normalized capture from docs, sessions, connectors — evidence, not yet trusted memory |
-| **Memory** | Confirmed (or candidate) compressed claim with type, domain, validity and evidence links |
-| **Evidence** | Quotes / provenance that make memories auditable and rejectable |
-| **Domain firewall** | Blocks cross-domain leakage **before** content reaches the LLM |
-| **Judgment** | Evolving principles and trade-offs — not the same store as facts |
-| **Persona** | Role lens (individual, developer, …) that scopes what may be retrieved |
-| **Context pack** | Privacy-filtered pack an agent pulls instead of asking you to re-brief |
-| **Observer** | Parallel recall / salience while a session runs |
+| **Percept** | Normalized capture — evidence, not yet trusted memory |
+| **Memory** | Compressed, evidence-backed claim (candidate to confirmed) |
+| **Evidence** | Quotes / provenance you can audit and reject |
+| **Domain firewall** | Blocks cross-domain leakage **before** content reaches the model |
+| **Judgment** | How you tend to decide — separate from facts |
+| **Persona** | Role lens that scopes what may be retrieved |
+| **Context pack** | Privacy-filtered pack a tool pulls instead of a re-brief |
+| **Observer** | Parallel recall while a session runs |
 
-Full pipeline, data model and threat model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Domains and MVP shape: [docs/PRODUCT.md](docs/PRODUCT.md).
+Full pipeline, data model and threat model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Domains and product shape: [docs/PRODUCT.md](docs/PRODUCT.md). Interfaces: [docs/INTERFACES.md](docs/INTERFACES.md).
+
+### Connectors
+
+Connectors pull sources into Twin **incrementally** (artifacts, then percepts, then candidates). They never auto-confirm Memory or Judgment.
+
+```bash
+twin connector setup github --source-owner personal   # ownership → auth → scope → preview (no ingest)
+twin connector add github --source-owner personal --secret "$GITHUB_TOKEN" --config '{"…"}'
+twin connector sync <connector_id>
+twin extract && twin review
+```
+
+In day-to-day, `twin connector due` / `sync-due`, health and dead letters in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+For per-connector auth, config and helpers (GitHub, Slack, Gmail, Outlook, Calendar, Fireflies, local folder), see **[connectors](docs/INTERFACES.md#connectors)**.
 
 ---
 
@@ -137,7 +156,7 @@ These are the constitution. Features may change; these should not. Full list: [d
 - **Evidence before memory** — durable claims need provenance you can inspect and reject.
 - **The graph is canonical; embeddings are indexes** — search aids retrieval; the graph is the source of truth.
 - **Firewall before reasoning** — filter by domain / persona / policy before the main LLM sees content.
-- **Progressive cognition** — `observe → remember → understand → judge → suggest → act`; no unsafe jump to autonomy.
+- **Progressive cognition** — observe, remember, understand, judge, suggest, then act; no unsafe jump to autonomy.
 - **Native where possible, MCP everywhere** — one cognitive core; no proprietary silo per host.
 - **Local-first + exportability** — default under `~/.twin`; leaving must stay easy (`twin export`).
 - **Human approval for durable judgment** — memory can be frequent; judgment stays conservative.
@@ -183,7 +202,7 @@ twin pack "retry strategy for Atlas webhooks" --domain technical
 twin setup mcp cursor          # or: claude-code | claude-desktop
 ```
 
-Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Full interfaces + per-client setup: [docs/CONNECTION.md](docs/CONNECTION.md).
+Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Full interfaces + per-client setup: [docs/INTERFACES.md](docs/INTERFACES.md).
 
 ### First visible result
 
@@ -203,23 +222,10 @@ documents / sessions
 
 If the model still asks you to explain from scratch: memory must be `confirmed`, MCP tools enabled, and the client must request a pack with the right domain.
 
-**Next:** keep ingesting your docs or complete MCP sessions (`session_start` → work → `session_complete`); `twin setup postgres` when you outgrow SQLite; daily ops via CLI or `twin serve` — see [docs/SETUP.md](docs/SETUP.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
+**Next:** keep ingesting your docs or complete MCP sessions (`session_start`, work, then `session_complete`); `twin setup postgres` when you outgrow SQLite; daily ops via CLI or `twin serve` — see [docs/SETUP.md](docs/SETUP.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ---
 
-## Roadmap
-
-Read end-to-end in **one place**: [docs/PRODUCT.md — Roadmap](docs/PRODUCT.md#roadmap).
-
-| Era | Focus |
-|---|---|
-| **v0.1 → v0.8** | Technical memory → sessions → quality → judgment → privacy → connectors → interpretation → consolidation |
-| **v0.9** | Cognitive OS spine (runtime, formation, packs, attention, sovereignty, release gates) |
-| **v1.0** | Daily-usable Personal Cognitive OS bar |
-| **v1.1.0** | Adoption DX — guided setup, mainstream LLM providers, docs + local UI polish |
-| **v2+** | Extended brain, automation, multimodal life, embodied memory — still progressive, still local-first |
-
----
 
 ## Docs
 
@@ -228,9 +234,11 @@ This README is the **overview**: problem, solution, architecture sketch and quic
 | Doc | Source of truth for |
 |---|---|
 | **[docs/FOUNDATIONS.md](docs/FOUNDATIONS.md)** | Why Twin exists — Extended Mind, 4E, academic inspirations |
-| **[docs/PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, MVP, **full roadmap** |
+| **[docs/PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, initial concepts, success criteria |
+| **[docs/ROADMAP.md](docs/ROADMAP.md)** | Planned work — correlation depth, v2+ majors |
+| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered — v0.1 through v1.1.0 |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — principles, pipeline, data model, observer, threat model |
-| **[docs/CONNECTION.md](docs/CONNECTION.md)** | How tools talk to Twin — MCP / CLI / API, native + MCP identity |
+| **[docs/INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — Native, MCP CLI, API, connectors |
 | **[docs/SETUP.md](docs/SETUP.md)** | How you install Twin — providers, config, tests |
 | **[docs/OPERATIONS.md](docs/OPERATIONS.md)** | How you operate Twin — runtime, backup, incidents |
 
@@ -252,6 +260,9 @@ Ollama (recommended), Anthropic, Gemini, OpenAI and any OpenAI-compatible gatewa
 
 **Where does my data live?**  
 Under `~/.twin` (or `$TWIN_HOME`). Export with `twin export`. Backup = copy the folder.
+
+**Does Twin share my data?**  
+No Twin cloud and no analytics phone-home. Memory stays on your machine. Nothing is sent to a provider unless **you** configure a cloud LLM or embedder for extract/search — and even then the Domain Firewall decides what may enter a context pack before any model sees it. Cross-domain leaks are blocked locally, not trusted to the LLM. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#firewall-before-reasoning), [docs/PRODUCT.md](docs/PRODUCT.md#domain-separation).
 
 **Can I leave later?**  
 Yes — exportability is a first-class architecture principle ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#exportability-over-lock-in)).

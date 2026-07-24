@@ -256,7 +256,7 @@ def _needs_review(cfg: Config, mem: ExtractedMemory, percept: Percept) -> Option
     if mem.type in ("belief", "procedure"):
         return "judgment-adjacent memory type"
     if mem.domain not in ("work", "technical", "personal_preferences", "assistant_preferences"):
-        return f"non-MVP domain {mem.domain}"
+        return f"non-base domain {mem.domain}"
     return None
 
 

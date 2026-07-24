@@ -1,20 +1,21 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
-# Connection
+# Interfaces
 
 > **Native where possible. MCP everywhere. One cognitive core.**
 
-Twin is infrastructure, not a chat app. Hosts should pull memory, judgment and safe context packs into tools you already use — preferably with native hooks when the host allows them, otherwise over MCP. CLI and the local API are the same core with different transport.
+Twin is infrastructure, not a chat app. LLM-powered **clients** (Cursor, Claude Code, Claude Desktop, …) pull memory and safe context packs from one local core. Prefer **native** when the host can embed Twin in its session lifecycle; use **MCP** as the universal tool surface everywhere else (including mid-conversation pulls). **CLI** and the local **API** are the same core with different transport. **Connectors** are separate: they ingest external sources (GitHub, Slack, …), not client sessions.
 
-This document is the source of truth for **interfaces** (MCP tools, CLI commands, HTTP routes and client setup). It is not a second product manifesto — identity and principles live in the [README](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
+This document is the source of truth for those surfaces. Identity and principles: [README](../README.md), [ARCHITECTURE.md](ARCHITECTURE.md).
 
-| Channel | Transport | Best for |
+| Surface | Role | Prefer when |
 |---|---|---|
-| **MCP** | stdio JSON-RPC tools | Agents / IDEs that pull context mid-conversation |
-| **CLI** | `twin …` process | Ingest, review, ops, scripting |
-| **Local API** | HTTP (+ Review Workbench UI) | Browsers, local integrations, `twin serve` |
+| **Native** | Host lifecycle binds to Twin sessions; packs on session start; observations; optional summary percept on stop | The host offers a native surface (Claude Code hooks today; app-server-style later) |
+| **MCP** | Universal tools: packs, search, sessions, review, judgment, connector ops | Every MCP client; also alongside native for mid-task tools |
+| **CLI** | Ingest, review, connector ops, scripting | Humans and automation outside an IDE |
+| **Local API** | HTTP + review workbench | Browsers and local integrations |
 
-Install and models: [SETUP.md](SETUP.md). Overview narrative: [README](../README.md).
+Install and models: [SETUP.md](SETUP.md). Overview: [README](../README.md).
 
 ---
 
@@ -34,9 +35,66 @@ Most retrieve / pack calls share these ideas:
 
 ---
 
-## MCP
+## Clients
 
-Preferred interface for Cursor, Claude Code, Claude Desktop and other MCP hosts. The client starts `twin mcp` locally; nothing is required to leave the machine.
+Clients are LLM-powered tools that **consume** Twin (packs, search, sessions). They are not [Connectors](#connectors).
+
+| Preference | Surface |
+|---|---|
+| **1. Native** | When the host can embed Twin in its session lifecycle (Claude Code hooks today; app-server-style later) |
+| **2. MCP** | Universal tools for every MCP client; also complements native |
+
+### Native hosts (preferred when available)
+
+Native integration binds the **host application** to Twin’s cognitive sessions without a parallel memory store. Today the shipped proof is **Claude Code hooks**. Deeper host embedding (for example app-server style surfaces) should follow the same rules: one core, fail-open, no silent Memory/Judgment confirmation.
+
+This is **not** a connector. Connectors ingest external systems (repos, Slack, …). Native binds the IDE/agent session you are already in. Both can create Percepts, but through different paths.
+
+#### What native can do
+
+| Power | What happens |
+|---|---|
+| Bind a host session | `session_start` / `pack_request` creates or resumes a `CognitiveSession` and a `HostSessionBinding` |
+| Emit a context pack | On **SessionStart** (and explicit `pack_request`), Twin builds a firewall-filtered pack and prints it on stdout for the host to inject |
+| Observe work | User prompts, tool request/completion, and related events are recorded as **session artifacts** (notes on the cognitive session) |
+| Form new percepts | On **Stop** / session end, Twin may `complete_session` and consolidate a **`session_summary` Percept** from those artifacts — then the usual extract/review path can turn it into candidate memories. Native never auto-confirms Memory or Judgment |
+| Fail open | With `--fail-open`, Twin failures return `ok=false` + `error_id` and exit 0 so the host is not blocked; diagnostics go to stderr/logs |
+
+Session lifecycle, packs and consolidation: [ARCHITECTURE.md](ARCHITECTURE.md) (sessions / observer) and cognition host binding in-tree (`twin/cognition/host_session.py`). Threat notes: [ARCHITECTURE.md](ARCHITECTURE.md#threat-model).
+
+#### How Claude Code hooks work
+
+1. `twin native install` writes a mergeable hooks snippet (does **not** auto-patch Claude settings).
+2. You merge the `hooks` object into Claude Code settings and restart.
+3. Each hook runs `twin native event --host claude-code --hook "$CLAUDE_HOOK_EVENT" --stdin --fail-open`.
+4. Twin normalizes the event, updates the binding/session, and — for SessionStart — may emit a context pack on stdout.
+
+| Claude Code hook | Twin event kind | Typical effect |
+|---|---|---|
+| `SessionStart` | `session_start` | Bind/start session; **may emit context pack** |
+| `UserPromptSubmit` | `user_message` | Observe as session artifact |
+| `PreToolUse` | `tool_requested` | Observe |
+| `PostToolUse` | `tool_completed` | Observe |
+| `Stop` | `session_end` | End session; may consolidate **`session_summary` Percept** |
+
+Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist on the native service for hosts that can send them; not all are in the default Claude install snippet.
+
+#### Native CLI / MCP status
+
+| Command / tool | What it does |
+|---|---|
+| `twin native install` | Write Claude Code hooks JSON snippet under Twin home (or `--dir`) |
+| `twin native bindings` | List `HostSessionBinding`s |
+| `twin native event` | Ingest a host event (JSON or `--stdin`) |
+| MCP `native_bindings` | List native host bindings |
+| MCP `native_session_status` | Status of a host-native session link |
+
+**With Claude Code, prefer native for session start/observe/stop.** Keep MCP enabled for tools that surface does not cover (search, review, judgment, one-shot packs mid-task, connector ops). Cursor and Claude Desktop remain MCP-first until they expose an equivalent native surface.
+
+
+### MCP (universal tool surface)
+
+MCP is the **universal** client interface: any MCP host can pull packs, search, run sessions and call tools — including session notes / observe / complete. Use it when the host has no native surface, and **alongside** native on Claude Code for mid-conversation tools. The client starts `twin mcp` locally; nothing is required to leave the machine.
 
 ```bash
 twin setup mcp cursor          # or: claude-code | claude-desktop
@@ -58,7 +116,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 `twin setup mcp` copies LLM/embed env from `~/.twin/env` into the client `env` block when present.
 
-### How agents should use it
+#### How agents should use it
 
 1. Prefer `memory_safe_context_pack` or `session_start` at the beginning of a technical task.
 2. Always pass a truthful `target_domain`.
@@ -67,7 +125,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 5. Cite memory ids / evidence when using specific claims.
 6. Mutating tools require `confirm=true` (and stronger flags for constitutional judgment changes).
 
-### Retrieve
+#### Retrieve
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -79,7 +137,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `memory_user_preferences` | `context=""` | Stable preference memories for the given context string. |
 | `memory_judgment_profile` | — | Active judgment items (DB) plus YAML bootstrap view. |
 
-### Context packs & observer
+#### Context packs & observer
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -87,7 +145,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `get_context_pack` | same shape | Lower-level pack builder (prefer `memory_safe_context_pack` in clients). |
 | `memory_observe` | `current_text`, `target_domain?` | Parallel “what might be relevant?” suggestion for the current text/task. |
 
-### Sessions
+#### Sessions
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -100,28 +158,28 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `session_feedback` | `session_id`, `verdict`, `memory_id?`, `note=""`, `scope?` | Feedback on session usefulness / a memory in context. |
 | `provide_feedback` | `emission_id=""`, `session_id=""`, `verdict="useful"`, `memory_id?`, `note=""` | Feedback on a specific emission (pack/suggestion). |
 
-### Review & curation (mutating — need `confirm`)
+#### Review & curation (mutating — need `confirm`)
 
 | Tool | Arguments | What it does |
 |---|---|---|
 | `review_queue` | `limit=20`, `conflicts_only=false` | Priority-ordered candidates waiting for human review. |
 | `review_batch_get` | `batch_id` | Load a review batch. |
 | `review_suggest_action` | `memory_id` | Suggest confirm/reject/merge/… **without** mutating. |
-| `memory_confirm` | `memory_id`, `confirm=false` | Promote candidate → confirmed. |
+| `memory_confirm` | `memory_id`, `confirm=false` | Promote candidate to confirmed. |
 | `memory_reject` | `memory_id`, `confirm=false` | Reject a candidate. |
 | `memory_archive` | `memory_id`, `confirm=false` | Archive a memory. |
 | `memory_merge` | `memory_ids`, `confirm=false`, titles/summaries/scope flags… | Merge memories into one (cross-scope needs extra confirm). |
 | `memory_split` | `memory_id`, `parts`, `confirm=false` | Split one memory into parts. |
 
-### Quality & provenance
+#### Quality & provenance
 
 | Tool | Arguments | What it does |
 |---|---|---|
 | `memory_quality` | `memory_id` | Quality findings + review priority. |
 | `memory_neighbors` | `memory_id` | Nearby memories for side-by-side review. |
-| `memory_provenance` | `memory_id` | Chain memory → evidence → percept → artifact. |
+| `memory_provenance` | `memory_id` | Chain memory, evidence, percept, artifact. |
 
-### Judgment governance
+#### Judgment governance
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -134,7 +192,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `judgment_conflicts` | `status="open"` | Open judgment conflicts. |
 | `judgment_version` | — | Current judgment store version metadata. |
 
-### Privacy
+#### Privacy
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -142,7 +200,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `privacy_explain` | `decision_id` | Explain a prior privacy decision. |
 | `privacy_validate_output` | `text`, `client?`, `client_token?` | Check model output for policy violations. |
 
-### Connectors & meta
+#### Connectors & meta
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -161,12 +219,11 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 ---
 
-
-## Per-client setup
+### Per-client setup
 
 `twin setup mcp <claude-code|claude-desktop|cursor>` writes/merges the entry for you; `twin doctor` verifies store, models, policies and MCP configs. GUIs do **not** inherit your shell env — put `TWIN_*` in the client `env` block.
 
-### Claude Code
+#### Claude Code
 
 ```bash
 claude mcp add twin -- twin mcp
@@ -188,7 +245,7 @@ Or directly in the project's `.mcp.json`:
 }
 ```
 
-### Claude Desktop
+#### Claude Desktop
 
 Edit the configuration file:
 
@@ -211,7 +268,7 @@ Edit the configuration file:
 Use the executable's absolute path (`which twin`) — desktop apps do not
 always have your `PATH`. Restart the app after editing.
 
-### Cursor
+#### Cursor
 
 `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` at the project root:
 
@@ -227,9 +284,9 @@ always have your `PATH`. Restart the app after editing.
 }
 ```
 
-Enable the server in Settings → MCP.
+Enable the server in Settings, then MCP.
 
-### Other stdio clients
+#### Other stdio clients
 
 Any MCP stdio-compatible client works with:
 
@@ -237,9 +294,9 @@ Any MCP stdio-compatible client works with:
 { "command": "twin", "args": ["mcp"] }
 ```
 
-### How a client should use the tools
+#### How a client should use the tools
 
-#### The session lifecycle (preferred for units of work)
+##### The session lifecycle (preferred for units of work)
 
 1. **Open work with `session_start`**, passing the task description in
    `query` and the working directory in `cwd` (it helps twin identify the
@@ -272,7 +329,7 @@ Any MCP stdio-compatible client works with:
    created. This feeds twin's product metrics — especially "did the user
    have to re-explain something twin should already have known?".
 
-#### One-shot context and exploration
+##### One-shot context and exploration
 
 1. **`memory_safe_context_pack`** returns the same pack without opening a
    session: pass the task in `query`, the correct `target_domain`
@@ -294,7 +351,7 @@ Any MCP stdio-compatible client works with:
 6. `memory_observe` is for suggesting context during an ongoing
    conversation; it never answers the user, it only remembers.
 
-### Troubleshooting
+##### Troubleshooting
 
 | symptom | likely cause |
 |---|---|
@@ -306,9 +363,10 @@ Any MCP stdio-compatible client works with:
 
 ---
 
+
 ## CLI
 
-Terminal / scripting surface. Global flag: `--home` → Twin home (default `~/.twin` or `$TWIN_HOME`).
+Terminal / scripting surface. Global flag: `--home` sets Twin home (default `~/.twin` or `$TWIN_HOME`).
 
 ### Setup & doctors
 
@@ -321,7 +379,7 @@ Terminal / scripting surface. Global flag: `--home` → Twin home (default `~/.t
 | `twin setup postgres` | Verify / prepare Postgres + pgvector. |
 | `twin setup mcp <client>` | Write/merge MCP server entry (`cursor`, `claude-code`, `claude-desktop`). |
 
-### Ingest → extract → review
+### Ingest, extract, review
 
 | Command | What it does |
 |---|---|
@@ -451,4 +509,125 @@ Base: `http://127.0.0.1:8765` (unless configured otherwise).
 
 ---
 
-Quickstart narrative: [README.md](../README.md). Install/config: [SETUP.md](SETUP.md).
+## Connectors
+
+Connectors are **source adapters**, not LLM clients. They pull GitHub, Slack, mail, calendars, meetings and folders into Twin. Client sessions (native / MCP) are documented under [Clients](#clients).
+
+Connectors are how Twin **obtains** ongoing evidence from professional systems. Each adapter fetches and normalizes into the same Artifact-to-Percept path as `twin ingest`. They do **not** confirm Memory or Judgment — you still run `twin extract` and `twin review`.
+
+Ownership (`--source-owner`) and vault labels keep employer and personal data separable. Day-2 ops (due list, DLQ, backup): [OPERATIONS.md](OPERATIONS.md).
+
+### Shared CLI
+
+| Command | What it does |
+|---|---|
+| `twin connector adapters` | List registered adapter types. |
+| `twin connector setup <type> --source-owner …` | Guided plan (ownership, auth, scope, preview). **Never ingests.** |
+| `twin connector add <type> --source-owner … [--secret …] [--config '{…}']` | Register account + instance. |
+| `twin connector configure <id> [--secret …] [--config '{…}']` | Rotate credential or update configuration. |
+| `twin connector list` | List instances (id, type, status, owner, vault). |
+| `twin connector auth` / `test <id>` | Validate stored credentials. |
+| `twin connector sync <id>` | Run one sync pass. |
+| `twin connector due` / `sync-due` | Scheduler: what is due / run due connectors. |
+| `twin connector pause` / `resume` / `revoke <id>` | Lifecycle controls. |
+| `twin connector backfill --preview <id>` | Historical import preview (**never** starts ingest). |
+| `twin connector production-ready` | Attest ≥2 real adapters closed for daily use. |
+| `twin connector completion` | Print §93 completion matrix. |
+
+MCP mirrors (capability-gated; mutating tools need confirm): `connector_list`, `connector_status`, `connector_health_all`, `connector_sync`, `connector_backfill_preview`, `connector_dead_letters` — see [Connectors & meta](#connectors--meta) above. HTTP: `/api/connectors…` and optional webhooks below.
+
+### Catalog
+
+| Type | Auth | Discovery helper | Notes |
+|---|---|---|---|
+| `github` | Personal access token (`--secret`) | `twin connector github repositories <id>` | Repos, issues, PRs, commits, releases; polling authoritative; optional webhook. |
+| `slack` | Bot token | `twin connector slack channels <id>` | Channel allow-list; high leakage risk — honest `source-owner` / vault. Optional Events API webhook. |
+| `gmail` | OAuth2 | `twin connector gmail …` | Mail partitioned by ownership; attachments metadata-oriented by default. |
+| `outlook` | OAuth2 | `twin connector outlook folders <id>` | Same mail rules as Gmail; folder discovery before sync. |
+| `calendar` | OAuth2 | `twin connector calendar calendars <id>` | Scope calendars explicitly; match vault to personal vs work. |
+| `fireflies` | API key | `twin connector fireflies meetings <id>` | Meeting transcripts; still extract + human review; PII policies apply. |
+| `folder` | None (local paths) | `twin connector folder roots <id>` | Watch roots on disk; incremental sync into the same percept pipeline. |
+
+### GitHub
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup github --source-owner personal` |
+| Register | `twin connector add github --source-owner personal --secret "$GITHUB_TOKEN" --config '{"repositories":["owner/repo"]}'` |
+| Validate | `twin connector auth <id>` |
+| Discover | `twin connector github repositories <id>` |
+| Sync | `twin connector sync <id>` |
+| Webhook (optional) | `POST /api/webhooks/github/{connector_id}` with `X-Hub-Signature-256` — marks sync due; does not replace polling |
+
+### Slack
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup slack --source-owner employer` (or `personal`) |
+| Register | `twin connector add slack --source-owner … --secret "$SLACK_BOT_TOKEN" --config '{…channels…}'` |
+| Validate | `twin connector auth <id>` |
+| Discover | `twin connector slack channels <id>` |
+| Sync | `twin connector sync <id>` |
+| Webhook (optional) | `POST /api/webhooks/slack/{connector_id}` (`X-Slack-Signature`, `url_verification`) |
+
+### Gmail
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup gmail --source-owner personal` |
+| Register | `twin connector add gmail --source-owner personal` then `configure` with OAuth secret material |
+| Discover | `twin connector gmail …` (account helpers) |
+| Sync | `twin connector sync <id>` |
+
+### Outlook
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup outlook --source-owner employer` |
+| Register | `twin connector add outlook --source-owner …` then OAuth `configure` |
+| Discover | `twin connector outlook folders <id>` |
+| Sync | `twin connector sync <id>` |
+
+### Calendar
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup calendar --source-owner personal` |
+| Register | `twin connector add calendar --source-owner …` then OAuth `configure` |
+| Discover | `twin connector calendar calendars <id>` |
+| Sync | `twin connector sync <id>` |
+
+### Fireflies
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup fireflies --source-owner personal` |
+| Register | `twin connector add fireflies --source-owner personal --secret "$FIREFLIES_API_KEY"` |
+| Discover | `twin connector fireflies meetings <id>` |
+| Sync | `twin connector sync <id>` |
+
+### Local folder
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup folder --source-owner personal` |
+| Register | `twin connector add folder --source-owner personal --config '{"roots":["/path/to/notes"]}'` |
+| Discover | `twin connector folder roots <id>` |
+| Sync | `twin connector sync <id>` |
+
+Empty roots leave the instance `awaiting_configuration` until roots are set.
+
+### After sync
+
+| Step | Command |
+|---|---|
+| Extract candidates | `twin extract` |
+| Human review | `twin review` |
+| Scheduler | `twin connector due` then `twin connector sync-due` |
+
+---
+
+
+---
+
+Quickstart narrative: [README.md](../README.md). Install/config: [SETUP.md](SETUP.md). Ops: [OPERATIONS.md](OPERATIONS.md).

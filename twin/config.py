@@ -23,10 +23,10 @@ from pathlib import Path
 
 DEFAULT_HOME = Path(os.environ.get("TWIN_HOME", "~/.twin")).expanduser()
 
-# Domains shipped in the MVP. The firewall also accepts the future ones so
+# Domains shipped in the initial concept. The firewall also accepts the future ones so
 # nothing breaks when they start showing up in data.
-MVP_DOMAINS = ["work", "technical", "personal_preferences", "assistant_preferences"]
-ALL_DOMAINS = MVP_DOMAINS + [
+BASE_DOMAINS = ["work", "technical", "personal_preferences", "assistant_preferences"]
+ALL_DOMAINS = BASE_DOMAINS + [
     "personal", "relationship", "family", "health",
     "finance", "social", "legal", "emotional", "general",
 ]

@@ -1,10 +1,10 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Setup
 
 **Source of truth for:** how you install Twin — packages, model providers, configuration and tests.
 
-For the shortest path to a first result, start at the [README quickstart](../README.md#quickstart). Interfaces: [CONNECTION.md](CONNECTION.md). Day-2 ops (runtime, backup, incidents): [OPERATIONS.md](OPERATIONS.md).
+For the shortest path to a first result, start at the [README quickstart](../README.md#quickstart). Interfaces: [INTERFACES.md](INTERFACES.md). Day-2 ops (runtime, backup, incidents): [OPERATIONS.md](OPERATIONS.md).
 
 ## Installation
 
@@ -85,4 +85,4 @@ Expected coverage:
 
 ---
 
-Quickstart: [README.md](../README.md#quickstart). Day-2 ops: [OPERATIONS.md](OPERATIONS.md). Interfaces: [CONNECTION.md](CONNECTION.md).
+Quickstart: [README.md](../README.md#quickstart). Day-2 ops: [OPERATIONS.md](OPERATIONS.md). Interfaces: [INTERFACES.md](INTERFACES.md).

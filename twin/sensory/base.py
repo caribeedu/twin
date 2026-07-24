@@ -1,6 +1,6 @@
 """Sensor contract and registry.
 
-A Sensor turns raw external signals into Percepts. The MVP sensors are
+A Sensor turns raw external signals into Percepts. The initial sensors are
 file-based (they receive paths); future sensors (email, calendar, browser,
 audio) may poll APIs or watch streams — the contract stays ``sense() →
 Iterable[Percept]``.

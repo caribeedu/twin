@@ -332,7 +332,7 @@ class FolderScanner(DocumentProvider):
         *,
         cursor: Optional[dict[str, Any]] = None,
     ) -> tuple[list[DocumentRecord], dict[str, Any], bool]:
-        """Full scan of one root (MVP — not page-budgeted).
+        """Full scan of one root (initial concept — not page-budgeted).
 
         Each call walks the entire tree with ``os.walk(followlinks=False)``,
         hashes every matched file, and returns ``done=True``. Checkpoint

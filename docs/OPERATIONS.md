@@ -1,4 +1,4 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Operations
 
@@ -64,7 +64,7 @@ twin memory candidates
 twin review
 ```
 
-**Default:** humans confirm Memory; Judgment always stays human-gated. Do not automate confirmation of Judgment. Opt-in `twin extract -A` (auto-confirm new *memory* candidates) is for trusted demos or tightly scoped pipelines only — not the recommended day-one path. See [CONNECTION.md](CONNECTION.md).
+**Default:** humans confirm Memory; Judgment always stays human-gated. Do not automate confirmation of Judgment. Opt-in `twin extract -A` (auto-confirm new *memory* candidates) is for trusted demos or tightly scoped pipelines only — not the recommended day-one path. See [INTERFACES.md](INTERFACES.md).
 
 ## Release gate
 
@@ -85,4 +85,4 @@ pytest -q
 
 ---
 
-Install: [SETUP.md](SETUP.md). Interfaces: [CONNECTION.md](CONNECTION.md). Overview: [README](../README.md).
+Install: [SETUP.md](SETUP.md). Interfaces: [INTERFACES.md](INTERFACES.md). Overview: [README](../README.md).

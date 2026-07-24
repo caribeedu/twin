@@ -1,16 +1,16 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Architecture
 
 **Source of truth for:** how Twin works — brain analogies, architecture principles, stack, data model, pipeline, privacy, review, judgment, observer and threat model.
 
-Product shape and the **complete roadmap** live in [PRODUCT.md](PRODUCT.md). Interfaces: [CONNECTION.md](CONNECTION.md). Why the shape exists: [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch: [README](../README.md#how-it-works).
+Product shape and the **complete roadmap** live in [ROADMAP.md](ROADMAP.md); what shipped is in [CHANGELOG.md](CHANGELOG.md). Product definition: [PRODUCT.md](PRODUCT.md). Interfaces: [INTERFACES.md](INTERFACES.md). Why the shape exists: [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch: [README](../README.md#how-it-works).
 
 ## Brain analogies
 
 Twin does **not** simulate a biological brain. Neuroscience and cognitive science supply *engineering analogies*: they explain why the system separates episodic capture, semantic structure, executive control, salience and working context instead of collapsing everything into one retrieval index. Deeper academic sources live in [FOUNDATIONS.md](FOUNDATIONS.md).
 
-### Cognitive systems → Twin layers
+### Cognitive systems mapped to Twin layers
 
 | Cognitive system | Function | Abstraction in Twin |
 |---|---|---|
@@ -20,7 +20,7 @@ Twin does **not** simulate a biological brain. Neuroscience and cognitive scienc
 | Working memory | current task focus | query, Memory Observer, context pack |
 | Executive control | selection, inhibition, judgment | Domain Firewall, policies, evolving judgment |
 
-### Brain regions → Twin components
+### Brain regions mapped to Twin components
 
 | Brain concept | Purpose | Twin abstraction |
 |---|---|---|
@@ -237,7 +237,7 @@ mandatory evidence > sourceless memory
 exportability > lock-in
 ```
 
-Continue in: [PRODUCT.md](PRODUCT.md) for roadmap and domain rules · [CONNECTION.md](CONNECTION.md) for MCP / CLI / API · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
+Continue in [PRODUCT.md](PRODUCT.md) for domain rules · [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md) for versions · [INTERFACES.md](INTERFACES.md) for MCP / CLI / API · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
 
 ## Stack and technical decisions
 
@@ -257,7 +257,7 @@ Full export = `twin export`.
 
 ### SQLite as a light graph
 
-The MVP uses SQLite with tables for:
+The initial concepts uses SQLite with tables for:
 
 - sources;
 - memories;
@@ -302,9 +302,9 @@ Search combines:
 
 Search must answer not only "what looks semantically similar?", but "what is relevant, allowed and trustworthy for this context?".
 
-### MCP-first
+### Native where possible, MCP everywhere
 
-The project must not depend on its own UI. MCP lets external tools query Twin; the CLI and local API expose the same cognitive core. Full tool / command / endpoint reference: [CONNECTION.md](CONNECTION.md).
+The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference: [INTERFACES.md](INTERFACES.md#clients).
 
 ## Data model
 
@@ -399,7 +399,7 @@ review classification
 graph + evidence + embedding
 ```
 
-MVP sources:
+initial concept sources:
 
 - markdown;
 - `.txt` transcripts;
@@ -462,7 +462,7 @@ A memory goes to review when:
 
 - confidence < threshold;
 - sensitivity is `private` or `restricted`;
-- domain is outside the MVP;
+- domain is outside the initial concept;
 - type is judgment-adjacent (`belief`, `procedure`);
 - the memory seems to update/contradict another;
 - there is partial duplication;
@@ -501,7 +501,7 @@ principles:
 
 technical_preferences:
   - avoid overengineering
-  - prefer a simple stack for an MVP
+  - prefer a simple stack for an initial concept
   - evaluate lock-in before adopting a tool
   - canonical data in an open, exportable format
 
@@ -604,7 +604,7 @@ The most dangerous operational risk. Mitigations:
 
 ### Overengineering
 
-The risk of trying to build the whole brain before the MVP. Mitigation:
+The risk of trying to build the whole brain before the being able to handle it. Mitigation:
 
 - start with technical work;
 - avoid WhatsApp/intimate life at the beginning;
@@ -671,4 +671,4 @@ Local-first personal cognitive OS. Assets: memories, judgment, connector secrets
 
 Operators still must: protect `$TWIN_HOME` and backup directories, rotate connector tokens, and treat every external document as adversarial input.
 
-Connect via [CONNECTION.md](CONNECTION.md). Install in [SETUP.md](SETUP.md). Operate in [OPERATIONS.md](OPERATIONS.md). Product and roadmap: [PRODUCT.md](PRODUCT.md).
+Connect via [INTERFACES.md](INTERFACES.md). Install in [SETUP.md](SETUP.md). Operate in [OPERATIONS.md](OPERATIONS.md). Product: [PRODUCT.md](PRODUCT.md). Roadmap: [ROADMAP.md](ROADMAP.md). Changelog: [CHANGELOG.md](CHANGELOG.md).
