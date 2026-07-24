@@ -22,10 +22,10 @@
 
 <p align="center">
   <a href="#why-twin">Why</a> ·
+  <a href="#before--after">Before / After</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#principles">Principles</a> ·
   <a href="#how-to-use-twin">How to use</a> ·
-  <a href="#before--after">Before / After</a> ·
   <a href="#docs">Docs</a> ·
   <a href="#faq">FAQ</a>
 </p>
@@ -64,6 +64,10 @@ Twin’s concrete answer: store evidence-grounded memory locally, confirm what i
 
 ## Vision
 
+<p align="center">
+  <img src="assets/before-and-after.png" alt="Before vs After: LLMs without Twin are isolated and restart every chat; with Twin they share one cognitive core — memory, judgment, privacy, graph, context and evidence" width="100%">
+</p>
+
 Long-term, Twin aims to work as a **personal exocortex**: continuity across tools, sessions, models and contexts — sober, local-first, auditable and incremental (aesthetic roots: [FOUNDATIONS](docs/FOUNDATIONS.md#aesthetic-inspiration)).
 
 It should preserve important facts, decisions, rejected alternatives, tasks, preferences, judgment patterns, beliefs that change over time, relationships, evidence, hard domain boundaries, privacy and human control.
@@ -88,11 +92,11 @@ Twin must not be understood as a chatbot, note-taking app, generic RAG, autonomo
 
 **Why not RAG?** RAG retrieves relevant text; Twin assembles safe cognitive context for the next decision.
 
-**Why not a vector database?** Vectors are indexes. The graph (memories, evidence, validity, domains, status) is truth. Wipe embeddings, `twin reindex`, keep the substrate.
+**Why not a vector database?** Vectors are indexes. The graph (memories, evidence, validity, domains, status) is the canonical store. Wipe embeddings, `twin reindex`, keep the substrate.
 
 ### Final definition
 
-Twin is a personal, local-first, interoperable and temporal layer of memory, judgment, privacy and context — so different LLMs can share a consistent representation of you without a re-brief every session.
+Twin is open-source, local-first cognitive infrastructure: a personal, interoperable and temporal layer of memory, judgment, privacy and context shared across authorized LLM-powered tools — so you do not re-brief every session.
 
 > I don't want to just use an AI. I want to feel integrated with the machine, as if part of my cognition could exist outside my brain, with safety, continuity and control.
 
@@ -131,7 +135,7 @@ These are the constitution. Features may change; these should not. Full list: [d
 - **Memory is compression** — keep what changes future action; do not archive life indiscriminately.
 - **Artifact ≠ Percept ≠ Memory ≠ Judgment** — never collapse capture, claim, principle and action into one blob.
 - **Evidence before memory** — durable claims need provenance you can inspect and reject.
-- **The graph is truth; embeddings are indexes** — search aids retrieval; the graph is authoritative.
+- **The graph is canonical; embeddings are indexes** — search aids retrieval; the graph is the source of truth.
 - **Firewall before reasoning** — filter by domain / persona / policy before the main LLM sees content.
 - **Progressive cognition** — `observe → remember → understand → judge → suggest → act`; no unsafe jump to autonomy.
 - **Native where possible, MCP everywhere** — one cognitive core; no proprietary silo per host.
@@ -200,16 +204,6 @@ documents / sessions
 If the model still asks you to explain from scratch: memory must be `confirmed`, MCP tools enabled, and the client must request a pack with the right domain.
 
 **Next:** keep ingesting your docs or complete MCP sessions (`session_start` → work → `session_complete`); `twin setup postgres` when you outgrow SQLite; daily ops via CLI or `twin serve` — see [docs/SETUP.md](docs/SETUP.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
-
----
-
-## Before / After
-
-<p align="center">
-  <img src="assets/before-and-after.png" alt="Before vs After: LLMs without Twin are isolated and restart every chat; with Twin they share one cognitive core — memory, judgment, privacy, graph, context and evidence" width="100%">
-</p>
-
-That loop is the product promise in miniature.
 
 ---
 
