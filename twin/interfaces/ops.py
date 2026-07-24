@@ -82,35 +82,63 @@ def doctor(cfg: Config) -> list[Check]:
     except Exception as exc:
         checks.append(Check("store:connection", FAIL, f"{url} → {exc}"))
 
-    # ollama + models
-    from ..memory.embeddings import ollama_reachable
+    # LLM + models (provider-aware)
+    from ..cognition.llm import llm_available, provider_kind
+    from ..memory.embeddings import get_embedder_for_config, ollama_reachable
 
-    if ollama_reachable(cfg.ollama_url):
-        try:
-            import httpx
+    provider = cfg.normalized_llm_provider
+    kind = provider_kind(provider)
+    checks.append(Check("llm:provider", OK, f"{provider} ({kind})"))
+    if kind == "ollama":
+        if ollama_reachable(cfg.resolved_llm_base_url):
+            try:
+                import httpx
 
-            tags = httpx.get(f"{cfg.ollama_url.rstrip('/')}/api/tags", timeout=5).json()
-            available = {m["name"].split(":")[0] for m in tags.get("models", [])}
-            for role, model in (("extraction", cfg.ollama_model),
-                                ("embeddings", cfg.ollama_embed_model)):
-                base = model.split(":")[0]
-                if base in available:
-                    checks.append(Check(f"ollama:{role}", OK, model))
-                else:
-                    checks.append(Check(f"ollama:{role}", WARN,
-                                        f"model {model} not pulled — twin setup ollama"))
-        except Exception as exc:
-            checks.append(Check("ollama:models", WARN, str(exc)))
+                tags = httpx.get(
+                    f"{cfg.resolved_llm_base_url.rstrip('/')}/api/tags", timeout=5,
+                ).json()
+                available = {m["name"].split(":")[0] for m in tags.get("models", [])}
+                for role, model in (
+                    ("extraction", cfg.resolved_llm_model),
+                    ("embeddings", cfg.resolved_embed_model),
+                ):
+                    base = model.split(":")[0]
+                    if base in available:
+                        checks.append(Check(f"ollama:{role}", OK, model))
+                    else:
+                        checks.append(Check(
+                            f"ollama:{role}", WARN,
+                            f"model {model} not pulled — twin setup ollama",
+                        ))
+            except Exception as exc:
+                checks.append(Check("ollama:models", WARN, str(exc)))
+        else:
+            checks.append(Check(
+                "ollama:server", WARN,
+                f"{cfg.resolved_llm_base_url} unreachable — extraction defers; "
+                "embeddings fall back to hash when embedder=auto",
+            ))
     else:
-        checks.append(Check("ollama:server", WARN,
-                            f"{cfg.ollama_url} unreachable — extraction falls back to "
-                            "heuristic, embeddings to hash"))
+        if llm_available(cfg):
+            checks.append(Check(
+                "llm:server", OK,
+                f"{cfg.resolved_llm_base_url} · model={cfg.resolved_llm_model}",
+            ))
+        else:
+            checks.append(Check(
+                "llm:server", WARN,
+                f"{cfg.resolved_llm_base_url} unreachable — check TWIN_LLM_BASE_URL / API key",
+            ))
+        if not cfg.resolved_llm_api_key:
+            hint = {
+                "anthropic": "set ANTHROPIC_API_KEY or TWIN_LLM_API_KEY",
+                "gemini": "set GEMINI_API_KEY / GOOGLE_API_KEY or TWIN_LLM_API_KEY",
+                "openai_compatible": "set TWIN_LLM_API_KEY (ok empty for some local servers)",
+            }.get(kind, "set TWIN_LLM_API_KEY")
+            checks.append(Check("llm:api_key", WARN, hint))
 
     # embedder resolution
-    from ..memory.embeddings import get_embedder
-
-    embedder = get_embedder(cfg.embedder, cfg.embedding_dim,
-                            ollama_url=cfg.ollama_url, ollama_model=cfg.ollama_embed_model)
+    embedder = get_embedder_for_config(cfg)
     checks.append(Check("embedder", OK, embedder.name))
 
     # policies + judgment parse
@@ -215,8 +243,46 @@ def setup_mcp(cfg: Config, client: str) -> list[str]:
         return [f"unknown client '{client}'. Options: {', '.join(paths)}"]
     path = paths[client]
     entry: dict = {"command": shutil.which("twin") or "twin", "args": ["mcp"]}
-    if os.environ.get("TWIN_DB_URL"):
-        entry["env"] = {"TWIN_DB_URL": os.environ["TWIN_DB_URL"]}
+    env: dict[str, str] = {}
+    for key in (
+        "TWIN_DB_URL",
+        "TWIN_HOME",
+        "TWIN_LLM_PROVIDER",
+        "TWIN_LLM_BASE_URL",
+        "TWIN_LLM_MODEL",
+        "TWIN_LLM_API_KEY",
+        "TWIN_OLLAMA_URL",
+        "TWIN_OLLAMA_MODEL",
+        "TWIN_OLLAMA_EMBED_MODEL",
+        "TWIN_EMBEDDER",
+        "TWIN_EMBED_BASE_URL",
+        "TWIN_EMBED_MODEL",
+        "TWIN_EMBED_API_KEY",
+        "TWIN_EXTRACTOR",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "TOGETHER_API_KEY",
+        "FIREWORKS_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MISTRAL_API_KEY",
+        "XAI_API_KEY",
+    ):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    # Prefer values from ~/.twin/env when process env lacks them
+    try:
+        from .ux import load_env_file
+        for key, value in load_env_file(cfg.home / "env").items():
+            env.setdefault(key, value)
+    except Exception:
+        pass
+    if env:
+        entry["env"] = env
     config: dict = {}
     if path.exists():
         try:

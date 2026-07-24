@@ -1,9 +1,9 @@
 """twin CLI.
 
-    twin init                          create ~/.twin (config + default policies/judgment)
+    twin init                          create ~/.twin + guided Ollama/model setup
     twin ingest <paths...>             run sensors over docs/transcripts/meetings/slack exports
-    twin extract                       extract memories from un-processed percepts
-    twin review                        interactive review of the candidate queue
+    twin extract [--auto-approve|-A]   interpret pending percepts (+ optional auto-confirm)
+    twin review                        interactive review (single-key a/r/s/q)
     twin search "query" [--domain d]   hybrid search
     twin pack "task" [--domain d]      build a safe context pack (confirmed only;
                                        --include-candidates to loosen)
@@ -43,20 +43,73 @@ def _print(data) -> None:
 
 
 def cmd_init(args) -> None:
+    from . import ux
+    from .setup_wizard import run_setup_wizard
+
     ws = Workspace(args.home)
-    print(f"initialized twin home at {ws.cfg.home}")
-    print(f"  db:        {ws.cfg.resolved_db_url}")
-    print(f"  policies:  {ws.cfg.policies_path}")
-    print(f"  judgment:  {ws.cfg.judgment_path}")
-    print(f"  embedder:  {ws.embedder.name}")
+    interactive = not getattr(args, "skip_setup", False)
+    run_setup_wizard(ws.cfg, interactive=interactive)
+    ux.print_panel(
+        f"db        {ws.cfg.resolved_db_url}\n"
+        f"policies  {ws.cfg.policies_path}\n"
+        f"judgment  {ws.cfg.judgment_path}\n"
+        f"calib     {ws.cfg.calibration_path}\n"
+        f"embedder  {ws.embedder.name}\n"
+        f"ollama    {ws.cfg.ollama_url}\n"
+        f"model     {ws.cfg.ollama_model}\n"
+        f"embed     {ws.cfg.ollama_embed_model}",
+        title="home ready",
+    )
+    ux.print_legend([
+        ("1", "twin ingest <paths>  — sense docs / transcripts"),
+        ("2", "twin extract         — interpret into memories"),
+        ("3", "twin review          — approve / reject candidates"),
+        ("4", "twin doctor          — verify local setup"),
+        ("5", "twin setup mcp cursor — wire MCP client"),
+    ], title="next steps")
 
 
 def cmd_ingest(args) -> None:
+    from . import ux
+
     ws = Workspace(args.home)
-    new_ids, skipped = ws.ingest(args.paths)
-    print(f"ingested {len(new_ids)} percept(s)")
-    for s in skipped:
-        print(f"  skipped: {s}")
+    paths = [str(p) for p in args.paths]
+    ux.print_rule("ingest")
+    ux.print_kv([
+        ("paths", ", ".join(paths)),
+        ("home", str(ws.cfg.home)),
+        ("db", ws.cfg.resolved_db_url),
+    ])
+    ux.print_panel(
+        "Sensors read files into percepts (raw observations).\n"
+        "Duplicates are skipped. Run twin extract next to interpret.",
+        title="what this does",
+    )
+    with ux.spinner(f"Sensing {len(paths)} path(s)…"):
+        new_ids, skipped = ws.ingest(args.paths)
+
+    if new_ids:
+        preview = "\n".join(f"  {pid}" for pid in new_ids[:20])
+        if len(new_ids) > 20:
+            preview += f"\n  … +{len(new_ids) - 20} more"
+        ux.print_panel(preview, title=f"new percepts ({len(new_ids)})")
+        ux.print_ok(f"ingested {len(new_ids)} percept(s)")
+    else:
+        ux.print_warn("no new percepts")
+
+    if skipped:
+        skip_body = "\n".join(f"  {s}" for s in skipped[:30])
+        if len(skipped) > 30:
+            skip_body += f"\n  … +{len(skipped) - 30} more"
+        ux.print_panel(skip_body, title=f"skipped ({len(skipped)})")
+    else:
+        ux.print_dim("skipped: 0")
+
+    ux.print_legend([
+        ("→", "twin extract   — interpret pending percepts"),
+        ("→", "twin interpret status — see queue health"),
+        ("→", "twin review    — after extract creates candidates"),
+    ], title="next")
 
 
 def cmd_interpret(args) -> None:
@@ -105,52 +158,105 @@ def cmd_interpret(args) -> None:
 
 def cmd_extract(args) -> None:
     from ..cognition import extract_pending
+    from ..cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+    from ..memory.models import MemoryStatus
+    from . import ux
 
     ws = Workspace(args.home)
-    reports = extract_pending(ws.store, ws.cfg, ws.embedder)
-    if not reports:
-        print("nothing to interpret (all percepts already interpreted or deferred)")
+    pending = ws.store.percepts_pending_interpretation(
+        max_attempts=MAX_INTERPRETATION_ATTEMPTS,
+    )
+    ux.print_rule("extract")
+    if not pending:
+        ux.print_warn("nothing to interpret (all percepts already interpreted or deferred)")
         return
+
+    auto = bool(getattr(args, "auto_approve", False))
+    ux.print_dim(
+        f"{len(pending)} percept(s) · model={ws.cfg.ollama_model} · "
+        f"url={ws.cfg.ollama_url}"
+        + (" · auto-approve ON" if auto else "")
+    )
+
+    details: list[str] = []
+
+    with ux.progress_bar(len(pending), description="Extracting") as advance:
+        def on_progress(done, total, percept, report) -> None:
+            short = percept.id[:10]
+            if report.deferred:
+                label = f"{short} deferred"
+                st = ws.store.get_interpretation(report.percept_id)
+                detail = (st.detail if st else "") or report.interpretation_status
+                fclass = (st.failure_class if st else "") or "-"
+                why = (
+                    "model unreachable — start Ollama / check TWIN_OLLAMA_URL"
+                    if report.interpretation_status == "deferred"
+                    else "interpreter call failed (timeout/schema/HTTP)"
+                )
+                details.append(
+                    f"{report.percept_id}: {report.interpretation_status.upper()} "
+                    f"({fclass}) — {why}"
+                )
+                if detail:
+                    details.append(f"  detail: {detail}")
+            else:
+                label = f"{short} +{len(report.inserted)}"
+                details.append(
+                    f"{report.percept_id}: {len(report.inserted)} memories via "
+                    f"{report.extractor} ({report.flagged_for_review} to review, "
+                    f"{report.duplicates} duplicates, "
+                    f"{report.pii_findings} PII findings masked)"
+                )
+            advance(label)
+
+        reports = extract_pending(
+            ws.store, ws.cfg, ws.embedder, on_progress=on_progress,
+        )
+
+    for line in details:
+        ux.print_dim(line) if line.startswith("  ") else print(line)
+
     total = sum(len(r.inserted) for r in reports)
     review = sum(r.flagged_for_review for r in reports)
     dups = sum(r.duplicates for r in reports)
     deferred = sum(1 for r in reports if r.deferred)
-    for r in reports:
-        if r.deferred:
-            st = ws.store.get_interpretation(r.percept_id)
-            detail = (st.detail if st else "") or r.interpretation_status
-            fclass = (st.failure_class if st else "") or "-"
-            # 'deferred' = Ollama unreachable; 'error' = reachable but call failed
-            why = (
-                "model unreachable — start Ollama / check TWIN_OLLAMA_URL"
-                if r.interpretation_status == "deferred"
-                else "interpreter call failed (timeout/schema/HTTP) — see detail"
-            )
-            print(
-                f"{r.percept_id}: {r.interpretation_status.upper()} "
-                f"({fclass}) — {why}"
-            )
-            if detail:
-                print(f"  detail: {detail}")
-            continue
-        print(f"{r.percept_id}: {len(r.inserted)} memories via {r.extractor}"
-              f" ({r.flagged_for_review} to review, {r.duplicates} duplicates,"
-              f" {r.pii_findings} PII findings masked)")
-    print(f"total: {total} new, {review} queued for review, {dups} duplicates,"
-          f" {deferred} deferred")
+    ux.print_ok(
+        f"total: {total} new, {review} queued for review, {dups} duplicates, "
+        f"{deferred} deferred"
+    )
+
+    if auto:
+        approved = 0
+        for r in reports:
+            for mid in r.inserted:
+                mem = ws.store.get_memory(mid)
+                if mem is None:
+                    continue
+                if mem.status.value in ("candidate", "confirmed"):
+                    # confirm candidates; leave already-confirmed alone
+                    if mem.status.value == "candidate":
+                        ws.store.set_status(mid, MemoryStatus.confirmed)
+                        approved += 1
+        ux.print_ok(f"auto-approved {approved} memory(ies) — skipped review queue")
+    elif review:
+        ux.print_dim("next: twin review   (or re-run with --auto-approve / -A)")
+
     if deferred:
-        print("  pending percepts stay eligible — inspect with "
-              "'twin interpret deferred' then re-run 'twin extract'")
+        ux.print_dim(
+            "pending percepts stay eligible — inspect with "
+            "'twin interpret deferred' then re-run 'twin extract'"
+        )
 
 
 def cmd_review(args) -> None:
     from ..cognition.quality import analyze_candidates, review_queue
     from ..memory.models import MemoryStatus
+    from . import ux
 
     ws = Workspace(args.home)
     if getattr(args, "analyze", False):
         reports = analyze_candidates(ws.store, ws.embedder)
-        print(f"analyzed {len(reports)} candidates")
+        ux.print_ok(f"analyzed {len(reports)} candidates")
         for r in reports[:20]:
             print(f"  {r.memory_id} prio={r.review_priority:.2f} "
                   f"action={r.suggested_action.value} flags={r.quality_flags}")
@@ -168,30 +274,53 @@ def cmd_review(args) -> None:
         if proj:
             queue = [m for m in queue if m.project_id == proj.id]
     if not queue:
-        print("review queue is empty")
+        ux.print_warn("review queue is empty")
         return
-    print(f"{len(queue)} memories to review (priority order). "
-          "[a]pprove / [r]eject / [s]kip / [q]uit\n")
-    for mem in queue:
-        print(f"— prio {mem.review_priority:.2f} · {mem.type.value} · {mem.domain} · "
-              f"{mem.sensitivity.value} · conf {mem.confidence:.2f}")
-        if mem.quality_flags:
-            print(f"  flags: {', '.join(mem.quality_flags)}")
-        if mem.review_reason:
-            print(f"  reason: {mem.review_reason}")
-        print(f"  {mem.title}")
+
+    ux.print_rule("review")
+    ux.print_panel(
+        f"{len(queue)} candidate(s) in priority order.\n"
+        "Press a single key — no Enter needed.",
+        title="queue",
+    )
+    ux.print_legend([
+        ("a", "approve — confirm memory (enters retrieval / packs)"),
+        ("r", "reject — discard memory (never retrieved)"),
+        ("s", "skip — leave as candidate, move to next"),
+        ("q", "quit — stop review, keep remaining candidates"),
+    ], title="legend")
+    approved = rejected = skipped = 0
+    for idx, mem in enumerate(queue, start=1):
+        body = (
+            f"prio {mem.review_priority:.2f} · {mem.type.value} · {mem.domain} · "
+            f"{mem.sensitivity.value} · conf {mem.confidence:.2f}\n"
+            f"{mem.title}"
+        )
         if mem.summary != mem.title:
-            print(f"  {mem.summary}")
+            body += f"\n{mem.summary}"
+        if mem.quality_flags:
+            body += f"\nflags: {', '.join(mem.quality_flags)}"
+        if mem.review_reason:
+            body += f"\nreason: {mem.review_reason}"
         for ev in ws.store.get_evidence(mem.id)[:1]:
-            print(f'  evidence: "{ev.quote[:140]}"')
-        choice = input("  [a/r/s/q] > ").strip().lower()
+            body += f'\nevidence: "{ev.quote[:140]}"'
+        ux.print_panel(body, title=f"{idx}/{len(queue)}")
+        choice = ux.read_key("  [a]pprove [r]eject [s]kip [q]uit  ", allowed="arsq")
         if choice == "a":
             ws.store.set_status(mem.id, MemoryStatus.confirmed)
+            approved += 1
+            ux.print_ok("approved")
         elif choice == "r":
             ws.store.set_status(mem.id, MemoryStatus.rejected)
+            rejected += 1
+            ux.print_err("rejected")
         elif choice == "q":
+            ux.print_dim("quit")
             break
-        print()
+        else:
+            skipped += 1
+            ux.print_dim("skipped")
+    ux.print_ok(f"done — approved={approved} rejected={rejected} skipped={skipped}")
 
 
 def cmd_review_batch(args) -> None:
@@ -312,43 +441,118 @@ def cmd_undo(args) -> None:
 
 def cmd_search(args) -> None:
     from ..memory.search import search
+    from . import ux
 
     ws = Workspace(args.home)
-    result = search(ws.store, ws.embedder, args.query, target_domain=args.domain,
-                    firewall=ws.firewall, limit=args.limit)
-    for h in result.hits:
-        print(f"{h.score:.3f}  [{h.memory.type.value}] {h.memory.title}  ({h.why})")
+    domain = args.domain or "technical"
+    ux.print_rule("search")
+    ux.print_kv([
+        ("query", args.query),
+        ("domain", domain),
+        ("limit", str(args.limit)),
+        ("embedder", ws.embedder.name),
+    ])
+    with ux.spinner("Searching memories…"):
+        result = search(
+            ws.store, ws.embedder, args.query,
+            target_domain=domain, firewall=ws.firewall, limit=args.limit,
+        )
+    if not result.hits:
+        ux.print_warn("no hits")
+    else:
+        ux.print_ok(f"{len(result.hits)} hit(s)")
+        for i, h in enumerate(result.hits, start=1):
+            mem = h.memory
+            body = (
+                f"{ux.score_bar(h.score)}  {h.why}\n"
+                f"[{mem.type.value}] {mem.domain} · {mem.status.value} · "
+                f"conf {mem.confidence:.2f}\n"
+                f"{mem.title}"
+            )
+            if mem.summary and mem.summary != mem.title:
+                summary = mem.summary if len(mem.summary) <= 220 else mem.summary[:217] + "…"
+                body += f"\n{summary}"
+            ux.print_panel(body, title=f"{i}/{len(result.hits)} · {mem.id[:10]}")
     if result.blocked:
-        print(f"\n{len(result.blocked)} memories blocked by firewall:")
-        for b in result.blocked:
-            print(f"  {b.memory_id}: {b.rule}")
+        ux.print_warn(f"{len(result.blocked)} blocked by firewall")
+        for b in result.blocked[:12]:
+            ux.print_dim(f"  {b.memory_id}: {b.rule} — {b.reason}")
+        if len(result.blocked) > 12:
+            ux.print_dim(f"  … +{len(result.blocked) - 12} more")
 
 
 def cmd_pack(args) -> None:
     from ..cognition.context_pack import build_context_pack
     from ..privacy.identity import ensure_local_identity, resolve_access
     from ..privacy.yaml_io import bootstrap_policy_set
+    from . import ux
 
     ws = Workspace(args.home)
+    persona = getattr(args, "persona", None) or "individual"
+    domain = args.domain or "technical"
+    ux.print_rule("pack")
+    ux.print_kv([
+        ("query", args.query),
+        ("domain", domain),
+        ("persona", persona),
+        ("max_tokens", str(args.max_tokens)),
+        ("candidates", "yes" if args.include_candidates else "confirmed only"),
+    ])
     bootstrap_policy_set(ws.store, policies_path=ws.cfg.policies_path)
     ensure_local_identity(ws.store)
     access = resolve_access(
         ws.store, surface="cli", client="local-cli",
-        persona=getattr(args, "persona", None) or "individual",
+        persona=persona,
         purpose=getattr(args, "purpose", None) or "memory_retrieval",
         audience=getattr(args, "audience", None) or "self",
         requested_domains=[args.domain] if getattr(args, "domain", None) else [],
     )
-    pack = build_context_pack(ws.store, ws.cfg, ws.embedder, args.query,
-                              target_domain=args.domain, max_tokens=args.max_tokens,
-                              include_candidates=args.include_candidates,
-                              firewall=ws.firewall, access=access)
+    with ux.spinner("Building context pack…"):
+        pack = build_context_pack(
+            ws.store, ws.cfg, ws.embedder, args.query,
+            target_domain=domain, max_tokens=args.max_tokens,
+            include_candidates=args.include_candidates,
+            firewall=ws.firewall, access=access,
+        )
     if args.json:
         _print(pack.__dict__)
-    else:
-        print(pack.context_pack or "(empty pack)")
-        if pack.blocked:
-            print(f"\n[{len(pack.blocked)} memories withheld by firewall]")
+        return
+
+    budget = pack.token_budget or {}
+    ux.print_kv([
+        ("confidence", f"{pack.confidence:.2f}"),
+        ("mode", pack.mode or "compact"),
+        ("sources", str(len(pack.sources))),
+        ("blocked", str(pack.blocked_count or len(pack.blocked))),
+        ("evidence", "included" if pack.evidence_included else "omitted"),
+        (
+            "budget",
+            f"{budget.get('used_chars', '?')} chars / "
+            f"max_tokens={budget.get('max', args.max_tokens)}",
+        ),
+    ])
+    body = pack.context_pack or "(empty pack — nothing passed firewall / retrieval)"
+    ux.print_panel(body, title="context pack")
+    if pack.sources:
+        lines = []
+        for src in pack.sources[:15]:
+            mid = src.get("memory_id") or src.get("id") or "?"
+            title = src.get("title") or ""
+            conf = src.get("confidence")
+            why = src.get("why_relevant") or src.get("label") or ""
+            prefix = f"conf {conf:.2f}  " if isinstance(conf, (int, float)) else ""
+            lines.append(f"{prefix}{mid}  {title}  {why}".rstrip())
+        ux.print_panel("\n".join(lines), title=f"sources ({len(pack.sources)})")
+    if pack.blocked:
+        ux.print_warn(f"{len(pack.blocked)} memories withheld by firewall")
+        for b in pack.blocked[:8]:
+            if isinstance(b, dict):
+                ux.print_dim(
+                    f"  {b.get('memory_id', '?')}: {b.get('rule', b.get('reason', ''))}"
+                )
+            else:
+                ux.print_dim(f"  {b}")
+    ux.print_ok("pack ready — paste into your agent or pipe with --json")
 
 
 def cmd_observe(args) -> None:
@@ -1412,33 +1616,77 @@ def cmd_watch(args) -> None:
 
 
 def cmd_doctor(args) -> None:
+    from . import ux
     from .ops import doctor
 
     ws = Workspace(args.home)
-    checks = doctor(ws.cfg)
-    icons = {"ok": "✓", "warn": "!", "fail": "✗"}
+    ux.print_rule("doctor")
+    ux.print_kv([
+        ("home", str(ws.cfg.home)),
+        ("db", ws.cfg.resolved_db_url),
+        ("llm", f"{ws.cfg.normalized_llm_provider} @ {ws.cfg.resolved_llm_base_url}"),
+        ("model", ws.cfg.resolved_llm_model),
+    ])
+    ux.print_legend([
+        ("✓", "ok — healthy"),
+        ("!", "warn — usable but incomplete / optional missing"),
+        ("✗", "fail — broken; fix before relying on this path"),
+    ], title="status legend")
+    with ux.spinner("Running checks…"):
+        checks = doctor(ws.cfg)
+
+    n_ok = n_warn = n_fail = 0
     worst = "ok"
     for c in checks:
-        print(f" {icons[c.status]} {c.name:24} {c.detail}")
-        if c.status == "fail" or (c.status == "warn" and worst == "ok"):
-            worst = c.status
+        if c.status == "ok":
+            n_ok += 1
+            ux.print_ok(f"{c.name:24} {c.detail}")
+        elif c.status == "warn":
+            n_warn += 1
+            ux.print_warn(f"{c.name:24} {c.detail}")
+            if worst == "ok":
+                worst = "warn"
+        else:
+            n_fail += 1
+            ux.print_err(f"{c.name:24} {c.detail}")
+            worst = "fail"
+
+    verdict = {
+        "ok": "all clear",
+        "warn": "usable with warnings — review items above",
+        "fail": "failures found — fix ✗ items before production use",
+    }[worst]
+    ux.print_panel(
+        f"ok={n_ok}  warn={n_warn}  fail={n_fail}\n{verdict}",
+        title="verdict",
+    )
     if worst == "fail":
+        ux.print_legend([
+            ("→", "twin init              — recreate home defaults"),
+            ("→", "twin setup ollama      — pull models / check server"),
+            ("→", "twin setup mcp cursor  — wire MCP"),
+        ], title="fix hints")
         raise SystemExit(1)
 
 
 def cmd_setup(args) -> None:
+    from . import ux
     from .ops import setup_mcp, setup_ollama, setup_postgres
 
     ws = Workspace(args.home)
+    ux.print_rule(f"setup {args.target}")
     if args.target == "ollama":
-        lines = setup_ollama(ws.cfg)
+        with ux.spinner("Talking to Ollama…"):
+            lines = setup_ollama(ws.cfg)
     elif args.target == "postgres":
-        lines = setup_postgres(ws.cfg)
+        with ux.spinner("Checking Postgres…"):
+            lines = setup_postgres(ws.cfg)
     else:
         if not args.client:
             raise SystemExit("usage: twin setup mcp <claude-code|claude-desktop|cursor>")
         lines = setup_mcp(ws.cfg, args.client)
-    print("\n".join(lines))
+    for line in lines:
+        ux.print_dim(line)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -1446,13 +1694,28 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--home", default=None, help="twin home dir (default ~/.twin or $TWIN_HOME)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="initialize the twin home").set_defaults(func=cmd_init)
+    p = sub.add_parser("init", help="initialize home + guided Ollama setup")
+    p.add_argument(
+        "--skip-setup",
+        action="store_true",
+        help="only create home defaults (no interactive wizard)",
+    )
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("ingest", help="run sensors over files or directories")
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_ingest)
 
-    sub.add_parser("extract", help="interpret pending percepts into memories").set_defaults(func=cmd_extract)
+    p = sub.add_parser(
+        "extract",
+        help="interpret pending percepts into memories",
+    )
+    p.add_argument(
+        "--auto-approve", "-A",
+        action="store_true",
+        help="confirm newly extracted memories immediately (skip review queue)",
+    )
+    p.set_defaults(func=cmd_extract)
 
     pi = sub.add_parser("interpret", help="cognitive interpretation status (v0.7)")
     pis = pi.add_subparsers(dest="interpret_command", required=True)

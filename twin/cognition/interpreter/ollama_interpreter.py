@@ -313,40 +313,34 @@ def _parse_model_json(content: str) -> dict:
 
 def interpret(percept: Percept, text: str, *,
               base_url: str = "http://127.0.0.1:11434",
-              model: str = "qwen3.6:latest", client=None) -> InterpretationResult:
-    import httpx
+              model: str = "qwen3.6:latest", client=None,
+              chat=None) -> InterpretationResult:
+    """Run the cognitive interpreter.
 
-    http = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=600)
-    # ``think: false`` is ignored by older Ollama / non-thinking models.
-    payload = {
-        "model": model,
-        "stream": False,
-        "format": INTERPRETATION_JSON_SCHEMA,
-        "think": False,
-        "options": {"temperature": 0.1},
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _user_content(percept, text)},
-        ],
-    }
-    resp = http.post("/api/chat", json=payload)
-    resp.raise_for_status()
-    body = resp.json()
-    message = body.get("message") or {}
-    content = message.get("content") or ""
-    # Some builds put the structured answer in a sibling field when thinking.
-    if not content.strip() and isinstance(message.get("thinking"), str):
-        content = message.get("thinking") or ""
-    data = _parse_model_json(content)
+    Prefer passing ``chat`` (a :class:`~twin.cognition.llm.ChatClient`) so
+    Ollama *or* OpenAI-compatible providers work. Legacy ``base_url`` /
+    ``model`` / ``client`` still build an Ollama chat client.
+    """
+    if chat is None:
+        from ..llm import OllamaChatClient
+        chat = OllamaChatClient(base_url, model, client=client)
+
+    data = chat.complete_json(
+        system=SYSTEM_PROMPT,
+        user=_user_content(percept, text),
+        schema=INTERPRETATION_JSON_SCHEMA,
+        temperature=0.1,
+    )
     items, dropped = _items_from_payload(data)
     status = (InterpretationStatus.interpreted if items
               else InterpretationStatus.empty)
     detail = f"dropped {dropped} malformed item(s)" if dropped else ""
+    label = getattr(chat, "name", None) or f"ollama:{model}"
     return InterpretationResult(
         items=items,
         status=status,
-        interpreter=f"ollama:{model}",
-        model=model,
+        interpreter=label,
+        model=getattr(chat, "model", model),
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
         unresolved_references=_as_str_list(data.get("unresolved_references")),

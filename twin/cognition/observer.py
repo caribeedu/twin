@@ -242,27 +242,24 @@ def _fast_read(store: MemoryStore, text: str, cwd: Optional[str] = None) -> Obse
 
 def _deep_read(store: MemoryStore, cfg: Config, text: str,
                fast: ObserverReading, client=None) -> ObserverReading:
-    import json as _json
-
-    import httpx
+    from .llm import get_chat_client
 
     projects = store.list_projects()
-    http = client or httpx.Client(base_url=cfg.ollama_url.rstrip("/"), timeout=60)
-    resp = http.post("/api/chat", json={
-        "model": cfg.ollama_model,
-        "stream": False,
-        "format": _DEEP_SCHEMA,
-        "options": {"temperature": 0},
-        "messages": [
-            {"role": "system", "content": _DEEP_PROMPT.format(
+    chat = get_chat_client(cfg, client=client, timeout=60)
+    try:
+        data = chat.complete_json(
+            system=_DEEP_PROMPT.format(
                 profiles=", ".join(PROFILES),
                 projects=", ".join(p.name for p in projects) or "none",
-            )},
-            {"role": "user", "content": text},
-        ],
-    })
-    resp.raise_for_status()
-    data = _json.loads(resp.json()["message"]["content"])
+            ),
+            user=text,
+            schema=_DEEP_SCHEMA,
+            temperature=0.0,
+        )
+    finally:
+        closer = getattr(chat, "close", None)
+        if callable(closer) and client is None:
+            closer()
 
     project_id = fast.project_id
     project_conf = fast.confidences.get("project", 0.0)
@@ -297,8 +294,8 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
 
 def read_context(store: MemoryStore, cfg: Config, text: str,
                  cwd: Optional[str] = None, client=None) -> ObserverReading:
-    """Fast observation always; deep (local LLM) only when the fast pass is
-    uncertain and Ollama is reachable.
+    """Fast observation always; deep LLM only when the fast pass is
+    uncertain and the configured chat provider is reachable.
 
     Every fallback is observable: when the deep read is skipped or fails,
     the reading carries ``fallback_reason`` (error type only — never the
@@ -307,12 +304,14 @@ def read_context(store: MemoryStore, cfg: Config, text: str,
     fast = _fast_read(store, text, cwd=cwd)
     if not fast.uncertain:
         return fast
-    from .extractors import ollama as ollama_extractor
+    from .llm import llm_available
 
-    if client is None and not ollama_extractor.available(cfg.ollama_url):
+    if client is None and not llm_available(cfg):
         fast.fallback_reason = "deep_observer_unavailable"
-        logger.warning("deep observer unavailable (%s unreachable); "
-                       "fast reading stands with domain=%s", cfg.ollama_url, fast.domain)
+        logger.warning(
+            "deep observer unavailable (%s @ %s); fast reading stands with domain=%s",
+            cfg.normalized_llm_provider, cfg.resolved_llm_base_url, fast.domain,
+        )
         return fast
     try:
         return _deep_read(store, cfg, text, fast, client=client)

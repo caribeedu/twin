@@ -1,4 +1,10 @@
-# Twin v1.0 Operator Runbook
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
+
+# Operations
+
+**Source of truth for:** day-2 operation — cognitive runtime, health, connectors, backup, release gates and incidents.
+
+Install and providers live in [SETUP.md](SETUP.md). Quickstart: [README](../README.md#quickstart).
 
 ## Start cognitive runtime
 
@@ -55,9 +61,10 @@ Validate before restore. Restored DB is isolated until you point `$TWIN_HOME` / 
 ```bash
 twin memory candidates
 # confirm / reject only with evidence present
+twin review
 ```
 
-Never automate confirmation of Memory or Judgment.
+**Default:** humans confirm Memory; Judgment always stays human-gated. Do not automate confirmation of Judgment. Opt-in `twin extract -A` (auto-confirm new *memory* candidates) is for trusted demos or tightly scoped pipelines only — not the recommended day-one path. See [CONNECTION.md](CONNECTION.md).
 
 ## Release gate
 
@@ -75,3 +82,7 @@ pytest -q
 2. Confirm packs exclude injection (`blocked` reasons, not content).
 3. Rotate any secrets that appeared in source text.
 4. Re-run `GET /api/health/cognition` / integrity job.
+
+---
+
+Install: [SETUP.md](SETUP.md). Interfaces: [CONNECTION.md](CONNECTION.md). Overview: [README](../README.md).

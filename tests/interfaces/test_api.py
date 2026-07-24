@@ -72,8 +72,11 @@ def test_full_flow_over_api(client):
     assert "entities" in export
 
     # UI renders
-    assert "twin" in client.get("/").text
-    assert client.get("/all").status_code == 200
+    home = client.get("/").text
+    assert "Twin" in home
+    assert client.get("/static/app.css").status_code == 200
+    assert client.get("/static/app.js").status_code == 200
+    assert client.get("/all").status_code in (200, 302)
 
 
 def test_projects_over_api(client):
