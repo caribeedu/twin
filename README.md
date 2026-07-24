@@ -11,7 +11,7 @@
   <a href="#how-to-use-twin"><img src="https://img.shields.io/badge/quickstart-how_to_use-7c3aed?style=for-the-badge" alt="How to use"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="docs/CONNECTION.md"><img src="https://img.shields.io/badge/MCP-first-111827?style=for-the-badge" alt="MCP"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
 
 <p align="center">
@@ -226,4 +226,4 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (principles) and [docs/PRODUCT
 
 ## License
 
-MIT — see `license` in [`pyproject.toml`](pyproject.toml).
+[MIT](LICENSE) © 2026 Edu Caribé
