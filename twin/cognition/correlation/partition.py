@@ -1,4 +1,4 @@
-"""Vault / ownership partition helpers for correlation (Phase 7 review)."""
+"""Vault / ownership partition helpers for correlation."""
 
 from __future__ import annotations
 

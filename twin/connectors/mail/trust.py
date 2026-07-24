@@ -1,4 +1,4 @@
-"""Source-trust calibration for professional email (v0.6 §69–70).
+"""Source-trust calibration for professional email.
 
 Email is more conservative than Slack: automated notifications and
 newsletters sit below the review threshold and are marked derived so they

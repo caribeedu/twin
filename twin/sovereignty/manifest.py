@@ -1,4 +1,4 @@
-"""Backup / export manifest (v0.9.8)."""
+"""Backup / export manifest."""
 
 from __future__ import annotations
 

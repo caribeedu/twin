@@ -1,4 +1,4 @@
-"""Workspace tick (v0.8) — Global-Workspace-shaped observation spine.
+"""Workspace tick — Global-Workspace-shaped observation spine.
 
 Synchronous, invocable evaluation — not a continuous background worker.
 Separates stages clearly:
@@ -8,7 +8,7 @@ reading → observe → salience → recall → [parallel_interpretation] → do
 ```
 
 A tick never writes confirmed Memory or Judgment. Optional interpretation
-reuses the v0.7 pipeline and only produces reviewable candidates, and only
+reuses the pipeline and only produces reviewable candidates, and only
 for ``input_mode="delta"`` with an idempotent identity.
 
 Execution exclusivity: only the caller that *creates* the running row may

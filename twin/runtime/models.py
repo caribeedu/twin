@@ -1,4 +1,4 @@
-"""Durable cognitive runtime models (v1.0 / v0.9.0).
+"""Durable cognitive runtime models.
 
 Jobs are the unit of background cognitive work. Leases give exclusive
 execution; dead letters capture terminal failures. This is not an autonomous

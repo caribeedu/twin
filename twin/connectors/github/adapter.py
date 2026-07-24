@@ -2,12 +2,12 @@
 
 Streams are dynamic, one per (repository, object family):
 
-    repo:{owner}/{name}:issues     issues + issue comments
-    repo:{owner}/{name}:pulls      PRs + reviews + review comments + CI summary
-    repo:{owner}/{name}:commits    default-branch commits
-    repo:{owner}/{name}:releases
+ repo:{owner}/{name}:issues issues + issue comments
+ repo:{owner}/{name}:pulls PRs + reviews + review comments + CI summary
+ repo:{owner}/{name}:commits default-branch commits
+ repo:{owner}/{name}:releases
 
-Incremental strategy (§23): per-substream pagination with continuation
+Incremental strategy: per-substream pagination with continuation
 cursors. A committed ``watermark`` advances only after every endpoint in
 the family finishes the current lookback window — page budget exhausted
 never means the stream is fully consumed.

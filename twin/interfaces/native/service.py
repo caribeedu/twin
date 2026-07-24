@@ -1,4 +1,4 @@
-"""Native host façade over the cognitive core (v0.6 Phase 8).
+"""Native host façade over the cognitive core.
 
 Fail-open: unexpected Twin errors become ``ok=False`` results — they must
 not crash the host hook process. Orphan / out-of-order events follow an

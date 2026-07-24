@@ -1,4 +1,4 @@
-"""Stream membership vs global deletion for mail connectors (v0.6 Phase 4).
+"""Stream membership vs global deletion for mail connectors.
 
 Leaving one allowlisted label/folder is not the same as leaving the connector
 scope. Tombstones must also resolve the persisted ``external_type`` so

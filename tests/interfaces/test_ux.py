@@ -1,4 +1,4 @@
-"""CLI UX helpers (v1.1)."""
+"""CLI UX helpers ()."""
 
 from __future__ import annotations
 

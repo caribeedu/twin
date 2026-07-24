@@ -1,7 +1,7 @@
-"""Read-only explainability for correlation hypotheses (v0.6).
+"""Read-only explainability for correlation hypotheses.
 
 Surfaces *why* an episode / identity link / project link exists from data
-Phase 7 already stores — never invents Memory or Judgment.
+ already stores — never invents Memory or Judgment.
 """
 
 from __future__ import annotations

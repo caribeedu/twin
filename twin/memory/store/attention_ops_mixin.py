@@ -1,4 +1,4 @@
-"""Attention emission ledger (v0.9.6)."""
+"""Attention emission ledger."""
 
 from __future__ import annotations
 

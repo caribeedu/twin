@@ -1,4 +1,4 @@
-"""Salience, novelty and live contradiction cues (v0.8).
+"""Salience, novelty and live contradiction cues.
 
 Deterministic, cheap signals for the parallel workspace — not a second
 quality analyzer.

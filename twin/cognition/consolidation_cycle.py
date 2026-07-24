@@ -1,4 +1,4 @@
-"""Daily / weekly consolidation cycles (v0.8 spine → v0.9.3 operational).
+"""Daily / weekly consolidation cycles.
 
 Distinct from session-close consolidation (``sessions._consolidate``): these
 cycles run on a logical window over the store — quality analysis, safe

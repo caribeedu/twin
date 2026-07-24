@@ -1,4 +1,4 @@
-"""safe_context_pack — recall, packaged for external LLMs.
+"""Safe_context_pack — recall, packaged for external LLMs.
 
 Given a task description and a target domain, returns a compact, firewall-
 filtered context pack ready to prepend to an external LLM's prompt, with
@@ -302,7 +302,7 @@ def build_context_pack(
                 judgment_snapshot_id = snap.id
                 pack_j["snapshot_id"] = snap.id
                 judgment_text = render_applicable(pack_j)
-        # No runtime judgment.yaml fallback — YAML is bootstrap/export only (v0.4+)
+        # No runtime judgment.yaml fallback — YAML is bootstrap/export only 
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
 

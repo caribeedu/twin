@@ -1,4 +1,4 @@
-"""Local LLM cognitive interpreter (v0.7 production path).
+"""Local LLM cognitive interpreter.
 
 Uses Ollama structured outputs against ``/api/chat`` — nothing leaves the
 machine. The prompt makes the interpreter do the work lexical rules cannot:

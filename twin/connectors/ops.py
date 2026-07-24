@@ -1,4 +1,4 @@
-"""Connector operations helpers for Phase 9 — setup plan, due sync, doctor checks."""
+"""Connector operations helpers for — setup plan, due sync, doctor checks."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def plan_connector_setup(
     configuration: Optional[dict[str, Any]] = None,
     home: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Guided setup plan — never starts ingestion (v0.6 §77).
+    """Guided setup plan — never starts ingestion .
 
     Order: ownership/vault → authenticate → scope → backfill preview → confirm.
     """

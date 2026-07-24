@@ -1,4 +1,4 @@
-"""GitHub API objects → ConnectorRecords (v0.6 §21–22).
+"""GitHub API objects → ConnectorRecords.
 
 One record per granular object (issue, comment, PR, review, commit…) — the
 granularity the cognitive layer needs already exists in GitHub's model, so
@@ -7,14 +7,14 @@ rely on:
 
 - ``actor_ids``: ``github:{login}`` — stable keys for identity resolution;
 - ``thread_key``: ``github:{repo}#{number}`` shared by an issue/PR and
-  everything nested under it — cross-source correlation anchors here;
+ everything nested under it — cross-source correlation anchors here;
 - ``source_metadata.lineage_root``: the informational root, so a bot
-  notification of PR #42 can later join PR #42's independence group
-  instead of counting as new evidence;
+ notification of PR #42 can later join PR #42's independence group
+ instead of counting as new evidence;
 - ``external_revision``: the provider's own change marker (``updated_at``;
-  commits use the immutable sha; reviews append a body hash because GitHub
-  exposes no updated_at for them — an edit becomes a NEW revision instead
-  of a false collision).
+ commits use the immutable sha; reviews append a body hash because GitHub
+ exposes no updated_at for them — an edit becomes a NEW revision instead
+ of a false collision).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Shared meeting cognitive layer (v0.6 Phase 5).
+"""Shared meeting cognitive layer.
 
 Provider adapters (Fireflies, …) live alongside this package; calendar
 correlation keys are also defined here so both sides share one fingerprint.

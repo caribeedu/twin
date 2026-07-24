@@ -1,8 +1,8 @@
-"""CalendarConnector — read-only calendar adapter (v0.6 Phase 5).
+"""CalendarConnector — read-only calendar adapter.
 
 Streams (explicit allowlist only):
 
-    calendar:{calendar_id}
+ calendar:{calendar_id}
 
 Continuous sync uses ``updated`` watermark + lookback. Cancelled events
 become tombstones. ``freebusy_only`` redacts the persisted raw payload.

@@ -174,7 +174,7 @@ def doctor(cfg: Config) -> list[Check]:
         checks.append(Check("mcp:clients", WARN,
                             "no client configured — twin setup mcp <client>"))
 
-    # Phase 9 — connector schedule / credentials / instance health
+    # connector schedule / credentials / instance health
     try:
         from ..connectors.ops import doctor_connector_checks
         from ..memory.store import create_store

@@ -1,4 +1,4 @@
-"""Run Phase 8 native-host eval cases."""
+"""Run native-host eval cases."""
 
 from __future__ import annotations
 

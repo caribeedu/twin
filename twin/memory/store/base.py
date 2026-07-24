@@ -40,7 +40,7 @@ class MemoryStore(ABC):
     def unprocessed_percepts(self) -> list[Percept]:
         """Percepts no memory/evidence has been derived from yet."""
 
-    # -- interpretation state (v0.7) --------------------------------------
+    # -- interpretation state  --------------------------------------
 
     @abstractmethod
     def record_interpretation(self, state: PerceptInterpretation) -> None:
@@ -67,7 +67,7 @@ class MemoryStore(ABC):
         settled states (interpreted/empty/quarantined/heuristic_detection) are
         excluded."""
 
-    # -- detection signals (v0.7 heuristic mode) --------------------------
+    # -- detection signals  --------------------------
 
     @abstractmethod
     def insert_detection_signal(self, signal: DetectionSignal) -> str:
@@ -251,7 +251,7 @@ class MemoryStore(ABC):
     @abstractmethod
     def close(self) -> None: ...
 
-    # -- transactions (v0.3 structural ops) ------------------------------------
+    # -- transactions  ------------------------------------
 
     def transaction(self):
         """Context manager: all writes in the block commit together or roll back.

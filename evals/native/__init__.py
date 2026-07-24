@@ -1,1 +1,1 @@
-"""Native host evals (v0.6 Phase 8)."""
+"""Native host evals."""

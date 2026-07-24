@@ -432,7 +432,7 @@ Terminal / scripting surface. Global flag: `--home` sets Twin home (default `~/.
 | `twin workspace tick …` | Parallel-memory observation/interpret tick. |
 | `twin consolidate daily\|weekly [--apply]` | Consolidation cycle (dry-run by default). |
 | `twin runtime start\|status\|enqueue\|…` | Durable cognitive runtime / job queue. |
-| `twin eval extraction\|retrieval\|golden\|…` | Benchmarks and completion matrices. |
+| `twin eval extraction\|retrieval\|golden\|…` | Benchmarks and golden work-loop. |
 | `twin source …` | Show source-trust calibration. |
 | `twin connector …` | Connector setup, sync, health, contract matrices (see `twin connector -h`). |
 | `twin export` | Export portable dump of the cognitive store. |
@@ -477,8 +477,8 @@ Shared CLI and per-type setup follow. Discovery helpers (`twin connector github 
 | `twin connector due` / `sync-due` | Scheduler: what is due / run due connectors. |
 | `twin connector pause` / `resume` / `revoke <id>` | Lifecycle controls. |
 | `twin connector backfill --preview <id>` | Historical import preview (**never** starts ingest). |
-| `twin connector production-ready` | Attest ≥2 real adapters closed for daily use. |
-| `twin connector completion` | Print §93 completion matrix. |
+| `twin connector production-ready` | Report which real adapters close the production-ready contract. |
+| `twin connector contract` | Print adapter contract matrix (evidence pointers into pytest). |
 
 MCP mirrors (capability-gated; mutating tools need confirm): `connector_list`, `connector_status`, `connector_health_all`, `connector_sync`, `connector_backfill_preview`, `connector_dead_letters` — see [Connectors & meta](#connectors--meta) above. HTTP: `/api/connectors…` and optional webhooks below.
 

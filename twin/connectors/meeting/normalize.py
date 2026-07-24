@@ -1,4 +1,4 @@
-"""MeetingRecord → ConnectorRecord (v0.6 Phase 5).
+"""MeetingRecord → ConnectorRecord.
 
 Long transcripts become ``meeting_transcript_chunk`` records — never silent
 truncation of primary evidence. Optional ``meeting_manifest`` + derived summary.

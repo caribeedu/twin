@@ -1,4 +1,4 @@
-"""Outlook / Microsoft Graph professional connector (v0.6 Phase 4)."""
+"""Outlook / Microsoft Graph professional connector."""
 
 from .adapter import OutlookConnector
 

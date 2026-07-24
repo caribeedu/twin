@@ -1,4 +1,4 @@
-"""Partitionable BackfillJob planning + claim helpers (v0.6 §34).
+"""Partitionable BackfillJob planning + claim helpers.
 
 Historical backfill is separated from continuous sync. Partitions are
 year-month windows so a large mailbox can pause/resume without redoing

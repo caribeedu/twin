@@ -1,4 +1,4 @@
-"""Cross-source correlation store mixin (v0.6 Phase 7)."""
+"""Cross-source correlation store mixin."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_ep_anchor_episode ON episode_anchors(episode_id);
 
 
 class CorrelationStoreMixin:
-    """Duck-typed persistence for Phase 7 correlation objects."""
+    """Duck-typed persistence for correlation objects."""
 
     def _corr_dec(self, payload: Any) -> Any:
         if hasattr(self, "codec") and self.codec is not None:

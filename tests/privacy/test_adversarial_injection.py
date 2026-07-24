@@ -1,4 +1,4 @@
-"""Adversarial privacy / injection checks for v0.9.9."""
+"""Adversarial privacy / injection checks for."""
 
 from twin import ids
 from twin.judgment.firewall import Firewall

@@ -225,3 +225,146 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def _bootstrap_connector_reader(store):
+    from twin.privacy.identity import ensure_local_identity, register_client_binding
+    from twin.privacy.models import Principal, PrincipalType
+    from twin.privacy.yaml_io import bootstrap_policy_set
+
+    bootstrap_policy_set(store)
+    ensure_local_identity(store)
+    store.insert_principal(Principal(
+        id="principal_conn_reader", type=PrincipalType.tool, name="reader",
+        capabilities=["connector:read", "read_context_pack"],
+        allowed_personas=["individual", "developer"],
+        allowed_vaults=["vault_general", "vault_personal"],
+    ))
+    register_client_binding(
+        store, client_id="conn-reader", tool_id="conn-reader",
+        principal_id="principal_conn_reader", credential="tok-reader",
+        capabilities=["connector:read"],
+        allowed_personas=["individual", "developer"],
+        allowed_vaults=["vault_general", "vault_personal"],
+    )
+
+
+@pytest.mark.anyio
+async def test_memory_get_and_related(server):
+    memories = json.loads(
+        (await server.call_tool("memory_search", {"query": "webhooks", "domain": "technical"}))[0][0].text
+    )
+    assert memories["hits"]
+    mid = memories["hits"][0]["id"]
+    got = json.loads(
+        (await server.call_tool("memory_get", {"memory_id": mid}))[0][0].text
+    )
+    assert got["id"] == mid
+    assert "evidence" in got
+    missing = json.loads(
+        (await server.call_tool("memory_get", {"memory_id": "mem_missing"}))[0][0].text
+    )
+    assert missing["error"] == "not found"
+
+
+@pytest.mark.anyio
+async def test_memory_recent_decisions_and_preferences(server):
+    decisions = json.loads(
+        (await server.call_tool("memory_recent_decisions", {"limit": 5}))[0][0].text
+    )
+    assert isinstance(decisions, list)
+    prefs = json.loads(
+        (await server.call_tool("memory_user_preferences", {"context": "code style"}))[0][0].text
+    )
+    assert isinstance(prefs, list)
+    profile = json.loads(
+        (await server.call_tool("memory_judgment_profile", {}))[0][0].text
+    )
+    assert "principles" in profile or "items" in profile
+
+
+@pytest.mark.anyio
+async def test_capabilities_and_health(server):
+    caps = json.loads((await server.call_tool("capabilities", {}))[0][0].text)
+    assert "session_start" in caps["tools"]
+    health = json.loads((await server.call_tool("health", {}))[0][0].text)
+    assert health.get("ok") is True
+
+
+@pytest.mark.anyio
+async def test_session_tools_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    home = tmp_path / "twin-home"
+    srv = create_server(str(home))
+
+    started = await _call(srv, "session_start", {
+        "query": "implement webhook retries", "domain": "technical",
+    })
+    sid = started["session_id"]
+    active = await _call(srv, "get_active_session", {"session_id": sid})
+    assert active["id"] == sid
+
+    observed = await _call(srv, "session_observe", {
+        "session_id": sid, "kind": "note", "note": "sketched backoff",
+    })
+    assert observed["artifacts"] == 1
+
+    attention = await _call(srv, "get_attention", {"session_id": sid})
+    assert attention["session_id"] == sid
+
+    completed = await _call(srv, "session_complete", {
+        "session_id": sid, "summary": "Decided on exponential backoff.",
+    })
+    assert completed["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_connector_list_dry_run(tmp_path, monkeypatch):
+    from twin.connectors import add_connector_instance, build_credential_store, register_source_account
+
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    home = tmp_path / "twin-home"
+    from twin.workspace import Workspace
+
+    ws = Workspace(str(home))
+    _bootstrap_connector_reader(ws.store)
+    creds = build_credential_store(home)
+    acc = register_source_account(
+        ws.store, connector_type="fake", source_owner="personal",
+        owner_principal_id="principal_conn_reader",
+    )
+    inst = add_connector_instance(ws.store, creds, account_id=acc.id, secret="tok")
+    ws.close()
+
+    srv = create_server(str(home))
+    denied = json.loads(
+        (await srv.call_tool("connector_list", {}))[0][0].text
+    )
+    assert denied.get("error") == "not_authorized"
+
+    listed = json.loads(
+        (await srv.call_tool("connector_list", {
+            "client": "conn-reader", "client_token": "tok-reader",
+        }))[0][0].text
+    )
+    assert isinstance(listed, list)
+    assert listed[0]["connector_id"] == inst.id
+
+    health = json.loads(
+        (await srv.call_tool("connector_health_all", {
+            "client": "conn-reader", "client_token": "tok-reader",
+        }))[0][0].text
+    )
+    assert isinstance(health, list)
+
+
+@pytest.mark.anyio
+async def test_privacy_validate_output(server):
+    result = json.loads(
+        (await server.call_tool("privacy_validate_output", {
+            "text": "harmless summary of architecture decisions",
+        }))[0][0].text
+    )
+    assert "allowed" in result or "issues" in result

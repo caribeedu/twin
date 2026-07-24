@@ -1,4 +1,4 @@
-"""CLI developer experience helpers (v1.1).
+"""CLI developer experience helpers ().
 
 Single-key input, progress with ETA, and Twin brand styling.
 Uses ``rich`` when installed; falls back to plain stdout so CI/tests never

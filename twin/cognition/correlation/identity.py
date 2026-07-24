@@ -1,4 +1,4 @@
-"""External identity resolution (v0.6 Phase 7 §17).
+"""External identity resolution.
 
 Never merge people by display name alone. Email + provider ID are strong
 signals within the same vault; cross-vault auto-links are never proposed.

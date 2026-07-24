@@ -2,10 +2,10 @@
 
 A session closes the read-only flow (twin → LLM) into a maintained loop:
 
-    session_start     → identify project/domain/task, supply a context pack
-    session_observe   → record artifacts produced or changed during the work
-    session_complete  → turn what happened into a percept and candidate memories
-    session_feedback  → record explicit usefulness feedback
+ session_start → identify project/domain/task, supply a context pack
+ session_observe → record artifacts produced or changed during the work
+ session_complete → turn what happened into a percept and candidate memories
+ session_feedback → record explicit usefulness feedback
 
 Sessions are the unit product metrics hang from: what was supplied, what
 came back, and whether it was actually useful.
@@ -13,13 +13,13 @@ came back, and whether it was actually useful.
 Design rules this module enforces:
 
 - ambiguity fails visibly and conservatively — an unknown explicit project
-  raises instead of being replaced by inference, and an unclassified domain
-  yields an empty (default-deny) pack plus ``needs_domain_confirmation``;
+ raises instead of being replaced by inference, and an unclassified domain
+ yields an empty (default-deny) pack plus ``needs_domain_confirmation``;
 - completion (the work ended) and consolidation (twin learned from it) are
-  separate states: consolidation is idempotent and retryable, anchored on a
-  deterministic percept dedup key;
+ separate states: consolidation is idempotent and retryable, anchored on a
+ deterministic percept dedup key;
 - artifact and feedback writes are append-only store operations, safe under
-  concurrent clients.
+ concurrent clients.
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def start_session(
     from ..privacy.yaml_io import bootstrap_policy_set
     # Surface identity is resolved server-side. Missing/unknown client →
     # restricted mode — never silently elevate to local-cli.
-    # Native host adapters (Phase 8) run as local hook/CLI processes: the
+    # Native host adapters  run as local hook/CLI processes: the
     # CognitiveSession.client still records the host, but auth surface is cli.
     _native = frozenset({
         "claude-code", "codex", "codex-app-server", "native",

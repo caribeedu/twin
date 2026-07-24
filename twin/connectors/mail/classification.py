@@ -1,4 +1,4 @@
-"""Email classification heuristics (v0.6 §37).
+"""Email classification heuristics.
 
 Classes are metadata for governance and extraction priority — never used to
 infer ``source_owner``. Only cognitively relevant classes should become

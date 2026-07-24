@@ -1,4 +1,4 @@
-"""Persona-aware privacy and governance (v0.5).
+"""Persona-aware privacy and governance.
 
 Judgment explains how the user thinks. This package decides what may leave
 the store — before any LLM or client consumes it.

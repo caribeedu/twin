@@ -1,4 +1,4 @@
-"""Source-trust calibration for GitHub objects (v0.6 §69).
+"""Source-trust calibration for GitHub objects.
 
 Trust follows the object's lifecycle state and its author's nature, not the
 platform: a merged PR is a team's final, versioned word; a bot comment is a
@@ -6,7 +6,7 @@ notification wearing a comment costume. This is an initial calibration —
 corroboration and explicit user confirmation refine it downstream.
 
 Bots land BELOW the low-trust threshold (0.65), so every memory candidate
-derived from them is born needing review — preparing the §20 invariant that
+derived from them is born needing review — preparing the invariant that
 a notification never counts as independent evidence of its source object.
 """
 

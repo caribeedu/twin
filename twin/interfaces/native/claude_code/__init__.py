@@ -1,4 +1,4 @@
-"""Claude Code Hooks adapter — Phase 8 native proof host."""
+"""Claude Code Hooks adapter — native proof host."""
 
 from .adapter import (
     MissingExternalSessionId,

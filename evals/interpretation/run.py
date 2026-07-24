@@ -1,4 +1,4 @@
-"""Offline eval runner for the v0.7 cognitive interpreter.
+"""Offline eval runner for the cognitive interpreter.
 
 Each case drives the real pipeline (``extract_percept``) with a *scripted*
 interpreter injected via ``set_interpreter_override`` — deterministic, no LLM,
@@ -8,7 +8,7 @@ the proposal-versus-decision distinction. The interpreter itself (an LLM) is
 out of scope here; what we prove is that whatever it says is catalogued
 correctly and safely.
 
-    python -m evals.interpretation.run
+ python -m evals.interpretation.run
 """
 
 from __future__ import annotations

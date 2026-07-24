@@ -755,7 +755,7 @@ class ConnectorStoreMixin:
         rows = self._j_fetchall("SELECT * FROM connector_sync_state", ())
         return [row_to_sync_state(r) for r in rows]
 
-    # -- backfill jobs (v0.6 Phase 4) --------------------------------------
+    # -- backfill jobs  --------------------------------------
 
     def insert_backfill_job(self, job: BackfillJob) -> str:
         self._c_insert("connector_backfill_jobs", backfill_job_to_row(job))

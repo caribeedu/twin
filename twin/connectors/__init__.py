@@ -1,7 +1,7 @@
-"""v0.6 — Professional Connectors and Continuous Work Perception.
+"""Professional connectors and continuous work perception.
 
-Framework only (Phase 1): contracts, persistence, credentials, checkpoints,
-batches, scheduler, health/DLQ, ownership-aware vaults and a FakeConnector.
+Contracts, persistence, credentials, checkpoints, batches, scheduler,
+health/DLQ, ownership-aware vaults and a FakeConnector.
 Connectors capture evidence; cognition creates understanding.
 """
 
@@ -28,7 +28,6 @@ from .credentials import (
     generate_token,
 )
 from .errors import sanitize_error
-from .completion import check_criterion, completion_matrix
 from .contract import (
     check_adapter_contract,
     contract_matrix,
@@ -170,8 +169,6 @@ __all__ = [
     "build_credential_store",
     "build_percept",
     "check_adapter_contract",
-    "check_criterion",
-    "completion_matrix",
     "compute_connector_metrics",
     "connector_health",
     "contract_matrix",

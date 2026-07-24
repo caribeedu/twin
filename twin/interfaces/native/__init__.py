@@ -1,4 +1,4 @@
-"""Host-native observation adapters (v0.6 Phase 8).
+"""Host-native observation adapters.
 
 Native adapters observe host sessions and call the cognitive core. They do
 not assemble Context Packs or create a parallel memory store. MCP remains

@@ -1,10 +1,10 @@
-"""Confidence-aware spontaneous recall (v0.8).
+"""Confidence-aware spontaneous recall.
 
 Recall is a *policy* over observer hits:
 
 ```text
 eligibility = confidence gate AND retrieval relevance gate
-ranking     = relevance + salience + controlled novelty boost
+ranking = relevance + salience + controlled novelty boost
 ```
 
 Novelty may reorder eligible suggestions; it must not help an irrelevant hit

@@ -1,4 +1,4 @@
-"""Orchestrate a cross-source correlation pass (v0.6 Phase 7)."""
+"""Orchestrate a cross-source correlation pass."""
 
 from __future__ import annotations
 

@@ -1,10 +1,10 @@
-"""Shared §88 adapter contract matrix (v0.6 Phase 9 — evidence-based).
+"""Shared adapter contract matrix (evidence-based).
 
 Two layers:
 
 * **framework** — FakeConnector proves the shared spine (batch txn, DLQ, …).
 * **adapter** — each real adapter must point at concrete tests or declare
-  ``not_supported`` / ``not_applicable`` via manifest affordances.
+ ``not_supported`` / ``not_applicable`` via manifest affordances.
 
 Statuses are structured; free-text notes alone never make ``ok`` true.
 """
@@ -420,7 +420,7 @@ def _row_ok(items: dict[str, dict[str, Any]]) -> bool:
 
 
 def check_adapter_contract(connector_type: str) -> dict[str, Any]:
-    """Return a §88 matrix row with structured evidence cells."""
+    """Return a matrix row with structured evidence cells."""
     cls = get_adapter_class(connector_type)
     manifest = get_manifest(connector_type)
     gaps = _manifest_gaps(manifest)
@@ -508,11 +508,11 @@ def framework_contract() -> dict[str, Any]:
 
 
 def contract_matrix() -> dict[str, Any]:
-    """Full §88 matrix. ``ok`` is true only when every adapter row is ok."""
+    """Full matrix. ``ok`` is true only when every adapter row is ok."""
     rows = [check_adapter_contract(name) for name in list_adapters()]
     fw = framework_contract()
     return {
-        "contract": "v0.6 §88",
+        "contract": "v0.6 ",
         "adapters": len(rows),
         "ok": all(r["ok"] for r in rows),
         "framework": fw,
@@ -542,10 +542,9 @@ def production_ready_adapters(
     *,
     exclude_fake: bool = True,
 ) -> dict[str, Any]:
-    """v0.9.7 attestation: real adapters with closed §88 rows.
+    """Report which real adapters close the production-ready contract.
 
-    FakeConnector proves the spine only — it never counts toward the
-    "two production-ready connectors" bar.
+    FakeConnector proves the spine only — it never counts toward readiness.
     """
     ready: list[dict[str, Any]] = []
     not_ready: list[dict[str, Any]] = []

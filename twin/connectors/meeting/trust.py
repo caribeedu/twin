@@ -1,4 +1,4 @@
-"""Source-trust calibration for meetings and calendar (v0.6 §69)."""
+"""Source-trust calibration for meetings and calendar."""
 
 from __future__ import annotations
 

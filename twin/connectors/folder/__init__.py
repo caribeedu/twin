@@ -1,4 +1,4 @@
-"""Local/shared folder professional connector (v0.6 Phase 6)."""
+"""Local/shared folder professional connector."""
 
 from .adapter import FolderConnector
 

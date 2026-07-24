@@ -1,4 +1,4 @@
-"""Shared document cognitive layer (v0.6 Phase 6).
+"""Shared document cognitive layer.
 
 Provider adapters live alongside this package (``folder`` now; Drive /
 OneDrive / Notion later) and normalize into ``DocumentRecord``.

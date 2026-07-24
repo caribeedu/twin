@@ -38,7 +38,7 @@ PACK_EMIT_KINDS = frozenset({"session_start", "pack_request"})
 
 
 class HostCapabilities(BaseModel):
-    """What the host can accept from Twin (Phase 8: Claude Code proof)."""
+    """What the host can accept from Twin ."""
 
     observe_session: bool = True
     request_context_pack: bool = True

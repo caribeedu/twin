@@ -2,7 +2,7 @@
 
 Deliberately small: authenticated GETs, Link-header pagination and rate-limit
 translation into structured ``ConnectorError``s. REST (not GraphQL) because
-every resource Phase 2 needs supports ``since``/``sort=updated`` natively and
+every resource needs supports ``since``/``sort=updated`` natively and
 the surface is trivial to mock offline.
 
 Never logs URLs with parameters, bodies or the token — failures surface as
@@ -157,7 +157,7 @@ class GitHubClient:
                  max_pages: int = 10) -> Iterator[list[Any]]:
         """Yield one JSON list per page, following the Link rel=next header
         up to ``max_pages`` — a single stream batch never tries to swallow a
-        huge repository in one go (backpressure §53)."""
+        huge repository in one go (backpressure)."""
         start_url: Optional[str] = None
         query = {"per_page": PER_PAGE, **(params or {})}
         pages = 0

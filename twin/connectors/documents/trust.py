@@ -1,4 +1,4 @@
-"""Source-trust calibration for shared documents (v0.6 §69)."""
+"""Source-trust calibration for shared documents."""
 
 from __future__ import annotations
 

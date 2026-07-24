@@ -1,4 +1,4 @@
-"""v0.5 privacy & governance models.
+"""Privacy & governance models.
 
 Judgment explains how the user thinks. Governance decides what the system
 may expose. The main LLM never interprets prose to authorize access.
@@ -151,7 +151,7 @@ class Vault(BaseModel):
     storage_backend: str = "logical"
     physical_boundary: str = "logical"
     allowed_personas: list[str] = Field(default_factory=list)
-    # v0.6: per-organization separation (design allows future physical split)
+    # per-organization separation (design allows future physical split)
     storage_namespace: Optional[str] = None
     backup_class: str = "personal"
     source_owner: Optional[str] = None
@@ -239,7 +239,7 @@ class PolicySetVersion(BaseModel):
 
 
 class PrivacyPolicyRevision(BaseModel):
-    """Immutable policy payload at evaluation time (v0.4-style)."""
+    """Immutable policy payload at evaluation time ."""
     id: str
     policy_id: str
     version: int = 1

@@ -7,15 +7,15 @@ registry and delegates to the runtime.
 Lifecycle rules:
 
 - provisioning is *compensable*: an instance starts as ``provisioning`` and
-  only becomes ``active``/``awaiting_auth`` when every step succeeded; any
-  failure rolls back what was written (no orphan secret, no orphan ref, no
-  usable half-configured connector);
+ only becomes ``active``/``awaiting_auth`` when every step succeeded; any
+ failure rolls back what was written (no orphan secret, no orphan ref, no
+ usable half-configured connector);
 - revocation is *resumable*: ``revoking`` → delete secret → verify absent →
-  clear ref → ``revoked``; residual secret material is reported as
-  ``revoked_with_residual_secret``, never claimed clean;
+ clear ref → ``revoked``; residual secret material is reported as
+ ``revoked_with_residual_secret``, never claimed clean;
 - only adapters that declare ``auth_mode=generated_local_token`` may receive
-  a framework-generated secret — an external provider without a credential is
-  ``awaiting_auth``, not active with a fake token.
+ a framework-generated secret — an external provider without a credential is
+ ``awaiting_auth``, not active with a fake token.
 """
 
 from __future__ import annotations
@@ -371,9 +371,9 @@ def backfill_preview(
 ) -> dict[str, Any]:
     """What a backfill WOULD ingest — scope, vault, policy, per-stream state
     and (when the adapter offers it) provider-side volume estimates. Read
-    only: previewing never starts ingestion (v0.6 §77–79).
+    only: previewing never starts ingestion .
 
-    Phase 4 adds a year-month partition plan for mail connectors; creating a
+    adds a year-month partition plan for mail connectors; creating a
     ``BackfillJob`` is a separate mutating call (``create_backfill_job``)."""
     from .mail.backfill import plan_year_month_partitions
     from .models import BackfillJobStatus

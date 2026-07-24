@@ -1,4 +1,4 @@
-# Real-model interpretation evals (v0.7, optional)
+# Real-model interpretation evals (optional)
 
 The deterministic suite in `evals/interpretation/` proves the *pipeline* —
 governance, grounding, cognitive-act handling — using a scripted interpreter.
@@ -7,7 +7,7 @@ cannot tell you whether the configured interpreter is any good.
 
 This second layer does. It runs the real cognitive interpreter
 (`TWIN_EXTRACTOR=ollama`) against a small labelled set and measures the
-qualities v0.7 depends on:
+qualities this layer depends on:
 
 - cognitive-act classification (statement / question / hypothesis / proposal /
   decision / opinion / third-party claim);

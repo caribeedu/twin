@@ -1,4 +1,4 @@
-"""GitHub webhook receiver support (v0.6 §24).
+"""GitHub webhook receiver support.
 
 A webhook is a *hint*, never a source of truth: the only effect of a valid
 delivery is nudging the scheduler (``next_run_at = now`` plus a

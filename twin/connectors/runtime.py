@@ -3,21 +3,21 @@
 Invariants this module enforces:
 
 - **Nothing becomes cognitively visible before a consistent commit.** Records
-  and Percepts are staged in memory and persisted only inside the single
-  transaction that also marks the batch committed and CAS-advances the
-  checkpoint. A partially failed batch persists raw items (source cache, for
-  DLQ replay) and dead letters — never Records or Percepts.
+ and Percepts are staged in memory and persisted only inside the single
+ transaction that also marks the batch committed and CAS-advances the
+ checkpoint. A partially failed batch persists raw items (source cache, for
+ DLQ replay) and dead letters — never Records or Percepts.
 - **batch committed ⇔ checkpoint references that batch.** Both happen in one
-  transaction; a failure between them is impossible by construction, and a
-  checkpoint CAS conflict aborts the batch instead of committing it.
+ transaction; a failure between them is impossible by construction, and a
+ checkpoint CAS conflict aborts the batch instead of committing it.
 - **One worker per (connector, stream).** A stream lease is acquired before
-  planning and released after; a concurrent sync observes ``already_running``.
+ planning and released after; a concurrent sync observes ``already_running``.
 - **External revisions are immutable.** The same idempotency key with a
-  different content hash is a provider contract violation → dead letter with
-  ``revision_collision``; existing evidence is never overwritten.
+ different content hash is a provider contract violation → dead letter with
+ ``revision_collision``; existing evidence is never overwritten.
 - **Deletions resolve lineage.** A tombstone locates every prior revision and
-  its Percepts and files a ``ConnectorDeletionEvent`` for the deletion
-  planner — it never cascades deletes or creates new content by itself.
+ its Percepts and files a ``ConnectorDeletionEvent`` for the deletion
+ planner — it never cascades deletes or creates new content by itself.
 
 This module writes Raw items, Records and Percepts — never confirmed Memory
 or Judgment.
@@ -161,7 +161,7 @@ def build_percept(
         "project_hint": record.project_hint,
     }
     # instance-level candidate-policy override rides with the percept so the
-    # extraction pipeline (not the adapter) can enforce it (§49–50)
+    # extraction pipeline (not the adapter) can enforce it ()
     policy_override = (instance.configuration or {}).get("ingestion_policy")
     if isinstance(policy_override, dict) and policy_override:
         metadata["ingestion_policy"] = policy_override

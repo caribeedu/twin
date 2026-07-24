@@ -1,6 +1,6 @@
-"""Conservative lexical detector (v0.7).
+"""Conservative lexical detector.
 
-This module NO LONGER produces memories. In v0.7 lexical rules may only
+This module NO LONGER produces memories. In lexical rules may only
 *detect* that a span looks like it might carry a decision, task, preference,
 constraint or rejected alternative — a routing/prioritization signal, never a
 cognitive conclusion. Establishing the memory type, domain, entities, title,
@@ -9,10 +9,10 @@ summary and cognitive confidence is the cognitive interpreter's job.
 Two consumers use ``scan``:
 
 - ``heuristic`` mode persists each hit as a ``DetectionSignal`` (never a
-  ``MemoryItem``);
+ ``MemoryItem``);
 - the offline *stub interpreter* (the deterministic test/CI stand-in for the
-  LLM) turns hits into grounded ``InterpretedItem``s so the interpreter path
-  can be exercised without a model.
+ LLM) turns hits into grounded ``InterpretedItem``s so the interpreter path
+ can be exercised without a model.
 """
 
 from __future__ import annotations

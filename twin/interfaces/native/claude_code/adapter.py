@@ -2,7 +2,7 @@
 
 Claude Code can invoke Twin via hooks that shell out to:
 
-    twin native event --host claude-code --stdin
+ twin native event --host claude-code --stdin
 
 Never invents ``external_session_id`` from cwd. Never attributes unknown
 hooks to the user. Tool inputs are redacted before persistence.
@@ -262,7 +262,7 @@ def write_hooks_config(
                 "external_session_id": "required — cwd is never used as conversation identity",
             },
             "note": (
-                "Phase 8 proof adapter. Merge `hooks` into Claude Code "
+                "proof adapter. Merge `hooks` into Claude Code "
                 "settings. Twin observes via the same cognitive core as MCP."
             ),
         },

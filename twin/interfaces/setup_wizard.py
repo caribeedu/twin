@@ -1,4 +1,4 @@
-"""Guided first-run setup for Twin (v1.1+).
+"""Guided first-run setup for Twin (+).
 
 Encourages local Ollama by default; optionally configures Anthropic,
 Gemini, or any OpenAI-compatible chat + embedding endpoint.

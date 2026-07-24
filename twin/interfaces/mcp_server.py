@@ -1,14 +1,14 @@
 """MCP server (stdio) — exposes the memory layer to Cursor, Claude Desktop,
 Claude Code and any other MCP client.
 
-Run:  twin mcp          (or: python -m twin.interfaces.mcp_server)
+Run: twin mcp (or: python -m twin.interfaces.mcp_server)
 
 Client config example (Claude Desktop / Cursor):
-    {
-      "mcpServers": {
-        "twin": { "command": "twin", "args": ["mcp"] }
-      }
-    }
+ {
+ "mcpServers": {
+ "twin": { "command": "twin", "args": ["mcp"] }
+ }
+ }
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ def create_server(home: Optional[str] = None):
         mode: str = "compact",
         session_id: Optional[str] = None,
     ) -> str:
-        """Alias of memory_safe_context_pack with mature pack modes (v0.9.5+)."""
+        """Alias of memory_safe_context_pack with mature pack modes ."""
         return memory_safe_context_pack(
             query=query, target_domain=target_domain, max_tokens=max_tokens,
             include_judgment=include_judgment, include_candidates=include_candidates,
@@ -515,7 +515,7 @@ def create_server(home: Optional[str] = None):
 
     @mcp.tool()
     def native_bindings(host_type: Optional[str] = None, limit: int = 50) -> str:
-        """List HostSessionBindings from the Phase 8 native adapter.
+        """List HostSessionBindings from the native adapter.
 
         Proves MCP and native observation share the same store: bindings
         point at CognitiveSession ids that session_* tools already use.
@@ -591,7 +591,7 @@ def create_server(home: Optional[str] = None):
         sequence: Optional[int] = None,
         idempotency_key: Optional[str] = None,
     ) -> str:
-        """Workspace evaluation tick (v0.8 spine): reading → recall → optional
+        """Workspace evaluation tick : reading → recall → optional
         delta interpretation (candidates only). Idempotent via session+sequence
         or idempotency_key. Never confirms Memory or Judgment."""
         from ..cognition.workspace import workspace_tick as _tick
@@ -623,7 +623,7 @@ def create_server(home: Optional[str] = None):
         )
         return json.dumps(result.to_dict(), ensure_ascii=False, default=str)
 
-    # -- v0.3 quality / review (read tools + gated mutations) -----------------
+    # -- quality / review (read tools + gated mutations) -----------------
 
     @mcp.tool()
     def memory_quality(memory_id: str) -> str:
@@ -754,7 +754,7 @@ def create_server(home: Optional[str] = None):
         return json.dumps({"children": result.extras.get("children"),
                            "operation_id": result.operation_id})
 
-    # -- v0.4 judgment (read tools + gated mutations) ----------------------
+    # -- judgment (read tools + gated mutations) ----------------------
 
     @mcp.tool()
     def judgment_applicable(domain: str = "technical", task_profile: str = "general",
@@ -896,7 +896,7 @@ def create_server(home: Optional[str] = None):
         )
         return json.dumps(validate_output(text, access=access, store=ws.store), ensure_ascii=False)
 
-    # -- connectors (v0.6) — admin/read only; never exposes raw payloads ---
+    # -- connectors  — admin/read only; never exposes raw payloads ---
     #
     # Every tool resolves the caller's identity and checks a connector:*
     # capability. read_context_pack never implies connector:read, and

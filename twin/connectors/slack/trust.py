@@ -1,4 +1,4 @@
-"""Source-trust calibration for Slack objects (v0.6 §69–70).
+"""Source-trust calibration for Slack objects.
 
 Slack is more conservative than GitHub: informal channel chat is not a
 team's final word. Bots and app notifications land below the review

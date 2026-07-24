@@ -1,4 +1,4 @@
-"""Cross-source conflict detection (v0.6 Phase 7 §72).
+"""Cross-source conflict detection.
 
 Findings are idempotent (``finding_key``) and require distinct sources
 supporting incompatible claims. A single record mentioning both ship and

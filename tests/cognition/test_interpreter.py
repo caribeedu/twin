@@ -1,4 +1,4 @@
-"""v0.7 cognitive interpreter: deferral, cognitive-act governance, grounding,
+"""Cognitive interpreter: deferral, cognitive-act governance, grounding,
 interpretation metadata, and the deterministic gates that still run first.
 
 The interpreter (an LLM) is stubbed with a deterministic override so these

@@ -675,7 +675,7 @@ CREATE TABLE IF NOT EXISTS connector_backfill_jobs (
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id);
--- Phase 9: exactly-once counter contributions per terminal batch
+-- exactly-once counter contributions per terminal batch
 CREATE TABLE IF NOT EXISTS connector_counter_batches (
     connector_id TEXT NOT NULL,
     batch_id TEXT NOT NULL,
@@ -886,7 +886,7 @@ class SqliteStore(
                 "ALTER TABLE connector_backfill_jobs "
                 "ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
             )
-        # Phase 8 review: binding generations + frozen security columns
+        # binding generations + frozen security columns
         hsb_cols = {r[1] for r in self.conn.execute(
             "PRAGMA table_info(host_session_bindings)")}
         if hsb_cols:
@@ -1003,7 +1003,7 @@ class SqliteStore(
         ).fetchall()
         return [self._row_to_percept(r) for r in rows]
 
-    # -- interpretation state (v0.7) --------------------------------------
+    # -- interpretation state  --------------------------------------
 
     def _row_to_interpretation(self, row: sqlite3.Row) -> PerceptInterpretation:
         return PerceptInterpretation(
@@ -1054,7 +1054,7 @@ class SqliteStore(
         )
         self._maybe_commit()
 
-    # -- detection signals (v0.7 heuristic mode) --------------------------
+    # -- detection signals  --------------------------
 
     def insert_detection_signal(self, signal: DetectionSignal) -> str:
         signal.created_at = signal.created_at or now_iso()
@@ -1686,7 +1686,7 @@ class SqliteStore(
         )
         self._maybe_commit()
 
-    # -- v0.3 artifacts / findings / batches / operations -------------------------
+    # -- artifacts / findings / batches / operations -------------------------
 
     def delete_embedding(self, ref_id: str) -> None:
         self.conn.execute("DELETE FROM embeddings WHERE ref_id = ?", (ref_id,))

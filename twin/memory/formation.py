@@ -1,4 +1,4 @@
-"""Explicit memory formation pipeline (v0.9.2).
+"""Explicit memory formation pipeline.
 
 Turns grounded interpretations into durable candidates with deterministic
 identity, evidence aggregation, review gates, and auditable confirm/reject.

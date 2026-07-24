@@ -1,4 +1,4 @@
-"""Shared email → ConnectorRecord normalization (v0.6 §32–37).
+"""Shared email → ConnectorRecord normalization.
 
 Gmail and Outlook share one cognitive model; only the technical adapters
 differ. Conventions:
@@ -6,7 +6,7 @@ differ. Conventions:
 - ``actor_ids``: ``mail:{addr}`` (lowercased);
 - ``thread_key``: ``mail:{provider}:{account}:{thread_id}``;
 - ``external_revision``: provider etag / internalDate / lastModified;
-- attachments are metadata-only artifact refs in Phase 4;
+- attachments are metadata-only artifact refs in ;
 - classification + derived flags live in ``source_metadata``.
 """
 

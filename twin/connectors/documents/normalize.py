@@ -1,4 +1,4 @@
-"""DocumentRecord → ConnectorRecord (v0.6 Phase 6).
+"""DocumentRecord → ConnectorRecord.
 
 Long documents become ``document_manifest`` + ``document_revision_chunk``
 records — never silent truncation of primary evidence. Oversized bodies emit

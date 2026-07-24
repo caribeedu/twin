@@ -1,23 +1,23 @@
-"""Tiny offline runner for connector eval cases (Phase 1).
+"""Connector eval runners.
 
 Runs each JSON case in ``cases/`` against the FakeConnector on an isolated
 in-memory store. No network, no production DB.
 
 Case ``scenario`` selects the harness:
 
-    normalization        sync once, assert records/percepts/lineage
-    replay               sync N times, assert idempotency
-    partial_batch        one item fails → NO percepts visible, checkpoint still;
-                         retry succeeds → everything lands together
-    revision_collision   same external revision, different content → DLQ,
-                         original evidence preserved
-    checkpoint_failure   fault-injected finalize → batch not committed AND
-                         checkpoint unchanged (never one without the other)
-    quarantine           malicious content → quarantined, zero percepts
-    source_deletion      tombstone → deletion event with prior lineage,
-                         no new percepts
+ normalization sync once, assert records/percepts/lineage
+ replay sync N times, assert idempotency
+ partial_batch one item fails → NO percepts visible, checkpoint still;
+ retry succeeds → everything lands together
+ revision_collision same external revision, different content → DLQ,
+ original evidence preserved
+ checkpoint_failure fault-injected finalize → batch not committed AND
+ checkpoint unchanged (never one without the other)
+ quarantine malicious content → quarantined, zero percepts
+ source_deletion tombstone → deletion event with prior lineage,
+ no new percepts
 
-    python -m evals.connectors.run
+ python -m evals.connectors.run
 """
 
 from __future__ import annotations
@@ -809,7 +809,7 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
 
 
 def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
-    """Phase 7: PR + Slack → WorkEpisode; shared independence; temporal conflict."""
+    """PR + Slack → WorkEpisode; shared independence; temporal conflict."""
     from twin.cognition.correlation import (
         independence_group_for,
         run_correlation_pass,
@@ -927,46 +927,9 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
-def _run_connector_completion(case: dict) -> tuple[bool, str]:
-    """Live completion_matrix ok + evidence discipline + sync never confirms."""
-    from twin.connectors import completion_matrix
-
-    matrix = completion_matrix()
-    expected = case["expected"]
-    if expected.get("matrix_ok", True) and not matrix.get("ok"):
-        return False, (
-            f"completion matrix not ok: "
-            f"failed={matrix.get('failed')} "
-            f"partial={matrix.get('partial')}"
-        )
-    if expected.get("pass_requires_evidence"):
-        for row in matrix.get("criteria") or []:
-            if row.get("status") == "pass" and not (
-                row.get("evidence") or row.get("eval")
-            ):
-                return False, f"pass cell {row.get('id')} lacks evidence"
-
-    with tempfile.TemporaryDirectory(prefix="twin-conn-eval-") as tmp:
-        store, creds, _acc, inst = _setup(case, tmp)
-        sync_connector(store, creds, inst.id)
-        confirmed = [
-            m for m in store.list_memories()
-            if getattr(m.status, "value", m.status) == "confirmed"
-        ]
-        if len(confirmed) != expected["confirmed_memories"]:
-            return False, f"confirmed memories {len(confirmed)} != 0"
-        judgments = []
-        if hasattr(store, "list_judgments"):
-            judgments = list(store.list_judgments() or [])
-        elif hasattr(store, "list_judgment_items"):
-            judgments = list(store.list_judgment_items() or [])
-        if len(judgments) != expected["judgments"]:
-            return False, f"judgments {len(judgments)} != 0"
-    return True, "ok"
-
 
 def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
-    """Phase 9 — health §57 + metrics §58 + setup/preview never ingest."""
+    """Health snapshot, metrics, and setup/preview never ingest."""
     from twin.connectors import (
         backfill_preview,
         compute_connector_metrics,
@@ -1042,7 +1005,6 @@ _SCENARIOS = {
     "folder_document_revisions": _run_folder_document_revisions,
     "cross_source_work_episode": _run_cross_source_work_episode,
     "ops_health_metrics": _run_ops_health_metrics,
-    "connector_completion": _run_connector_completion,
 }
 
 

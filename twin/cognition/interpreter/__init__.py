@@ -1,4 +1,4 @@
-"""Cognitive interpreter (v0.7) — semantic identification and cataloguing.
+"""Cognitive interpreter — semantic identification and cataloguing.
 
 The interpreter is the production path for deciding what a Percept *means*.
 Deterministic governance downstream is unchanged; this package only produces

@@ -1,4 +1,4 @@
-"""Connector observability metrics (v0.6 Phase 9 §58).
+"""Connector observability metrics.
 
 Cumulative ``*_total`` counters are read from durable ``ConnectorSyncState``
 fields (never from a sliding window of recent batches). Labels never carry

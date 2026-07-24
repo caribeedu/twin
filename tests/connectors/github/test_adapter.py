@@ -441,7 +441,7 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
 
 def test_rejected_alternative_becomes_decision_with_payload():
-    # v0.7: a rejected alternative interpreted by the LLM is catalogued as a
+    # a rejected alternative interpreted by the LLM is catalogued as a
     # decision carrying payload.rejected_alternative. The interpretation is
     # authored ground truth (the LLM's job), not derived from lexical rules.
     from twin.cognition.interpreter.schema import (

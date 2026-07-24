@@ -1,4 +1,4 @@
-"""Per-source memory candidate policy (v0.6 §49–50, §70).
+"""Per-source memory candidate policy.
 
 Connector-fed percepts don't get to propose every memory type: GitHub may
 propose decisions and constraints, but never beliefs or preferences; Slack
@@ -8,10 +8,10 @@ capture evidence; the cognitive core decides what to do with it).
 
 Resolution order for one extracted memory:
 
-    type in drop            → discarded (searchable as artifact, never memory)
-    type in require_review  → candidate, forced needs_review
-    allow declared and type not in allow → discarded
-    otherwise               → normal pipeline rules apply
+ type in drop → discarded (searchable as artifact, never memory)
+ type in require_review → candidate, forced needs_review
+ allow declared and type not in allow → discarded
+ otherwise → normal pipeline rules apply
 
 Only percepts that carry ``metadata.connector_type`` are affected — local
 sensors (documents, git working copy, sessions) keep their existing rules.
@@ -39,7 +39,7 @@ class PolicyDecision:
     reason: Optional[str] = None
 
 
-# Initial calibration per connector type (v0.6 §70). Instance configuration
+# Initial calibration per connector type . Instance configuration
 # may only NARROW these defaults — never widen them.
 DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
     "github": SourcePolicy(
@@ -57,7 +57,7 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
                                   "event", "fact"}),
         drop=frozenset({"preference", "belief", "relationship", "procedure"}),
     ),
-    # Email is stricter still (v0.6 §70): narrow allowlist, every candidate
+    # Email is stricter still : narrow allowlist, every candidate
     # needs review; belief/preference/relationship never auto-flow.
     "gmail": SourcePolicy(
         allow=frozenset({"decision", "constraint", "task", "fact"}),

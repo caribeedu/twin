@@ -1,4 +1,4 @@
-"""Persona records + judgment snapshot explain (v0.9.4)."""
+"""Persona records + judgment snapshot explain."""
 
 from twin.privacy.identity import ensure_local_identity, resolve_access
 

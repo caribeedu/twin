@@ -1,4 +1,4 @@
-"""Cross-source cognition (v0.6 Phase 7).
+"""Cross-source cognition.
 
 Identity resolution, project mapping, WorkEpisode correlation, independence
 groups, and conflict findings. Connectors capture evidence; this package

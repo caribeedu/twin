@@ -1,33 +1,33 @@
-"""twin CLI.
+"""Twin CLI.
 
-    twin init                          create ~/.twin + guided Ollama/model setup
-    twin ingest <paths...>             run sensors over docs/transcripts/meetings/slack exports
-    twin extract [--auto-approve|-A]   interpret pending percepts (+ optional auto-confirm)
-    twin review                        interactive review (single-key a/r/s/q)
-    twin search "query" [--domain d]   hybrid search
-    twin pack "task" [--domain d]      build a safe context pack (confirmed only;
-                                       --include-candidates to loosen)
-    twin observe "current text"        memory observer suggestion
-    twin workspace tick "text"         parallel memory tick (recall + optional interpret)
-    twin consolidate daily|weekly      scheduled consolidation cycle
-    twin runtime start|status|enqueue  durable cognitive runtime (v1.0)
-    twin promote <memory_id>           promote a memory into the judgment profile
-    twin supersede <new_id> <old_id>   new memory replaces the old one
-    twin contradict <id_a> <id_b>      flag two memories as contradictory
-    twin stats                         memory + product quality metrics
-    twin reindex                       regenerate embeddings with the current embedder
-    twin session start "task"          open a cognitive session (context pack + tracking)
-    twin session observe <id> ...      record artifacts produced during the work
-    twin session complete <id>         close the loop: work → percepts → candidates
-    twin session feedback <id> <v>     usefulness feedback (useful, irrelevant, ...)
-    twin project add|list              first-class projects (repos, aliases, goals)
-    twin watch <paths...>              continuous incremental ingestion
-    twin doctor                        verify models, stores, configs, MCP clients
-    twin setup ollama|postgres|mcp     bootstrap local infrastructure
-    twin serve [--port 8765]           local API + review UI
-    twin mcp                           MCP server over stdio
-    twin native event|install|bindings host-native observation (Phase 8)
-    twin export                        dump memories/entities/judgment as JSON
+ twin init create ~/.twin + guided Ollama/model setup
+ twin ingest <paths...> run sensors over docs/transcripts/meetings/slack exports
+ twin extract [--auto-approve|-A] interpret pending percepts (+ optional auto-confirm)
+ twin review interactive review (single-key a/r/s/q)
+ twin search "query" [--domain d] hybrid search
+ twin pack "task" [--domain d] build a safe context pack (confirmed only;
+ --include-candidates to loosen)
+ twin observe "current text" memory observer suggestion
+ twin workspace tick "text" parallel memory tick (recall + optional interpret)
+ twin consolidate daily|weekly scheduled consolidation cycle
+ twin runtime start|status|enqueue durable cognitive runtime (v1.0)
+ twin promote <memory_id> promote a memory into the judgment profile
+ twin supersede <new_id> <old_id> new memory replaces the old one
+ twin contradict <id_a> <id_b> flag two memories as contradictory
+ twin stats memory + product quality metrics
+ twin reindex regenerate embeddings with the current embedder
+ twin session start "task" open a cognitive session (context pack + tracking)
+ twin session observe <id> ... record artifacts produced during the work
+ twin session complete <id> close the loop: work → percepts → candidates
+ twin session feedback <id> <v> usefulness feedback (useful, irrelevant, ...)
+ twin project add|list first-class projects (repos, aliases, goals)
+ twin watch <paths...> continuous incremental ingestion
+ twin doctor verify models, stores, configs, MCP clients
+ twin setup ollama|postgres|mcp bootstrap local infrastructure
+ twin serve [--port 8765] local API + review UI
+ twin mcp MCP server over stdio
+ twin native event|install|bindings host-native observation
+ twin export dump memories/entities/judgment as JSON
 """
 
 from __future__ import annotations
@@ -394,12 +394,6 @@ def cmd_eval(args) -> None:
         report = run_golden_work_loop(ws.store, ws.cfg, ws.embedder)
         print(json.dumps(report, indent=2, default=str))
         if not report.get("ok"):
-            raise SystemExit(1)
-    elif args.eval_command == "v1-completion":
-        from ..evals.v1_completion import v1_completion_matrix
-        matrix = v1_completion_matrix()
-        print(json.dumps(matrix, indent=2, default=str))
-        if not matrix.get("ok"):
             raise SystemExit(1)
     elif args.eval_command == "compare":
         print("compare requires two prior run payloads; use API /api/evals for now")
@@ -1165,12 +1159,6 @@ def cmd_connector(args) -> None:
         print(_json.dumps(report, indent=2, default=str))
         if not report.get("ok"):
             raise SystemExit(1)
-    elif cmd == "completion":
-        from ..connectors import completion_matrix
-        matrix = completion_matrix()
-        print(_json.dumps(matrix, indent=2, default=str))
-        if not matrix.get("ok"):
-            raise SystemExit(1)
     else:
         raise SystemExit(f"unknown connector command: {cmd}")
 
@@ -1400,7 +1388,7 @@ def cmd_project(args) -> None:
 
 
 def cmd_native(args) -> None:
-    """Phase 8 — host-native observation (Claude Code hooks proof).
+    """host-native observation (Claude Code hooks proof).
 
     Protocol:
     - stdout: JSON ``NativeEventResult`` (context_pack only for SessionStart /
@@ -1717,7 +1705,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.set_defaults(func=cmd_extract)
 
-    pi = sub.add_parser("interpret", help="cognitive interpretation status (v0.7)")
+    pi = sub.add_parser("interpret", help="cognitive interpretation status ")
     pis = pi.add_subparsers(dest="interpret_command", required=True)
     pistatus = pis.add_parser("status", help="counts by interpretation status")
     pistatus.set_defaults(func=cmd_interpret)
@@ -1774,10 +1762,6 @@ def main(argv: list[str] | None = None) -> None:
     es.add_parser("retrieval").set_defaults(func=cmd_eval)
     es.add_parser("golden", help="run golden cognitive work-loop scenario"
                   ).set_defaults(func=cmd_eval)
-    es.add_parser(
-        "v1-completion",
-        help="fail-closed v1.0 cognitive OS completion matrix",
-    ).set_defaults(func=cmd_eval)
     es.add_parser("compare").set_defaults(func=cmd_eval)
 
     p = sub.add_parser("source", help="show source calibration")
@@ -1819,7 +1803,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--domain", default=None)
     p.set_defaults(func=cmd_observe)
 
-    p = sub.add_parser("workspace", help="parallel memory workspace (v0.8)")
+    p = sub.add_parser("workspace", help="parallel memory workspace ")
     wss = p.add_subparsers(dest="workspace_command", required=True)
     wt = wss.add_parser("tick", help="one observation/recall tick")
     wt.add_argument("text")
@@ -1842,7 +1826,7 @@ def main(argv: list[str] | None = None) -> None:
                     help="reclaim a prior failed (error) tick with the same identity")
     wt.set_defaults(func=cmd_workspace)
 
-    p = sub.add_parser("consolidate", help="daily/weekly consolidation cycle (v0.8)")
+    p = sub.add_parser("consolidate", help="daily/weekly consolidation cycle ")
     cs = p.add_subparsers(dest="consolidate_command", required=True)
     for kind, help_text in (
         ("daily", "daily quality + safe automation + temporal refresh"),
@@ -1965,7 +1949,7 @@ def main(argv: list[str] | None = None) -> None:
     pde.add_argument("deletion_id"); pde.add_argument("--token", required=True)
     pde.set_defaults(func=cmd_privacy)
 
-    p = sub.add_parser("connector", help="professional connectors (v0.6)")
+    p = sub.add_parser("connector", help="professional connectors ")
     cs = p.add_subparsers(dest="connector_command", required=True)
     cs.add_parser("adapters", help="list registered adapter types").set_defaults(func=cmd_connector)
     cs.add_parser("list", help="list connector instances").set_defaults(func=cmd_connector)
@@ -2075,15 +2059,11 @@ def main(argv: list[str] | None = None) -> None:
     csyncdue = cs.add_parser("sync-due", help="run one scheduler pass over due connectors")
     csyncdue.add_argument("--no-percepts", action="store_true")
     csyncdue.set_defaults(func=cmd_connector)
-    cs.add_parser("contract", help="print §88 adapter contract matrix"
+    cs.add_parser("contract", help="print adapter contract matrix"
                   ).set_defaults(func=cmd_connector)
     cs.add_parser(
         "production-ready",
-        help="attest ≥2 real adapters closed for daily production use",
-    ).set_defaults(func=cmd_connector)
-    cs.add_parser(
-        "completion",
-        help="print connector completion criteria matrix (§93)",
+        help="report which real adapters meet the production-ready contract",
     ).set_defaults(func=cmd_connector)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
@@ -2235,7 +2215,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser(
         "native",
-        help="host-native observation (Claude Code hooks — Phase 8)",
+        help="host-native observation (Claude Code hooks)",
     )
     nat = p.add_subparsers(dest="native_command", required=True)
     ni = nat.add_parser("install", help="write Claude Code hooks snippet")
@@ -2267,7 +2247,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     ni.set_defaults(func=cmd_native)
 
-    p = sub.add_parser("backup", help="sovereignty backup create/validate/restore (v0.9.8)")
+    p = sub.add_parser("backup", help="sovereignty backup create/validate/restore ")
     bs = p.add_subparsers(dest="backup_command", required=True)
     bc = bs.add_parser("create", help="write NDJSON + optional sqlite copy")
     bc.add_argument("dest", help="destination directory")

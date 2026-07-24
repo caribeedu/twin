@@ -69,12 +69,12 @@ twin review
 ## Release gate
 
 ```bash
-twin eval v1-completion
+twin eval golden
 twin connector production-ready
 pytest -q
 ```
 
-`v1-completion` fails closed on required criteria that are untested, partial, or evidence-free.
+`twin eval golden` exercises the cognitive work-loop. `production-ready` reports whether real adapters (not Fake) close the shared contract. Behavior lives in ordinary pytest suites under `tests/` — not in version or phase checklists.
 
 ## Incident: injection suspected
 

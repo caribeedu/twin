@@ -1,15 +1,15 @@
-"""Mail stream naming: continuous vs backfill namespaces (v0.6 Phase 4).
+"""Mail stream naming: continuous vs backfill namespaces.
 
 Continuous streams stay provider-native:
 
-    label:{id}
-    folder:{id}
+ label:{id}
+ folder:{id}
 
 Backfill uses a separate checkpoint/lease namespace so historical partitions
 never regress continuous watermarks:
 
-    backfill:{job_id}:{partition_key}:label:{id}
-    backfill:{job_id}:{partition_key}:folder:{id}
+ backfill:{job_id}:{partition_key}:label:{id}
+ backfill:{job_id}:{partition_key}:folder:{id}
 """
 
 from __future__ import annotations

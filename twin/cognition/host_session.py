@@ -1,4 +1,4 @@
-"""Host ↔ cognitive session binding (v0.6 Phase 8).
+"""Host ↔ cognitive session binding.
 
 Native adapters call this module. They never assemble Context Packs or write
 confirmed Memory / Judgment — the same core used by MCP / CLI / API does.

@@ -1,4 +1,4 @@
-"""WorkEpisode correlation across connectors (v0.6 Phase 7 §19).
+"""WorkEpisode correlation across connectors.
 
 Partitioned by vault. Merge anchors form clusters; contextual anchors
 (fingerprint / thread) attach or form candidate-only episodes without
@@ -263,7 +263,7 @@ def _rebuild_episode_from_active_links(store, ep: WorkEpisode) -> WorkEpisode:
     lineage_groups = sorted(g for g in groups if g.startswith("lineage:"))
     ep.independence_group = lineage_groups[0] if lineage_groups else None
     # Confidence follows active membership — shrink/downgrade when evidence
-    # leaves (Phase 7 debt: never leave a stale high confidence).
+    # leaves.
     # ``closed`` here means "no active members" and is reversible on rebuild
     # when evidence returns (not a permanent manual close).
     if links:
