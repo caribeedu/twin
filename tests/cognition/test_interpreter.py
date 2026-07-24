@@ -468,6 +468,45 @@ def test_invented_speaker_is_flagged_unresolved(store, interpreting_cfg, embedde
     assert mem.needs_review is True
 
 
+def test_parse_model_json_strips_think_tags_and_fences():
+    from twin.cognition.interpreter.ollama_interpreter import _parse_model_json
+
+    data = _parse_model_json(
+        '<think>noise</think>\n```json\n{"items":[],"unresolved_references":[]}\n```'
+    )
+    assert data == {"items": [], "unresolved_references": []}
+
+
+def test_coerce_item_tolerates_messy_llm_fields():
+    from twin.cognition.interpreter.ollama_interpreter import _items_from_payload
+
+    items, dropped = _items_from_payload({
+        "items": [
+            {
+                "memory_type": "Rejected Alternative",
+                "cognitive_act": "suggestion",
+                "title": "Kafka",
+                "summary": "Rejected Kafka for now",
+                "domain": "tech",
+                "sensitivity": " INTERNAL ",
+                "confidence": "high",
+                "entities": "Kafka",
+                "evidence": "We chose not to use Kafka",
+                "relations": [{"subject": "Atlas", "predicate": "rejects", "object": "Kafka"}],
+                "extra_junk": True,
+            },
+            {"memory_type": "fact"},  # unusable — no title/summary
+        ],
+    })
+    assert dropped == 1
+    assert len(items) == 1
+    assert items[0].memory_type == "rejected_alternative"
+    assert items[0].cognitive_act.value == "proposal"
+    assert items[0].domain == "technical"
+    assert items[0].confidence == 0.85
+    assert items[0].evidence_span.startswith("We chose")
+
+
 def test_known_speaker_attribution_resolves(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
         InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
