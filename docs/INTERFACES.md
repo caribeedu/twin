@@ -2,11 +2,13 @@
 
 # Interfaces
 
+**Source of truth for:** how tools talk to Twin — Native, MCP, CLI, local API and connectors.
+
 > **Native where possible. MCP everywhere. One cognitive core.**
 
 Twin is infrastructure, not a chat app. LLM-powered **clients** (Cursor, Claude Code, Claude Desktop, …) pull memory and safe context packs from one local core. Prefer **native** when the host can embed Twin in its session lifecycle; use **MCP** as the universal tool surface everywhere else (including mid-conversation pulls). **CLI** and the local **API** are the same core with different transport. **Connectors** are separate: they ingest external sources (GitHub, Slack, …), not client sessions.
 
-This document is the source of truth for those surfaces. Identity and principles: [README](../README.md), [ARCHITECTURE.md](ARCHITECTURE.md).
+Identity and principles in [README](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md). Install and models in [SETUP.md](SETUP.md). Day-2 ops in [OPERATIONS.md](OPERATIONS.md).
 
 | Surface | Role | Prefer when |
 |---|---|---|
@@ -15,11 +17,9 @@ This document is the source of truth for those surfaces. Identity and principles
 | **CLI** | Ingest, review, connector ops, scripting | Humans and automation outside an IDE |
 | **Local API** | HTTP + review workbench | Browsers and local integrations |
 
-Install and models: [SETUP.md](SETUP.md). Overview: [README](../README.md).
-
 ---
 
-## Shared concepts (all channels)
+## Shared concepts
 
 Most retrieve / pack calls share these ideas:
 
@@ -44,7 +44,7 @@ Clients are LLM-powered tools that **consume** Twin (packs, search, sessions). T
 | **1. Native** | When the host can embed Twin in its session lifecycle (Claude Code hooks today; app-server-style later) |
 | **2. MCP** | Universal tools for every MCP client; also complements native |
 
-### Native hosts (preferred when available)
+### Native hosts
 
 Native integration binds the **host application** to Twin’s cognitive sessions without a parallel memory store. Today the shipped proof is **Claude Code hooks**. Deeper host embedding (for example app-server style surfaces) should follow the same rules: one core, fail-open, no silent Memory/Judgment confirmation.
 
@@ -60,7 +60,7 @@ This is **not** a connector. Connectors ingest external systems (repos, Slack, �
 | Form new percepts | On **Stop** / session end, Twin may `complete_session` and consolidate a **`session_summary` Percept** from those artifacts — then the usual extract/review path can turn it into candidate memories. Native never auto-confirms Memory or Judgment |
 | Fail open | With `--fail-open`, Twin failures return `ok=false` + `error_id` and exit 0 so the host is not blocked; diagnostics go to stderr/logs |
 
-Session lifecycle, packs and consolidation: [ARCHITECTURE.md](ARCHITECTURE.md) (sessions / observer) and cognition host binding in-tree (`twin/cognition/host_session.py`). Threat notes: [ARCHITECTURE.md](ARCHITECTURE.md#threat-model).
+Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md) (sessions / observer) and cognition host binding in-tree (`twin/cognition/host_session.py`). Threat notes in [ARCHITECTURE.md](ARCHITECTURE.md#threat-model).
 
 #### How Claude Code hooks work
 
@@ -92,7 +92,7 @@ Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist
 **With Claude Code, prefer native for session start/observe/stop.** Keep MCP enabled for tools that surface does not cover (search, review, judgment, one-shot packs mid-task, connector ops). Cursor and Claude Desktop remain MCP-first until they expose an equivalent native surface.
 
 
-### MCP (universal tool surface)
+### MCP
 
 MCP is the **universal** client interface: any MCP host can pull packs, search, run sessions and call tools — including session notes / observe / complete. Use it when the host has no native surface, and **alongside** native on Claude Code for mid-conversation tools. The client starts `twin mcp` locally; nothing is required to leave the machine.
 
@@ -363,7 +363,6 @@ Any MCP stdio-compatible client works with:
 
 ---
 
-
 ## CLI
 
 Terminal / scripting surface. Global flag: `--home` sets Twin home (default `~/.twin` or `$TWIN_HOME`).
@@ -392,7 +391,7 @@ Terminal / scripting surface. Global flag: `--home` sets Twin home (default `~/.
 | `twin review --priority high` | Filter queue by priority. |
 | `twin review --conflicts` | Focus conflicted items. |
 | `twin review-batch create\|resume` | Batch review sessions. |
-| `twin serve` | Review Workbench UI + local HTTP API (default `http://127.0.0.1:8765`). |
+| `twin serve` | Review workbench UI + local HTTP API (default `http://127.0.0.1:8765`). |
 
 ### Query
 
@@ -440,9 +439,131 @@ Terminal / scripting surface. Global flag: `--home` sets Twin home (default `~/.
 
 ---
 
+## Connectors
+
+Connectors are **source adapters**, not LLM clients. They pull GitHub, Slack, mail, calendars, meetings and folders into Twin. Client sessions (native / MCP) are documented under [Clients](#clients).
+
+Connectors are how Twin **obtains** ongoing evidence from professional systems. Each adapter fetches and normalizes into the same Artifact-to-Percept path as `twin ingest`. They do **not** confirm Memory or Judgment — you still run `twin extract` and `twin review`.
+
+Ownership (`--source-owner`) and vault labels keep employer and personal data separable. Day-2 ops (due list, DLQ, backup) in [OPERATIONS.md](OPERATIONS.md).
+
+### What each connector extracts
+
+Every connector uses an **allowlist** (repos, channels, labels, folders, calendars, or disk roots) — never “ingest the whole workspace by default.” Attachments are metadata-oriented unless noted. After any sync: `twin extract` then `twin review`.
+
+| Connector | Identifier | Pulls into Twin | Does not pull | Notes |
+|---|---|---|---|---|
+| **GitHub** | `github` | Issues + issue comments; PRs + reviews + review comments; default-branch commits; releases; CI check **summaries** | Diffs / patches; attachment or blob bytes; non-default-branch commits (except as PR heads); provider deletions | Explicit repo list. Polling is authoritative; optional webhook only marks sync due. Bot-like posts flagged as derived. |
+| **Slack** | `slack` | Channel history: messages and thread replies (text, edits, deletion tombstones). File **names / mime / size / permalink** as refs | File **bytes**. Whole-workspace scrape | Channel allow-list. DMs and private channels off unless you opt in. High leakage risk — set ownership/vault honestly. |
+| **Gmail** | `gmail` | Messages under chosen labels: subject, From/To/Cc, authored body (quotes/signatures split), snippet, label membership | Attachment **bodies** (metadata refs only by default). Spam/promotions unless you include those labels | OAuth read-only. HTML kept as an untrusted stub, not safe UI HTML. |
+| **Outlook** | `outlook` | Same mail cognitive model as Gmail, via Microsoft Graph folders you choose | Attachment bodies (same metadata rule). Write scopes | Folder discovery before sync. Delta sync; removals become tombstones. |
+| **Google Calendar** | `calendar` | Events on chosen calendars: title, when, status, location, organizer, attendees, description (capped) | Attachments. In **free/busy** mode: no title, attendees, or description — busy windows only | Correlate later with meeting transcripts when ids / links match. Match vault to personal vs work. |
+| **Fireflies** | `fireflies` | Meeting **manifest**, speaker-labeled **transcript chunks**, optional provider **summary** | Audio / video bytes; signed media URLs (flags only that media existed) | Chunks never split mid-utterance. Summary marked derived. Still extract + human review; PII policies apply. |
+| **Local folder** | `folder` | Watched roots: text docs (default `md` / `txt` / `rst`, …) as manifest + revision **chunks**; deletes as tombstones | Binary file bodies; absolute paths in the cognitive payload | Content-hash skips unchanged files. Oversized / unsupported files stay metadata-only. No auth — path access is the trust boundary. |
+
+Shared CLI and per-type setup follow. Discovery helpers (`twin connector github repositories`, `slack channels`, …) list what you can put on the allowlist **before** you widen sync.
+
+### Shared CLI
+
+| Command | What it does |
+|---|---|
+| `twin connector adapters` | List registered adapter types. |
+| `twin connector setup <type> --source-owner …` | Guided plan (ownership, auth, scope, preview). **Never ingests.** |
+| `twin connector add <type> --source-owner … [--secret …] [--config '{…}']` | Register account + instance. |
+| `twin connector configure <id> [--secret …] [--config '{…}']` | Rotate credential or update configuration. |
+| `twin connector list` | List instances (id, type, status, owner, vault). |
+| `twin connector auth` / `test <id>` | Validate stored credentials. |
+| `twin connector sync <id>` | Run one sync pass. |
+| `twin connector due` / `sync-due` | Scheduler: what is due / run due connectors. |
+| `twin connector pause` / `resume` / `revoke <id>` | Lifecycle controls. |
+| `twin connector backfill --preview <id>` | Historical import preview (**never** starts ingest). |
+| `twin connector production-ready` | Attest ≥2 real adapters closed for daily use. |
+| `twin connector completion` | Print §93 completion matrix. |
+
+MCP mirrors (capability-gated; mutating tools need confirm): `connector_list`, `connector_status`, `connector_health_all`, `connector_sync`, `connector_backfill_preview`, `connector_dead_letters` — see [Connectors & meta](#connectors--meta) above. HTTP: `/api/connectors…` and optional webhooks below.
+
+### GitHub
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup github --source-owner personal` |
+| Register | `twin connector add github --source-owner personal --secret "$GITHUB_TOKEN" --config '{"repositories":["owner/repo"]}'` |
+| Validate | `twin connector auth <id>` |
+| Discover | `twin connector github repositories <id>` |
+| Sync | `twin connector sync <id>` |
+| Webhook (optional) | `POST /api/webhooks/github/{connector_id}` with `X-Hub-Signature-256` — marks sync due; does not replace polling |
+
+### Slack
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup slack --source-owner employer` (or `personal`) |
+| Register | `twin connector add slack --source-owner … --secret "$SLACK_BOT_TOKEN" --config '{…channels…}'` |
+| Validate | `twin connector auth <id>` |
+| Discover | `twin connector slack channels <id>` |
+| Sync | `twin connector sync <id>` |
+| Webhook (optional) | `POST /api/webhooks/slack/{connector_id}` (`X-Slack-Signature`, `url_verification`) |
+
+### Gmail
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup gmail --source-owner personal` |
+| Register | `twin connector add gmail --source-owner personal` then `configure` with OAuth secret material |
+| Discover | `twin connector gmail …` (account helpers) |
+| Sync | `twin connector sync <id>` |
+
+### Outlook
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup outlook --source-owner employer` |
+| Register | `twin connector add outlook --source-owner …` then OAuth `configure` |
+| Discover | `twin connector outlook folders <id>` |
+| Sync | `twin connector sync <id>` |
+
+### Google Calendar
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup calendar --source-owner personal` |
+| Register | `twin connector add calendar --source-owner …` then OAuth `configure` |
+| Discover | `twin connector calendar calendars <id>` |
+| Sync | `twin connector sync <id>` |
+
+### Fireflies
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup fireflies --source-owner personal` |
+| Register | `twin connector add fireflies --source-owner personal --secret "$FIREFLIES_API_KEY"` |
+| Discover | `twin connector fireflies meetings <id>` |
+| Sync | `twin connector sync <id>` |
+
+### Local folder
+
+| Step | Command / surface |
+|---|---|
+| Plan | `twin connector setup folder --source-owner personal` |
+| Register | `twin connector add folder --source-owner personal --config '{"roots":["/path/to/notes"]}'` |
+| Discover | `twin connector folder roots <id>` |
+| Sync | `twin connector sync <id>` |
+
+Empty roots leave the instance `awaiting_configuration` until roots are set.
+
+### After sync
+
+| Step | Command |
+|---|---|
+| Extract candidates | `twin extract` |
+| Human review | `twin review` |
+| Scheduler | `twin connector due` then `twin connector sync-due` |
+
+---
+
 ## Local API
 
-`twin serve` mounts a minimal Review Workbench, a JSON API and interactive docs (OpenAPI/Swagger via FastAPI when the `api` extra is installed).
+`twin serve` mounts a minimal review workbench, a JSON API and interactive docs (OpenAPI/Swagger via FastAPI when the `api` extra is installed).
 
 Base: `http://127.0.0.1:8765` (unless configured otherwise).
 
@@ -509,125 +630,4 @@ Base: `http://127.0.0.1:8765` (unless configured otherwise).
 
 ---
 
-## Connectors
-
-Connectors are **source adapters**, not LLM clients. They pull GitHub, Slack, mail, calendars, meetings and folders into Twin. Client sessions (native / MCP) are documented under [Clients](#clients).
-
-Connectors are how Twin **obtains** ongoing evidence from professional systems. Each adapter fetches and normalizes into the same Artifact-to-Percept path as `twin ingest`. They do **not** confirm Memory or Judgment — you still run `twin extract` and `twin review`.
-
-Ownership (`--source-owner`) and vault labels keep employer and personal data separable. Day-2 ops (due list, DLQ, backup): [OPERATIONS.md](OPERATIONS.md).
-
-### Shared CLI
-
-| Command | What it does |
-|---|---|
-| `twin connector adapters` | List registered adapter types. |
-| `twin connector setup <type> --source-owner …` | Guided plan (ownership, auth, scope, preview). **Never ingests.** |
-| `twin connector add <type> --source-owner … [--secret …] [--config '{…}']` | Register account + instance. |
-| `twin connector configure <id> [--secret …] [--config '{…}']` | Rotate credential or update configuration. |
-| `twin connector list` | List instances (id, type, status, owner, vault). |
-| `twin connector auth` / `test <id>` | Validate stored credentials. |
-| `twin connector sync <id>` | Run one sync pass. |
-| `twin connector due` / `sync-due` | Scheduler: what is due / run due connectors. |
-| `twin connector pause` / `resume` / `revoke <id>` | Lifecycle controls. |
-| `twin connector backfill --preview <id>` | Historical import preview (**never** starts ingest). |
-| `twin connector production-ready` | Attest ≥2 real adapters closed for daily use. |
-| `twin connector completion` | Print §93 completion matrix. |
-
-MCP mirrors (capability-gated; mutating tools need confirm): `connector_list`, `connector_status`, `connector_health_all`, `connector_sync`, `connector_backfill_preview`, `connector_dead_letters` — see [Connectors & meta](#connectors--meta) above. HTTP: `/api/connectors…` and optional webhooks below.
-
-### Catalog
-
-| Type | Auth | Discovery helper | Notes |
-|---|---|---|---|
-| `github` | Personal access token (`--secret`) | `twin connector github repositories <id>` | Repos, issues, PRs, commits, releases; polling authoritative; optional webhook. |
-| `slack` | Bot token | `twin connector slack channels <id>` | Channel allow-list; high leakage risk — honest `source-owner` / vault. Optional Events API webhook. |
-| `gmail` | OAuth2 | `twin connector gmail …` | Mail partitioned by ownership; attachments metadata-oriented by default. |
-| `outlook` | OAuth2 | `twin connector outlook folders <id>` | Same mail rules as Gmail; folder discovery before sync. |
-| `calendar` | OAuth2 | `twin connector calendar calendars <id>` | Scope calendars explicitly; match vault to personal vs work. |
-| `fireflies` | API key | `twin connector fireflies meetings <id>` | Meeting transcripts; still extract + human review; PII policies apply. |
-| `folder` | None (local paths) | `twin connector folder roots <id>` | Watch roots on disk; incremental sync into the same percept pipeline. |
-
-### GitHub
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup github --source-owner personal` |
-| Register | `twin connector add github --source-owner personal --secret "$GITHUB_TOKEN" --config '{"repositories":["owner/repo"]}'` |
-| Validate | `twin connector auth <id>` |
-| Discover | `twin connector github repositories <id>` |
-| Sync | `twin connector sync <id>` |
-| Webhook (optional) | `POST /api/webhooks/github/{connector_id}` with `X-Hub-Signature-256` — marks sync due; does not replace polling |
-
-### Slack
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup slack --source-owner employer` (or `personal`) |
-| Register | `twin connector add slack --source-owner … --secret "$SLACK_BOT_TOKEN" --config '{…channels…}'` |
-| Validate | `twin connector auth <id>` |
-| Discover | `twin connector slack channels <id>` |
-| Sync | `twin connector sync <id>` |
-| Webhook (optional) | `POST /api/webhooks/slack/{connector_id}` (`X-Slack-Signature`, `url_verification`) |
-
-### Gmail
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup gmail --source-owner personal` |
-| Register | `twin connector add gmail --source-owner personal` then `configure` with OAuth secret material |
-| Discover | `twin connector gmail …` (account helpers) |
-| Sync | `twin connector sync <id>` |
-
-### Outlook
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup outlook --source-owner employer` |
-| Register | `twin connector add outlook --source-owner …` then OAuth `configure` |
-| Discover | `twin connector outlook folders <id>` |
-| Sync | `twin connector sync <id>` |
-
-### Calendar
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup calendar --source-owner personal` |
-| Register | `twin connector add calendar --source-owner …` then OAuth `configure` |
-| Discover | `twin connector calendar calendars <id>` |
-| Sync | `twin connector sync <id>` |
-
-### Fireflies
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup fireflies --source-owner personal` |
-| Register | `twin connector add fireflies --source-owner personal --secret "$FIREFLIES_API_KEY"` |
-| Discover | `twin connector fireflies meetings <id>` |
-| Sync | `twin connector sync <id>` |
-
-### Local folder
-
-| Step | Command / surface |
-|---|---|
-| Plan | `twin connector setup folder --source-owner personal` |
-| Register | `twin connector add folder --source-owner personal --config '{"roots":["/path/to/notes"]}'` |
-| Discover | `twin connector folder roots <id>` |
-| Sync | `twin connector sync <id>` |
-
-Empty roots leave the instance `awaiting_configuration` until roots are set.
-
-### After sync
-
-| Step | Command |
-|---|---|
-| Extract candidates | `twin extract` |
-| Human review | `twin review` |
-| Scheduler | `twin connector due` then `twin connector sync-due` |
-
----
-
-
----
-
-Quickstart narrative: [README.md](../README.md). Install/config: [SETUP.md](SETUP.md). Ops: [OPERATIONS.md](OPERATIONS.md).
+Quickstart narrative in [README.md](../README.md). Install/config in [SETUP.md](SETUP.md). Ops in [OPERATIONS.md](OPERATIONS.md).

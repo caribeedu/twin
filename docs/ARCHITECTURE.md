@@ -4,7 +4,7 @@
 
 **Source of truth for:** how Twin works — brain analogies, architecture principles, stack, data model, pipeline, privacy, review, judgment, observer and threat model.
 
-Product shape and the **complete roadmap** live in [ROADMAP.md](ROADMAP.md); what shipped is in [CHANGELOG.md](CHANGELOG.md). Product definition: [PRODUCT.md](PRODUCT.md). Interfaces: [INTERFACES.md](INTERFACES.md). Why the shape exists: [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch: [README](../README.md#how-it-works).
+Product shape and the **complete roadmap** live in [ROADMAP.md](ROADMAP.md); what shipped is in [CHANGELOG.md](CHANGELOG.md). Product definition in [PRODUCT.md](PRODUCT.md). Interfaces in [INTERFACES.md](INTERFACES.md). Why the shape exists in [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch in [README](../README.md#how-it-works).
 
 ## Brain analogies
 
@@ -304,7 +304,7 @@ Search must answer not only "what looks semantically similar?", but "what is rel
 
 ### Native where possible, MCP everywhere
 
-The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference: [INTERFACES.md](INTERFACES.md#clients).
+The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference in [INTERFACES.md](INTERFACES.md#clients).
 
 ## Data model
 
@@ -671,4 +671,4 @@ Local-first personal cognitive OS. Assets: memories, judgment, connector secrets
 
 Operators still must: protect `$TWIN_HOME` and backup directories, rotate connector tokens, and treat every external document as adversarial input.
 
-Connect via [INTERFACES.md](INTERFACES.md). Install in [SETUP.md](SETUP.md). Operate in [OPERATIONS.md](OPERATIONS.md). Product: [PRODUCT.md](PRODUCT.md). Roadmap: [ROADMAP.md](ROADMAP.md). Changelog: [CHANGELOG.md](CHANGELOG.md).
+Connect via [INTERFACES.md](INTERFACES.md). Install in [SETUP.md](SETUP.md). Operate in [OPERATIONS.md](OPERATIONS.md). Product in [PRODUCT.md](PRODUCT.md). Roadmap in [ROADMAP.md](ROADMAP.md). Changelog in [CHANGELOG.md](CHANGELOG.md).

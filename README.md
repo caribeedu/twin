@@ -16,7 +16,6 @@
 <p align="center">
   <a href="#how-to-use-twin"><img src="https://img.shields.io/badge/quickstart-how_to_use-7c3aed?style=for-the-badge" alt="How to use"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
-  <a href="docs/INTERFACES.md"><img src="https://img.shields.io/badge/Native_where_possible-111827?style=for-the-badge" alt="Native where possible"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
 
@@ -68,7 +67,7 @@ Twin’s concrete answer: store evidence-grounded memory locally, confirm what i
   <img src="assets/before-and-after.png" alt="Before vs After: LLMs without Twin are isolated and restart every chat; with Twin they share one cognitive core — memory, judgment, privacy, graph, context and evidence" width="100%">
 </p>
 
-Long-term, Twin aims to work as a **personal exocortex**: continuity across tools, sessions, models and contexts — sober, local-first, auditable and incremental (aesthetic roots: [FOUNDATIONS](docs/FOUNDATIONS.md#aesthetic-inspiration)).
+Long-term, Twin aims to work as a **personal exocortex**: continuity across tools, sessions, models and contexts — sober, local-first, auditable and incremental (aesthetic roots in [FOUNDATIONS](docs/FOUNDATIONS.md#aesthetic-inspiration)).
 
 It should preserve important facts, decisions, rejected alternatives, tasks, preferences, judgment patterns, beliefs that change over time, relationships, evidence, hard domain boundaries, privacy and human control.
 
@@ -127,28 +126,29 @@ Twin does not treat raw files as “memory”. Cognition moves through three fri
 | **Context pack** | Privacy-filtered pack a tool pulls instead of a re-brief |
 | **Observer** | Parallel recall while a session runs |
 
-Full pipeline, data model and threat model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Domains and product shape: [docs/PRODUCT.md](docs/PRODUCT.md). Interfaces: [docs/INTERFACES.md](docs/INTERFACES.md).
+Full pipeline, data model and threat model in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Domains and product shape in [docs/PRODUCT.md](docs/PRODUCT.md). Interfaces in [docs/INTERFACES.md](docs/INTERFACES.md).
 
 ### Connectors
 
-Connectors pull sources into Twin **incrementally** (artifacts, then percepts, then candidates). They never auto-confirm Memory or Judgment.
+Connectors pull sources into Twin **incrementally** (artifacts, then percepts, then candidates). They never auto-confirm Memory or Judgment. After sync, run `twin extract` and `twin review`.
 
-```bash
-twin connector setup github --source-owner personal   # ownership → auth → scope → preview (no ingest)
-twin connector add github --source-owner personal --secret "$GITHUB_TOKEN" --config '{"…"}'
-twin connector sync <connector_id>
-twin extract && twin review
-```
+| Connector | What Twin pulls today |
+|---|---|
+| **GitHub** | Chosen repos: issues and comments, PRs (reviews + review comments), default-branch commits, releases, CI status summaries — not diffs or file bytes |
+| **Slack** | Chosen channels: messages and thread replies (text); file names/links as metadata only — not file bytes; DMs/private off by default |
+| **Gmail** | Chosen labels: mail subjects, parties, and body text; attachments as metadata only |
+| **Outlook** | Chosen folders: same mail shape as Gmail via Microsoft Graph |
+| **Google Calendar** | Chosen calendars: events (title, time, people, description) — or free/busy only when configured that way |
+| **Fireflies** | Meeting manifests, speaker-labeled transcript chunks, provider summaries — not audio/video |
+| **Local folder** | Watched roots of text notes (Markdown/txt/…): document chunks on change; binaries stay metadata-only |
 
-In day-to-day, `twin connector due` / `sync-due`, health and dead letters in [docs/OPERATIONS.md](docs/OPERATIONS.md).
-
-For per-connector auth, config and helpers (GitHub, Slack, Gmail, Outlook, Calendar, Fireflies, local folder), see **[connectors](docs/INTERFACES.md#connectors)**.
+Ownership and vaults keep personal vs work data separable. Auth, config, discovery helpers and webhooks in **[connectors](docs/INTERFACES.md#connectors)**. Day-2 ops in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ---
 
 ## Principles
 
-These are the constitution. Features may change; these should not. Full list: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#architecture-principles).
+These are the constitution. Features may change; these should not. Full list in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#architecture-principles).
 
 - **Knowledge is not understanding** — packs should explain *why* a fact matters now, not only that it matched.
 - **Memory is compression** — keep what changes future action; do not archive life indiscriminately.
@@ -177,7 +177,7 @@ twin init                   # creates ~/.twin + guided model setup
 twin doctor                 # optional: store, policies, LLM, MCP configs
 ```
 
-`twin init` is required before anything else — until it runs there is no home and no store. The wizard configures chat + embeddings (Ollama recommended; Anthropic, Gemini and OpenAI-compatible are opt-in). Details: [docs/SETUP.md](docs/SETUP.md).
+`twin init` is required before anything else — until it runs there is no home and no store. The wizard configures chat + embeddings (Ollama recommended; Anthropic, Gemini and OpenAI-compatible are opt-in). Details in [docs/SETUP.md](docs/SETUP.md).
 
 ### Put knowledge in (and confirm it)
 
@@ -202,7 +202,7 @@ twin pack "retry strategy for Atlas webhooks" --domain technical
 twin setup mcp cursor          # or: claude-code | claude-desktop
 ```
 
-Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Full interfaces + per-client setup: [docs/INTERFACES.md](docs/INTERFACES.md).
+Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Full interfaces with per-client setup in [docs/INTERFACES.md](docs/INTERFACES.md).
 
 ### First visible result
 
@@ -235,10 +235,10 @@ This README is the **overview**: problem, solution, architecture sketch and quic
 |---|---|
 | **[docs/FOUNDATIONS.md](docs/FOUNDATIONS.md)** | Why Twin exists — Extended Mind, 4E, academic inspirations |
 | **[docs/PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, initial concepts, success criteria |
-| **[docs/ROADMAP.md](docs/ROADMAP.md)** | Planned work — correlation depth, v2+ majors |
-| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered — v0.1 through v1.1.0 |
+| **[docs/ROADMAP.md](docs/ROADMAP.md)** | Planned work — correlation depth, next major versions |
+| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered — v0.1 through nowadays |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — principles, pipeline, data model, observer, threat model |
-| **[docs/INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — Native, MCP CLI, API, connectors |
+| **[docs/INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — Native, MCP, CLI, API, connectors |
 | **[docs/SETUP.md](docs/SETUP.md)** | How you install Twin — providers, config, tests |
 | **[docs/OPERATIONS.md](docs/OPERATIONS.md)** | How you operate Twin — runtime, backup, incidents |
 
@@ -246,29 +246,29 @@ This README is the **overview**: problem, solution, architecture sketch and quic
 
 ## FAQ
 
-**Do I need the cloud?**  
-No. Default path is local Ollama + SQLite. Cloud providers are opt-in.
-
 **Is Twin another RAG app?**  
 No. Retrieval is one step; firewall, evidence, temporality and judgment are the product.
 
 **Is Twin a vector database?**  
 No. Embeddings help search; the temporal graph is authoritative ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-graph-is-truth-embeddings-are-indexes)).
 
+**Do I need the cloud?**  
+No. Default path is local Ollama + SQLite. Cloud providers are opt-in.
+
 **Which LLM providers work?**  
 Ollama (recommended), Anthropic, Gemini, OpenAI and any OpenAI-compatible gateway (Groq, OpenRouter, LM Studio, vLLM, …). See [docs/SETUP.md](docs/SETUP.md).
 
-**Where does my data live?**  
-Under `~/.twin` (or `$TWIN_HOME`). Export with `twin export`. Backup = copy the folder.
+**Does Anthropic do embeddings?**  
+No. Pair Claude chat with Ollama / OpenAI-compatible / Gemini / hash embeddings.
 
 **Does Twin share my data?**  
-No Twin cloud and no analytics phone-home. Memory stays on your machine. Nothing is sent to a provider unless **you** configure a cloud LLM or embedder for extract/search — and even then the Domain Firewall decides what may enter a context pack before any model sees it. Cross-domain leaks are blocked locally, not trusted to the LLM. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#firewall-before-reasoning), [docs/PRODUCT.md](docs/PRODUCT.md#domain-separation).
+No Twin cloud and no analytics phone-home. Memory stays on your machine. Nothing is sent to a provider unless **you** configure a cloud LLM or embedder for extract/search — and even then the Domain Firewall decides what may enter a context pack before any model sees it. Cross-domain leaks are blocked locally, not trusted to the LLM. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#firewall-before-reasoning) and [docs/PRODUCT.md](docs/PRODUCT.md#domain-separation).
+
+**Where does my data live?**  
+Under `~/.twin` (or `$TWIN_HOME`). Export with `twin export`.
 
 **Can I leave later?**  
 Yes — exportability is a first-class architecture principle ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#exportability-over-lock-in)).
-
-**Does Anthropic do embeddings?**  
-No. Pair Claude chat with Ollama / OpenAI-compatible / Gemini / hash embeddings.
 
 ---
 
@@ -281,7 +281,7 @@ pip install -e ".[dev]"
 python -m pytest
 ```
 
-Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (principles) and [docs/PRODUCT.md](docs/PRODUCT.md) before large design swings.
+Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PRODUCT.md](docs/PRODUCT.md) before large design swings.
 
 ---
 

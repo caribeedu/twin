@@ -4,7 +4,7 @@
 
 **Source of truth for:** day-2 operation — cognitive runtime, health, connectors, backup, release gates and incidents.
 
-Install and providers live in [SETUP.md](SETUP.md). Quickstart: [README](../README.md#quickstart).
+Install and providers live in [SETUP.md](SETUP.md). Quickstart in [README](../README.md#quickstart).
 
 ## Start cognitive runtime
 
@@ -85,4 +85,4 @@ pytest -q
 
 ---
 
-Install: [SETUP.md](SETUP.md). Interfaces: [INTERFACES.md](INTERFACES.md). Overview: [README](../README.md).
+Install in [SETUP.md](SETUP.md). Interfaces in [INTERFACES.md](INTERFACES.md). Overview in [README](../README.md).

@@ -4,7 +4,7 @@
 
 **Source of truth for:** how you install Twin — packages, model providers, configuration and tests.
 
-For the shortest path to a first result, start at the [README quickstart](../README.md#quickstart). Interfaces: [INTERFACES.md](INTERFACES.md). Day-2 ops (runtime, backup, incidents): [OPERATIONS.md](OPERATIONS.md).
+For the shortest path to a first result, start at the [README quickstart](../README.md#quickstart). Interfaces in [INTERFACES.md](INTERFACES.md). Day-2 ops (runtime, backup, incidents) in [OPERATIONS.md](OPERATIONS.md).
 
 ## Installation
 
@@ -85,4 +85,4 @@ Expected coverage:
 
 ---
 
-Quickstart: [README.md](../README.md#quickstart). Day-2 ops: [OPERATIONS.md](OPERATIONS.md). Interfaces: [INTERFACES.md](INTERFACES.md).
+Quickstart in [README.md](../README.md#quickstart). Day-2 ops in [OPERATIONS.md](OPERATIONS.md). Interfaces in [INTERFACES.md](INTERFACES.md).

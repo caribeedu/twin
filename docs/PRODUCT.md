@@ -4,7 +4,7 @@
 
 **Source of truth for:** what Twin delivers — memory / judgment / action layers, domain separation, initial concept shape, related projects and success criteria.
 
-Twin is a personal, local-first cognitive layer: structured memory, evolving judgment, domain firewall and interoperable access (MCP / CLI / API) so tools can reason with your context without becoming a chat replacement. Architecture principles and brain analogies live in [ARCHITECTURE.md](ARCHITECTURE.md). Delivered releases: [CHANGELOG.md](CHANGELOG.md). Future versions: [ROADMAP.md](ROADMAP.md). Overview: [README](../README.md).
+Twin is a personal, local-first cognitive layer: structured memory, evolving judgment, domain firewall and interoperable access (MCP / CLI / API) so tools can reason with your context without becoming a chat replacement. Architecture principles and brain analogies live in [ARCHITECTURE.md](ARCHITECTURE.md). Delivered releases in [CHANGELOG.md](CHANGELOG.md). Future versions in [ROADMAP.md](ROADMAP.md). Overview in [README](../README.md).
 
 ## Central concept: memory is not enough
 
@@ -213,4 +213,4 @@ The concept is successful if it:
 
 ---
 
-See also: [FOUNDATIONS.md](FOUNDATIONS.md), [ARCHITECTURE.md](ARCHITECTURE.md), [CHANGELOG.md](CHANGELOG.md), [ROADMAP.md](ROADMAP.md), [README.md](../README.md).
+See also [FOUNDATIONS.md](FOUNDATIONS.md), [ARCHITECTURE.md](ARCHITECTURE.md), [CHANGELOG.md](CHANGELOG.md), [ROADMAP.md](ROADMAP.md), [README.md](../README.md).

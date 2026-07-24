@@ -2,9 +2,9 @@
 
 # Roadmap
 
-**Source of truth for:** planned work — deferred correlation depth and future major versions (v2+).
+**Source of truth for:** planned work — deferred correlation depth and next major versions.
 
-Product shape: [PRODUCT.md](PRODUCT.md). What shipped: [CHANGELOG.md](CHANGELOG.md).
+Product shape in [PRODUCT.md](PRODUCT.md). What shipped in [CHANGELOG.md](CHANGELOG.md).
 
 ## Correlation depth (planned vX — after Phase 7)
 
@@ -123,4 +123,4 @@ Prepare the cognitive substrate for physical agents:
 
 ---
 
-Shipped history: [CHANGELOG.md](CHANGELOG.md). Product definition: [PRODUCT.md](PRODUCT.md).
+Shipped history in [CHANGELOG.md](CHANGELOG.md). Product definition in [PRODUCT.md](PRODUCT.md).

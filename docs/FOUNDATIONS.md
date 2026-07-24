@@ -4,7 +4,7 @@
 
 **Source of truth for:** why Twin exists — philosophy and academic inspirations (Extended Mind, 4E, memory systems, GWT, ACT-R, …).
 
-This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built: [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers: [PRODUCT.md](PRODUCT.md). Versions: [CHANGELOG.md](CHANGELOG.md) / [ROADMAP.md](ROADMAP.md). Short narrative: [README](../README.md).
+This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built in [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers in [PRODUCT.md](PRODUCT.md). Versions in [CHANGELOG.md](CHANGELOG.md) / [ROADMAP.md](ROADMAP.md). Short narrative in [README](../README.md).
 
 ## Academic and conceptual foundations
 
@@ -222,4 +222,4 @@ The long-term experience can draw on sci-fi and human–machine interfaces (exoc
 
 ---
 
-Next: product shape in [PRODUCT.md](PRODUCT.md). Architecture principles and brain analogies: [ARCHITECTURE.md](ARCHITECTURE.md).
+Next: product shape in [PRODUCT.md](PRODUCT.md). Architecture principles and brain analogies in [ARCHITECTURE.md](ARCHITECTURE.md).

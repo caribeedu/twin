@@ -2,9 +2,9 @@
 
 # Changelog
 
-**Source of truth for:** what each released version delivered (v0.1 through v1.1.0).
+**Source of truth for:** what each released version delivered.
 
-Product definition: [PRODUCT.md](PRODUCT.md). Future work: [ROADMAP.md](ROADMAP.md). Overview: [README](../README.md).
+Product definition in [PRODUCT.md](PRODUCT.md). Future work in [ROADMAP.md](ROADMAP.md). Overview in [README](../README.md).
 
 ### v0.1 — Local Technical Memory
 
@@ -47,7 +47,7 @@ Goal: keep memory quality, coherence and auditability as ingestion scales beyond
 Delivered:
 
 - quality analyzer with neighborhood discovery, claim-aware findings and recomputable review priority (with conflict/privacy floors);
-- Review Workbench with priority queue, side-by-side diffs, keyboard shortcuts and batch preview/apply;
+- Review workbench with priority queue, side-by-side diffs, keyboard shortcuts and batch preview/apply;
 - transactional merge and split with compatibility gates, evidence mapping on split, provenance and full undo;
 - artifact provenance chain via explicit artifact↔percept links (no content-hash cascade);
 - source×type calibration and soft confidence adjustment at extraction;
@@ -383,7 +383,7 @@ Delivered:
 - env keys honored per provider (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, …) plus `TWIN_LLM_*` / `TWIN_EMBED_*`;
 - `twin doctor` provider-aware checks; Ollama base URL resolution respects `TWIN_OLLAMA_URL` / configured home env (WSL-friendly);
 - CLI UX polish: review single-key actions, extract progress/ETA, `--auto-approve` / `-A`, clearer panels and contrast;
-- `twin serve` Review Workbench refresh — candidate/neighbor cards, evidence quotes, flags, friendly labels;
+- `twin serve` Review workbench refresh — candidate/neighbor cards, evidence quotes, flags, friendly labels;
 - Search / Pack / Memories: human-readable selects and metadata chips (implementation ids stay on CLI/MCP/API);
 - Search relevance as relative % (top hit = 100%) with match-why chips under the score bar; Memories hides duplicate body when title equals summary;
 - marketing README with banner / vision / before-after visuals; deep material under `docs/` (`FOUNDATIONS`, `PRODUCT`, `ROADMAP`, `CHANGELOG`, `ARCHITECTURE`, `CONNECTION`, `SETUP`, `OPERATIONS`);
