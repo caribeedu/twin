@@ -55,18 +55,20 @@ For an advanced user of AI, RAG, MCP, vectorization, PII, pipelines and agents, 
 
 The central point is that **integration does not just mean low latency**. Latency helps, but what is really missing is **operational understanding**: the AI needs to understand what a given memory means, when it holds, in which domain it may be used and how it should affect a decision.
 
+Twin’s answer to that problem is concrete: store evidence-grounded memory locally, confirm what is trusted, then let any LLM pull a safe context pack instead of asking you to re-explain. The next section is that path end-to-end — from first install to the first chat where the model already knows something you never typed there.
+
 ---
 
 ## 3. How to use Twin
 
-This section is the shortest path from a clean machine to a visible result: an LLM answers using something you never typed in that chat, because Twin already holds it as confirmed memory.
+This is the shortest practical path: install Twin, load a sample decision, confirm it, connect an MCP client, and ask a new chat a question that only Twin’s memory can answer.
 
 You need Python 3.10+, a clone of this repo, and an MCP-capable client (Cursor, Claude Code, or Claude Desktop). SQLite is enough for the first run — no Postgres or Ollama required.
 
 ### 3.1 Install and initialize
 
 ```bash
-git clone https://github.com/caribeedu/twin.git
+git clone <this-repo-url>
 cd twin
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -149,6 +151,8 @@ If the model still asks you to explain from scratch: check that the memory is `c
 
 ### 3.5 What to do next
 
+That first chat is the product promise in miniature: less re-explanation, more operational continuity. From here you can deepen the same loop — or read on for what Twin deliberately refuses to become, so the substrate stays sharp.
+
 - Keep feeding Twin: `twin ingest` on your own docs, or complete sessions via MCP (`session_start` → work → `session_complete`) so new candidates appear for review.
 - Prefer `session_start` for real work units so Twin tracks continuity across tools.
 - When you outgrow SQLite or want a stronger local extractor/embedder: `twin setup postgres`, `twin setup ollama` (see Configuration and Installation later in this README).
@@ -158,7 +162,7 @@ If the model still asks you to explain from scratch: check that the memory is `c
 
 ## 4. What the project is not
 
-`twin` must not be understood as:
+The walkthrough above can look like “another AI app.” It is not. Twin is the substrate those apps consult — not a replacement for the chat, the IDE, or the notes where you already work. In particular, `twin` must not be understood as:
 
 - a chatbot;
 - a note-taking app;
@@ -331,7 +335,7 @@ Example:
 ```text
 2026-07-01
 Atlas kickoff meeting
-Participants: Edu, Marina, Rafael
+Participants: Alex, Marina, Rafael
 Decision: use Postgres outbox + dedicated worker
 Rejected alternative: Kafka
 Future condition: revisit Kafka if volume > 50k events/day
@@ -418,11 +422,11 @@ ACT-R is a cognitive architecture that separates declarative and procedural comp
 
 Predictive processing and active inference models treat the brain as a system that maintains internal models, predicts the world and updates beliefs upon receiving prediction error.
 
-For `twin`, this implies the system should not store only loose sentences like "Edu prefers X". It should track the evolution of mental models:
+For `twin`, this implies the system should not store only loose sentences like "the user prefers X". It should track the evolution of mental models:
 
 ```text
-2023: Edu considered microservices preferable for almost everything.
-2026: Edu came to prefer a modular monolith when maintainability and simplicity matter more.
+2023: the user considered microservices preferable for almost everything.
+2026: the user came to prefer a modular monolith when maintainability and simplicity matter more.
 Reason: hands-on experience with operational complexity.
 ```
 
@@ -443,10 +447,10 @@ Psychology discusses that a person does not operate with a single homogeneous "s
 
 These roles share some memories, but not all. This point is crucial for privacy.
 
-`twin` must not model only `Edu -> everything`. It must model:
+`twin` must not model only `User -> everything`. It must model:
 
 ```text
-Edu
+User
  ├── persona: developer
  │    └── domain: work/technical
  ├── persona: partner
@@ -465,7 +469,7 @@ Before LLMs, symbolic AI already represented knowledge with semantic networks, f
 
 `twin` reuses those ideas:
 
-- triples/edges: `Edu -> prefers -> pt-BR answers`;
+- triples/edges: `User -> prefers -> pt-BR answers`;
 - frames: a technical decision with slots for context, alternatives, risks and consequence;
 - scripts: recurring sequences of how the user decides or works;
 - policies: explicit privacy and judgment rules.
@@ -919,8 +923,8 @@ Memories must have temporal validity.
 Example:
 
 ```text
-2025: works at Ambev
-2026: works at Shippo
+2025: works at Acme Corp
+2026: works at Globex
 ```
 
 Both can be true, but not simultaneously.
