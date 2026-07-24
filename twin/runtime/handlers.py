@@ -33,14 +33,17 @@ def handle_interpret_percept(
     if percept is None:
         raise HandlerError(f"percept {percept_id} not found", error_class=ErrorClass.permanent, stage="validate")
 
-    if interp_service.interpreting_mode(cfg) and cfg.extractor in ("auto", "ollama"):
+    if interp_service.interpreting_mode(cfg) and cfg.extractor != "echo":
         runtime = interp_service.InterpretationRuntime(cfg)
-        if not runtime.available:
-            raise HandlerError(
-                "cognitive model unavailable",
-                error_class=ErrorClass.model_unavailable,
-                stage="interpret",
-            )
+        try:
+            if not runtime.available:
+                raise HandlerError(
+                    "cognitive model unavailable",
+                    error_class=ErrorClass.model_unavailable,
+                    stage="interpret",
+                )
+        finally:
+            runtime.close()
 
     report = extract_percept(store, cfg, embedder, percept)
     return {

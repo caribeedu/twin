@@ -63,7 +63,7 @@ Twin’s answer to that problem is concrete: store evidence-grounded memory loca
 
 This is the shortest practical path: install Twin, load a sample decision, confirm it, connect an MCP client, and ask a new chat a question that only Twin’s memory can answer.
 
-You need Python 3.10+, a clone of this repo, and an MCP-capable client (Cursor, Claude Code, or Claude Desktop). SQLite is enough for the first run — no Postgres or Ollama required.
+You need Python 3.10+, a clone of this repo, and an MCP-capable client (Cursor, Claude Code, or Claude Desktop). SQLite is enough for the first run — no Postgres required. For extraction and embeddings Twin **prefers local open models via Ollama**, but you choose the provider: any **OpenAI-compatible** chat + embed endpoint works (OpenAI, LM Studio, vLLM, Groq, Together, …). Offline `echo` / `hash` fallbacks still let you try the store without a model.
 
 ### 3.1 Install and initialize
 
@@ -74,11 +74,31 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[mcp]"     # add ,dev or ,api later if you want tests/API
 
-twin init                   # creates ~/.twin (policies, judgment, SQLite store)
-twin doctor                 # optional: store, policies, MCP client configs
+twin init                   # creates ~/.twin + guided model setup
+twin doctor                 # optional: store, policies, LLM, MCP client configs
 ```
 
-`twin init` is the first required Twin command. Until it runs, there is no home directory and no store for memories.
+`twin init` is the first required Twin command. Until it runs, there is no home directory and no store for memories. The wizard asks which **LLM provider** to use for cognitive interpretation (extract / deep observer) and which **embedding** backend to use:
+
+1. **Ollama (recommended)** — local open models; nothing leaves the machine. Install from [ollama.com/download](https://ollama.com/download), then set URL + chat model + embed model (defaults are fine to start).
+2. **OpenAI-compatible (optional)** — base URL, API key (if needed), chat model, and embedding model. Covers OpenAI, Azure OpenAI, Groq, Together, Fireworks, OpenRouter, DeepSeek, Mistral, xAI, LM Studio, vLLM, and similar gateways. You can also set `TWIN_LLM_PROVIDER=groq|openrouter|…` for preset base URLs.
+3. **Anthropic (Claude)** — Messages API via `ANTHROPIC_API_KEY`. Anthropic has no embeddings API; the wizard asks for a separate embed backend (Ollama / OpenAI-compatible / Gemini / hash).
+4. **Google Gemini** — `generateContent` + `embedContent` via `GEMINI_API_KEY` / `GOOGLE_API_KEY`.
+
+Settings are written to `~/.twin/env` and picked up on the next Twin process (CLI, API, MCP). Skip the interactive wizard with `twin init --skip-setup` when scripting CI.
+
+Useful env knobs (full table in [§21 Configuration](#21-configuration)):
+
+| variable | role |
+|---|---|
+| `TWIN_LLM_PROVIDER` | `ollama` (default), `anthropic`, `gemini`, `openai`, `openai_compatible`, `groq`, `openrouter`, … |
+| `TWIN_LLM_BASE_URL` / `TWIN_LLM_MODEL` / `TWIN_LLM_API_KEY` | chat endpoint for extract + deep observer |
+| `TWIN_EMBEDDER` | `auto` / `ollama` / `openai_compatible` / `gemini` / `hash` |
+| `TWIN_EMBED_BASE_URL` / `TWIN_EMBED_MODEL` / `TWIN_EMBED_API_KEY` | embedding endpoint |
+| `TWIN_OLLAMA_*` | still valid aliases when provider is Ollama |
+| `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `OPENAI_API_KEY` / … | provider-native key env vars (also honored) |
+
+After changing the embedding model, regenerate vectors with `twin reindex`.
 
 ### 3.2 Put knowledge into Twin (and confirm it)
 
@@ -88,8 +108,9 @@ Twin does not invent durable facts for you. You ingest evidence, extract candida
 # Seed with the sample Atlas webhook RFC (or use your own notes/docs)
 twin ingest ./examples/docs
 
-# Turn percepts into memory candidates
+# Turn percepts into memory candidates (needs a reachable chat model, or TWIN_EXTRACTOR=echo)
 twin extract
+# twin extract -A   # optional: auto-confirm new candidates (skip review)
 
 # Confirm at least one solid decision (interactive review)
 twin review
@@ -127,7 +148,7 @@ Manual equivalent (Cursor `~/.cursor/mcp.json`):
 }
 ```
 
-Use an absolute path to `twin` if the GUI cannot see your shell `PATH` (`which twin`).
+Use an absolute path to `twin` if the GUI cannot see your shell `PATH` (`which twin`). `twin setup mcp` copies LLM/embed env vars from `~/.twin/env` into the client entry when present, so the MCP process sees the same provider as the CLI.
 
 ### 3.4 First visible result
 
@@ -155,7 +176,7 @@ That first chat is the product promise in miniature: less re-explanation, more o
 
 - Keep feeding Twin: `twin ingest` on your own docs, or complete sessions via MCP (`session_start` → work → `session_complete`) so new candidates appear for review.
 - Prefer `session_start` for real work units so Twin tracks continuity across tools.
-- When you outgrow SQLite or want a stronger local extractor/embedder: `twin setup postgres`, `twin setup ollama` (see Configuration and Installation later in this README).
+- When you outgrow SQLite: `twin setup postgres`. To pull or retarget models: re-run `twin init`, or `twin setup ollama` for the local path (see [§21 Configuration](#21-configuration)).
 - Daily operations (review workbench, judgment, connectors, backup): covered from the Installation and Basic flow sections onward.
 
 ---
@@ -1286,16 +1307,21 @@ Main endpoints:
 |---|---|---|
 | `TWIN_HOME` | `~/.twin` | config directory (policies/judgment) |
 | `TWIN_DB_URL` | `sqlite:///~/.twin/twin.db` | `postgresql://…` selects the primary backend (pgvector) |
+| `TWIN_LLM_PROVIDER` | `ollama` | `ollama` (encouraged), `anthropic`/`claude`, `gemini`/`google`, `openai`/`openai_compatible`, or presets `groq` / `together` / `fireworks` / `openrouter` / `deepseek` / `mistral` / `xai` / `azure_openai` / `lmstudio` / `vllm` |
+| `TWIN_LLM_BASE_URL` | (provider default) | chat API base; Ollama defaults to `TWIN_OLLAMA_URL` |
+| `TWIN_LLM_MODEL` | (falls back to provider default / `TWIN_OLLAMA_MODEL`) | chat model for extract + deep observer |
+| `TWIN_LLM_API_KEY` | — | API key for cloud chat (also reads `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, … per provider) |
 | `TWIN_OLLAMA_URL` | `http://127.0.0.1:11434` | local Ollama server |
-| `TWIN_OLLAMA_MODEL` | `qwen3:8b` | local extraction model |
-| `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text` | local embedding model |
-| `TWIN_EXTRACTOR` | `auto` | `auto` / `ollama` / `heuristic` |
-| `TWIN_EMBEDDER` | `auto` | `auto` / `ollama` / `hash` |
+| `TWIN_OLLAMA_MODEL` | `qwen3.6:latest` | local chat / extraction model |
+| `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text-v2-moe` | local embedding model |
+| `TWIN_EXTRACTOR` | `auto` | `auto` / `ollama` / `echo` / `heuristic` |
+| `TWIN_EMBEDDER` | `auto` | `auto` / `ollama` / `openai_compatible` / `gemini` / `hash` |
+| `TWIN_EMBED_BASE_URL` | (provider default) | embeddings API base |
+| `TWIN_EMBED_MODEL` | (falls back to `TWIN_OLLAMA_EMBED_MODEL`) | embedding model id |
+| `TWIN_EMBED_API_KEY` | — | API key for cloud embeddings |
 | `TWIN_ENCRYPTION_KEY` | — | when set, encrypts raw content and evidence at rest |
 
-Everything runs on local models; there is no cloud LLM option. Embeddings
-are not the source of truth: they are regenerable (`twin reindex`) and never
-mix across different models.
+Local open models via Ollama are the recommended default (`twin init` steers you there first). Anthropic, Gemini, OpenAI, and other OpenAI-compatible gateways are opt-in. Anthropic chat needs a separate embedding backend. Embeddings are not the source of truth: they are regenerable (`twin reindex`) and never mix across different models.
 
 ---
 

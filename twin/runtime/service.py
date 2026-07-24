@@ -9,7 +9,7 @@ import time
 from typing import Optional
 
 from twin.config import Config
-from twin.memory.embeddings import Embedder, get_embedder
+from twin.memory.embeddings import Embedder, get_embedder_for_config
 from twin.memory.store.base import MemoryStore
 from twin.runtime.queue import RuntimeQueue
 from twin.runtime.scheduler import RuntimeScheduler
@@ -35,7 +35,7 @@ class TwinRuntime:
     ):
         self.store = store
         self.cfg = cfg
-        self.embedder = embedder or get_embedder(cfg.embedder, cfg.embedding_dim)
+        self.embedder = embedder or get_embedder_for_config(cfg)
         self.workers_n = max(1, workers)
         self.vault_id = vault_id
         self.lease_seconds = lease_seconds

@@ -57,7 +57,10 @@ def interpreting_mode(cfg: Config) -> bool:
     offline-detection test must never be silently upgraded to interpretation."""
     if cfg.extractor == "heuristic":
         return False
-    return cfg.extractor in ("auto", "ollama", "echo") or _OVERRIDE is not None
+    return cfg.extractor in (
+        "auto", "ollama", "echo", "openai", "openai_compatible",
+        "anthropic", "claude", "gemini", "google",
+    ) or _OVERRIDE is not None
 
 
 def _classify_exception(exc: Exception) -> tuple[InterpretationStatus, str]:
@@ -80,11 +83,13 @@ def _classify_exception(exc: Exception) -> tuple[InterpretationStatus, str]:
 
 class InterpretationRuntime:
     """One interpreter binding for a whole batch: availability resolved once,
-    HTTP client reused across Percepts, closed at the end."""
+    chat client reused across Percepts, closed at the end."""
 
     def __init__(self, cfg: Config):
+        from ..llm import get_chat_client
+
         self.cfg = cfg
-        self._client = None
+        self._chat = None
         if _OVERRIDE is not None:
             self.mode = "override"
             self.available = True
@@ -92,16 +97,11 @@ class InterpretationRuntime:
             self.mode = "echo"
             self.available = True
         else:
-            self.mode = "ollama"
+            # auto / ollama / openai_compatible — all use the chat client
+            self.mode = "llm"
+            self._chat = get_chat_client(cfg)
             # one health check for the batch, not one per Percept
-            self.available = ollama_interpreter.available(cfg.ollama_url)
-
-    def _http(self):
-        if self._client is None:
-            import httpx
-            self._client = httpx.Client(
-                base_url=self.cfg.ollama_url.rstrip("/"), timeout=600)
-        return self._client
+            self.available = self._chat.available()
 
     def interpret(self, percept: Percept, masked_text: str) -> InterpretationResult:
         if self.mode == "override":
@@ -114,15 +114,12 @@ class InterpretationRuntime:
         if self.mode == "echo":
             return echo.interpret(percept, masked_text, self.cfg)
 
-        # ollama
-        if not self.available:
+        if not self.available or self._chat is None:
             return _deferred("cognitive interpreter unavailable (model unreachable)",
                              failure_class="unavailable")
         try:
             return ollama_interpreter.interpret(
-                percept, masked_text,
-                base_url=self.cfg.ollama_url, model=self.cfg.ollama_model,
-                client=self._http(),
+                percept, masked_text, chat=self._chat,
             )
         except Exception as exc:
             status, fclass = _classify_exception(exc)
@@ -133,18 +130,21 @@ class InterpretationRuntime:
                              status=status, failure_class=fclass)
 
     def close(self) -> None:
-        if self._client is not None:
-            try:
-                self._client.close()
-            except Exception:
-                pass
-            self._client = None
+        if self._chat is not None:
+            closer = getattr(self._chat, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
+            self._chat = None
 
 
 def interpreter_available(cfg: Config) -> bool:
     if _OVERRIDE is not None or cfg.extractor == "echo":
         return True
-    return ollama_interpreter.available(cfg.ollama_url)
+    from ..llm import llm_available
+    return llm_available(cfg)
 
 
 def run_interpreter(cfg: Config, percept: Percept,
