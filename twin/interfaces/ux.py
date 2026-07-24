@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from typing import Iterator, Sequence
 
 
-# Twin brand — purple on white/neutral terminal
+# Twin brand — purple accents. Avoid "dim magenta": near-invisible on
+# Ubuntu's default terminal palette (poor contrast for secondary text).
 BRAND = "magenta"
 BRAND_BOLD = "bold magenta"
-BRAND_DIM = "dim magenta"
 BRAND_BORDER = "bright_magenta"
 OK = "green"
 WARN = "yellow"
@@ -134,7 +134,7 @@ def print_err(msg: str) -> None:
 def print_dim(msg: str) -> None:
     c = console()
     if c is not None:
-        c.print(f"[{BRAND_DIM}]{msg}[/]")
+        c.print(msg)
     else:
         print(msg)
 
