@@ -248,7 +248,7 @@ async function home() {
     <section class="hero">
       <article class="core-card">
         <div class="core-head">
-          <div class="mark" aria-hidden="true"></div>
+          <img class="mark" src="/static/logo.svg" width="48" height="48" alt="" />
           <h1>Twin</h1>
           <p>Persistent Cognitive Core</p>
         </div>

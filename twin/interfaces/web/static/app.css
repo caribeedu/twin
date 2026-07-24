@@ -109,30 +109,15 @@ body {
 .mark {
   width: 34px;
   height: 34px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at center, var(--white) 0 18%, transparent 19%),
-    conic-gradient(from 20deg, var(--purple), var(--purple-soft), var(--purple-deep), var(--purple));
-  box-shadow: 0 0 0 3px var(--purple-mist);
-  position: relative;
+  display: block;
   flex-shrink: 0;
-}
-
-.mark::before {
-  content: "";
-  position: absolute;
-  inset: 7px;
-  border-radius: 50%;
-  border: 1.5px dashed rgba(255,255,255,0.7);
+  object-fit: contain;
 }
 
 .mark.sm {
   width: 18px;
   height: 18px;
-  box-shadow: none;
 }
-
-.mark.sm::before { inset: 4px; }
 
 .nav {
   display: flex;
