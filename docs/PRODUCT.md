@@ -547,7 +547,7 @@ Follow-on (not blocking v1.0): remaining adapter contract rows, unified explain 
 
 ### v1.1.0 — Adoption DX and mainstream LLM providers
 
-Goal: make Twin easier to install, configure and trust day-to-day — guided setup, mainstream chat providers, clearer product docs — without changing the cognitive core.
+Goal: make Twin easier to install, configure and trust day-to-day — guided setup, mainstream chat providers, clearer product docs and a friendlier local UI — without changing the cognitive core.
 
 Delivered:
 
@@ -555,10 +555,14 @@ Delivered:
 - pluggable chat LLM adapter with presets (`ollama`, `anthropic`/`claude`, `gemini`/`google`, `openai`, `groq`, `openrouter`, `lmstudio`, `vllm`, …);
 - embeddings via Ollama, OpenAI-compatible, Gemini or hash; Anthropic chat pairs with a separate embed backend;
 - env keys honored per provider (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, …) plus `TWIN_LLM_*` / `TWIN_EMBED_*`;
-- CLI UX polish: review single-key actions, extract progress/ETA, `--auto-approve` / `-A`, `twin doctor` provider-aware checks;
-- `twin serve` Review Workbench visual refresh;
-- documentation split under `docs/` (`FOUNDATIONS`, `PRODUCT`, `ARCHITECTURE`, `CONNECTION`, `SETUP`) with MCP client guides folded into CONNECTION;
-- package/`__version__` → `1.1.0`.
+- `twin doctor` provider-aware checks; Ollama base URL resolution respects `TWIN_OLLAMA_URL` / configured home env (WSL-friendly);
+- CLI UX polish: review single-key actions, extract progress/ETA, `--auto-approve` / `-A`, clearer panels and contrast;
+- `twin serve` Review Workbench refresh — candidate/neighbor cards, evidence quotes, flags, friendly labels;
+- Search / Pack / Memories: human-readable selects and metadata chips (implementation ids stay on CLI/MCP/API);
+- Search relevance as relative % (top hit = 100%) with match-why chips under the score bar; Memories hides duplicate body when title equals summary;
+- marketing README with banner / vision / before-after visuals; deep material under `docs/` (`FOUNDATIONS`, `PRODUCT`, `ARCHITECTURE`, `CONNECTION`, `SETUP`);
+- MCP client guides folded into CONNECTION; runbook → SETUP; threat model → ARCHITECTURE; v1-release notes → PRODUCT;
+- root `LICENSE` (MIT); package/`__version__` → `1.1.0`.
 
 
 ## Future major versions
