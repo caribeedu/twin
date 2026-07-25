@@ -2329,8 +2329,9 @@ def cmd_native(args) -> None:
 
     from .native.claude_code import (
         MissingExternalSessionId,
+        claude_hooks_stdout,
+        install_claude_code_hooks,
         normalize_claude_code_hook,
-        write_hooks_config,
     )
     from .native.events import HostEvent
     from .native.service import NativeHostService, should_emit_pack
@@ -2340,17 +2341,34 @@ def cmd_native(args) -> None:
         from . import ux
 
         target = args.dir or str(ws.cfg.home / "native" / "claude-code")
-        path = write_hooks_config(
-            Path(target),
-            twin_bin=args.twin_bin or "twin",
-            home=str(ws.cfg.home),
-        )
+        merge = not bool(getattr(args, "no_merge", False))
+        settings_path = getattr(args, "settings", None)
+        try:
+            result = install_claude_code_hooks(
+                twin_bin=args.twin_bin or "twin",
+                home=str(ws.cfg.home),
+                snippet_dir=Path(target),
+                settings_path=Path(settings_path) if settings_path else None,
+                merge=merge,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
         ux.print_rule("native install")
-        ux.print_ok(f"wrote {path}")
-        ux.print_next([
-            ("→", "merge the `hooks` object into Claude Code settings"),
-            ("→", "restart Claude Code to activate host-native observation"),
-        ])
+        ux.print_ok(f"snippet {result['snippet']}")
+        if result.get("merged"):
+            ux.print_ok(f"merged into {result['settings']}")
+            if result.get("backup"):
+                ux.print_dim(f"backup {result['backup']}")
+            ux.print_next([
+                ("→", "restart Claude Code (or start a new session)"),
+                ("→", "type /hooks — SessionStart / UserPromptSubmit / … should list Twin"),
+            ])
+        else:
+            ux.print_warn("snippet only — did not patch Claude settings (--no-merge)")
+            ux.print_next([
+                ("→", "merge hooks from the snippet into ~/.claude/settings.json"),
+                ("→", "restart Claude Code to activate host-native observation"),
+            ])
         return
 
     if args.native_command == "bindings":
@@ -2417,7 +2435,36 @@ def cmd_native(args) -> None:
             + (f" error_id={result.error_id}" if result.error_id else ""),
             file=sys.stderr,
         )
-    print(json.dumps(payload, ensure_ascii=False, default=str))
+    # Hooks (--fail-open + claude-code): speak Claude's hook stdout schema so
+    # SessionStart injects context_pack as additionalContext, and observation
+    # hooks stay silent (no Twin JSON dumped into the transcript).
+    if fail_open and host == "claude-code":
+        meta = getattr(event, "metadata", None) or {}
+        hook_name = (
+            getattr(args, "hook", None)
+            or meta.get("hook_event_name")
+            or ""
+        )
+        kind_to_hook = {
+            "session_start": "SessionStart",
+            "user_message": "UserPromptSubmit",
+            "tool_requested": "PreToolUse",
+            "tool_completed": "PostToolUse",
+            "session_end": "Stop",
+        }
+        if not hook_name and getattr(event, "kind", "") in kind_to_hook:
+            hook_name = kind_to_hook[event.kind]
+        claude_out = claude_hooks_stdout(
+            hook_event_name=str(hook_name),
+            ok=result.ok,
+            context_pack=payload.get("context_pack") if emit_pack else None,
+            error=result.error,
+        )
+        if claude_out is not None:
+            print(json.dumps(claude_out, ensure_ascii=False, default=str))
+        # silent success / fail-open: no NativeEventResult on stdout
+    else:
+        print(json.dumps(payload, ensure_ascii=False, default=str))
     if not result.ok and not fail_open:
         raise SystemExit(1)
 
@@ -3174,9 +3221,20 @@ def main(argv: list[str] | None = None) -> None:
         help="host-native observation (Claude Code hooks)",
     )
     nat = p.add_subparsers(dest="native_command", required=True)
-    ni = nat.add_parser("install", help="write Claude Code hooks snippet")
-    ni.add_argument("--dir", default=None, help="output directory")
+    ni = nat.add_parser(
+        "install",
+        help="write Claude Code hooks and merge into ~/.claude/settings.json",
+    )
+    ni.add_argument("--dir", default=None, help="snippet output directory")
     ni.add_argument("--twin-bin", default="twin")
+    ni.add_argument(
+        "--settings", default=None,
+        help="Claude Code settings.json to merge into (default: ~/.claude/settings.json)",
+    )
+    ni.add_argument(
+        "--no-merge", action="store_true",
+        help="write snippet only; do not patch Claude Code settings",
+    )
     ni.set_defaults(func=cmd_native)
     ni = nat.add_parser("bindings", help="list HostSessionBindings")
     ni.add_argument("--host", default=None)

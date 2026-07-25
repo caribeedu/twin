@@ -64,10 +64,10 @@ Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md)
 
 #### How Claude Code hooks work
 
-1. `twin native install` writes a mergeable hooks snippet (does **not** auto-patch Claude settings).
-2. You merge the `hooks` object into Claude Code settings and restart.
-3. Each hook runs `twin native event --host claude-code --hook "$CLAUDE_HOOK_EVENT" --stdin --fail-open`.
-4. Twin normalizes the event, updates the binding/session, and — for SessionStart — may emit a context pack on stdout.
+1. `twin native install` writes a snippet under Twin home **and** merges Twin's `hooks` into `~/.claude/settings.json` (user-global). Prior Twin handlers are replaced; other hooks/settings are kept. Use `--no-merge` for snippet-only, or `--settings <path>` to target another file. A `.twin-bak` backup is written when an existing settings file is patched.
+2. Restart Claude Code (or start a new session). Confirm with `/hooks`.
+3. Each hook runs `twin native event --host claude-code --stdin --fail-open`. The event name comes from Claude's stdin JSON (`hook_event_name`).
+4. Twin normalizes the event, updates the binding/session, and — for SessionStart — may emit Claude's `hookSpecificOutput.additionalContext` with the context pack (observation hooks stay silent on stdout).
 
 | Claude Code hook | Twin event kind | Typical effect |
 |---|---|---|
@@ -83,7 +83,7 @@ Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist
 
 | Command / tool | What it does |
 |---|---|
-| `twin native install` | Write Claude Code hooks JSON snippet under Twin home (or `--dir`) |
+| `twin native install` | Write Claude Code hooks snippet + merge into `~/.claude/settings.json` (`--no-merge` / `--settings` / `--dir`) |
 | `twin native bindings` | List `HostSessionBinding`s |
 | `twin native event` | Ingest a host event (JSON or `--stdin`) |
 | MCP `native_bindings` | List native host bindings |

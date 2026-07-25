@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +13,10 @@ from twin.cognition.host_session import recommend_intervention
 from twin.cognition.sessions import start_session
 from twin.interfaces.native.claude_code import (
     MissingExternalSessionId,
+    build_hooks_object,
+    claude_hooks_stdout,
+    install_claude_code_hooks,
+    merge_hooks_into_settings,
     normalize_claude_code_hook,
     write_hooks_config,
 )
@@ -463,9 +468,105 @@ def test_intervention_is_heuristic_display_only(store, cfg, embedder):
     assert "Possible decision reversal cue" in recs[0].reason
 
 
-def test_write_hooks_config_fail_open(tmp_path):
+def test_write_hooks_config_matcher_group_schema(tmp_path):
+    """Claude Code expects matcher groups with nested hooks[], not flat handlers."""
     path = write_hooks_config(tmp_path, twin_bin="twin", home="/tmp/twin-home")
     data = json.loads(path.read_text())
-    cmd = data["hooks"]["SessionStart"][0]["command"]
+    group = data["hooks"]["SessionStart"][0]
+    assert "hooks" in group
+    assert group["matcher"] == ""
+    cmd = group["hooks"][0]["command"]
+    assert group["hooks"][0]["type"] == "command"
     assert "--fail-open" in cmd
+    assert "--stdin" in cmd
+    assert "native event --host claude-code" in cmd
+    # undocumented env var must not be required
+    assert "CLAUDE_HOOK_EVENT" not in cmd
     assert data["twin_native"]["capabilities"]["block_action"] is False
+    for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"):
+        assert event in data["hooks"]
+        assert data["hooks"][event][0]["hooks"][0]["type"] == "command"
+
+
+def test_merge_hooks_preserves_foreign_and_replaces_twin(tmp_path):
+    twin = build_hooks_object(twin_bin="twin", home="/tmp/h")
+    existing = {
+        "permissions": {"allow": ["Bash"]},
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup",
+                    "hooks": [{"type": "command", "command": "echo other"}],
+                },
+                # legacy flat Twin handler must be removed
+                {"type": "command", "command": "twin native event --host claude-code --stdin --fail-open"},
+            ],
+            "Notification": [
+                {
+                    "matcher": "",
+                    "hooks": [{"type": "command", "command": "notify-send hi"}],
+                }
+            ],
+        },
+    }
+    merged = merge_hooks_into_settings(existing, twin)
+    assert merged["permissions"] == {"allow": ["Bash"]}
+    starts = merged["hooks"]["SessionStart"]
+    assert any(
+        g.get("hooks", [{}])[0].get("command") == "echo other" for g in starts
+    )
+    twin_groups = [
+        g for g in starts
+        if "native event --host claude-code" in str(g.get("hooks", [{}])[0].get("command"))
+    ]
+    assert len(twin_groups) == 1
+    assert merged["hooks"]["Notification"][0]["hooks"][0]["command"] == "notify-send hi"
+
+    # idempotent reinstall
+    again = merge_hooks_into_settings(merged, twin)
+    twin_again = [
+        g for g in again["hooks"]["SessionStart"]
+        if "native event --host claude-code" in str(g.get("hooks", [{}])[0].get("command"))
+    ]
+    assert len(twin_again) == 1
+
+
+def test_install_merges_into_settings_with_backup(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"hooks": {"Stop": [{"matcher": "", "hooks": '
+                        '[{"type": "command", "command": "echo keep"}]}]}}\n')
+    result = install_claude_code_hooks(
+        twin_bin="twin",
+        home="/tmp/h",
+        snippet_dir=tmp_path / "snippet",
+        settings_path=settings,
+        merge=True,
+    )
+    assert result["merged"] is True
+    assert Path(result["backup"]).exists()
+    data = json.loads(settings.read_text())
+    assert any(
+        h.get("command") == "echo keep"
+        for g in data["hooks"]["Stop"] for h in g.get("hooks", [])
+    )
+    assert any(
+        "native event --host claude-code" in h.get("command", "")
+        for g in data["hooks"]["SessionStart"] for h in g.get("hooks", [])
+    )
+
+
+def test_claude_hooks_stdout_session_start_pack():
+    out = claude_hooks_stdout(
+        hook_event_name="SessionStart",
+        ok=True,
+        context_pack="remember the Atlas webhook decision",
+    )
+    assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "Atlas" in out["hookSpecificOutput"]["additionalContext"]
+    assert out["suppressOutput"] is True
+    assert claude_hooks_stdout(
+        hook_event_name="PreToolUse", ok=True, context_pack=None,
+    ) is None
+    assert claude_hooks_stdout(
+        hook_event_name="SessionStart", ok=False, error="boom",
+    ) is None

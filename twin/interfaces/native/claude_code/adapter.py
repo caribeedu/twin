@@ -185,6 +185,8 @@ def normalize_claude_code_hook(
         for k in ("permission_mode", "model", "tool_name")
         if k in data
     }
+    if name:
+        meta["hook_event_name"] = str(name)
     if not known:
         meta["unrecognized_hook"] = str(name) or True
     if data.get("transcript_path"):
@@ -227,46 +229,233 @@ def normalize_claude_code_hook(
     )
 
 
+# Marker used to find Twin-owned handlers when merging into Claude settings.
+TWIN_HOOK_MARKER = "native event --host claude-code"
+
+# Events Twin wires by default. Schema matches Claude Code settings:
+#   hooks.<Event> = [ { matcher?, hooks: [ { type, command } ] } ]
+# See https://code.claude.com/docs/en/hooks-guide
+_DEFAULT_HOOK_EVENTS = (
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+)
+
+
+def twin_hook_command(*, twin_bin: str = "twin", home: Optional[str] = None) -> str:
+    """Shell command Claude Code runs for every Twin-owned hook handler.
+
+    Event name comes from stdin JSON (``hook_event_name``) — Claude Code does
+    not document a ``$CLAUDE_HOOK_EVENT`` env var. ``--fail-open`` keeps Twin
+    failures from blocking the host.
+    """
+    home_flag = f' --home "{home}"' if home else ""
+    return (
+        f"{twin_bin}{home_flag} native event --host claude-code "
+        f"--stdin --fail-open"
+    )
+
+
+def _matcher_group(command: str, *, matcher: str = "") -> dict[str, Any]:
+    """One Claude Code matcher group wrapping a single command handler."""
+    group: dict[str, Any] = {
+        "hooks": [{"type": "command", "command": command}],
+    }
+    # Empty matcher = fire on every occurrence (SessionStart sources, all tools, …).
+    # Claude silently ignores matcher on events that don't support it.
+    if matcher != "":
+        group["matcher"] = matcher
+    else:
+        group["matcher"] = ""
+    return group
+
+
+def build_hooks_object(*, twin_bin: str = "twin", home: Optional[str] = None) -> dict[str, Any]:
+    """Claude Code ``hooks`` object (matcher-group schema)."""
+    cmd = twin_hook_command(twin_bin=twin_bin, home=home)
+    return {event: [_matcher_group(cmd)] for event in _DEFAULT_HOOK_EVENTS}
+
+
+def is_twin_hook_handler(handler: Any) -> bool:
+    """True when a hook handler object is Twin-owned (safe to replace on reinstall)."""
+    if not isinstance(handler, dict):
+        return False
+    cmd = handler.get("command")
+    return isinstance(cmd, str) and TWIN_HOOK_MARKER in cmd
+
+
+def is_twin_matcher_group(group: Any) -> bool:
+    """True when a matcher group contains only Twin handlers (or is Twin-shaped empty)."""
+    if not isinstance(group, dict):
+        return False
+    handlers = group.get("hooks")
+    if not isinstance(handlers, list) or not handlers:
+        return False
+    return all(is_twin_hook_handler(h) for h in handlers)
+
+
+def merge_hooks_into_settings(
+    settings: dict[str, Any],
+    twin_hooks: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge Twin hooks into a Claude Code settings document.
+
+    Idempotent: removes prior Twin-owned matcher groups / flat handlers, then
+    inserts the current Twin groups. Never drops unrelated hooks or settings keys.
+    """
+    out = dict(settings)
+    existing = out.get("hooks")
+    if not isinstance(existing, dict):
+        existing = {}
+    merged: dict[str, Any] = {k: list(v) if isinstance(v, list) else v
+                              for k, v in existing.items()}
+
+    for event, groups in twin_hooks.items():
+        current = merged.get(event)
+        kept: list[Any] = []
+        if isinstance(current, list):
+            for item in current:
+                # Current schema: matcher groups with nested hooks[].
+                if is_twin_matcher_group(item):
+                    continue
+                # Legacy flat schema Twin used to write: {type, command} at top level.
+                if is_twin_hook_handler(item):
+                    continue
+                kept.append(item)
+        for group in groups:
+            kept.append(group)
+        merged[event] = kept
+
+    out["hooks"] = merged
+    return out
+
+
+def default_claude_settings_path() -> Path:
+    """User-scoped Claude Code settings (all projects on this machine)."""
+    return Path.home() / ".claude" / "settings.json"
+
+
+def install_claude_code_hooks(
+    *,
+    twin_bin: str = "twin",
+    home: Optional[str] = None,
+    snippet_dir: Optional[Path] = None,
+    settings_path: Optional[Path] = None,
+    merge: bool = True,
+) -> dict[str, Any]:
+    """Write the snippet and optionally merge into Claude Code settings.
+
+    Returns paths + merged flag for the CLI to report.
+    """
+    twin_hooks = build_hooks_object(twin_bin=twin_bin, home=home)
+    snippet_dir = Path(snippet_dir) if snippet_dir else None
+    if snippet_dir is None:
+        raise ValueError("snippet_dir is required")
+    snippet_dir.mkdir(parents=True, exist_ok=True)
+
+    config = {
+        "hooks": twin_hooks,
+        "twin_native": {
+            "host": "claude-code",
+            "capabilities": CLAUDE_CODE_CAPABILITIES.model_dump(),
+            "protocol": {
+                "stdout": (
+                    "with --fail-open: Claude hook JSON "
+                    "(SessionStart → hookSpecificOutput.additionalContext); "
+                    "otherwise NativeEventResult JSON"
+                ),
+                "stderr": "diagnostics / twin errors (never blocks the host when --fail-open)",
+                "external_session_id": "required — cwd is never used as conversation identity",
+                "hook_event_name": "read from stdin JSON (Claude Code sets hook_event_name)",
+            },
+            "note": (
+                "hooks use Claude Code matcher-group schema. "
+                "`twin native install` merges into ~/.claude/settings.json by default."
+            ),
+        },
+    }
+    snippet_path = snippet_dir / "twin-claude-code-hooks.json"
+    snippet_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+    result: dict[str, Any] = {
+        "snippet": str(snippet_path),
+        "merged": False,
+        "settings": None,
+        "backup": None,
+    }
+    if not merge:
+        return result
+
+    path = Path(settings_path) if settings_path else default_claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    settings: dict[str, Any] = {}
+    if path.exists():
+        raw = path.read_text(encoding="utf-8").strip()
+        if raw:
+            try:
+                loaded = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"{path} is not valid JSON — fix it manually before re-running "
+                    f"twin native install ({exc})"
+                ) from exc
+            if not isinstance(loaded, dict):
+                raise ValueError(f"{path} must be a JSON object")
+            settings = loaded
+            backup = path.with_suffix(path.suffix + ".twin-bak")
+            backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+            result["backup"] = str(backup)
+
+    merged = merge_hooks_into_settings(settings, twin_hooks)
+    path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    result["merged"] = True
+    result["settings"] = str(path)
+    return result
+
+
 def write_hooks_config(
     target_dir: Path,
     *,
     twin_bin: str = "twin",
     home: Optional[str] = None,
 ) -> Path:
-    """Write a Claude Code ``settings`` hooks snippet that calls Twin.
+    """Write a Claude Code hooks snippet that calls Twin (snippet only, no merge).
 
     Observation hooks are fail-open (CLI exits 0 even when Twin fails).
-    Context Pack is only emitted for SessionStart.
+    Context Pack is only emitted for SessionStart (as additionalContext).
     """
-    target_dir = Path(target_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    home_flag = f' --home "{home}"' if home else ""
-    cmd = (
-        f'{twin_bin}{home_flag} native event --host claude-code '
-        f'--hook "$CLAUDE_HOOK_EVENT" --stdin --fail-open'
+    result = install_claude_code_hooks(
+        twin_bin=twin_bin,
+        home=home,
+        snippet_dir=Path(target_dir),
+        merge=False,
     )
-    config = {
-        "hooks": {
-            "SessionStart": [{"type": "command", "command": cmd}],
-            "UserPromptSubmit": [{"type": "command", "command": cmd}],
-            "PreToolUse": [{"type": "command", "command": cmd}],
-            "PostToolUse": [{"type": "command", "command": cmd}],
-            "Stop": [{"type": "command", "command": cmd}],
-        },
-        "twin_native": {
-            "host": "claude-code",
-            "capabilities": CLAUDE_CODE_CAPABILITIES.model_dump(),
-            "protocol": {
-                "stdout": "JSON NativeEventResult; context_pack only for SessionStart/pack_request",
-                "stderr": "diagnostics / twin errors (never blocks the host when --fail-open)",
-                "external_session_id": "required — cwd is never used as conversation identity",
+    return Path(result["snippet"])
+
+
+def claude_hooks_stdout(
+    *,
+    hook_event_name: str,
+    ok: bool,
+    context_pack: Optional[str] = None,
+    error: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Stdout payload Claude Code understands when Twin runs as a hook.
+
+    - SessionStart with a pack → ``hookSpecificOutput.additionalContext``
+    - Other events → ``None`` (silent success; observation already persisted)
+    - Failures under ``--fail-open`` → ``None`` (stderr carries diagnostics)
+    """
+    if not ok:
+        return None
+    if hook_event_name in ("SessionStart", "session_start") and context_pack:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": context_pack,
             },
-            "note": (
-                "proof adapter. Merge `hooks` into Claude Code "
-                "settings. Twin observes via the same cognitive core as MCP."
-            ),
-        },
-    }
-    path = target_dir / "twin-claude-code-hooks.json"
-    path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    return path
+            "suppressOutput": True,
+        }
+    return None
