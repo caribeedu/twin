@@ -1,8 +1,8 @@
-"""CLI developer experience helpers ().
+"""CLI developer experience helpers.
 
-Single-key input, progress with ETA, and Twin brand styling.
-Uses ``rich`` when installed; falls back to plain stdout so CI/tests never
-hard-depend on it.
+Rules, panels, legends, tables, single-key input, progress with ETA, and Twin
+brand styling. Uses ``rich`` when installed; falls back to plain stdout so
+CI/tests never hard-depend on it.
 """
 
 from __future__ import annotations
@@ -153,6 +153,51 @@ def print_kv(rows: Sequence[tuple[str, str]]) -> None:
         return
     for k, v in rows:
         print(f"  {k}: {v}")
+
+
+def print_table(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[object]],
+    *,
+    title: str = "",
+) -> None:
+    """Render a branded table; plain aligned columns without Rich.
+
+    Empty ``rows`` prints nothing (callers show their own empty-state warning).
+    """
+    if not rows:
+        return
+    str_rows = [[("" if c is None else str(c)) for c in row] for row in rows]
+    r = _rich()
+    if r:
+        table = r["Table"](
+            show_header=True,
+            header_style=BRAND_BOLD,
+            box=None,
+            padding=(0, 2),
+            title=(f"[{BRAND_BOLD}]{title}[/]" if title else None),
+        )
+        for head in headers:
+            table.add_column(str(head), style="bright_white", overflow="fold")
+        for row in str_rows:
+            table.add_row(*row)
+        r["Console"](highlight=False).print(table)
+        return
+    widths = [len(str(h)) for h in headers]
+    for row in str_rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+    if title:
+        print(title)
+    print("  ".join(str(h).ljust(widths[i]) for i, h in enumerate(headers)))
+    print("  ".join("-" * widths[i] for i in range(len(headers))))
+    for row in str_rows:
+        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
+
+
+def print_next(entries: Sequence[tuple[str, str]]) -> None:
+    """Show a "next steps" legend (arrow + suggested command)."""
+    print_legend(entries, title="next")
 
 
 def score_bar(score: float, *, width: int = 12) -> str:

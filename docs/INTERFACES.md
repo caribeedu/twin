@@ -367,6 +367,8 @@ Any MCP stdio-compatible client works with:
 
 Terminal / scripting surface. Global flag: `--home` sets Twin home (default `~/.twin` or `$TWIN_HOME`).
 
+Add `--json` to any of them to get machine-readable output for scripting and pipes (mirrors `twin pack --json`). The machine protocol surfaces stay unchanged and always speak their own protocol: `twin native event` (JSON on stdout for host hooks, with `--fail-open`), `twin mcp` (MCP over stdio), and `twin serve` (HTTP API).
+
 ### Setup & doctors
 
 | Command | What it does |

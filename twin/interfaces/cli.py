@@ -42,6 +42,67 @@ def _print(data) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
+def _want_json(args) -> bool:
+    return bool(getattr(args, "json", False))
+
+
+def _emit(args, data, pretty) -> None:
+    """Machine path when ``--json`` is set, else the human ``pretty`` callable.
+
+    ``data`` is JSON-serialised (``_print``) for scripts; ``pretty`` renders the
+    branded human view. Keeps every ported command's ``--json`` branch uniform.
+    """
+    if _want_json(args):
+        _print(data)
+        return
+    pretty()
+
+
+def _add_json_flag(parser) -> None:
+    """Attach a uniform ``--json`` escape hatch for scripting/machine output."""
+    parser.add_argument(
+        "--json", action="store_true",
+        help="emit machine-readable JSON instead of the human view",
+    )
+
+
+def _summary_kv(data: dict) -> list[tuple[str, str]]:
+    """Flatten a result dict to KV rows: scalars verbatim, containers summarised."""
+    rows: list[tuple[str, str]] = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            rows.append((str(key), f"{{{len(value)} field(s)}}"))
+        elif isinstance(value, list):
+            rows.append((str(key), f"[{len(value)} item(s)]"))
+        elif isinstance(value, bool):
+            rows.append((str(key), "yes" if value else "no"))
+        else:
+            rows.append((str(key), str(value)))
+    return rows
+
+
+def _work_spinner(args, message: str):
+    """Spinner while working, unless ``--json`` (keeps stdout pure JSON)."""
+    from contextlib import nullcontext
+
+    from . import ux
+
+    if _want_json(args):
+        return nullcontext()
+    return ux.spinner(message)
+
+
+def _add_json_flag_tree(parser) -> None:
+    """Add ``--json`` to every leaf subparser under ``parser`` (recursively)."""
+    subs = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+    if not subs:
+        _add_json_flag(parser)
+        return
+    for sub in subs:
+        for child in sub.choices.values():
+            _add_json_flag_tree(child)
+
+
 def cmd_init(args) -> None:
     from . import ux
     from .setup_wizard import run_setup_wizard
@@ -115,6 +176,7 @@ def cmd_ingest(args) -> None:
 def cmd_interpret(args) -> None:
     from collections import Counter
 
+    from . import ux
     from ..cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
 
     ws = Workspace(args.home)
@@ -124,36 +186,78 @@ def cmd_interpret(args) -> None:
             i for i in ws.store.list_interpretations(limit=10000)
             if i.status in ("deferred", "error")
         ]
-        if not stuck:
-            print("no deferred/error percepts")
-            return
-        for st in stuck:
-            flag = "terminal" if st.terminal else "retryable"
-            print(
-                f"{st.percept_id}  {st.status}/{st.failure_class or '-'}  "
-                f"attempts={st.attempts}  {flag}  "
-                f"next={st.next_attempt_at or 'now'}  {st.detail}"
+        rows = [
+            {
+                "percept_id": st.percept_id,
+                "status": f"{st.status}/{st.failure_class or '-'}",
+                "attempts": st.attempts,
+                "kind": "terminal" if st.terminal else "retryable",
+                "next": st.next_attempt_at or "now",
+                "detail": st.detail,
+            }
+            for st in stuck
+        ]
+
+        def pretty():
+            ux.print_rule("interpret · deferred")
+            if not rows:
+                ux.print_ok("no deferred/error percepts")
+                return
+            ux.print_table(
+                ["percept", "status", "attempts", "kind", "next", "detail"],
+                [[r["percept_id"], r["status"], r["attempts"], r["kind"],
+                  r["next"], (r["detail"] or "")[:50]] for r in rows],
             )
+            ux.print_warn(f"{len(rows)} percept(s) awaiting retry")
+
+        _emit(args, {"deferred": rows, "count": len(rows)}, pretty)
         return
     if args.interpret_command == "signals":
         signals = ws.store.list_detection_signals(limit=10000)
-        if not signals:
-            print("no detection signals (heuristic mode records hints, not memories)")
-            return
-        for s in signals:
-            print(f"{s.percept_id}  {s.kind:20}  {s.span[:70]}")
+        rows = [{"percept_id": s.percept_id, "kind": s.kind, "span": s.span}
+                for s in signals]
+
+        def pretty():
+            ux.print_rule("interpret · signals")
+            if not rows:
+                ux.print_warn("no detection signals (heuristic mode records hints, not memories)")
+                return
+            ux.print_table(
+                ["percept", "kind", "span"],
+                [[r["percept_id"], r["kind"], (r["span"] or "")[:70]] for r in rows],
+            )
+            ux.print_ok(f"{len(rows)} routing hint(s)")
+
+        _emit(args, {"signals": rows, "count": len(rows)}, pretty)
         return
     # status
     counts = Counter(i.status for i in ws.store.list_interpretations(limit=10000))
     never = len([p for p in ws.store.percepts_pending_interpretation(
         max_attempts=MAX_INTERPRETATION_ATTEMPTS)
         if ws.store.get_interpretation(p.id) is None])
-    print(f"never interpreted : {never}")
-    for status in ("interpreted", "empty", "deferred", "error",
-                   "heuristic_detection", "quarantined"):
-        print(f"{status:20}: {counts.get(status, 0)}")
+    statuses = ("interpreted", "empty", "deferred", "error",
+                "heuristic_detection", "quarantined")
     signal_count = len(ws.store.list_detection_signals(limit=10000))
-    print(f"{'detection_signals':20}: {signal_count} (routing hints, not memories)")
+    data = {
+        "never_interpreted": never,
+        **{s: counts.get(s, 0) for s in statuses},
+        "detection_signals": signal_count,
+    }
+
+    def pretty():
+        ux.print_rule("interpret · status")
+        ux.print_kv([
+            ("never interpreted", str(never)),
+            *[(s, str(counts.get(s, 0))) for s in statuses],
+            ("detection_signals", f"{signal_count} (routing hints, not memories)"),
+        ])
+        pending = never + counts.get("deferred", 0) + counts.get("error", 0)
+        if pending:
+            ux.print_next([("→", "twin extract   — interpret pending percepts")])
+        else:
+            ux.print_ok("nothing pending interpretation")
+
+    _emit(args, data, pretty)
 
 
 def cmd_extract(args) -> None:
@@ -256,10 +360,30 @@ def cmd_review(args) -> None:
     ws = Workspace(args.home)
     if getattr(args, "analyze", False):
         reports = analyze_candidates(ws.store, ws.embedder)
-        ux.print_ok(f"analyzed {len(reports)} candidates")
-        for r in reports[:20]:
-            print(f"  {r.memory_id} prio={r.review_priority:.2f} "
-                  f"action={r.suggested_action.value} flags={r.quality_flags}")
+        rows = [
+            {
+                "memory_id": r.memory_id,
+                "priority": round(r.review_priority, 2),
+                "action": r.suggested_action.value,
+                "flags": list(r.quality_flags),
+            }
+            for r in reports
+        ]
+
+        def pretty():
+            ux.print_rule("review · analyze")
+            if not rows:
+                ux.print_ok("no candidates to analyze")
+                return
+            ux.print_table(
+                ["memory", "priority", "action", "flags"],
+                [[r["memory_id"], f"{r['priority']:.2f}", r["action"],
+                  ", ".join(r["flags"]) or "—"] for r in rows[:20]],
+            )
+            ux.print_ok(f"analyzed {len(rows)} candidate(s)")
+            ux.print_next([("→", "twin review   — step through the queue interactively")])
+
+        _emit(args, {"reports": rows, "count": len(rows)}, pretty)
         return
 
     queue = review_queue(
@@ -324,6 +448,7 @@ def cmd_review(args) -> None:
 
 
 def cmd_review_batch(args) -> None:
+    from . import ux
     from ..memory.batches import create_batch, get_batch
 
     ws = Workspace(args.home)
@@ -336,19 +461,50 @@ def cmd_review_batch(args) -> None:
             if proj:
                 query["project_id"] = proj.id
         batch = create_batch(ws.store, args.name or "batch", query=query)
-        print(f"{batch.id}  {batch.name}  {batch.progress_total} memories")
+        data = {"id": batch.id, "name": batch.name, "total": batch.progress_total}
+
+        def pretty():
+            ux.print_rule("review-batch · create")
+            ux.print_kv([
+                ("batch", batch.id), ("name", batch.name),
+                ("memories", str(batch.progress_total)),
+            ])
+            ux.print_ok("batch created")
+            ux.print_next([("→", f"twin review-batch resume {batch.id}")])
+
+        _emit(args, data, pretty)
     elif args.batch_command == "resume":
         batch = get_batch(ws.store, args.batch_id)
         if batch is None:
             raise SystemExit(f"batch {args.batch_id} not found")
-        print(f"{batch.id}  reviewed {batch.progress_reviewed}/{batch.progress_total}")
+        upcoming = []
         for mid in batch.memory_ids[batch.progress_reviewed:batch.progress_reviewed + 5]:
             m = ws.store.get_memory(mid)
             if m:
-                print(f"  {m.id}  {m.title}")
+                upcoming.append({"id": m.id, "title": m.title})
+        data = {
+            "id": batch.id, "reviewed": batch.progress_reviewed,
+            "total": batch.progress_total, "upcoming": upcoming,
+        }
+
+        def pretty():
+            ux.print_rule("review-batch · resume")
+            ux.print_kv([
+                ("batch", batch.id),
+                ("progress", f"{batch.progress_reviewed}/{batch.progress_total}"),
+            ])
+            if upcoming:
+                ux.print_table(
+                    ["memory", "title"],
+                    [[u["id"], u["title"]] for u in upcoming],
+                )
+            ux.print_next([("→", "twin review   — review candidates interactively")])
+
+        _emit(args, data, pretty)
 
 
 def cmd_memory(args) -> None:
+    from . import ux
     from ..memory.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
     from ..memory.provenance import memory_provenance
 
@@ -357,80 +513,200 @@ def cmd_memory(args) -> None:
         a, b = ws.store.get_memory(args.id_a), ws.store.get_memory(args.id_b)
         if not a or not b:
             raise SystemExit("memory not found")
-        print(f"A: {a.title}\n   {a.summary}\n")
-        print(f"B: {b.title}\n   {b.summary}")
+
+        def pretty():
+            ux.print_rule("memory diff")
+            ux.print_panel(f"{a.title}\n\n{a.summary}", title=f"A · {a.id}")
+            ux.print_panel(f"{b.title}\n\n{b.summary}", title=f"B · {b.id}")
+
+        _emit(args, {
+            "a": {"id": a.id, "title": a.title, "summary": a.summary},
+            "b": {"id": b.id, "title": b.title, "summary": b.summary},
+        }, pretty)
     elif args.memory_command == "merge":
         result = merge_memories(ws.store, args.ids, embedder=ws.embedder)
-        print(f"merged → {result.extras.get('merged_id')}  op={result.operation_id}")
+        merged = result.extras.get("merged_id")
+
+        def pretty():
+            ux.print_rule("memory merge")
+            ux.print_ok(f"merged {len(args.ids)} → {merged}")
+            ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
+
+        _emit(args, {"merged_id": merged, "operation_id": result.operation_id}, pretty)
     elif args.memory_command == "split":
         parts = [{"title": p, "summary": p} for p in args.parts]
         result = split_memory(ws.store, args.memory_id, parts, embedder=ws.embedder)
-        print(f"split → {result.extras.get('children')}  op={result.operation_id}")
+        children = result.extras.get("children")
+
+        def pretty():
+            ux.print_rule("memory split")
+            ux.print_ok(f"split {args.memory_id} → {children}")
+            ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
+
+        _emit(args, {"children": children, "operation_id": result.operation_id}, pretty)
     elif args.memory_command == "provenance":
-        print(json.dumps(memory_provenance(ws.store, args.memory_id), indent=2, default=str))
+        prov = memory_provenance(ws.store, args.memory_id)
+
+        def pretty():
+            ux.print_rule(f"provenance · {args.memory_id}")
+            ux.print_panel(json.dumps(prov, indent=2, default=str), title="lineage")
+
+        _emit(args, prov, pretty)
     elif args.memory_command == "archive":
         result = archive_memory(ws.store, args.memory_id)
-        print(f"archived {args.memory_id}  op={result.operation_id}")
+
+        def pretty():
+            ux.print_rule("memory archive")
+            ux.print_ok(f"archived {args.memory_id}")
+            ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
+
+        _emit(args, {"archived": args.memory_id, "operation_id": result.operation_id}, pretty)
     elif args.memory_command == "unsupported":
-        for m in ws.store.list_memories(status="unsupported", limit=200):
-            print(f"{m.id}  {m.title}")
+        rows = [{"id": m.id, "title": m.title}
+                for m in ws.store.list_memories(status="unsupported", limit=200)]
+
+        def pretty():
+            ux.print_rule("memory · unsupported")
+            if not rows:
+                ux.print_ok("no unsupported memories")
+                return
+            ux.print_table(["memory", "title"], [[r["id"], r["title"]] for r in rows])
+
+        _emit(args, {"unsupported": rows, "count": len(rows)}, pretty)
     elif args.memory_command == "undo":
-        print(undo_operation(ws.store, args.operation_id))
+        out = undo_operation(ws.store, args.operation_id)
+
+        def pretty():
+            ux.print_rule("memory undo")
+            ux.print_ok(f"reverted operation {args.operation_id}")
+            ux.print_panel(json.dumps(out, indent=2, default=str), title="result")
+
+        _emit(args, out, pretty)
 
 
 def cmd_eval(args) -> None:
+    from . import ux
     from ..evals import compare_runs, default_eval_root, run_extraction_eval, run_retrieval_eval
 
     ws = Workspace(args.home)
     root = default_eval_root()
     if args.eval_command == "extraction":
-        run = run_extraction_eval(ws.store, ws.cfg, ws.embedder, root / "extraction")
-        print(json.dumps({"id": run.id, "summary": run.summary}, indent=2))
+        with _work_spinner(args, "Running extraction eval…"):
+            run = run_extraction_eval(ws.store, ws.cfg, ws.embedder, root / "extraction")
+        data = {"id": run.id, "summary": run.summary}
+
+        def pretty():
+            ux.print_rule("eval · extraction")
+            ux.print_kv([("run", run.id)])
+            ux.print_panel(json.dumps(run.summary, indent=2, default=str), title="summary")
+
+        _emit(args, data, pretty)
     elif args.eval_command == "retrieval":
-        run = run_retrieval_eval(ws.store, ws.embedder, root / "retrieval", firewall=ws.firewall)
-        print(json.dumps({"id": run.id, "summary": run.summary}, indent=2))
+        with _work_spinner(args, "Running retrieval eval…"):
+            run = run_retrieval_eval(ws.store, ws.embedder, root / "retrieval", firewall=ws.firewall)
+        data = {"id": run.id, "summary": run.summary}
+
+        def pretty():
+            ux.print_rule("eval · retrieval")
+            ux.print_kv([("run", run.id)])
+            ux.print_panel(json.dumps(run.summary, indent=2, default=str), title="summary")
+
+        _emit(args, data, pretty)
     elif args.eval_command == "golden":
         from ..evals.golden import run_golden_work_loop
-        report = run_golden_work_loop(ws.store, ws.cfg, ws.embedder)
-        print(json.dumps(report, indent=2, default=str))
+        with _work_spinner(args, "Running golden work-loop…"):
+            report = run_golden_work_loop(ws.store, ws.cfg, ws.embedder)
+
+        def pretty():
+            ux.print_rule("eval · golden")
+            ux.print_kv(_summary_kv(report))
+            if report.get("ok"):
+                ux.print_ok("golden scenario passed")
+            else:
+                ux.print_err("golden scenario failed — inspect with --json")
+
+        _emit(args, report, pretty)
         if not report.get("ok"):
             raise SystemExit(1)
     elif args.eval_command == "compare":
-        print("compare requires two prior run payloads; use API /api/evals for now")
+        msg = "compare requires two prior run payloads; use API /api/evals for now"
+
+        def pretty():
+            ux.print_rule("eval · compare")
+            ux.print_warn(msg)
+
+        _emit(args, {"error": msg}, pretty)
 
 
 def cmd_source(args) -> None:
+    from . import ux
     from ..memory.calibration import load_calibration, source_report
 
     ws = Workspace(args.home)
     cal = load_calibration(ws.cfg.calibration_path)
-    print(json.dumps(source_report(cal, args.source if args.source != "all" else None), indent=2))
+    report = source_report(cal, args.source if args.source != "all" else None)
+
+    def pretty():
+        ux.print_rule("source calibration")
+        ux.print_panel(json.dumps(report, indent=2, default=str),
+                       title=args.source)
+
+    _emit(args, report, pretty)
 
 
 def cmd_retention(args) -> None:
+    from . import ux
     from ..memory.retention import apply_retention_policies
 
     ws = Workspace(args.home)
     dry = not getattr(args, "apply", False)
-    print(json.dumps(apply_retention_policies(ws.store, dry_run=dry), indent=2))
+    result = apply_retention_policies(ws.store, dry_run=dry)
+
+    def pretty():
+        ux.print_rule("retention")
+        ux.print_kv([("mode", "dry-run" if dry else "apply")])
+        ux.print_panel(json.dumps(result, indent=2, default=str), title="policies")
+        if dry:
+            ux.print_warn("dry-run — re-run with --apply to enforce")
+        else:
+            ux.print_ok("retention policies applied")
+
+    _emit(args, result, pretty)
 
 
 def cmd_delete_source(args) -> None:
+    from . import ux
     from ..memory.retention import delete_by_source_system
 
     ws = Workspace(args.home)
     dry = not getattr(args, "apply", False)
-    print(json.dumps(
-        delete_by_source_system(ws.store, args.source_system, dry_run=dry),
-        indent=2, default=str,
-    ))
+    result = delete_by_source_system(ws.store, args.source_system, dry_run=dry)
+
+    def pretty():
+        ux.print_rule(f"delete-source · {args.source_system}")
+        ux.print_kv([("mode", "dry-run" if dry else "apply")])
+        ux.print_panel(json.dumps(result, indent=2, default=str), title="deletion")
+        if dry:
+            ux.print_warn("dry-run — re-run with --apply to delete")
+        else:
+            ux.print_ok("source deletion propagated")
+
+    _emit(args, result, pretty)
 
 
 def cmd_undo(args) -> None:
+    from . import ux
     from ..memory.lifecycle import undo_operation
 
     ws = Workspace(args.home)
-    print(json.dumps(undo_operation(ws.store, args.operation_id), indent=2))
+    out = undo_operation(ws.store, args.operation_id)
+
+    def pretty():
+        ux.print_rule("undo")
+        ux.print_ok(f"reverted operation {args.operation_id}")
+        ux.print_panel(json.dumps(out, indent=2, default=str), title="result")
+
+    _emit(args, out, pretty)
 
 
 def cmd_search(args) -> None:
@@ -550,54 +826,95 @@ def cmd_pack(args) -> None:
 
 
 def cmd_observe(args) -> None:
+    from . import ux
     from ..cognition.observer import observe
 
     ws = Workspace(args.home)
-    s = observe(ws.store, ws.cfg, ws.embedder, args.text, args.domain)
-    _print({
+    ux_domain = args.domain or "(inferred)"
+    with _work_spinner(args, "Observing current text…"):
+        s = observe(ws.store, ws.cfg, ws.embedder, args.text, args.domain)
+    data = {
         "inferred_domain": s.inferred_domain,
         "suggested_context": s.suggested_context,
         "blocked_context": s.blocked_context,
-    })
+    }
+
+    def pretty():
+        ux.print_rule("observe")
+        ux.print_kv([
+            ("requested domain", ux_domain),
+            ("inferred domain", s.inferred_domain or "—"),
+        ])
+        if s.suggested_context:
+            ux.print_panel(s.suggested_context, title="suggested context")
+        else:
+            ux.print_warn("no context suggested (nothing passed retrieval / firewall)")
+        if s.blocked_context:
+            ux.print_warn("some context withheld by firewall")
+
+    _emit(args, data, pretty)
 
 
 def cmd_workspace(args) -> None:
+    from . import ux
     from ..cognition.workspace import workspace_tick
 
     ws = Workspace(args.home)
     if args.workspace_command != "tick":
         raise SystemExit(f"unknown workspace command: {args.workspace_command}")
-    result = workspace_tick(
-        ws.store, ws.cfg, ws.embedder, args.text,
-        session_id=getattr(args, "session_id", "") or "",
-        target_domain=getattr(args, "domain", None),
-        cwd=getattr(args, "cwd", None),
-        interpret=bool(getattr(args, "interpret", False)),
-        input_mode=getattr(args, "input_mode", "snapshot") or "snapshot",
-        sequence=getattr(args, "sequence", None),
-        idempotency_key=getattr(args, "idempotency_key", None),
-        retry=bool(getattr(args, "retry", False)),
-        firewall=ws.firewall,
-    )
-    _print(result.to_dict())
+    with _work_spinner(args, "Running workspace tick…"):
+        result = workspace_tick(
+            ws.store, ws.cfg, ws.embedder, args.text,
+            session_id=getattr(args, "session_id", "") or "",
+            target_domain=getattr(args, "domain", None),
+            cwd=getattr(args, "cwd", None),
+            interpret=bool(getattr(args, "interpret", False)),
+            input_mode=getattr(args, "input_mode", "snapshot") or "snapshot",
+            sequence=getattr(args, "sequence", None),
+            idempotency_key=getattr(args, "idempotency_key", None),
+            retry=bool(getattr(args, "retry", False)),
+            firewall=ws.firewall,
+        )
+    data = result.to_dict()
+
+    def pretty():
+        ux.print_rule("workspace · tick")
+        ux.print_kv(_summary_kv(data))
+        ux.print_ok("tick complete — full payload with --json")
+
+    _emit(args, data, pretty)
 
 
 def cmd_consolidate(args) -> None:
+    from . import ux
     from ..cognition.consolidation_cycle import run_consolidation_cycle
 
     ws = Workspace(args.home)
     kind = args.consolidate_command
-    result = run_consolidation_cycle(
-        ws.store, ws.cfg, ws.embedder,
-        kind=kind,
-        dry_run=not getattr(args, "apply", False),
-        analyze_limit=int(getattr(args, "limit", 200) or 200),
-        retry=bool(getattr(args, "retry", False)),
-    )
-    _print(result.to_dict())
+    dry = not getattr(args, "apply", False)
+    with _work_spinner(args, f"Running {kind} consolidation…"):
+        result = run_consolidation_cycle(
+            ws.store, ws.cfg, ws.embedder,
+            kind=kind,
+            dry_run=dry,
+            analyze_limit=int(getattr(args, "limit", 200) or 200),
+            retry=bool(getattr(args, "retry", False)),
+        )
+    data = result.to_dict()
+
+    def pretty():
+        ux.print_rule(f"consolidate · {kind}")
+        ux.print_kv([("mode", "dry-run" if dry else "apply"), *_summary_kv(data)])
+        if dry:
+            ux.print_warn("dry-run — re-run with --apply to write changes")
+        else:
+            ux.print_ok("consolidation applied")
+
+    _emit(args, data, pretty)
 
 
 def cmd_runtime(args) -> None:
+    from . import ux
     from ..runtime.models import JobKind
     from ..runtime.queue import RuntimeQueue
     from ..runtime.scheduler import RuntimeScheduler
@@ -608,6 +925,7 @@ def cmd_runtime(args) -> None:
     q = RuntimeQueue(ws.store)
 
     if cmd == "start":
+        # long-running foreground service — not a JSON dump
         rt = TwinRuntime(
             ws.store, ws.cfg, ws.embedder,
             workers=int(getattr(args, "workers", 2) or 2),
@@ -616,22 +934,46 @@ def cmd_runtime(args) -> None:
             schedule_interval=float(getattr(args, "schedule_interval", 30) or 30),
             offline=bool(getattr(args, "offline", False)),
         )
+        if not _want_json(args):
+            ux.print_rule("runtime · start")
+            ux.print_ok("runtime started — Ctrl+C to stop")
         rt.run()
         return
 
     if cmd == "status":
-        _print({
+        recent = [j.model_dump(mode="json") for j in ws.store.list_runtime_jobs(limit=20)]
+        data = {
             "queue": ws.store.runtime_queue_depth(),
             "dead_letters": len(ws.store.list_runtime_dead_letters(limit=500)),
-            "recent": [j.model_dump(mode="json") for j in ws.store.list_runtime_jobs(limit=20)],
-        })
+            "recent": recent,
+        }
+
+        def pretty():
+            ux.print_rule("runtime · status")
+            ux.print_kv([
+                ("queue depth", str(data["queue"])),
+                ("dead letters", str(data["dead_letters"])),
+                ("recent jobs", str(len(recent))),
+            ])
+            if recent:
+                ux.print_table(
+                    ["job", "kind", "status"],
+                    [[j.get("id"), j.get("kind"), j.get("status")] for j in recent],
+                )
+
+        _emit(args, data, pretty)
         return
 
     if cmd == "schedule":
         ids = RuntimeScheduler(
             q, vault_id=getattr(args, "vault", None) or "vault_general",
         ).tick()
-        _print({"enqueued": ids})
+
+        def pretty():
+            ux.print_rule("runtime · schedule")
+            ux.print_ok(f"enqueued {len(ids)} due job(s)")
+
+        _emit(args, {"enqueued": ids}, pretty)
         return
 
     if cmd == "enqueue":
@@ -646,38 +988,75 @@ def cmd_runtime(args) -> None:
             vault_id=getattr(args, "vault", None) or "vault_general",
             priority=int(getattr(args, "priority", 100) or 100),
         )
-        _print(job.model_dump(mode="json"))
+        data = job.model_dump(mode="json")
+
+        def pretty():
+            ux.print_rule("runtime · enqueue")
+            ux.print_kv([("job", data.get("id")), ("kind", data.get("kind")),
+                         ("status", data.get("status"))])
+            ux.print_ok("job enqueued")
+
+        _emit(args, data, pretty)
         return
 
     if cmd == "job":
         job = ws.store.get_runtime_job(args.job_id)
         if job is None:
             raise SystemExit(f"job {args.job_id} not found")
-        _print(job.model_dump(mode="json"))
+        data = job.model_dump(mode="json")
+
+        def pretty():
+            ux.print_rule(f"runtime job · {args.job_id}")
+            ux.print_panel(json.dumps(data, indent=2, default=str), title="job")
+
+        _emit(args, data, pretty)
         return
 
     if cmd == "retry":
         job = q.retry(args.job_id)
         if job is None:
             raise SystemExit(f"job {args.job_id} not found")
-        _print(job.model_dump(mode="json"))
+        data = job.model_dump(mode="json")
+
+        def pretty():
+            ux.print_rule("runtime · retry")
+            ux.print_ok(f"requeued {args.job_id} → {data.get('status')}")
+
+        _emit(args, data, pretty)
         return
 
     if cmd == "cancel":
         ok = q.cancel(args.job_id)
-        _print({"id": args.job_id, "cancelled": ok})
+
+        def pretty():
+            ux.print_rule("runtime · cancel")
+            if ok:
+                ux.print_ok(f"cancelled {args.job_id}")
+            else:
+                ux.print_warn(f"{args.job_id} not cancellable")
+
+        _emit(args, {"id": args.job_id, "cancelled": ok}, pretty)
         return
 
     raise SystemExit(f"unknown runtime command: {cmd}")
 
 
 def cmd_reindex(args) -> None:
+    from . import ux
+
     ws = Workspace(args.home)
-    count = ws.reindex()
-    print(f"re-embedded {count} memories with {ws.embedder.name}")
+    with _work_spinner(args, f"Re-embedding with {ws.embedder.name}…"):
+        count = ws.reindex()
+
+    def pretty():
+        ux.print_rule("reindex")
+        ux.print_ok(f"re-embedded {count} memory(ies) with {ws.embedder.name}")
+
+    _emit(args, {"reembedded": count, "embedder": ws.embedder.name}, pretty)
 
 
 def cmd_promote(args) -> None:
+    from . import ux
     from ..judgment.profile import promote_memory
 
     ws = Workspace(args.home)
@@ -686,10 +1065,17 @@ def cmd_promote(args) -> None:
         raise SystemExit(f"memory {args.memory_id} not found")
     section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
     ws.store.update_memory(mem.id, payload={**mem.payload, "promoted_to_judgment": True})
-    print(f"promoted {mem.id} → {section} (pending human approval if proposal)")
+
+    def pretty():
+        ux.print_rule("promote")
+        ux.print_ok(f"promoted {mem.id} → {section}")
+        ux.print_dim("pending human approval if a proposal was created")
+
+    _emit(args, {"memory_id": mem.id, "section": section}, pretty)
 
 
 def cmd_judgment(args) -> None:
+    from . import ux
     from ..judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
     from ..judgment.proposals import (
         approve_proposal, defer_proposal, preview_proposal, propose_from_memory,
@@ -702,36 +1088,115 @@ def cmd_judgment(args) -> None:
     ws = Workspace(args.home)
     cmd = args.judgment_command
     if cmd == "list":
-        for item in active_items(ws.store):
-            print(f"{item.id}  {item.kind.value:12}  {item.statement[:80]}")
+        items = active_items(ws.store)
+        rows = [{"id": i.id, "kind": i.kind.value, "statement": i.statement} for i in items]
+
+        def pretty():
+            ux.print_rule("judgment · items")
+            if not rows:
+                ux.print_warn("no active judgment items")
+                return
+            ux.print_table(
+                ["id", "kind", "statement"],
+                [[r["id"], r["kind"], (r["statement"] or "")[:80]] for r in rows],
+            )
+
+        _emit(args, {"items": rows, "count": len(rows)}, pretty)
     elif cmd == "show":
         item = ws.store.get_judgment_item(args.judgment_id)
         if item is None:
             raise SystemExit("not found")
-        print(item.model_dump_json(indent=2))
+
+        def pretty():
+            ux.print_rule(f"judgment · {item.id}")
+            ux.print_panel(item.model_dump_json(indent=2), title=item.kind.value)
+
+        _emit(args, item.model_dump(mode="json"), pretty)
     elif cmd == "history":
         item = ws.store.get_judgment_item(args.judgment_id)
         if item is None:
             raise SystemExit("not found")
-        print(f"supersedes: {item.supersedes}")
-        for v in ws.store.list_judgment_versions():
-            if args.judgment_id in v.item_ids:
-                print(f"  v{v.version}  {v.id}  {v.reason}")
+        versions = [
+            {"version": v.version, "id": v.id, "reason": v.reason}
+            for v in ws.store.list_judgment_versions() if args.judgment_id in v.item_ids
+        ]
+
+        def pretty():
+            ux.print_rule(f"judgment history · {args.judgment_id}")
+            ux.print_kv([("supersedes", str(item.supersedes or "—"))])
+            if versions:
+                ux.print_table(
+                    ["version", "id", "reason"],
+                    [[f"v{v['version']}", v["id"], v["reason"]] for v in versions],
+                )
+
+        _emit(args, {"supersedes": item.supersedes, "versions": versions}, pretty)
     elif cmd == "versions":
-        for v in ws.store.list_judgment_versions():
-            flag = "*" if v.active else " "
-            print(f"{flag} v{v.version}  {v.id}  items={len(v.item_ids)}  {v.reason}")
+        rows = [
+            {"version": v.version, "id": v.id, "active": v.active,
+             "items": len(v.item_ids), "reason": v.reason}
+            for v in ws.store.list_judgment_versions()
+        ]
+
+        def pretty():
+            ux.print_rule("judgment · versions")
+            if not rows:
+                ux.print_warn("no versions")
+                return
+            ux.print_table(
+                ["", "version", "id", "items", "reason"],
+                [["*" if r["active"] else "", f"v{r['version']}", r["id"],
+                  r["items"], r["reason"]] for r in rows],
+            )
+
+        _emit(args, {"versions": rows}, pretty)
     elif cmd == "import-preview":
-        for c in preview_yaml_import(ws.cfg.judgment_path):
-            print(f"{c['kind']:12} [{c['stability']:14}] {c['statement'][:70]}")
+        cands = list(preview_yaml_import(ws.cfg.judgment_path))
+
+        def pretty():
+            ux.print_rule("judgment · import-preview")
+            if not cands:
+                ux.print_warn("nothing to import")
+                return
+            ux.print_table(
+                ["kind", "stability", "statement"],
+                [[c["kind"], c["stability"], (c["statement"] or "")[:70]] for c in cands],
+            )
+
+        _emit(args, {"candidates": cands, "count": len(cands)}, pretty)
     elif cmd == "import":
         result = apply_yaml_import(ws.store, ws.cfg.judgment_path)
-        print(f"imported {result['count']} items as version {result['version']}")
+
+        def pretty():
+            ux.print_rule("judgment · import")
+            ux.print_ok(f"imported {result['count']} item(s) as version {result['version']}")
+
+        _emit(args, result, pretty)
     elif cmd == "export":
-        print(export_judgment_yaml(ws.store))
+        yaml_text = export_judgment_yaml(ws.store)
+        if _want_json(args):
+            _print({"yaml": yaml_text})
+        else:
+            print(yaml_text)
     elif cmd == "proposals":
-        for p in ws.store.list_judgment_proposals(status=args.status or None):
-            print(f"{p.id}  {p.status.value:10}  conf={p.confidence:.2f}  {p.reason[:60]}")
+        rows = [
+            {"id": p.id, "status": p.status.value, "confidence": round(p.confidence, 2),
+             "reason": p.reason}
+            for p in ws.store.list_judgment_proposals(status=args.status or None)
+        ]
+
+        def pretty():
+            ux.print_rule("judgment · proposals")
+            if not rows:
+                ux.print_ok("no proposals")
+                return
+            ux.print_table(
+                ["id", "status", "conf", "reason"],
+                [[r["id"], r["status"], f"{r['confidence']:.2f}", (r["reason"] or "")[:60]]
+                 for r in rows],
+            )
+
+        _emit(args, {"proposals": rows, "count": len(rows)}, pretty)
     elif cmd == "propose":
         if args.from_memory:
             p = propose_from_memory(ws.store, args.from_memory)
@@ -740,48 +1205,113 @@ def cmd_judgment(args) -> None:
             if not props:
                 raise SystemExit("no pattern proposals generated")
             p = props[0]
-        print(p.id, p.reason)
+
+        def pretty():
+            ux.print_rule("judgment · propose")
+            ux.print_ok(f"proposal {p.id}")
+            ux.print_dim(p.reason)
+            ux.print_next([("→", f"twin judgment preview {p.id}")])
+
+        _emit(args, {"id": p.id, "reason": p.reason}, pretty)
     elif cmd == "preview":
-        print(preview_proposal(ws.store, args.proposal_id))
+        text = preview_proposal(ws.store, args.proposal_id)
+
+        def pretty():
+            ux.print_rule(f"judgment preview · {args.proposal_id}")
+            ux.print_panel(str(text), title="preview")
+
+        _emit(args, {"preview": text}, pretty)
     elif cmd == "approve":
         result = approve_proposal(
             ws.store, args.proposal_id, preview_token=args.token,
             confirm_constitutional=args.constitutional,
         )
-        print(result)
+
+        def pretty():
+            ux.print_rule("judgment · approve")
+            ux.print_ok(f"approved {args.proposal_id}")
+            ux.print_dim(str(result))
+
+        _emit(args, {"proposal_id": args.proposal_id, "result": result}, pretty)
     elif cmd == "reject":
         reject_proposal(ws.store, args.proposal_id, reason=args.reason or "")
-        print("rejected")
+
+        def pretty():
+            ux.print_rule("judgment · reject")
+            ux.print_ok(f"rejected {args.proposal_id}")
+
+        _emit(args, {"proposal_id": args.proposal_id, "status": "rejected"}, pretty)
     elif cmd == "defer":
         defer_proposal(ws.store, args.proposal_id)
-        print("deferred")
+
+        def pretty():
+            ux.print_rule("judgment · defer")
+            ux.print_ok(f"deferred {args.proposal_id}")
+
+        _emit(args, {"proposal_id": args.proposal_id, "status": "deferred"}, pretty)
     elif cmd == "simulate":
         result = simulate(
             ws.store, args.query, domain=args.domain or "technical",
             project_id=args.project, task_profile=args.profile or "architecture",
         )
-        print(result["markdown"])
+
+        def pretty():
+            ux.print_rule("judgment · simulate")
+            ux.print_panel(result["markdown"], title="simulation")
+
+        _emit(args, result, pretty)
     elif cmd == "explain":
         tr = ws.store.get_judgment_trace(args.trace_id)
         if tr is None:
             raise SystemExit("trace not found")
-        print(tr.model_dump_json(indent=2))
+
+        def pretty():
+            ux.print_rule(f"judgment explain · {args.trace_id}")
+            ux.print_panel(tr.model_dump_json(indent=2), title="trace")
+
+        _emit(args, tr.model_dump(mode="json"), pretty)
     elif cmd == "counterfactual":
-        print(counterfactual(ws.store, args.query, args.judgment_id,
-                             domain=args.domain or "technical"))
+        text = counterfactual(ws.store, args.query, args.judgment_id,
+                              domain=args.domain or "technical")
+
+        def pretty():
+            ux.print_rule("judgment · counterfactual")
+            ux.print_panel(str(text), title="counterfactual")
+
+        _emit(args, {"counterfactual": text}, pretty)
     elif cmd == "conflicts":
         if args.refresh:
             detect_judgment_conflicts(ws.store)
             detect_behavior_conflicts(ws.store)
-        for c in ws.store.list_judgment_conflicts(status=args.status or "open"):
-            print(f"{c.id}  {c.type.value:20}  {c.reason[:70]}")
+        rows = [
+            {"id": c.id, "type": c.type.value, "reason": c.reason}
+            for c in ws.store.list_judgment_conflicts(status=args.status or "open")
+        ]
+
+        def pretty():
+            ux.print_rule("judgment · conflicts")
+            if not rows:
+                ux.print_ok("no conflicts")
+                return
+            ux.print_table(
+                ["id", "type", "reason"],
+                [[r["id"], r["type"], (r["reason"] or "")[:70]] for r in rows],
+            )
+            ux.print_warn(f"{len(rows)} open conflict(s)")
+
+        _emit(args, {"conflicts": rows, "count": len(rows)}, pretty)
     elif cmd == "resolve-conflict":
         resolve_conflict(
             ws.store, args.conflict_id,
             resolution=args.resolution or "dismiss",
             dismiss=True,
         )
-        print("resolved")
+
+        def pretty():
+            ux.print_rule("judgment · resolve-conflict")
+            ux.print_ok(f"resolved {args.conflict_id}")
+
+        _emit(args, {"conflict_id": args.conflict_id, "status": "resolved"}, pretty)
     else:
         raise SystemExit(f"unknown judgment command: {cmd}")
 
@@ -873,9 +1403,40 @@ def cmd_privacy(args) -> None:
         raise SystemExit(f"unknown privacy command: {cmd}")
 
 
+def _connector_adapter(ws, creds, connector_id: str):
+    """Build a live adapter for discovery helpers (raises if not found)."""
+    from ..connectors.registry import build_adapter
+
+    inst = ws.store.get_connector_instance(connector_id)
+    if inst is None:
+        raise SystemExit(f"connector {connector_id} not found")
+    acc = ws.store.get_source_account(inst.account_id)
+    secret = creds.get(inst.credential_ref) if inst.credential_ref else None
+    return build_adapter(inst, acc, secret)
+
+
+def _connector_discovery(args, ws, creds, *, method, headers, row):
+    """Shared render for github/slack/gmail/... scope-discovery helpers."""
+    from . import ux
+
+    adapter = _connector_adapter(ws, creds, args.connector_id)
+    items = list(getattr(adapter, method)())
+
+    def pretty():
+        ux.print_rule(f"connector · {args.connector_command}")
+        if not items:
+            ux.print_warn("nothing visible to this credential")
+            return
+        ux.print_table(headers, [row(it) for it in items])
+        ux.print_ok(f"{len(items)} item(s) visible")
+
+    _emit(args, {"items": items, "count": len(items)}, pretty)
+
+
 def cmd_connector(args) -> None:
     import json as _json
 
+    from . import ux
     from ..connectors import (
         add_connector_instance,
         build_credential_store,
@@ -894,15 +1455,41 @@ def cmd_connector(args) -> None:
     cmd = args.connector_command
 
     if cmd == "adapters":
-        for name in list_adapters():
-            print(name)
+        names = list(list_adapters())
+
+        def pretty():
+            ux.print_rule("connector adapters")
+            ux.print_table(["adapter"], [[n] for n in names])
+            ux.print_ok(f"{len(names)} adapter type(s) registered")
+
+        _emit(args, {"adapters": names}, pretty)
     elif cmd == "list":
+        rows = []
         for inst in ws.store.list_connector_instances():
             acc = ws.store.get_source_account(inst.account_id)
-            owner = acc.source_owner if acc else "?"
-            vault = acc.vault_id if acc else "?"
-            print(f"{inst.id}  {inst.connector_type:8}  {inst.status:12}  "
-                  f"owner={owner}  vault={vault}  account={inst.account_id}")
+            rows.append({
+                "id": inst.id,
+                "type": inst.connector_type,
+                "status": getattr(inst.status, "value", inst.status),
+                "owner": acc.source_owner if acc else "?",
+                "vault": acc.vault_id if acc else "?",
+                "account": inst.account_id,
+            })
+
+        def pretty():
+            ux.print_rule("connectors")
+            if not rows:
+                ux.print_warn("no connectors yet")
+                ux.print_next([("→", "twin connector setup <type> --source-owner personal")])
+                return
+            ux.print_table(
+                ["id", "type", "status", "owner", "vault", "account"],
+                [[r["id"], r["type"], r["status"], r["owner"], r["vault"], r["account"]]
+                 for r in rows],
+            )
+            ux.print_ok(f"{len(rows)} connector(s)")
+
+        _emit(args, {"connectors": rows, "count": len(rows)}, pretty)
     elif cmd == "add":
         acc = register_source_account(
             ws.store,
@@ -922,8 +1509,29 @@ def cmd_connector(args) -> None:
             ws.store, creds, account_id=acc.id, secret=args.secret,
             configuration=_json.loads(args.config) if args.config else None,
         )
-        print(f"account {acc.id}  vault={acc.vault_id}")
-        print(f"connector {inst.id}  status={inst.status.value}")
+        data = {
+            "account": acc.id, "vault": acc.vault_id,
+            "connector": inst.id, "status": inst.status.value,
+        }
+
+        def pretty():
+            ux.print_rule(f"connector add · {args.connector_type}")
+            ux.print_kv([
+                ("account", acc.id),
+                ("vault", acc.vault_id),
+                ("connector", inst.id),
+                ("status", inst.status.value),
+                ("credential", "set" if args.secret else "none"),
+            ])
+            ux.print_ok("connector registered")
+            ux.print_next([
+                ("→", f"twin connector auth {inst.id}      — verify credential"),
+                ("→", f"twin connector sync {inst.id}      — first sync pass"),
+                ("→", "twin extract                        — interpret percepts"),
+                ("→", "twin review                         — approve candidates"),
+            ])
+
+        _emit(args, data, pretty)
     elif cmd == "configure":
         if args.config:
             ws.store.update_connector_instance(
@@ -940,130 +1548,153 @@ def cmd_connector(args) -> None:
             set_webhook_secret(ws.store, creds, args.connector_id,
                                args.webhook_secret)
         inst = ws.store.get_connector_instance(args.connector_id)
-        print(f"{inst.id}  status={inst.status.value}  credential={'set' if inst.credential_ref else 'none'}")
+        cred = "set" if inst.credential_ref else "none"
+        data = {"id": inst.id, "status": inst.status.value, "credential": cred}
+
+        def pretty():
+            ux.print_rule("connector configure")
+            ux.print_kv([
+                ("connector", inst.id),
+                ("status", inst.status.value),
+                ("credential", cred),
+            ])
+            ux.print_ok("configuration updated")
+
+        _emit(args, data, pretty)
     elif cmd in ("auth", "test"):
         health = validate_connector(ws.store, creds, args.connector_id)
-        print(f"{args.connector_id}  {health.status.value}  {health.detail}")
+        status = health.status.value
+        data = {"connector": args.connector_id, "status": status, "detail": health.detail}
+
+        def pretty():
+            ux.print_rule(f"connector {cmd}")
+            ux.print_kv([("connector", args.connector_id), ("status", status)])
+            msg = f"{args.connector_id}: {health.detail}"
+            if status in ("healthy", "ok"):
+                ux.print_ok(msg)
+            elif status in ("unknown", "paused", "degraded"):
+                ux.print_warn(msg)
+            else:
+                ux.print_err(msg)
+
+        _emit(args, data, pretty)
+        if status not in ("healthy", "ok", "unknown", "paused"):
+            raise SystemExit(1)
     elif cmd == "sync":
         result = sync_connector(
             ws.store, creds, args.connector_id,
             streams=[args.stream] if args.stream else None,
             emit_percepts=not args.no_percepts,
         )
-        print(f"health={result.health.value}  percepts={result.percepts}")
-        for s in result.streams:
-            state = "skipped:" + s.skipped if s.skipped else f"committed={s.committed}"
-            print(f"  {s.stream:16}  {state}  raw={s.raw}  "
-                  f"normalized={s.normalized}  dedup={s.deduplicated}  "
-                  f"quarantined={s.quarantined}  percepts={s.percepts}  failed={s.failed}")
-    elif cmd == "github":
-        if args.github_command == "repositories":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for repo in adapter.list_repositories():
-                print(f"{repo['full_name']:40}  "
-                      f"{'private' if repo.get('private') else 'public ':7}  "
-                      f"open_issues={repo.get('open_issues')}  "
-                      f"pushed={repo.get('pushed_at')}")
-        else:
-            raise SystemExit(f"unknown github command: {args.github_command}")
-    elif cmd == "slack":
-        if args.slack_command == "channels":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for ch in adapter.list_channels():
-                kind = ("private" if ch.get("is_private")
-                        else "im" if ch.get("is_im") else "public")
-                print(f"{ch['id']:16}  #{ch.get('name') or '?':32}  "
-                      f"{kind:8}  members={ch.get('num_members')}")
-        else:
-            raise SystemExit(f"unknown slack command: {args.slack_command}")
-    elif cmd == "gmail":
-        if args.gmail_command == "labels":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for lab in adapter.list_labels():
-                print(f"{lab['id']:24}  {lab.get('name') or '?':32}  "
-                      f"type={lab.get('type')}  "
-                      f"messages={lab.get('messages_total')}")
-        else:
-            raise SystemExit(f"unknown gmail command: {args.gmail_command}")
-    elif cmd == "outlook":
-        if args.outlook_command == "folders":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for folder in adapter.list_folders():
-                print(f"{folder['id']:36}  {folder.get('name') or '?':32}  "
-                      f"items={folder.get('total_item_count')}")
-        else:
-            raise SystemExit(f"unknown outlook command: {args.outlook_command}")
-    elif cmd == "calendar":
-        if args.calendar_command == "calendars":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for cal in adapter.list_calendars():
-                primary = " primary" if cal.get("primary") else ""
-                print(f"{cal['id']:40}  {cal.get('summary') or '?':32}  "
-                      f"role={cal.get('access_role')}{primary}")
-        else:
-            raise SystemExit(f"unknown calendar command: {args.calendar_command}")
-    elif cmd == "fireflies":
-        if args.fireflies_command == "meetings":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for m in adapter.list_meetings():
-                print(f"{m.get('id') or '?':24}  {m.get('title') or '?':40}  "
-                      f"{m.get('date') or ''}")
-        else:
-            raise SystemExit(
-                f"unknown fireflies command: {args.fireflies_command}")
-    elif cmd == "folder":
-        if args.folder_command == "roots":
-            from ..connectors.registry import build_adapter
-            inst = ws.store.get_connector_instance(args.connector_id)
-            if inst is None:
-                raise SystemExit(f"connector {args.connector_id} not found")
-            acc = ws.store.get_source_account(inst.account_id)
-            secret = creds.get(inst.credential_ref) if inst.credential_ref else None
-            adapter = build_adapter(inst, acc, secret)
-            for root in adapter.list_roots():
-                flag = "ok" if root.get("readable") else (
-                    "missing" if not root.get("exists") else "unreadable"
+        streams = [
+            {
+                "stream": s.stream,
+                "state": ("skipped:" + s.skipped) if s.skipped else "committed",
+                "raw": s.raw, "normalized": s.normalized, "dedup": s.deduplicated,
+                "quarantined": s.quarantined, "percepts": s.percepts, "failed": s.failed,
+            }
+            for s in result.streams
+        ]
+        data = {
+            "connector": args.connector_id,
+            "health": result.health.value,
+            "percepts": result.percepts,
+            "streams": streams,
+        }
+
+        def pretty():
+            ux.print_rule(f"connector sync · {args.connector_id}")
+            ux.print_kv([
+                ("health", result.health.value),
+                ("percepts", str(result.percepts)),
+                ("streams", str(len(streams))),
+            ])
+            if streams:
+                ux.print_table(
+                    ["stream", "state", "raw", "norm", "dedup", "quar", "percepts", "failed"],
+                    [[s["stream"], s["state"], s["raw"], s["normalized"], s["dedup"],
+                      s["quarantined"], s["percepts"], s["failed"]] for s in streams],
                 )
-                print(f"{root.get('id') or '?':24}  {root.get('path') or '?':48}  "
-                      f"{flag}")
-        else:
+            if result.health.value in ("healthy", "ok"):
+                ux.print_ok("sync complete")
+            else:
+                ux.print_warn(f"sync finished with health={result.health.value}")
+            if result.percepts:
+                ux.print_next([("→", "twin extract   — interpret the new percepts")])
+
+        _emit(args, data, pretty)
+    elif cmd == "github":
+        if args.github_command != "repositories":
+            raise SystemExit(f"unknown github command: {args.github_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_repositories",
+            headers=["repository", "visibility", "open_issues", "pushed"],
+            row=lambda r: [
+                r["full_name"], "private" if r.get("private") else "public",
+                r.get("open_issues"), r.get("pushed_at"),
+            ],
+        )
+    elif cmd == "slack":
+        if args.slack_command != "channels":
+            raise SystemExit(f"unknown slack command: {args.slack_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_channels",
+            headers=["id", "channel", "kind", "members"],
+            row=lambda ch: [
+                ch["id"], f"#{ch.get('name') or '?'}",
+                "private" if ch.get("is_private") else "im" if ch.get("is_im") else "public",
+                ch.get("num_members"),
+            ],
+        )
+    elif cmd == "gmail":
+        if args.gmail_command != "labels":
+            raise SystemExit(f"unknown gmail command: {args.gmail_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_labels",
+            headers=["id", "label", "type", "messages"],
+            row=lambda lab: [
+                lab["id"], lab.get("name") or "?", lab.get("type"),
+                lab.get("messages_total"),
+            ],
+        )
+    elif cmd == "outlook":
+        if args.outlook_command != "folders":
+            raise SystemExit(f"unknown outlook command: {args.outlook_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_folders",
+            headers=["id", "folder", "items"],
+            row=lambda f: [f["id"], f.get("name") or "?", f.get("total_item_count")],
+        )
+    elif cmd == "calendar":
+        if args.calendar_command != "calendars":
+            raise SystemExit(f"unknown calendar command: {args.calendar_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_calendars",
+            headers=["id", "calendar", "role", "primary"],
+            row=lambda c: [
+                c["id"], c.get("summary") or "?", c.get("access_role"),
+                "yes" if c.get("primary") else "",
+            ],
+        )
+    elif cmd == "fireflies":
+        if args.fireflies_command != "meetings":
+            raise SystemExit(f"unknown fireflies command: {args.fireflies_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_meetings",
+            headers=["id", "title", "date"],
+            row=lambda m: [m.get("id") or "?", m.get("title") or "?", m.get("date") or ""],
+        )
+    elif cmd == "folder":
+        if args.folder_command != "roots":
             raise SystemExit(f"unknown folder command: {args.folder_command}")
+        _connector_discovery(
+            args, ws, creds, method="list_roots",
+            headers=["id", "path", "status"],
+            row=lambda r: [
+                r.get("id") or "?", r.get("path") or "?",
+                "ok" if r.get("readable") else "missing" if not r.get("exists") else "unreadable",
+            ],
+        )
     elif cmd == "backfill":
         if getattr(args, "run_partition", False):
             if not args.job_id:
@@ -1073,22 +1704,55 @@ def cmd_connector(args) -> None:
                 ws.store, creds, args.job_id,
                 emit_percepts=not getattr(args, "no_percepts", False),
             )
-            print(_json.dumps(out, indent=2, default=str))
+
+            def pretty():
+                ux.print_rule("backfill · run-partition")
+                ux.print_panel(_json.dumps(out, indent=2, default=str), title="result")
+
+            _emit(args, out, pretty)
             return
         if not args.connector_id:
             raise SystemExit("connector_id required")
         if getattr(args, "create", False):
             from ..connectors import create_backfill_job
             job = create_backfill_job(ws.store, creds, args.connector_id)
-            print(f"job {job.id}  status={job.status.value}  "
-                  f"partitions={(job.progress or {}).get('total_partitions')}")
+            total = (job.progress or {}).get("total_partitions")
+            data = {"job": job.id, "status": job.status.value, "partitions": total}
+
+            def pretty():
+                ux.print_rule("backfill · create")
+                ux.print_kv([
+                    ("job", job.id), ("status", job.status.value),
+                    ("partitions", str(total)),
+                ])
+                ux.print_ok("backfill job created (no ingest yet)")
+                ux.print_next([
+                    ("→", f"twin connector backfill {args.connector_id} --run-partition --job-id {job.id}"),
+                ])
+
+            _emit(args, data, pretty)
             return
         if getattr(args, "jobs", False):
+            jobs = []
             for job in ws.store.list_backfill_jobs(args.connector_id):
                 prog = job.progress or {}
-                print(f"{job.id}  {job.status.value:10}  "
-                      f"{prog.get('completed_partitions', 0)}/"
-                      f"{prog.get('total_partitions', 0)} partitions")
+                jobs.append({
+                    "id": job.id, "status": job.status.value,
+                    "completed": prog.get("completed_partitions", 0),
+                    "total": prog.get("total_partitions", 0),
+                })
+
+            def pretty():
+                ux.print_rule("backfill · jobs")
+                if not jobs:
+                    ux.print_warn("no backfill jobs")
+                    return
+                ux.print_table(
+                    ["id", "status", "partitions"],
+                    [[j["id"], j["status"], f"{j['completed']}/{j['total']}"] for j in jobs],
+                )
+
+            _emit(args, {"jobs": jobs, "count": len(jobs)}, pretty)
             return
         if not args.preview:
             raise SystemExit(
@@ -1098,32 +1762,130 @@ def cmd_connector(args) -> None:
         from ..connectors import backfill_preview
         preview = backfill_preview(ws.store, creds, args.connector_id,
                                    principal_id="principal_local_cli")
-        print(_json.dumps(preview, indent=2, ensure_ascii=False))
-    elif cmd == "pause":
-        print(pause_connector(ws.store, args.connector_id).status.value)
-    elif cmd == "resume":
-        print(resume_connector(ws.store, args.connector_id).status.value)
-    elif cmd == "revoke":
-        print(revoke_connector(ws.store, creds, args.connector_id).status.value)
+
+        def pretty():
+            ux.print_rule(f"backfill preview · {args.connector_id}")
+            ux.print_panel(_json.dumps(preview, indent=2, ensure_ascii=False),
+                           title="scope (no ingest)")
+            ux.print_ok("preview only — nothing was imported")
+
+        _emit(args, preview, pretty)
+    elif cmd in ("pause", "resume", "revoke"):
+        if cmd == "pause":
+            inst = pause_connector(ws.store, args.connector_id)
+        elif cmd == "resume":
+            inst = resume_connector(ws.store, args.connector_id)
+        else:
+            inst = revoke_connector(ws.store, creds, args.connector_id)
+        status = inst.status.value
+        data = {"connector": args.connector_id, "status": status}
+
+        def pretty():
+            ux.print_rule(f"connector {cmd}")
+            ux.print_ok(f"{args.connector_id} → {status}")
+
+        _emit(args, data, pretty)
     elif cmd == "status":
-        print(_json.dumps(connector_health(ws.store, args.connector_id), indent=2))
+        health = connector_health(ws.store, args.connector_id)
+
+        def pretty():
+            ux.print_rule(f"connector status · {args.connector_id}")
+            if health.get("error"):
+                ux.print_err(health["error"])
+                return
+            ux.print_kv([
+                ("type", str(health.get("connector_type"))),
+                ("health", str(health.get("health"))),
+                ("instance", str(health.get("instance_status"))),
+                ("pending", str(health.get("pending_items"))),
+                ("dead_letters", str(health.get("dead_letters"))),
+                ("last_success", str(health.get("last_success_at") or "—")),
+                ("next_run", str(health.get("next_run_at") or "—")),
+            ])
+            hv = str(health.get("health"))
+            if hv in ("healthy", "ok"):
+                ux.print_ok("connector healthy")
+            elif hv in ("failed", "error"):
+                ux.print_err(f"health={hv}")
+            else:
+                ux.print_warn(f"health={hv}")
+
+        _emit(args, health, pretty)
     elif cmd == "checkpoint":
-        for c in ws.store.list_connector_checkpoints(args.connector_id):
-            print(f"{c.stream:16}  v{c.version}  cursor={c.cursor}  batch={c.committed_batch_id}")
+        rows = [
+            {"stream": c.stream, "version": c.version, "cursor": c.cursor,
+             "batch": c.committed_batch_id}
+            for c in ws.store.list_connector_checkpoints(args.connector_id)
+        ]
+
+        def pretty():
+            ux.print_rule(f"checkpoints · {args.connector_id}")
+            if not rows:
+                ux.print_warn("no checkpoints")
+                return
+            ux.print_table(
+                ["stream", "version", "cursor", "batch"],
+                [[r["stream"], f"v{r['version']}", r["cursor"], r["batch"]] for r in rows],
+            )
+
+        _emit(args, {"checkpoints": rows}, pretty)
     elif cmd == "dead-letters":
-        for d in ws.store.list_connector_dead_letters(args.connector_id):
-            print(f"{d.id}  {d.failure_class.value:18}  {d.status.value:10}  "
-                  f"attempts={d.attempts}  {d.external_type}:{d.external_id}  "
-                  f"{d.last_error[:60]}")
+        rows = [
+            {"id": d.id, "failure_class": d.failure_class.value, "status": d.status.value,
+             "attempts": d.attempts, "external": f"{d.external_type}:{d.external_id}",
+             "last_error": d.last_error}
+            for d in ws.store.list_connector_dead_letters(args.connector_id)
+        ]
+
+        def pretty():
+            ux.print_rule(f"dead letters · {args.connector_id}")
+            if not rows:
+                ux.print_ok("no dead letters")
+                return
+            ux.print_table(
+                ["id", "failure", "status", "attempts", "external", "error"],
+                [[r["id"], r["failure_class"], r["status"], r["attempts"],
+                  r["external"], (r["last_error"] or "")[:60]] for r in rows],
+            )
+            ux.print_warn(f"{len(rows)} dead letter(s) — retry with: twin connector replay <id>")
+
+        _emit(args, {"dead_letters": rows}, pretty)
     elif cmd == "replay":
         from ..connectors import retry_dead_letter
         dlq = retry_dead_letter(ws.store, creds, args.dead_letter_id)
-        print(f"{dlq.id}  status={dlq.status.value}  attempts={dlq.attempts}"
-              + (f"  error={dlq.last_error}" if dlq.last_error else ""))
+        data = {"id": dlq.id, "status": dlq.status.value, "attempts": dlq.attempts,
+                "last_error": dlq.last_error}
+
+        def pretty():
+            ux.print_rule("connector replay")
+            ux.print_kv([("id", dlq.id), ("status", dlq.status.value),
+                         ("attempts", str(dlq.attempts))])
+            if dlq.last_error:
+                ux.print_warn(dlq.last_error)
+            else:
+                ux.print_ok("replayed")
+
+        _emit(args, data, pretty)
     elif cmd == "deletion-events":
-        for e in ws.store.list_connector_deletion_events(args.connector_id):
-            print(f"{e.id}  {e.status.value:9}  {e.external_type}:{e.external_id}  "
-                  f"prior={len(e.prior_record_ids)}  percepts={len(e.affected_percept_ids)}")
+        rows = [
+            {"id": e.id, "status": e.status.value,
+             "external": f"{e.external_type}:{e.external_id}",
+             "prior": len(e.prior_record_ids), "percepts": len(e.affected_percept_ids)}
+            for e in ws.store.list_connector_deletion_events(args.connector_id)
+        ]
+
+        def pretty():
+            ux.print_rule(f"deletion events · {args.connector_id}")
+            if not rows:
+                ux.print_ok("no deletion events")
+                return
+            ux.print_table(
+                ["id", "status", "external", "prior", "percepts"],
+                [[r["id"], r["status"], r["external"], r["prior"], r["percepts"]]
+                 for r in rows],
+            )
+
+        _emit(args, {"deletion_events": rows}, pretty)
     elif cmd == "setup":
         from ..connectors import plan_connector_setup
         plan = plan_connector_setup(
@@ -1136,27 +1898,124 @@ def cmd_connector(args) -> None:
             configuration=_json.loads(args.config) if args.config else None,
             home=ws.cfg.home,
         )
-        print(_json.dumps(plan, indent=2, ensure_ascii=False))
+
+        def pretty():
+            ux.print_rule(f"connector setup · {args.connector_type}")
+            if not plan.get("ok"):
+                ux.print_err(plan.get("error", "setup plan failed"))
+                for key in ("known", "allowed"):
+                    if plan.get(key):
+                        ux.print_dim(f"  {key}: {', '.join(map(str, plan[key]))}")
+                return
+            ux.print_kv([
+                ("connector_type", plan.get("connector_type")),
+                ("source_owner", plan.get("source_owner")),
+                ("vault_id", str(plan.get("vault_id") or "(auto)")),
+                ("auth_mode", str(plan.get("auth_mode") or "—")),
+                ("ingests", "no — plan only"),
+            ])
+            for w in plan.get("warnings", []):
+                ux.print_warn(w)
+            for i, step in enumerate(plan.get("steps", []), start=1):
+                body = f"{step.get('detail', '')}\n\n$ {step.get('command', '')}"
+                ux.print_panel(
+                    body,
+                    title=f"{i}. {step.get('title')} · {step.get('status')}",
+                )
+            ux.print_ok("plan only — nothing registered or fetched yet")
+
+        _emit(args, plan, pretty)
         if not plan.get("ok"):
             raise SystemExit(1)
     elif cmd == "due":
         from ..connectors import list_due_connectors
-        print(_json.dumps(list_due_connectors(ws.store, ws.cfg.home),
-                          indent=2, default=str))
+        due = list_due_connectors(ws.store, ws.cfg.home)
+
+        def pretty():
+            ux.print_rule("connectors due")
+            rows = due.get("due", [])
+            if not rows:
+                ux.print_ok("nothing due right now")
+                return
+            ux.print_table(
+                ["connector", "type", "status", "lag(s)", "next_run"],
+                [[r.get("connector_id"), r.get("connector_type"), r.get("status"),
+                  r.get("schedule_lag_seconds"), r.get("next_run_at") or "—"]
+                 for r in rows],
+            )
+            ux.print_warn(f"{due.get('count')} connector(s) due")
+            ux.print_next([("→", "twin connector sync-due   — run one scheduler pass")])
+
+        _emit(args, due, pretty)
     elif cmd == "sync-due":
         from ..connectors import run_sync_due
         rows = run_sync_due(
             ws.store, creds, ws.cfg.home,
             emit_percepts=not getattr(args, "no_percepts", False),
         )
-        print(_json.dumps({"results": rows, "count": len(rows)}, indent=2))
+
+        def pretty():
+            ux.print_rule("connector sync-due")
+            if not rows:
+                ux.print_ok("nothing was due")
+                return
+            ux.print_table(
+                ["connector", "ok", "health", "percepts", "streams"],
+                [[r.get("connector_id"), "yes" if r.get("ok") else "no",
+                  r.get("health"), r.get("percepts"), r.get("streams")] for r in rows],
+            )
+            total = sum(r.get("percepts", 0) for r in rows)
+            ux.print_ok(f"{len(rows)} connector(s) synced · {total} percepts")
+
+        _emit(args, {"results": rows, "count": len(rows)}, pretty)
     elif cmd == "contract":
         from ..connectors import contract_matrix
-        print(_json.dumps(contract_matrix(), indent=2, default=str))
+        matrix = contract_matrix()
+
+        def pretty():
+            ux.print_rule("adapter contract matrix")
+            ux.print_kv([
+                ("adapters", str(matrix.get("adapters"))),
+                ("ok", "yes" if matrix.get("ok") else "no"),
+            ])
+            ux.print_table(
+                ["adapter", "ok", "missing_required", "partial"],
+                [[r.get("connector_type") or r.get("adapter") or r.get("name"),
+                  "yes" if r.get("ok") else "no",
+                  len(r.get("missing_required", []) or []),
+                  len(r.get("partial_items", []) or [])]
+                 for r in matrix.get("rows", [])],
+            )
+            if matrix.get("ok"):
+                ux.print_ok("all adapter rows meet the contract")
+            else:
+                ux.print_warn(matrix.get("note", "some rows incomplete"))
+
+        _emit(args, matrix, pretty)
     elif cmd == "production-ready":
         from ..connectors import production_ready_adapters
         report = production_ready_adapters()
-        print(_json.dumps(report, indent=2, default=str))
+
+        def pretty():
+            ux.print_rule("production-ready adapters")
+            ready = report.get("ready", [])
+            not_ready = report.get("not_ready", [])
+            if ready:
+                ux.print_table(
+                    ["adapter", "status"],
+                    [[r.get("connector_type"), "ready"] for r in ready],
+                )
+            for r in not_ready:
+                ux.print_warn(
+                    f"{r.get('connector_type')}: missing "
+                    f"{', '.join(r.get('missing_required', []) or []) or '—'}"
+                )
+            if report.get("ok"):
+                ux.print_ok(f"{len(ready)} adapter(s) production-ready")
+            else:
+                ux.print_warn(f"{len(not_ready)} adapter(s) not production-ready")
+
+        _emit(args, report, pretty)
         if not report.get("ok"):
             raise SystemExit(1)
     else:
@@ -1164,28 +2023,61 @@ def cmd_connector(args) -> None:
 
 
 def cmd_supersede(args) -> None:
+    from . import ux
     from ..memory.lifecycle import supersede
 
     ws = Workspace(args.home)
     result = supersede(ws.store, args.new_id, args.old_id)
-    print(f"{result.subject_id} supersedes {result.object_id};"
-          f" old memory deprecated (relation {result.relation_id})")
+
+    def pretty():
+        ux.print_rule("supersede")
+        ux.print_ok(f"{result.subject_id} supersedes {result.object_id}")
+        ux.print_dim(f"old memory deprecated (relation {result.relation_id})")
+
+    _emit(args, {
+        "subject_id": result.subject_id, "object_id": result.object_id,
+        "relation_id": result.relation_id,
+    }, pretty)
 
 
 def cmd_contradict(args) -> None:
+    from . import ux
     from ..memory.lifecycle import contradict
 
     ws = Workspace(args.home)
     result = contradict(ws.store, args.id_a, args.id_b)
-    print(f"{result.subject_id} contradicts {result.object_id};"
-          f" both queued for review (relation {result.relation_id})")
+
+    def pretty():
+        ux.print_rule("contradict")
+        ux.print_warn(f"{result.subject_id} contradicts {result.object_id}")
+        ux.print_dim(f"both queued for review (relation {result.relation_id})")
+
+    _emit(args, {
+        "subject_id": result.subject_id, "object_id": result.object_id,
+        "relation_id": result.relation_id,
+    }, pretty)
 
 
 def cmd_stats(args) -> None:
+    from . import ux
     from ..memory.metrics import compute_metrics
 
     ws = Workspace(args.home)
-    _print(compute_metrics(ws.store))
+    metrics = compute_metrics(ws.store)
+
+    def pretty():
+        ux.print_rule("stats")
+        flat = [(k, v) for k, v in metrics.items() if not isinstance(v, (dict, list))]
+        if flat:
+            ux.print_kv([(str(k), str(v)) for k, v in flat])
+        for k, v in metrics.items():
+            if isinstance(v, dict) and v:
+                ux.print_table(
+                    [k, "value"],
+                    [[str(kk), str(vv)] for kk, vv in v.items()],
+                )
+
+    _emit(args, metrics, pretty)
 
 
 def cmd_serve(args) -> None:
@@ -1203,6 +2095,7 @@ def cmd_mcp(args) -> None:
 def cmd_backup(args) -> None:
     from pathlib import Path
 
+    from . import ux
     from ..sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
 
     ws = Workspace(args.home)
@@ -1212,24 +2105,48 @@ def cmd_backup(args) -> None:
         db_path = None
         if hasattr(ws.store, "path"):
             db_path = Path(ws.store.path)
-        manifest = create_backup(ws.store, dest, copy_sqlite_db=db_path)
-        _print(manifest.model_dump(mode="json"))
+        with _work_spinner(args, "Creating backup…"):
+            manifest = create_backup(ws.store, dest, copy_sqlite_db=db_path)
+        data = manifest.model_dump(mode="json")
+
+        def pretty():
+            ux.print_rule("backup · create")
+            ux.print_kv([("destination", str(dest)), *_summary_kv(data)])
+            ux.print_ok(f"backup written to {dest}")
+
+        _emit(args, data, pretty)
         return
     if cmd == "validate":
-        _print(validate_backup(args.bundle))
+        result = validate_backup(args.bundle)
+
+        def pretty():
+            ux.print_rule("backup · validate")
+            ux.print_panel(json.dumps(result, indent=2, default=str), title=str(args.bundle))
+            if isinstance(result, dict) and result.get("ok", True):
+                ux.print_ok("bundle looks valid")
+
+        _emit(args, result, pretty)
         return
     if cmd == "restore":
-        _print(restore_sqlite_backup(args.bundle, args.target_db))
+        result = restore_sqlite_backup(args.bundle, args.target_db)
+
+        def pretty():
+            ux.print_rule("backup · restore")
+            ux.print_panel(json.dumps(result, indent=2, default=str), title="restore")
+            ux.print_ok(f"restored into {args.target_db}")
+
+        _emit(args, result, pretty)
         return
     raise SystemExit(f"unknown backup command: {cmd}")
 
 
 def cmd_export(args) -> None:
+    from . import ux
     from ..judgment.profile import load_profile
 
     ws = Workspace(args.home)
     memories = ws.store.list_memories(limit=100000)
-    _print({
+    data = {
         "memories": [
             {
                 **m.model_dump(),
@@ -1241,7 +2158,17 @@ def cmd_export(args) -> None:
         ],
         "entities": [e.model_dump() for e in ws.store.list_entities()],
         "judgment": load_profile(ws.cfg.judgment_path),
-    })
+    }
+
+    def pretty():
+        ux.print_rule("export")
+        ux.print_kv([
+            ("memories", str(len(data["memories"]))),
+            ("entities", str(len(data["entities"]))),
+        ])
+        ux.print_warn("summary only — pipe with --json to capture the full dump")
+
+    _emit(args, data, pretty)
 
 
 def cmd_session_start(args) -> None:
@@ -1410,14 +2337,20 @@ def cmd_native(args) -> None:
 
     ws = Workspace(args.home)
     if args.native_command == "install":
-        target = args.dir or str(ws.home / "native" / "claude-code")
+        from . import ux
+
+        target = args.dir or str(ws.cfg.home / "native" / "claude-code")
         path = write_hooks_config(
             Path(target),
             twin_bin=args.twin_bin or "twin",
-            home=str(ws.home),
+            home=str(ws.cfg.home),
         )
-        print(f"wrote {path}")
-        print("Merge the `hooks` object into Claude Code settings, then restart.")
+        ux.print_rule("native install")
+        ux.print_ok(f"wrote {path}")
+        ux.print_next([
+            ("→", "merge the `hooks` object into Claude Code settings"),
+            ("→", "restart Claude Code to activate host-native observation"),
+        ])
         return
 
     if args.native_command == "bindings":
@@ -1713,12 +2646,14 @@ def main(argv: list[str] | None = None) -> None:
     pisd.set_defaults(func=cmd_interpret)
     pisig = pis.add_parser("signals", help="heuristic detection hints (never memories)")
     pisig.set_defaults(func=cmd_interpret)
+    _add_json_flag_tree(pi)
 
     p = sub.add_parser("review", help="interactive priority review queue")
     p.add_argument("--priority", choices=["high"], default=None)
     p.add_argument("--project", default=None)
     p.add_argument("--conflicts", action="store_true")
     p.add_argument("--analyze", action="store_true", help="run quality analyzer on candidates")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("review-batch", help="create or resume a review batch")
@@ -1731,6 +2666,7 @@ def main(argv: list[str] | None = None) -> None:
     pbr = rb.add_parser("resume")
     pbr.add_argument("batch_id")
     pbr.set_defaults(func=cmd_review_batch)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("memory", help="memory consolidation ops")
     ms = p.add_subparsers(dest="memory_command", required=True)
@@ -1755,6 +2691,7 @@ def main(argv: list[str] | None = None) -> None:
     pu = ms.add_parser("undo")
     pu.add_argument("operation_id")
     pu.set_defaults(func=cmd_memory)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("eval", help="run extraction/retrieval benchmarks")
     es = p.add_subparsers(dest="eval_command", required=True)
@@ -1763,24 +2700,29 @@ def main(argv: list[str] | None = None) -> None:
     es.add_parser("golden", help="run golden cognitive work-loop scenario"
                   ).set_defaults(func=cmd_eval)
     es.add_parser("compare").set_defaults(func=cmd_eval)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("source", help="show source calibration")
     p.add_argument("source", nargs="?", default="all")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_source)
 
     p = sub.add_parser("retention", help="apply retention policies")
     p.add_argument("--dry-run", action="store_true", default=True)
     p.add_argument("--apply", action="store_true")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_retention)
 
     p = sub.add_parser("delete-source", help="propagate deletion from a source system")
     p.add_argument("source_system")
     p.add_argument("--dry-run", action="store_true", default=True)
     p.add_argument("--apply", action="store_true")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_delete_source)
 
     p = sub.add_parser("undo", help="undo a recorded memory operation")
     p.add_argument("operation_id")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_undo)
 
     p = sub.add_parser("search", help="hybrid search")
@@ -1801,6 +2743,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("observe", help="memory observer suggestion")
     p.add_argument("text")
     p.add_argument("--domain", default=None)
+    _add_json_flag(p)
     p.set_defaults(func=cmd_observe)
 
     p = sub.add_parser("workspace", help="parallel memory workspace ")
@@ -1825,6 +2768,7 @@ def main(argv: list[str] | None = None) -> None:
     wt.add_argument("--retry", action="store_true",
                     help="reclaim a prior failed (error) tick with the same identity")
     wt.set_defaults(func=cmd_workspace)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("consolidate", help="daily/weekly consolidation cycle ")
     cs = p.add_subparsers(dest="consolidate_command", required=True)
@@ -1840,6 +2784,7 @@ def main(argv: list[str] | None = None) -> None:
         pc.add_argument("--retry", action="store_true",
                         help="reclaim a prior failed (error) apply run for this window")
         pc.set_defaults(func=cmd_consolidate)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("runtime", help="durable cognitive runtime (v1.0)")
     rs = p.add_subparsers(dest="runtime_command", required=True)
@@ -1875,11 +2820,15 @@ def main(argv: list[str] | None = None) -> None:
     rc = rs.add_parser("cancel", help="cancel pending/failed job")
     rc.add_argument("job_id")
     rc.set_defaults(func=cmd_runtime)
+    _add_json_flag_tree(p)
 
-    sub.add_parser("reindex", help="regenerate embeddings").set_defaults(func=cmd_reindex)
+    preidx = sub.add_parser("reindex", help="regenerate embeddings")
+    _add_json_flag(preidx)
+    preidx.set_defaults(func=cmd_reindex)
 
     p = sub.add_parser("promote", help="propose promoting a memory into judgment")
     p.add_argument("memory_id")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_promote)
 
     p = sub.add_parser("judgment", help="evolving judgment model")
@@ -1916,6 +2865,7 @@ def main(argv: list[str] | None = None) -> None:
     prc = js.add_parser("resolve-conflict")
     prc.add_argument("conflict_id"); prc.add_argument("--resolution")
     prc.set_defaults(func=cmd_judgment)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("privacy", help="persona-aware privacy & governance")
     ps = p.add_subparsers(dest="privacy_command", required=True)
@@ -2065,18 +3015,24 @@ def main(argv: list[str] | None = None) -> None:
         "production-ready",
         help="report which real adapters meet the production-ready contract",
     ).set_defaults(func=cmd_connector)
+    # every connector command is human-pretty by default with --json for scripts
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("supersede", help="mark a memory as superseding another")
     p.add_argument("new_id")
     p.add_argument("old_id")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_supersede)
 
     p = sub.add_parser("contradict", help="flag two memories as contradictory")
     p.add_argument("id_a")
     p.add_argument("id_b")
+    _add_json_flag(p)
     p.set_defaults(func=cmd_contradict)
 
-    sub.add_parser("stats", help="memory quality metrics").set_defaults(func=cmd_stats)
+    pstats = sub.add_parser("stats", help="memory quality metrics")
+    _add_json_flag(pstats)
+    pstats.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("serve", help="run local API + review UI")
     p.add_argument("--host", default="127.0.0.1")
@@ -2259,8 +3215,11 @@ def main(argv: list[str] | None = None) -> None:
     br.add_argument("bundle")
     br.add_argument("target_db")
     br.set_defaults(func=cmd_backup)
+    _add_json_flag_tree(p)
 
-    sub.add_parser("export", help="export everything as JSON").set_defaults(func=cmd_export)
+    pexport = sub.add_parser("export", help="export everything as JSON")
+    _add_json_flag(pexport)
+    pexport.set_defaults(func=cmd_export)
 
     args = parser.parse_args(argv)
     args.func(args)
