@@ -24,14 +24,14 @@ from .schema import (
 from ..schema import SENSITIVITIES
 from ...config import ALL_DOMAINS
 
-PROMPT_VERSION = "interpret-v1"
+PROMPT_VERSION = "interpret-v2"
 SCHEMA_VERSION = "1"
 
 SYSTEM_PROMPT = """\
 You are the cognitive interpreter of a personal cognitive system. You read a
 document, meeting transcript or chat log belonging to the user and identify
-what it MEANS, cataloguing durable, reusable items about the user's
-professional and technical life. You do not summarize; you interpret.
+what it MEANS, cataloguing durable, reusable items — professional, technical,
+or personal preferences. You do not summarize; you interpret.
 
 For every item you catalogue, decide the COGNITIVE ACT that produced it:
 - decision: a settled choice the parties actually made;
@@ -46,6 +46,13 @@ For every item you catalogue, decide the COGNITIVE ACT that produced it:
 Then classify memory_type: decision, task, fact, event, preference, belief,
 constraint, procedure, relationship, communication_act, or
 rejected_alternative (an option considered and turned down).
+
+Each item MUST use these field names exactly (no synonyms):
+- title: short label (a few words)
+- summary: one-sentence meaning of the item
+- evidence_span: verbatim excerpt from the source that supports the item
+Do NOT emit "description", "text", "content", or "item_id". If you cannot
+fill title and summary, omit the item.
 
 Hard rules:
 - evidence_span MUST be a verbatim excerpt from the source that supports the

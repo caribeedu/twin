@@ -530,16 +530,18 @@ Flow:
 ```text
 current text / task / draft
         ↓
-domain inference
+candidate memory search (hybrid, vault-wide)
         ↓
-candidate memory search
+firewall (consumer domain: the open session, or an explicit argument)
         ↓
-firewall
-        ↓
-ranking
+ranking (semantic + text + entity, plus a soft same-domain boost)
         ↓
 compact suggestion for the main AI
 ```
+
+The consumer domain is never guessed from the text: it is the frozen domain of the open session or an explicit argument. With no such domain the firewall target is `unclassified` and the suggestion comes back empty — ambiguity yields *less* context, never another domain's memories.
+
+Opening a session scope is a separate decision (`resolve_context_domain`): a retrieval vote across confirmed memories names the domain, and only when that vote is inconclusive does the local LLM classify it. The domain freezes once. Native hosts follow the same rule — Claude's **Stop** is end-of-turn (observe only), and **SessionEnd** closes the session and consolidates the `session_summary` Percept (see [INTERFACES.md](INTERFACES.md)).
 
 This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
 

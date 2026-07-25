@@ -58,6 +58,29 @@ def test_normalize_tool_phases_and_unknown():
     assert unknown.kind == "unsupported_host_event"
 
 
+def test_normalize_stop_is_turn_end_session_end_closes():
+    """Claude Stop = turn done; SessionEnd = chat closes."""
+    stop = normalize_claude_code_hook({
+        "hook_event_name": "Stop",
+        "session_id": "s1",
+        "last_assistant_message": "Done with Atlas.",
+    })
+    assert stop.kind == "assistant_result"
+    assert "Atlas" in stop.text
+    bare_stop = normalize_claude_code_hook({
+        "hook_event_name": "Stop", "session_id": "s1",
+    })
+    assert bare_stop.kind == "assistant_result"
+    assert bare_stop.text == "[turn_end]"
+    end = normalize_claude_code_hook({
+        "hook_event_name": "SessionEnd",
+        "session_id": "s1",
+        "reason": "prompt_input_exit",
+    })
+    assert end.kind == "session_end"
+    assert end.summary == "prompt_input_exit"
+
+
 def test_redact_secrets():
     clean, cats = redact_text("Authorization: Bearer SECRETTOKEN123 api_key=abc")
     assert "SECRETTOKEN123" not in clean
@@ -65,7 +88,7 @@ def test_redact_secrets():
     assert "bearer" in cats or "authorization" in cats
 
 
-def test_generation_after_stop(store, cfg, embedder):
+def test_generation_after_session_end(store, cfg, embedder):
     svc = NativeHostService(store, cfg, embedder)
     r1 = svc.handle(HostEvent(
         kind="session_start", host_type="claude-code",
@@ -100,6 +123,58 @@ def test_generation_after_stop(store, cfg, embedder):
     new = store.get_session(r2.session_id)
     assert not any("only in second" in str(a.get("note")) for a in old.artifacts)
     assert any("only in second" in str(a.get("note")) for a in new.artifacts)
+
+
+def test_turn_stop_keeps_binding_open_for_followup(store, cfg, embedder):
+    """Claude Stop after first reply must not drop later user messages (Dexter bug)."""
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="multi_turn", text="hi", domain="technical",
+    ))
+    assert start.ok
+    svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="multi_turn", text="atlas webhooks?",
+        event_id="um-atlas",
+    ))
+    turn = svc.handle(HostEvent(
+        kind="assistant_result", host_type="claude-code",
+        external_session_id="multi_turn", text="[turn_end]",
+        event_id="stop-1",
+        metadata={"hook_event_name": "Stop"},
+    ))
+    assert turn.ok
+    assert turn.binding.ended_at is None
+    svc.handle(HostEvent(
+        kind="tool_requested", host_type="claude-code",
+        external_session_id="multi_turn",
+        text='Bash: {"command": "grep atlas"}',
+        event_id="tool-1", tool_phase="before",
+    ))
+    dex = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="multi_turn",
+        text="I finished Dexter tv serie last week.",
+        event_id="um-dexter",
+    ))
+    assert dex.ok
+    assert dex.binding.id == start.binding.id
+    close = svc.handle(HostEvent(
+        kind="session_end", host_type="claude-code",
+        external_session_id="multi_turn", summary="prompt_input_exit",
+    ))
+    assert close.ok and close.binding.ended_at
+    ses = store.get_session(start.session_id)
+    notes = " ".join(str(a.get("note") or "") for a in ses.artifacts)
+    assert "Dexter" in notes
+    assert "grep atlas" in notes  # still on session
+    assert ses.summary_percept_id
+    percept = store.get_percept(ses.summary_percept_id)
+    assert percept is not None
+    assert "Dexter" in percept.content
+    assert "grep atlas" not in percept.content
+    assert "tool_requested" not in percept.content
 
 
 def test_duplicate_session_start_reuses_open(store, cfg, embedder):
@@ -477,15 +552,20 @@ def test_write_hooks_config_matcher_group_schema(tmp_path):
     assert group["matcher"] == ""
     cmd = group["hooks"][0]["command"]
     assert group["hooks"][0]["type"] == "command"
+    assert group["hooks"][0]["timeout"] == 120
     assert "--fail-open" in cmd
     assert "--stdin" in cmd
     assert "native event --host claude-code" in cmd
     # undocumented env var must not be required
     assert "CLAUDE_HOOK_EVENT" not in cmd
     assert data["twin_native"]["capabilities"]["block_action"] is False
-    for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"):
+    for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"):
         assert event in data["hooks"]
         assert data["hooks"][event][0]["hooks"][0]["type"] == "command"
+    assert data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["timeout"] == 120
+    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == 30
+    assert data["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 30
+    assert data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"] == 120
 
 
 def test_merge_hooks_preserves_foreign_and_replaces_twin(tmp_path):
@@ -570,3 +650,88 @@ def test_claude_hooks_stdout_session_start_pack():
     assert claude_hooks_stdout(
         hook_event_name="SessionStart", ok=False, error="boom",
     ) is None
+
+
+def test_claude_hooks_stdout_user_prompt_submit_pack():
+    out = claude_hooks_stdout(
+        hook_event_name="UserPromptSubmit",
+        ok=True,
+        context_pack="Atlas webhooks use FastAPI",
+    )
+    assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert "FastAPI" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def _seed_confirmed_memory(store, embedder, *, title: str, summary: str, domain: str = "technical"):
+    mem = MemoryItem(
+        id=ids.memory_id(),
+        type=MemoryType.decision,
+        domain=domain,
+        title=title,
+        summary=summary,
+        status=MemoryStatus.confirmed,
+        confidence=0.9,
+    )
+    store.insert_memory(mem)
+    store.store_embedding(
+        mem.id, "memory", embedder.name, embedder.embed(f"{title}\n{summary}"),
+    )
+    return mem
+
+
+def test_user_message_upgrades_unclassified_and_emits_pack(store, cfg, embedder):
+    """SessionStart empty → first prompt search-votes domain + pack (no LLM)."""
+    _seed_confirmed_memory(
+        store, embedder,
+        title="Atlas webhook stack",
+        summary="Atlas webhooks run on FastAPI with schema_version.",
+    )
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="repack1",
+        text="native host session",
+    ))
+    assert start.ok
+    assert start.binding.domain == "unclassified"
+    assert not (start.context_pack or "").strip()
+
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="repack1",
+        text="What retry strategy did we decide for Atlas webhooks?",
+    ))
+    assert msg.ok
+    assert msg.binding.domain == "technical"
+    assert msg.extras.get("emit_pack") is True
+    assert msg.extras.get("domain_upgraded_from") == "unclassified"
+    assert msg.binding.metadata.get("domain_resolved_via") == "search"
+    assert msg.context_pack and "webhook" in msg.context_pack.lower()
+
+    # Domain now frozen — second prompt observes but does not re-emit upgrade pack
+    again = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="repack1",
+        text="And what about the payload schema?",
+    ))
+    assert again.ok
+    assert again.binding.domain == "technical"
+    assert again.extras.get("emit_pack") is not True
+    assert again.context_pack is None
+
+
+def test_user_message_keeps_unclassified_without_signal(store, cfg, embedder):
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="repack2", text="hi",
+    ))
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="repack2",
+        text="hey there",  # no domain keywords
+    ))
+    assert msg.ok
+    assert msg.binding.domain == "unclassified"
+    assert msg.context_pack is None
+    assert msg.extras.get("emit_pack") is not True

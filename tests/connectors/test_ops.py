@@ -626,6 +626,7 @@ def test_cli_setup_and_contract_smoke(tmp_path, monkeypatch, capsys):
 
     args = _Args()
     args.home = str(home)
+    args.json = True  # machine path — _emit prints JSON only with --json
     args.connector_command = "setup"
     args.connector_type = "fake"
     args.source_owner = "personal"

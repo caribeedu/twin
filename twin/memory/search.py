@@ -15,6 +15,10 @@ from .store.base import MemoryStore
 FTS_WEIGHT = 0.55
 VECTOR_WEIGHT = 0.35
 ENTITY_WEIGHT = 0.10
+# Soft boost for a hit that already lives in the consumer's domain. Small
+# enough that a strong cross-domain match still surfaces, large enough to win
+# ties in favour of the domain the caller is actually working in.
+DOMAIN_AFFINITY_WEIGHT = 0.15
 
 
 @dataclass
@@ -51,6 +55,7 @@ def search(
     type_: Optional[str] = None,
     limit: int = 10,
     include_candidates: bool = True,
+    domain_affinity: Optional[str] = None,
 ) -> SearchResult:
     fts_scores = store.fts_search(query, limit=100)
     query_vec = embedder.embed(query)
@@ -95,6 +100,9 @@ def search(
             + VECTOR_WEIGHT * vec_scores.get(mem_id, 0.0)
             + ENTITY_WEIGHT * _entity_boost(query, memory)
         )
+        same_domain = bool(domain_affinity) and memory.domain == domain_affinity
+        if same_domain:
+            score += DOMAIN_AFFINITY_WEIGHT
         why_parts = []
         if mem_id in fts_norm:
             why_parts.append("text match")
@@ -102,6 +110,8 @@ def search(
             why_parts.append("semantic similarity")
         if _entity_boost(query, memory):
             why_parts.append("entity match")
+        if same_domain:
+            why_parts.append("same-domain")
         hits.append(SearchHit(memory=memory, score=round(score, 4), why=", ".join(why_parts) or "weak match"))
 
     hits.sort(key=lambda h: h.score, reverse=True)

@@ -4,7 +4,7 @@ from tests.paths import EXAMPLES
 
 from twin.cognition import extract_pending
 from twin.cognition.context_pack import build_context_pack
-from twin.cognition.observer import infer_domain, observe
+from twin.cognition.observer import observe
 from twin.judgment.firewall import Firewall
 from twin.memory.search import search
 from twin.sensory import sense_paths
@@ -69,16 +69,27 @@ def test_context_pack_respects_budget_and_includes_judgment(store, cfg, embedder
     assert all("percept_ids" in s for s in pack.sources)
 
 
-def test_observer_suggests_and_infers_domain(store, cfg, embedder):
+def test_observer_suggests_for_consumer_domain(store, cfg, embedder):
     _populate(store, cfg, embedder)
-    assert infer_domain("preciso revisar a arquitetura do deploy") == "technical"
+    # the consumer domain is supplied (session/explicit), never guessed from text
     suggestion = observe(store, cfg, embedder,
-                         "vou escrever a RFC de arquitetura dos webhooks do Atlas")
+                         "vou escrever a RFC de arquitetura dos webhooks do Atlas",
+                         target_domain="technical")
     assert suggestion.inferred_domain == "technical"
     assert suggestion.suggested_context
     for item in suggestion.suggested_context:
         assert item["allowed"] is True
         assert item["memory_id"].startswith("mem_")
+
+
+def test_observer_without_domain_suggests_nothing(store, cfg, embedder):
+    """No consumer domain → unclassified target → firewall default-deny, so
+    the observer never leaks another domain's memories on a bare text match."""
+    _populate(store, cfg, embedder)
+    suggestion = observe(store, cfg, embedder,
+                         "vou escrever a RFC de arquitetura dos webhooks do Atlas")
+    assert suggestion.inferred_domain == "unclassified"
+    assert suggestion.suggested_context == []
 
 
 def _confirmed_mem(store, embedder, **kw):
@@ -182,14 +193,21 @@ def test_pack_unused_section_budget_is_redistributed(store, cfg, embedder):
     assert len(pack.sources) > in_section  # carry-over actually added hits
 
 
-def test_infer_domain_uses_graph_entities(store, embedder):
-    _confirmed_mem(store, embedder, type="preference", domain="assistant_preferences",
-                   title="Respostas diretas", summary="Prefere respostas diretas.",
-                   entities=["Falstaff"])
-    # no keywords at all — only the entity connects to a domain
-    assert infer_domain("o que você sabe sobre Falstaff?", store) == "assistant_preferences"
-    # without the graph there is no evidence — never assume a real domain
-    assert infer_domain("o que você sabe sobre Falstaff?") == "unclassified"
+def test_search_domain_affinity_boosts_same_domain(store, embedder):
+    """With the consumer domain known, a same-domain hit outranks an otherwise
+    identical cross-domain hit — the tie-break is domain affinity, not text."""
+    tech = _confirmed_mem(store, embedder, type="fact", domain="technical",
+                          title="Atlas webhook retries",
+                          summary="Atlas webhooks retry with exponential backoff.")
+    work = _confirmed_mem(store, embedder, type="fact", domain="work",
+                          title="Atlas webhook retries",
+                          summary="Atlas webhooks retry with exponential backoff.")
+    result = search(store, embedder, "Atlas webhook retries backoff",
+                    domain_affinity="technical")
+    ranked = [h.memory.id for h in result.hits]
+    assert ranked.index(tech.id) < ranked.index(work.id)
+    tech_hit = next(h for h in result.hits if h.memory.id == tech.id)
+    assert "same-domain" in tech_hit.why
 
 
 def test_inactive_statuses_excluded_from_search(store, embedder):

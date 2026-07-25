@@ -12,7 +12,7 @@ Identity and principles in [README](../README.md) and [ARCHITECTURE.md](ARCHITEC
 
 | Surface | Role | Prefer when |
 |---|---|---|
-| **Native** | Host lifecycle binds to Twin sessions; packs on session start; observations; optional summary percept on stop | The host offers a native surface (Claude Code hooks today; app-server-style later) |
+| **Native** | Host lifecycle binds to Twin sessions; packs on session start; observations; summary percept on session end | The host offers a native surface (Claude Code hooks today; app-server-style later) |
 | **MCP** | Universal tools: packs, search, sessions, review, judgment, connector ops | Every MCP client; also alongside native for mid-task tools |
 | **CLI** | Ingest, review, connector ops, scripting | Humans and automation outside an IDE |
 | **Local API** | HTTP + review workbench | Browsers and local integrations |
@@ -55,9 +55,9 @@ This is **not** a connector. Connectors ingest external systems (repos, Slack, �
 | Power | What happens |
 |---|---|
 | Bind a host session | `session_start` / `pack_request` creates or resumes a `CognitiveSession` and a `HostSessionBinding` |
-| Emit a context pack | On **SessionStart** (and explicit `pack_request`), Twin builds a firewall-filtered pack and prints it on stdout for the host to inject |
+| Emit a context pack | On **SessionStart** (and explicit `pack_request`), and on the first **UserPromptSubmit** that resolves a previously `unclassified` domain, Twin builds a firewall-filtered pack and prints it on stdout for the host to inject |
 | Observe work | User prompts, tool request/completion, and related events are recorded as **session artifacts** (notes on the cognitive session) |
-| Form new percepts | On **Stop** / session end, Twin may `complete_session` and consolidate a **`session_summary` Percept** from those artifacts — then the usual extract/review path can turn it into candidate memories. Native never auto-confirms Memory or Judgment |
+| Form new percepts | On **SessionEnd** (chat actually closes), Twin may `complete_session` and fold **user prompts, assistant replies and deliberate observations** (file/commit/doc/note and host file/project context) into a **`session_summary` Percept** (tool I/O and session boilerplate stay on the session for replay, not in the percept) — then extract/review can form candidate memories. Claude's **Stop** is only end-of-turn and must not close the Twin binding. Native never auto-confirms Memory or Judgment |
 | Fail open | With `--fail-open`, Twin failures return `ok=false` + `error_id` and exit 0 so the host is not blocked; diagnostics go to stderr/logs |
 
 Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md) (sessions / observer) and cognition host binding in-tree (`twin/cognition/host_session.py`). Threat notes in [ARCHITECTURE.md](ARCHITECTURE.md#threat-model).
@@ -67,15 +67,16 @@ Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md)
 1. `twin native install` writes a snippet under Twin home **and** merges Twin's `hooks` into `~/.claude/settings.json` (user-global). Prior Twin handlers are replaced; other hooks/settings are kept. Use `--no-merge` for snippet-only, or `--settings <path>` to target another file. A `.twin-bak` backup is written when an existing settings file is patched.
 2. Restart Claude Code (or start a new session). Confirm with `/hooks`.
 3. Each hook runs `twin native event --host claude-code --stdin --fail-open`. The event name comes from Claude's stdin JSON (`hook_event_name`).
-4. Twin normalizes the event, updates the binding/session, and — for SessionStart — may emit Claude's `hookSpecificOutput.additionalContext` with the context pack (observation hooks stay silent on stdout).
+4. Twin normalizes the event, updates the binding/session, and may emit Claude's `hookSpecificOutput.additionalContext` with a context pack on **SessionStart** (when domain is already known) or on the first **UserPromptSubmit** that resolves a previously `unclassified` domain (Claude SessionStart often has no prompt text). Other observation hooks stay silent on stdout. Twin sets per-hook `timeout` (120s for SessionStart / UserPromptSubmit / SessionEnd) so pack and consolidation work is not discarded by Claude's 30s default.
 
 | Claude Code hook | Twin event kind | Typical effect |
 |---|---|---|
-| `SessionStart` | `session_start` | Bind/start session; **may emit context pack** |
-| `UserPromptSubmit` | `user_message` | Observe as session artifact |
+| `SessionStart` | `session_start` | Bind/start session; **may emit context pack** if domain is known |
+| `UserPromptSubmit` | `user_message` | Observe; if domain was `unclassified`, **upgrade once + emit pack** |
 | `PreToolUse` | `tool_requested` | Observe |
 | `PostToolUse` | `tool_completed` | Observe |
-| `Stop` | `session_end` | End session; may consolidate **`session_summary` Percept** |
+| `Stop` | `assistant_result` | End of **agent turn** — observe only; binding stays open |
+| `SessionEnd` | `session_end` | Chat closes; may consolidate **`session_summary` Percept** |
 
 Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist on the native service for hosts that can send them; not all are in the default Claude install snippet.
 
@@ -89,7 +90,7 @@ Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist
 | MCP `native_bindings` | List native host bindings |
 | MCP `native_session_status` | Status of a host-native session link |
 
-**With Claude Code, prefer native for session start/observe/stop.** Keep MCP enabled for tools that surface does not cover (search, review, judgment, one-shot packs mid-task, connector ops). Cursor and Claude Desktop remain MCP-first until they expose an equivalent native surface.
+**With Claude Code, prefer native for session start/observe/end.** Keep MCP enabled for tools that surface does not cover (search, review, judgment, one-shot packs mid-task, connector ops). Cursor and Claude Desktop remain MCP-first until they expose an equivalent native surface.
 
 
 ### MCP

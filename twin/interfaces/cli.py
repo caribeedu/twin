@@ -2361,7 +2361,7 @@ def cmd_native(args) -> None:
                 ux.print_dim(f"backup {result['backup']}")
             ux.print_next([
                 ("→", "restart Claude Code (or start a new session)"),
-                ("→", "type /hooks — SessionStart / UserPromptSubmit / … should list Twin"),
+                ("→", "type /hooks — SessionStart / UserPromptSubmit / SessionEnd / … should list Twin"),
             ])
         else:
             ux.print_warn("snippet only — did not patch Claude settings (--no-merge)")
@@ -2427,7 +2427,11 @@ def cmd_native(args) -> None:
         result = NativeEventResult(ok=False, error=str(exc))
         event = None
 
-    emit_pack = should_emit_pack(getattr(event, "kind", "") or "")
+    emit_pack = (
+        should_emit_pack(getattr(event, "kind", "") or "")
+        or bool((result.extras or {}).get("emit_pack"))
+        or bool(result.context_pack)
+    )
     payload = result.to_dict(include_pack=emit_pack)
     if not result.ok:
         print(
@@ -2450,7 +2454,8 @@ def cmd_native(args) -> None:
             "user_message": "UserPromptSubmit",
             "tool_requested": "PreToolUse",
             "tool_completed": "PostToolUse",
-            "session_end": "Stop",
+            "assistant_result": "Stop",
+            "session_end": "SessionEnd",
         }
         if not hook_name and getattr(event, "kind", "") in kind_to_hook:
             hook_name = kind_to_hook[event.kind]

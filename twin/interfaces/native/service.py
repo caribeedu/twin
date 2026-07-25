@@ -21,6 +21,7 @@ from ...cognition.host_session import (
     NativeSessionStart,
     bind_and_start,
     end_host_session,
+    maybe_upgrade_domain_and_pack,
     observe_host_event,
     recommend_intervention,
     request_context_pack,
@@ -122,7 +123,7 @@ class NativeHostService:
             return self._start_or_pack(event, observe_start=(kind == "session_start"))
 
         if kind == "session_end":
-            # Orphan Stop → idempotent no-op (warning logged in end_host_session)
+            # Orphan SessionEnd → idempotent no-op (warning logged in end_host_session)
             binding = end_host_session(
                 self.store, self.cfg, self.embedder,
                 host_type=event.host_type,
@@ -201,7 +202,7 @@ class NativeHostService:
             )
 
         # Observations require an active binding — never invent one from cwd.
-        # After Stop: reject (do not attach to closed occurrence).
+        # After SessionEnd: reject (do not attach to closed occurrence).
         result = observe_host_event(
             self.store,
             host_type=event.host_type,
@@ -218,10 +219,42 @@ class NativeHostService:
             redacted=event.redacted,
             redaction_categories=event.redaction_categories,
         )
+        extras: dict[str, Any] = {"duplicated": result.duplicated}
+
+        # Claude SessionStart often has no prompt → unclassified empty pack.
+        # First user_message with enough signal upgrades domain and emits pack
+        # (UserPromptSubmit additionalContext). Skip duplicates / empty text.
+        if (
+            kind == "user_message"
+            and not result.duplicated
+            and (event.text or "").strip()
+        ):
+            upgraded = maybe_upgrade_domain_and_pack(
+                self.store, self.cfg, self.embedder,
+                binding=result.binding,
+                query=event.text,
+                cwd=event.cwd,
+            )
+            if upgraded is not None:
+                pack = upgraded.pack
+                extras.update({
+                    "domain": upgraded.resolved_domain,
+                    "domain_upgraded_from": upgraded.previous_domain,
+                    "needs_domain_confirmation": False,
+                    "emit_pack": True,
+                })
+                return NativeEventResult(
+                    binding=upgraded.binding,
+                    session_id=upgraded.binding.cognitive_session_id,
+                    context_pack=pack.context_pack,
+                    sources=list(pack.sources or []),
+                    extras=extras,
+                )
+
         return NativeEventResult(
             binding=result.binding,
             session_id=result.binding.cognitive_session_id,
-            extras={"duplicated": result.duplicated},
+            extras=extras,
         )
 
     def _start_or_pack(

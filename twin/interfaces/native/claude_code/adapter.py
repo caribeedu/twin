@@ -19,6 +19,9 @@ from ..events import CLAUDE_CODE_CAPABILITIES, HostEvent
 from ..redact import redact_payload, redact_text
 
 # Claude Code hook name → HostEvent.kind
+#
+# Stop = end of *agent turn* (fires every reply). SessionEnd = chat actually
+# closes (/clear, exit, …). Twin only consolidates on SessionEnd.
 _HOOK_KIND = {
     "SessionStart": "session_start",
     "session_start": "session_start",
@@ -28,8 +31,8 @@ _HOOK_KIND = {
     "post_tool_use": "tool_completed",
     "PreToolUse": "tool_requested",
     "pre_tool_use": "tool_requested",
-    "Stop": "session_end",
-    "stop": "session_end",
+    "Stop": "assistant_result",
+    "stop": "assistant_result",
     "SessionEnd": "session_end",
     "session_end": "session_end",
     "Notification": "assistant_result",
@@ -92,7 +95,12 @@ def normalize_claude_code_hook(
     kind = _HOOK_KIND.get(str(name), "")
     if not kind:
         # Never invent user_message for unknown hooks.
-        if data.get("session_end") or data.get("reason") == "stop":
+        # SessionEnd-style reasons only — do NOT treat Claude's turn-level
+        # Stop (or reason=stop) as session close.
+        reason = str(data.get("reason") or "").lower()
+        if data.get("session_end") or reason in (
+            "clear", "logout", "prompt_input_exit", "other",
+        ):
             kind = "session_end"
         elif data.get("tool_name") or data.get("tool_input"):
             # Ambiguous tool hook without name → unsupported, not completed
@@ -120,8 +128,13 @@ def normalize_claude_code_hook(
         or data.get("message")
         or data.get("text")
         or data.get("content")
+        or data.get("last_assistant_message")
+        or data.get("assistant_message")
         or ""
     )
+    # Turn-end Stop often has no prompt text — still record a boundary note.
+    if not text and kind == "assistant_result" and str(name) in ("Stop", "stop"):
+        text = "[turn_end]"
     tool_phase = None
     tool_call_id = (
         data.get("tool_use_id")
@@ -241,7 +254,20 @@ _DEFAULT_HOOK_EVENTS = (
     "PreToolUse",
     "PostToolUse",
     "Stop",
+    "SessionEnd",
 )
+
+# Claude Code defaults UserPromptSubmit command hooks to 30s and discards
+# stdout on timeout. Pack assembly needs headroom; SessionEnd consolidates
+# (Claude's SessionEnd group budget is tight unless timeout is set).
+_HOOK_TIMEOUTS_SEC: dict[str, int] = {
+    "SessionStart": 120,
+    "UserPromptSubmit": 120,
+    "PreToolUse": 30,
+    "PostToolUse": 30,
+    "Stop": 30,
+    "SessionEnd": 120,
+}
 
 
 def twin_hook_command(*, twin_bin: str = "twin", home: Optional[str] = None) -> str:
@@ -258,10 +284,15 @@ def twin_hook_command(*, twin_bin: str = "twin", home: Optional[str] = None) -> 
     )
 
 
-def _matcher_group(command: str, *, matcher: str = "") -> dict[str, Any]:
+def _matcher_group(
+    command: str, *, matcher: str = "", timeout: Optional[int] = None,
+) -> dict[str, Any]:
     """One Claude Code matcher group wrapping a single command handler."""
+    handler: dict[str, Any] = {"type": "command", "command": command}
+    if timeout is not None:
+        handler["timeout"] = int(timeout)
     group: dict[str, Any] = {
-        "hooks": [{"type": "command", "command": command}],
+        "hooks": [handler],
     }
     # Empty matcher = fire on every occurrence (SessionStart sources, all tools, …).
     # Claude silently ignores matcher on events that don't support it.
@@ -275,7 +306,10 @@ def _matcher_group(command: str, *, matcher: str = "") -> dict[str, Any]:
 def build_hooks_object(*, twin_bin: str = "twin", home: Optional[str] = None) -> dict[str, Any]:
     """Claude Code ``hooks`` object (matcher-group schema)."""
     cmd = twin_hook_command(twin_bin=twin_bin, home=home)
-    return {event: [_matcher_group(cmd)] for event in _DEFAULT_HOOK_EVENTS}
+    return {
+        event: [_matcher_group(cmd, timeout=_HOOK_TIMEOUTS_SEC.get(event))]
+        for event in _DEFAULT_HOOK_EVENTS
+    }
 
 
 def is_twin_hook_handler(handler: Any) -> bool:
@@ -444,18 +478,27 @@ def claude_hooks_stdout(
 ) -> Optional[dict[str, Any]]:
     """Stdout payload Claude Code understands when Twin runs as a hook.
 
-    - SessionStart with a pack → ``hookSpecificOutput.additionalContext``
+    - SessionStart / UserPromptSubmit with a pack →
+      ``hookSpecificOutput.additionalContext`` (UserPromptSubmit is how Twin
+      recovers when SessionStart had no domain signal)
     - Other events → ``None`` (silent success; observation already persisted)
     - Failures under ``--fail-open`` → ``None`` (stderr carries diagnostics)
     """
     if not ok:
         return None
-    if hook_event_name in ("SessionStart", "session_start") and context_pack:
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "SessionStart",
-                "additionalContext": context_pack,
-            },
-            "suppressOutput": True,
-        }
-    return None
+    if not context_pack:
+        return None
+    name = str(hook_event_name or "")
+    if name in ("SessionStart", "session_start"):
+        claude_event = "SessionStart"
+    elif name in ("UserPromptSubmit", "user_prompt_submit", "user_message"):
+        claude_event = "UserPromptSubmit"
+    else:
+        return None
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": claude_event,
+            "additionalContext": context_pack,
+        },
+        "suppressOutput": True,
+    }

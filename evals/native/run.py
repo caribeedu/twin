@@ -125,7 +125,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
             text="second conversation", domain=case.get("domain", "technical"),
         ))
         if not again.ok or again.binding.occurrence != 2:
-            return False, "reuse after Stop did not open occurrence 2"
+            return False, "reuse after SessionEnd did not open occurrence 2"
         if again.session_id == start.session_id:
             return False, "reuse attached to old CognitiveSession"
 

@@ -18,7 +18,7 @@ twin init                      # creates ~/.twin (policies.yaml, judgment.yaml)
 
 ## Model providers
 
-`twin init` is the first required Twin command. Until it runs, there is no home directory and no store for memories. The wizard asks which **LLM provider** to use for cognitive interpretation (extract / deep observer) and which **embedding** backend to use:
+`twin init` is the first required Twin command. Until it runs, there is no home directory and no store for memories. The wizard asks which **LLM provider** to use for cognitive interpretation (extract and session domain resolution) and which **embedding** backend to use:
 
 1. **Ollama (recommended)** — local open models; nothing leaves the machine. Install from [ollama.com/download](https://ollama.com/download), then set URL + chat model + embed model (defaults are fine to start).
 2. **OpenAI-compatible (optional)** — base URL, API key (if needed), chat model, and embedding model. Covers OpenAI, Azure OpenAI, Groq, Together, Fireworks, OpenRouter, DeepSeek, Mistral, xAI, LM Studio, vLLM, and similar gateways. You can also set `TWIN_LLM_PROVIDER=groq|openrouter|…` for preset base URLs.
@@ -32,7 +32,7 @@ Useful env knobs (full table in [Configuration](#configuration)):
 | variable | role |
 |---|---|
 | `TWIN_LLM_PROVIDER` | `ollama` (default), `anthropic`, `gemini`, `openai`, `openai_compatible`, `groq`, `openrouter`, … |
-| `TWIN_LLM_BASE_URL` / `TWIN_LLM_MODEL` / `TWIN_LLM_API_KEY` | chat endpoint for extract + deep observer |
+| `TWIN_LLM_BASE_URL` / `TWIN_LLM_MODEL` / `TWIN_LLM_API_KEY` | chat endpoint for extract + session domain resolution |
 | `TWIN_EMBEDDER` | `auto` / `ollama` / `openai_compatible` / `gemini` / `hash` |
 | `TWIN_EMBED_BASE_URL` / `TWIN_EMBED_MODEL` / `TWIN_EMBED_API_KEY` | embedding endpoint |
 | `TWIN_OLLAMA_*` | still valid aliases when provider is Ollama |
@@ -50,7 +50,7 @@ When you outgrow SQLite, run `twin setup postgres` to move to the primary Postgr
 | `TWIN_DB_URL` | `sqlite:///~/.twin/twin.db` | `postgresql://…` selects the primary backend (pgvector) |
 | `TWIN_LLM_PROVIDER` | `ollama` | `ollama` (encouraged), `anthropic`/`claude`, `gemini`/`google`, `openai`/`openai_compatible`, or presets `groq` / `together` / `fireworks` / `openrouter` / `deepseek` / `mistral` / `xai` / `azure_openai` / `lmstudio` / `vllm` |
 | `TWIN_LLM_BASE_URL` | (provider default) | chat API base; Ollama defaults to `TWIN_OLLAMA_URL` |
-| `TWIN_LLM_MODEL` | (falls back to provider default / `TWIN_OLLAMA_MODEL`) | chat model for extract + deep observer |
+| `TWIN_LLM_MODEL` | (falls back to provider default / `TWIN_OLLAMA_MODEL`) | chat model for extract + session domain resolution |
 | `TWIN_LLM_API_KEY` | — | API key for cloud chat (also reads `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, … per provider) |
 | `TWIN_OLLAMA_URL` | `http://127.0.0.1:11434` | local Ollama server |
 | `TWIN_OLLAMA_MODEL` | `qwen3.6:latest` | local chat / extraction model |

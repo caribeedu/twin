@@ -44,8 +44,9 @@ from ..memory.models import (
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
 from .context_pack import ContextPack, build_context_pack
-from .observer import read_context
+from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain
 from .pipeline import extract_percept
+from .task_profiles import infer_task_profile
 
 logger = logging.getLogger("twin.cognition.sessions")
 
@@ -56,6 +57,26 @@ logger = logging.getLogger("twin.cognition.sessions")
 # "assistant" is an LLM's own unconfirmed account of what it did.
 SUMMARY_TRUST = {"user": 0.9, "derived": 0.85, "client": 0.7, "assistant": 0.6}
 DEFAULT_STALE_HOURS = 24.0
+
+# Folded into the extractable session_summary Percept: the dialogue plus the
+# deliberate observations a human or host records (twin session observe, and
+# the host's file/project context). Tool I/O (tool_requested / tool_completed /
+# tool_failed) and session_start boilerplate stay on session.artifacts for
+# replay — copied into the percept they drown the interpreter with pack dumps.
+_SUMMARY_PERCEPT_KINDS = frozenset({
+    "user_message",
+    "assistant_result",
+    "file",
+    "commit",
+    "doc",
+    "note",
+    "file_context",
+    "project_context",
+})
+# SessionEnd reason codes — not conversational content.
+_SUMMARY_IGNORE_TEXT = frozenset({
+    "prompt_input_exit", "clear", "logout", "other", "abort", "stop",
+})
 
 
 @dataclass
@@ -94,8 +115,26 @@ def start_session(
     the caller nor observation can name a domain, the session opens as
     ``unclassified``: the firewall blocks all memories, the pack carries no
     judgment, and ``needs_domain_confirmation`` asks the client to confirm.
+
+    Domain inference (search vote → local LLM) runs only when the caller did
+    not already supply a real domain.
     """
-    reading = read_context(store, cfg, query, cwd=cwd)
+    if domain and domain != UNCLASSIFIED_DOMAIN:
+        reading = ObserverReading(
+            domain=domain,
+            task_profile=task_profile or "general",
+            confidences={
+                "domain": 1.0,
+                "task_profile": 1.0 if task_profile else 0.0,
+                "project": 0.0,
+            },
+            uncertain=False,
+            mode=DOMAIN_MODE_EXPLICIT,
+        )
+    else:
+        reading = resolve_context_domain(
+            store, cfg, embedder, query, cwd=cwd,
+        )
 
     if project:
         found = store.get_project(project) or store.find_project(project)
@@ -111,6 +150,15 @@ def start_session(
 
     session_domain = domain or reading.domain
     needs_confirmation = session_domain == UNCLASSIFIED_DOMAIN
+
+    # Task profile orders the pack and is independent of the domain decision:
+    # infer it from the query whenever the caller did not pin it and the
+    # reading only carries the generic default.
+    resolved_task_profile = task_profile or reading.task_profile or "general"
+    if not task_profile and resolved_task_profile == "general":
+        inferred_profile, _ = infer_task_profile(query)
+        if inferred_profile != "general":
+            resolved_task_profile = inferred_profile
 
     started_at = now_iso()
     from ..privacy.identity import ensure_local_identity, resolve_access
@@ -146,7 +194,7 @@ def start_session(
         client=client,
         project_id=project_id,
         domain=session_domain,
-        task_profile=task_profile or reading.task_profile,
+        task_profile=resolved_task_profile,
         initial_query=query,
         started_at=started_at,
         last_activity_at=started_at,
@@ -214,12 +262,13 @@ def complete_session(
     """Close the session and consolidate what happened.
 
     Completion is a compare-and-set transition (two concurrent completes
-    cannot both win). Consolidation — summary + artifact notes become a
-    percept, extraction turns it into candidate memories — is tracked in
-    ``consolidation_status`` and is retryable: calling complete again on a
-    session whose consolidation failed re-runs only the consolidation,
-    without duplicating percepts or memories (the percept dedup key is
-    derived from the session id)."""
+    cannot both win). Consolidation — an optional summary plus **user /
+    assistant** artifact notes become a ``session_summary`` percept;
+    tool I/O stays on the session for replay but is not folded into that
+    percept. Extraction then turns the percept into candidate memories.
+    Retryable: calling complete again on a failed consolidation re-runs
+    only consolidation, without duplicating percepts (dedup key =
+    session id)."""
     if summary_origin not in SUMMARY_TRUST:
         raise ValueError(f"summary_origin must be one of {sorted(SUMMARY_TRUST)}")
     session = store.get_session(session_id)
@@ -247,13 +296,19 @@ def complete_session(
         store.update_session(session)
         return session
 
-    lines = [summary] if summary else []
+    lines: list[str] = []
+    summary_text = (summary or "").strip()
+    if summary_text and summary_text.lower() not in _SUMMARY_IGNORE_TEXT:
+        lines.append(summary_text)
     for artifact in session.artifacts:
         if artifact.get("percept_id"):
             continue  # already a first-class percept — never duplicated as text
+        kind = str(artifact.get("kind") or "").strip()
+        if kind not in _SUMMARY_PERCEPT_KINDS:
+            continue
         note = artifact.get("note") or artifact.get("ref") or ""
         if note:
-            lines.append(f"[{artifact.get('kind', 'artifact')}] {note}")
+            lines.append(f"[{kind}] {note}")
     if not lines:
         session.consolidation_status = ConsolidationStatus.skipped
         store.update_session(session)

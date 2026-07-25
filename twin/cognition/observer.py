@@ -3,97 +3,45 @@
 Watches the user's current text (a message, a task, a draft) and suggests
 relevant memories without ever answering the user itself.
 
-Flow: infer probable domain → search candidates → firewall filter → rank →
-return a compact suggestion payload (suggested_context / blocked_context).
+Flow: search candidates (hybrid, vault-wide) → firewall filter by the
+*consumer* domain (the open session, or an explicit argument) → rank, with
+a soft boost for memories that already live in that domain → return a
+compact suggestion payload (suggested_context / blocked_context).
+
+The observer never guesses the consumer domain from the text: a domain the
+firewall trusts must come from a stable source (the frozen session domain or
+an explicit argument). With no such domain the target is ``unclassified`` and
+the firewall returns nothing — ambiguity degrades to *less* context, never to
+somebody else's context.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from ..config import UNCLASSIFIED_DOMAIN, Config
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
-from ..memory.models import INACTIVE_STATUSES
 from ..memory.search import search
 from ..memory.store.base import MemoryStore
 
 logger = logging.getLogger("twin.cognition.observer")
 
-_DOMAIN_HINTS: list[tuple[str, list[str]]] = [
-    ("technical", [
-        "arquitetura", "architecture", "deploy", "api", "banco", "database",
-        "código", "code", "bug", "refactor", "rfc", "backend", "frontend",
-        "infra", "docker", "kubernetes", "migração", "migration", "stack",
-    ]),
-    ("work", [
-        "reunião", "meeting", "sprint", "prazo", "deadline", "cliente", "client",
-        "equipe", "team", "entrega", "roadmap", "stakeholder", "1:1", "okr",
-    ]),
-    ("assistant_preferences", [
-        "responda", "responder", "answer me", "tom de voz", "formato de resposta",
-        "explique como", "assistant", "assistente",
-    ]),
-]
+# Mode of an ObserverReading — how the session domain was decided.
+DOMAIN_MODE_SEARCH = "search"        # retrieval vote across confirmed memories
+DOMAIN_MODE_LLM = "llm"              # configured local chat model
+DOMAIN_MODE_UNRESOLVED = "unresolved"  # nothing could name it → unclassified
+DOMAIN_MODE_EXPLICIT = "explicit"    # caller supplied a real domain
+DOMAIN_MODE_FROZEN = "frozen"        # already frozen on the binding/session
 
 
 @dataclass
 class ObserverSuggestion:
     suggested_context: list[dict] = field(default_factory=list)
     blocked_context: list[dict] = field(default_factory=list)
-    inferred_domain: str = "technical"
-
-
-_CANDIDATE_ENTITY_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]{2,}(?:\s+[A-Z][a-zA-Z0-9]+)*\b")
-
-
-def _graph_domain_votes(store: MemoryStore, text: str) -> dict[str, int]:
-    """Entities mentioned in the text vote with the domains of the memories
-    they are attached to — inference informed by the graph, not just
-    keywords."""
-    votes: dict[str, int] = {}
-    seen: set[str] = set()
-    for match in _CANDIDATE_ENTITY_RE.finditer(text):
-        name = match.group(0)
-        if name.lower() in seen:
-            continue
-        seen.add(name.lower())
-        entity = store.get_entity_by_name(name)
-        if entity is None:
-            continue
-        for mem in store.memories_for_entity(entity.id)[:20]:
-            if mem.status.value in INACTIVE_STATUSES:
-                continue
-            votes[mem.domain] = votes.get(mem.domain, 0) + 1
-    return votes
-
-
-def infer_domain(text: str, store: Optional[MemoryStore] = None) -> str:
-    """Keyword hints + (when a store is given) domain votes from the graph.
-
-    With no evidence at all the answer is ``unclassified`` — never a real
-    domain. Downstream the firewall treats it as default-deny, so ambiguity
-    degrades to *less* context, not to somebody else's context."""
-    lowered = text.lower()
-    scores: dict[str, float] = {}
-    for domain, keywords in _DOMAIN_HINTS:
-        hits = sum(1 for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", lowered))
-        if hits:
-            scores[domain] = scores.get(domain, 0.0) + float(hits)
-    if store is not None:
-        graph_votes = _graph_domain_votes(store, text)
-        total = sum(graph_votes.values())
-        if total:
-            # graph signal is capped at the weight of ~2 keyword hits so a
-            # heavily-populated domain can't drown explicit wording
-            for domain, count in graph_votes.items():
-                scores[domain] = scores.get(domain, 0.0) + 2.0 * (count / total)
-    if not scores:
-        return UNCLASSIFIED_DOMAIN
-    return max(scores, key=scores.get)  # ties resolve by insertion (keywords first)
+    inferred_domain: str = UNCLASSIFIED_DOMAIN
 
 
 def observe(
@@ -106,11 +54,21 @@ def observe(
     min_score: float = 0.15,
     firewall: Optional[Firewall] = None,
 ) -> ObserverSuggestion:
-    domain = target_domain or infer_domain(current_text, store)
+    """Suggest memories relevant to ``current_text`` for a known consumer domain.
+
+    ``target_domain`` is the *consumer* domain (a frozen session domain, or an
+    explicit argument). It is never inferred from the text. When it is absent
+    the target is ``unclassified``: the firewall denies everything and the
+    suggestion comes back empty rather than leaking another domain's memories.
+    Same-domain hits get a soft ranking boost so the consumer's own domain wins
+    ties without excluding firewall-allowed cross-domain context.
+    """
+    domain = target_domain or UNCLASSIFIED_DOMAIN
     firewall = firewall or Firewall(cfg.policies_path, store)
     result = search(
         store, embedder, current_text,
         target_domain=domain, firewall=firewall, limit=limit,
+        domain_affinity=domain if domain != UNCLASSIFIED_DOMAIN else None,
     )
     suggestion = ObserverSuggestion(inferred_domain=domain)
     for hit in result.hits:
@@ -130,16 +88,12 @@ def observe(
     return suggestion
 
 
-# -- fast / deep observation ---------------------------------------------------
+# -- context observation -------------------------------------------------------
 #
-# Observation happens at two levels:
-#   fast: deterministic — keywords, entity matches, project/repository
-#         signals and graph votes; cheap enough to run on every call.
-#   deep: local LLM classification, used only when domain, project or task
-#         profile remains ambiguous after the fast pass.
-# The reading carries confidence per dimension, not a single guess.
-
-from pathlib import Path
+# Session/context classification (opening a cognitive session scope) is decided
+# by a retrieval vote across confirmed memories and, failing that, the
+# configured local chat model. There is no keyword path: the domain either has
+# evidence in the store or the model names it, otherwise it stays unclassified.
 
 from .task_profiles import PROFILES, infer_task_profile
 
@@ -168,13 +122,9 @@ confidence between 0 and 1 for domain and task. Respond with JSON only."""
 
 # Below this confidence the observer refuses to name a domain: the reading
 # says "unclassified" and downstream operates default-deny until either the
-# deep observer resolves it or the client confirms the domain explicitly.
-# One explicit keyword hit scores ~0.33 — that IS evidence and passes; zero
-# evidence scores 0.0 and never does.
+# local LLM resolves it or the client confirms the domain explicitly. The
+# model must clear this bar for its own answer to be asserted.
 DOMAIN_CONFIDENCE_THRESHOLD = 0.3
-# Below this the fast reading is *uncertain* and worth a deep (LLM) pass —
-# a higher bar than asserting the domain at all.
-UNCERTAIN_DOMAIN_CONFIDENCE = 0.34
 
 
 @dataclass
@@ -184,7 +134,7 @@ class ObserverReading:
     project_id: Optional[str] = None
     confidences: dict = field(default_factory=dict)  # {domain, task_profile, project}
     uncertain: bool = False
-    mode: str = "fast"
+    mode: str = DOMAIN_MODE_UNRESOLVED
     fallback_reason: Optional[str] = None  # set when a deep read was attempted and failed
 
     @property
@@ -192,56 +142,8 @@ class ObserverReading:
         return self.domain == UNCLASSIFIED_DOMAIN
 
 
-def _fast_read(store: MemoryStore, text: str, cwd: Optional[str] = None) -> ObserverReading:
-    lowered = text.lower()
-    domain_scores: dict[str, float] = {}
-    for domain, keywords in _DOMAIN_HINTS:
-        hits = sum(1 for kw in keywords if re.search(rf"\b{re.escape(kw)}\b", lowered))
-        if hits:
-            domain_scores[domain] = domain_scores.get(domain, 0.0) + float(hits)
-    graph_votes = _graph_domain_votes(store, text)
-    total_votes = sum(graph_votes.values())
-    if total_votes:
-        for domain, count in graph_votes.items():
-            domain_scores[domain] = domain_scores.get(domain, 0.0) + 2.0 * (count / total_votes)
-
-    if domain_scores:
-        domain = max(domain_scores, key=domain_scores.get)
-        domain_conf = min(1.0, domain_scores[domain] / 3)
-    else:
-        domain, domain_conf = UNCLASSIFIED_DOMAIN, 0.0
-    if domain_conf < DOMAIN_CONFIDENCE_THRESHOLD:
-        # not enough evidence to assert a domain — never guess a permissive one
-        domain = UNCLASSIFIED_DOMAIN
-
-    task_profile, task_conf = infer_task_profile(text)
-
-    # project resolution: repository/directory signal first, then mentions
-    project_id: Optional[str] = None
-    project_conf = 0.0
-    if cwd:
-        project = store.find_project(Path(cwd).name)
-        if project is not None:
-            project_id, project_conf = project.id, 0.9
-    if project_id is None:
-        for p in store.list_projects():
-            names = [p.name] + p.aliases
-            if any(re.search(rf"\b{re.escape(n.lower())}\b", lowered) for n in names):
-                project_id, project_conf = p.id, 0.7
-                break
-
-    return ObserverReading(
-        domain=domain, task_profile=task_profile, project_id=project_id,
-        confidences={"domain": round(domain_conf, 2),
-                     "task_profile": round(task_conf, 2),
-                     "project": round(project_conf, 2)},
-        uncertain=(domain_conf < UNCERTAIN_DOMAIN_CONFIDENCE or task_conf < 0.5),
-        mode="fast",
-    )
-
-
 def _deep_read(store: MemoryStore, cfg: Config, text: str,
-               fast: ObserverReading, client=None) -> ObserverReading:
+               seed: ObserverReading, client=None) -> ObserverReading:
     from .llm import get_chat_client
 
     projects = store.list_projects()
@@ -261,24 +163,23 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
         if callable(closer) and client is None:
             closer()
 
-    project_id = fast.project_id
-    project_conf = fast.confidences.get("project", 0.0)
+    project_id = seed.project_id
+    project_conf = seed.confidences.get("project", 0.0)
     if project_id is None and data.get("project"):
         found = store.find_project(str(data["project"]))
         if found is not None:
             project_id, project_conf = found.id, 0.6
 
-    domain = data.get("domain", fast.domain)
-    if domain not in {d for d, _ in _DOMAIN_HINTS} | {"work", "technical",
-                                                      "personal_preferences",
-                                                      "assistant_preferences"}:
-        domain = fast.domain  # may be unclassified — the safe answer stands
+    allowed = {"work", "technical", "personal_preferences", "assistant_preferences"}
+    domain = data.get("domain", seed.domain)
+    if domain not in allowed:
+        domain = UNCLASSIFIED_DOMAIN
     domain_conf = float(data.get("domain_confidence", 0.5))
     if domain_conf < DOMAIN_CONFIDENCE_THRESHOLD:
         domain = UNCLASSIFIED_DOMAIN  # the model itself is not sure — don't assert
-    task_profile = data.get("task_profile", fast.task_profile)
+    task_profile = data.get("task_profile", seed.task_profile)
     if task_profile not in PROFILES:
-        task_profile = fast.task_profile
+        task_profile = "general"
 
     return ObserverReading(
         domain=domain, task_profile=task_profile, project_id=project_id,
@@ -288,35 +189,165 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
             "project": round(project_conf, 2),
         },
         uncertain=(domain == UNCLASSIFIED_DOMAIN),
-        mode="deep",
+        mode=DOMAIN_MODE_LLM,
     )
 
 
 def read_context(store: MemoryStore, cfg: Config, text: str,
                  cwd: Optional[str] = None, client=None) -> ObserverReading:
-    """Fast observation always; deep LLM only when the fast pass is
-    uncertain and the configured chat provider is reachable.
+    """Classify session context with the configured local LLM only.
 
-    Every fallback is observable: when the deep read is skipped or fails,
-    the reading carries ``fallback_reason`` (error type only — never the
-    text being classified) and a warning is logged. An unresolved reading
-    keeps ``domain=unclassified``, which downstream means default-deny."""
-    fast = _fast_read(store, text, cwd=cwd)
-    if not fast.uncertain:
-        return fast
+    No keyword / graph heuristic pass. When the LLM is unavailable or fails,
+    return ``unclassified`` (default-deny) with an observable
+    ``fallback_reason`` (error type only — never the text being classified).
+    ``cwd`` is offered to the model as a hint, not resolved by path rules.
+
+    Prefer ``resolve_context_domain`` at session boundaries — it tries
+    retrieval votes before calling this.
+    """
     from .llm import llm_available
 
+    seed = ObserverReading(
+        domain=UNCLASSIFIED_DOMAIN,
+        task_profile="general",
+        project_id=None,
+        confidences={"domain": 0.0, "task_profile": 0.0, "project": 0.0},
+        uncertain=True,
+        mode=DOMAIN_MODE_UNRESOLVED,
+    )
+    user = (text or "").strip()
+    if cwd:
+        user = f"{user}\n\n[cwd: {cwd}]".strip()
+
     if client is None and not llm_available(cfg):
-        fast.fallback_reason = "deep_observer_unavailable"
+        seed.fallback_reason = "deep_observer_unavailable"
         logger.warning(
-            "deep observer unavailable (%s @ %s); fast reading stands with domain=%s",
-            cfg.normalized_llm_provider, cfg.resolved_llm_base_url, fast.domain,
+            "deep observer unavailable (%s @ %s); leaving domain=unclassified",
+            cfg.normalized_llm_provider, cfg.resolved_llm_base_url,
         )
-        return fast
+        return seed
     try:
-        return _deep_read(store, cfg, text, fast, client=client)
-    except Exception as exc:  # deep observation is best-effort, but never silent
-        fast.fallback_reason = f"deep_observer_failed:{type(exc).__name__}"
-        logger.warning("deep observer failed (%s); fast reading stands with domain=%s",
-                       type(exc).__name__, fast.domain)
-        return fast
+        return _deep_read(store, cfg, user or "(empty)", seed, client=client)
+    except Exception as exc:  # best-effort, never silent, never heuristic fallback
+        seed.fallback_reason = f"deep_observer_failed:{type(exc).__name__}"
+        logger.warning(
+            "deep observer failed (%s); leaving domain=unclassified",
+            type(exc).__name__,
+        )
+        return seed
+
+
+# Cross-domain retrieval vote → domain. Used before the local LLM.
+# Hash/local embedders often land relevant hits in the 0.10–0.20 band.
+DOMAIN_VOTE_MIN_HIT_SCORE = 0.10
+DOMAIN_VOTE_MIN_SHARE = 0.55
+DOMAIN_VOTE_MIN_MARGIN = 0.05
+
+
+def infer_domain_from_search(
+    store: MemoryStore,
+    embedder: Embedder,
+    text: str,
+    *,
+    limit: int = 8,
+    min_score: float = DOMAIN_VOTE_MIN_HIT_SCORE,
+) -> Optional[ObserverReading]:
+    """Vote a domain from confirmed memory hits (no firewall / no keywords).
+
+    Returns ``None`` when evidence is missing or ambiguous — caller may then
+    fall back to the local LLM. Never invents a domain from empty retrieval.
+    """
+    query = (text or "").strip()
+    if not query:
+        return None
+
+    # firewall=None → cross-domain candidates (unclassified target would deny all)
+    result = search(
+        store, embedder, query,
+        target_domain="",
+        firewall=None,
+        limit=limit,
+        include_candidates=False,
+    )
+    weights: dict[str, float] = {}
+    project_votes: dict[str, float] = {}
+    for hit in result.hits:
+        if hit.score < min_score:
+            continue
+        domain = (hit.memory.domain or "").strip()
+        if not domain or domain == UNCLASSIFIED_DOMAIN:
+            continue
+        weights[domain] = weights.get(domain, 0.0) + float(hit.score)
+        pid = hit.memory.project_id
+        if pid:
+            project_votes[pid] = project_votes.get(pid, 0.0) + float(hit.score)
+
+    if not weights:
+        return None
+
+    ranked = sorted(weights.items(), key=lambda kv: (-kv[1], kv[0]))
+    top_domain, top_score = ranked[0]
+    total = sum(weights.values()) or 1.0
+    share = top_score / total
+    second = ranked[1][1] if len(ranked) > 1 else 0.0
+    margin = top_score - second
+    clear = share >= DOMAIN_VOTE_MIN_SHARE or (
+        len(ranked) == 1 and top_score >= min_score
+    )
+    if not clear and margin < DOMAIN_VOTE_MIN_MARGIN:
+        return None
+    if share < DOMAIN_VOTE_MIN_SHARE and len(ranked) > 1:
+        return None
+
+    project_id = None
+    project_conf = 0.0
+    if project_votes:
+        pid, pscore = max(project_votes.items(), key=lambda kv: kv[1])
+        if pscore / total >= DOMAIN_VOTE_MIN_SHARE:
+            project_id, project_conf = pid, min(1.0, pscore / total)
+
+    # Task profile only orders the pack (coding vs architecture vs …); it is
+    # not a firewall input, so cheap keyword hints on the query are fine here.
+    task_profile, task_conf = infer_task_profile(query)
+
+    return ObserverReading(
+        domain=top_domain,
+        task_profile=task_profile,
+        project_id=project_id,
+        confidences={
+            "domain": round(min(1.0, share), 2),
+            "task_profile": round(task_conf, 2),
+            "project": round(project_conf, 2),
+        },
+        uncertain=False,
+        mode=DOMAIN_MODE_SEARCH,
+    )
+
+
+def resolve_context_domain(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    text: str,
+    *,
+    cwd: Optional[str] = None,
+    client=None,
+    existing_domain: Optional[str] = None,
+) -> ObserverReading:
+    """Resolve domain for an open session: search vote first, local LLM second.
+
+    Skips inference when ``existing_domain`` is already a real frozen domain.
+    """
+    if existing_domain and existing_domain != UNCLASSIFIED_DOMAIN:
+        return ObserverReading(
+            domain=existing_domain,
+            task_profile="general",
+            confidences={"domain": 1.0, "task_profile": 0.0, "project": 0.0},
+            uncertain=False,
+            mode=DOMAIN_MODE_FROZEN,
+        )
+
+    voted = infer_domain_from_search(store, embedder, text)
+    if voted is not None:
+        return voted
+    return read_context(store, cfg, text, cwd=cwd, client=client)

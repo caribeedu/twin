@@ -58,8 +58,11 @@ def test_full_flow_over_api(client):
     assert r.status_code == 200
     assert "context_pack" in r.json()
 
-    # observer
-    r = client.post("/api/observer", json={"current_text": "arquitetura dos webhooks"})
+    # observer — the consumer domain is supplied (never guessed from the text);
+    # without it the firewall target is unclassified and nothing is suggested
+    r = client.post("/api/observer", json={
+        "current_text": "arquitetura dos webhooks", "target_domain": "technical",
+    })
     assert r.status_code == 200
     assert r.json()["inferred_domain"] == "technical"
 
@@ -103,13 +106,16 @@ def test_session_lifecycle_over_api(client):
     r = client.post("/api/sessions", json={
         "query": "implement the webhook retry endpoint code",
         "client": "test", "cwd": "/home/edu/atlas-api",
+        "project": "Atlas", "domain": "technical", "task_profile": "coding",
     })
     assert r.status_code == 200
     started = r.json()
     session_id = started["session"]["id"]
     assert started["session"]["project_id"] == project["id"]
     assert started["session"]["task_profile"] == "coding"
-    assert started["observer_mode"] in ("fast", "deep")
+    assert started["observer_mode"] in (
+        "fast", "deep", "unresolved", "explicit", "search", "frozen",
+    )
     assert started["needs_domain_confirmation"] is False
     assert "context_pack" in started["context_pack"]
 

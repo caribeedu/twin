@@ -5,7 +5,7 @@ confirmed Memory / Judgment — the same core used by MCP / CLI / API does.
 
 Binding contract:
 - ``(host_type, external_session_id, occurrence)`` is unique;
-- after Stop, a new SessionStart opens occurrence N+1 + new CognitiveSession;
+- after SessionEnd, a new SessionStart opens occurrence N+1 + new CognitiveSession;
 - security fields (domain/project/persona/purpose/audience/vault) freeze at bind;
 - observations are idempotent by ``event_id``.
 """
@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..config import Config
+from ..config import UNCLASSIFIED_DOMAIN, Config
 from ..memory.embeddings import Embedder
 from ..memory.models import (
     HostSessionBinding,
@@ -98,6 +98,20 @@ def resolve_observation_event_id(
     return ids.new_id("hostevent")
 
 
+def _domain_is_frozen(domain: Optional[str]) -> bool:
+    """True when domain is a real (non-placeholder) frozen value."""
+    return bool(domain) and domain != UNCLASSIFIED_DOMAIN
+
+
+def _scope_field_is_frozen(value: Optional[str]) -> bool:
+    """True when a persona/purpose/audience value is intentionally frozen.
+
+    ``unknown`` / empty are placeholders from an unclassified SessionStart
+    (restricted access) and may be upgraded once with the domain.
+    """
+    return bool(value) and value not in ("unknown", UNCLASSIFIED_DOMAIN)
+
+
 def _assert_frozen_scope(
     binding: HostSessionBinding,
     *,
@@ -107,21 +121,30 @@ def _assert_frozen_scope(
     purpose: Optional[str],
     audience: Optional[str],
 ) -> None:
-    """Reject silent scope widening on an open binding."""
-    if domain and binding.domain and domain != binding.domain:
+    """Reject silent scope widening on an open binding.
+
+    ``unclassified`` domain and ``unknown`` persona/purpose/audience are not
+    frozen — a later real scope may upgrade them once (Claude SessionStart
+    often opens with no prompt text).
+    """
+    if (
+        domain
+        and _domain_is_frozen(binding.domain)
+        and domain != binding.domain
+    ):
         raise BindingScopeError(
             f"domain mismatch: binding frozen to {binding.domain!r}, "
             f"got {domain!r} — start a new host session"
         )
-    if persona and binding.persona and persona != binding.persona:
+    if persona and _scope_field_is_frozen(binding.persona) and persona != binding.persona:
         raise BindingScopeError(
             f"persona mismatch: binding frozen to {binding.persona!r}"
         )
-    if purpose and binding.purpose and purpose != binding.purpose:
+    if purpose and _scope_field_is_frozen(binding.purpose) and purpose != binding.purpose:
         raise BindingScopeError(
             f"purpose mismatch: binding frozen to {binding.purpose!r}"
         )
-    if audience and binding.audience and audience != binding.audience:
+    if audience and _scope_field_is_frozen(binding.audience) and audience != binding.audience:
         raise BindingScopeError(
             f"audience mismatch: binding frozen to {binding.audience!r}"
         )
@@ -145,7 +168,7 @@ def bind_and_start(
     audience: str = "self",
     metadata: Optional[dict[str, Any]] = None,
 ) -> NativeSessionStart:
-    """Open or reuse an *active* binding; after Stop, open a new occurrence."""
+    """Open or reuse an *active* binding; after SessionEnd, open a new occurrence."""
     if not (external_session_id or "").strip():
         raise ValueError("external_session_id required")
     host_type = (host_type or "native").lower()
@@ -366,6 +389,146 @@ def observe_host_event(
     return ObserveResult(binding=binding, duplicated=False)
 
 
+@dataclass
+class DomainUpgradePack:
+    """Result of upgrading an unclassified binding and packing context."""
+
+    binding: HostSessionBinding
+    pack: ContextPack
+    previous_domain: str
+    resolved_domain: str
+
+
+def _refresh_placeholder_access(
+    store: MemoryStore, cfg: Config,
+    binding: HostSessionBinding, resolved: str,
+):
+    """Re-resolve access now that an unclassified binding has a real domain.
+
+    An unclassified SessionStart freezes persona/purpose/audience as ``unknown``
+    (restricted access); left as-is the upgraded pack stays empty. Placeholder
+    scope fields fall back to local-cli defaults; already-frozen ones are kept.
+    """
+    from ..privacy.identity import ensure_local_identity, resolve_access
+    from ..privacy.yaml_io import bootstrap_policy_set
+
+    bootstrap_policy_set(store, policies_path=cfg.policies_path)
+    ensure_local_identity(store)
+    return resolve_access(
+        store,
+        surface="cli",
+        client="cli",
+        tool_id=binding.host_type or "claude-code",
+        persona=(
+            "individual" if not _scope_field_is_frozen(binding.persona)
+            else binding.persona
+        ),
+        purpose=(
+            "task_execution" if not _scope_field_is_frozen(binding.purpose)
+            else binding.purpose
+        ),
+        audience=(
+            "self" if not _scope_field_is_frozen(binding.audience)
+            else binding.audience
+        ),
+        project_id=binding.project_id,
+        session_id=binding.cognitive_session_id,
+        requested_domains=[resolved],
+    )
+
+
+def _apply_upgraded_scope(target, *, domain: str, reading, access) -> None:
+    """Apply the resolved domain + refreshed access to a binding or session.
+
+    Placeholder scope fields (``unknown`` / empty) are filled from ``access``;
+    intentionally frozen ones are preserved. Task profile only fills a generic
+    slot. Shared shape lets binding and session take the same upgrade.
+    """
+    target.domain = domain
+    if reading.task_profile and (
+        not target.task_profile or target.task_profile == "general"
+    ):
+        target.task_profile = reading.task_profile
+    if not _scope_field_is_frozen(target.persona):
+        target.persona = access.persona
+    if not _scope_field_is_frozen(target.purpose):
+        target.purpose = access.purpose
+    if not _scope_field_is_frozen(target.audience):
+        target.audience = access.audience
+    if not target.principal_id or target.principal_id == "unknown":
+        target.principal_id = access.principal_id
+
+
+def maybe_upgrade_domain_and_pack(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    binding: HostSessionBinding,
+    query: str,
+    cwd: Optional[str] = None,
+    max_tokens: int = 1200,
+) -> Optional[DomainUpgradePack]:
+    """If binding domain is unclassified, try to resolve it from ``query`` and pack.
+
+    Used when Claude Code SessionStart had no prompt text (empty pack), then
+    the first ``UserPromptSubmit`` carries enough signal to name a domain.
+    Returns ``None`` when domain is already frozen, still unclassified, or
+    ``query`` is empty. Never widens a frozen real domain.
+
+    Resolution order when domain is still open: retrieval vote → local LLM.
+    No-op when domain already frozen. Hook timeouts must cover LLM fallback.
+    """
+    if not (query or "").strip():
+        return None
+    previous = binding.domain or UNCLASSIFIED_DOMAIN
+    if _domain_is_frozen(previous):
+        return None
+
+    from .observer import resolve_context_domain
+
+    reading = resolve_context_domain(
+        store, cfg, embedder, query, cwd=cwd, existing_domain=previous,
+    )
+    resolved = reading.domain or UNCLASSIFIED_DOMAIN
+    if not _domain_is_frozen(resolved):
+        return None
+
+    access = _refresh_placeholder_access(store, cfg, binding, resolved)
+
+    _apply_upgraded_scope(binding, domain=resolved, reading=reading, access=access)
+    meta = dict(binding.metadata or {})
+    meta["domain_upgraded_from"] = previous
+    meta["domain_upgraded_at"] = now_iso()
+    meta["domain_resolved_via"] = reading.mode
+    binding.metadata = meta
+    store.update_host_session_binding(binding)
+
+    session = store.get_session(binding.cognitive_session_id)
+    if session is not None:
+        _apply_upgraded_scope(session, domain=resolved, reading=reading, access=access)
+        store.update_session(session)
+
+    pack = request_context_pack(
+        store, cfg, embedder,
+        query=query,
+        binding=binding,
+        cwd=cwd,
+        max_tokens=max_tokens,
+        client=binding.host_type or "claude-code",
+    )
+    logger.info(
+        "host binding %s domain %s → %s persona=%s (pack sources=%s)",
+        binding.id, previous, resolved, binding.persona, len(pack.sources or []),
+    )
+    return DomainUpgradePack(
+        binding=binding,
+        pack=pack,
+        previous_domain=previous,
+        resolved_domain=resolved,
+    )
+
+
 def request_context_pack(
     store: MemoryStore,
     cfg: Config,
@@ -467,7 +630,7 @@ def end_host_session(
     abandoned: bool = False,
     summary_origin: str = "assistant",
 ) -> Optional[HostSessionBinding]:
-    """End the active binding. Returns None when no active binding (orphan Stop)."""
+    """End the active binding. Returns None when no active binding (orphan SessionEnd)."""
     binding = resolve_active_binding(
         store, host_type=host_type, external_session_id=external_session_id,
     )

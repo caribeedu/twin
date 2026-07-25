@@ -208,8 +208,14 @@ INTERPRETATION_JSON_SCHEMA: dict = {
                         "type": "string",
                         "enum": [a.value for a in CognitiveAct],
                     },
-                    "title": {"type": "string"},
-                    "summary": {"type": "string"},
+                    "title": {
+                        "type": "string",
+                        "description": "Short label for the item (required; not description).",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-sentence meaning (required; not description).",
+                    },
                     "domain": {"type": "string", "enum": ALL_DOMAINS},
                     "sensitivity": {"type": "string", "enum": SENSITIVITIES},
                     "confidence": {"type": "number"},
@@ -231,7 +237,10 @@ INTERPRETATION_JSON_SCHEMA: dict = {
                             "additionalProperties": False,
                         },
                     },
-                    "evidence_span": {"type": "string"},
+                    "evidence_span": {
+                        "type": "string",
+                        "description": "Verbatim excerpt from the source text.",
+                    },
                     "unresolved_references": {
                         "type": "array", "items": {"type": "string"},
                     },
