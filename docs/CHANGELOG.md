@@ -400,19 +400,21 @@ Delivered:
 
 - `twin native install` merges Twin hooks into `~/.claude/settings.json` by default (keeps non-Twin hooks; `--no-merge` / `--settings` escape hatches; `.twin-bak` backup on patch); event name comes from stdin `hook_event_name`, not a fake env var;
 - context packs return as Claude's `hookSpecificOutput.additionalContext` (observation hooks stay silent on stdout);
-- lifecycle fix: Claude's **Stop** is end-of-turn only (`assistant_result` — binding stays open); **SessionEnd** closes the chat, completes the session and consolidates — default install wires `SessionEnd` with per-hook timeouts (120s SessionStart / UserPromptSubmit / SessionEnd);
-- deferred context pack: SessionStart with no prompt text opens `unclassified` (empty pack); the first `UserPromptSubmit` that resolves a domain upgrades the binding once and emits the pack.
+- lifecycle fix: Claude's **Stop** is end-of-turn only (`assistant_result` — binding stays open); **SessionEnd** closes the binding immediately and enqueues background `session_complete` (summary + extract via `twin-runtime`) — default install wires `SessionEnd` with per-hook timeouts (120s SessionStart / UserPromptSubmit / SessionEnd);
+- deferred context pack: SessionStart with no prompt text opens `unclassified` (empty pack); the first `UserPromptSubmit` that **search-votes** a domain upgrades once and emits the pack — never waits on the local LLM in the hook.
 
 **Domain resolution and observation**
 
-- session domain by evidence: retrieval vote across confirmed memories, then local LLM only when the vote is inconclusive — keyword/graph domain guess removed;
+- hot-path session domain is search-vote only (keyword/graph guess removed); inconclusive make it stay `unclassified` and enqueue background `session_domain_resolve` (multi-message LLM) or wait for client/MCP explicit domain;
 - Memory Observer no longer invents the consumer domain from text: uses the frozen session domain or an explicit argument (else `unclassified` → default-deny), with a soft same-domain ranking boost on hybrid search;
-- `session_summary` consolidation folds dialogue plus deliberate observations (`file` / `commit` / `doc` / `note` / host file/project context); tool I/O and session boilerplate stay on the session for replay.
+- `session_summary` consolidation folds dialogue plus deliberate observations (`file` / `commit` / `doc` / `note` / host file/project context) with human speaker labels (`User:` / `Assistant:` …) so machine kind tags do not leak into evidence quotes; tool I/O and session boilerplate stay on the session for replay.
 
 **Interpreter, CLI and release hygiene**
 
 - interpreter prompt/schema (interpret-v2) require `title` and `summary` so grounded items are no longer dropped as malformed;
 - CLI DX: human-readable views across connector and day-to-day commands, with a uniform `--json` escape hatch for scripting (machine protocol surfaces — `twin native event`, `twin mcp`, `twin serve` — unchanged);
+- runtime CLI documents `session_domain_resolve` / `session_complete` job kinds (`twin runtime enqueue|status|job|retry|…`; see INTERFACES + OPERATIONS);
+- `twin runtime start` / `twin-runtime` show a live processing panel on TTY (in-flight workers, queue depth, recent jobs; `--no-live` / `TWIN_RUNTIME_NO_LIVE` escape hatch);
 - drop versioned completion gates and phase folklore (`twin eval v1-completion` / connector completion matrices → behavior tests and `twin connector contract` / production-ready report);
 - docs/README polish: `CONNECTION.md` → `INTERFACES.md`, ROADMAP for future majors, CHANGELOG as release history, clearer how-to-use and visuals;
 - package/`__version__` to `1.2.0`.

@@ -145,12 +145,66 @@ def test_vault_isolation_on_claim(store):
 def test_worker_runs_integrity_check(store, cfg, embedder):
     q = RuntimeQueue(store)
     job = q.enqueue(JobKind.integrity_check, idempotency_key="run-once")
-    w = RuntimeWorker(store, cfg, embedder, worker_id="test-w")
+    events = []
+    w = RuntimeWorker(
+        store, cfg, embedder, worker_id="test-w",
+        on_job_event=events.append,
+    )
+    assert w.current is None
     assert w.run_once() is True
     done = store.get_runtime_job(job.id)
     assert done.status == JobStatus.completed
     assert done.result.get("ok") is True
     assert w.jobs_completed == 1
+    assert w.current is None
+    assert [e["status"] for e in events] == ["started", "completed"]
+    assert events[-1]["kind"] == "integrity_check"
+
+
+def test_runtime_snapshot_tracks_inflight_and_recent(store, cfg, embedder):
+    from twin.runtime.service import TwinRuntime
+
+    rt = TwinRuntime(store, cfg, embedder, workers=1, schedule_interval=3600)
+    q = RuntimeQueue(store)
+    job = q.enqueue(JobKind.integrity_check, idempotency_key="snap-1")
+
+    claimed = []
+
+    class SlowWorker(RuntimeWorker):
+        def run_once(self):
+            j = self.queue.claim(self.worker_id, lease_seconds=30)
+            if j is None:
+                return False
+            self.current = {
+                "job_id": j.id,
+                "kind": j.kind.value,
+                "stage": "dispatch",
+                "started_at": j.started_at or "2020-01-01T00:00:00+00:00",
+                "label": f"{j.kind.value}",
+            }
+            claimed.append(j)
+            return True
+
+    w = SlowWorker(store, cfg, embedder, worker_id="snap-w")
+    rt._pool = [w]
+    assert w.run_once() is True
+    snap = rt.snapshot()
+    assert snap["workers"][0]["current"]["job_id"] == job.id
+    assert snap["queue"].get("running", 0) >= 1 or snap["workers"][0]["current"]
+
+    rt.note_job_event({
+        "status": "completed", "kind": "integrity_check",
+        "job_id": job.id, "worker_id": "snap-w", "label": "integrity_check",
+    })
+    snap2 = rt.snapshot()
+    assert snap2["recent"][0]["job_id"] == job.id
+    assert snap2["recent"][0]["status"] == "completed"
+
+    from twin.interfaces.ux import format_runtime_dashboard_plain
+
+    line = format_runtime_dashboard_plain(snap2)
+    assert "integrity_check" in line
+    assert "runtime" in line
 
 
 def test_scheduler_idempotent_daily_keys(store):
@@ -189,3 +243,77 @@ def test_dispatch_missing_handler_payload(store, cfg, embedder):
         assert False, "expected HandlerError"
     except HandlerError as exc:
         assert exc.error_class == ErrorClass.permanent
+
+
+def test_session_complete_job_consolidates(store, cfg, embedder):
+    from twin.cognition.sessions import observe_session, start_session
+    from twin.memory.models import ConsolidationStatus
+
+    ses = start_session(
+        store, cfg, embedder, "task", domain="technical", client="cli",
+    ).session
+    observe_session(store, ses.id, {
+        "kind": "user_message", "note": "i finished watching dexter",
+    })
+    q = RuntimeQueue(store)
+    job = q.enqueue(
+        JobKind.session_complete,
+        payload={
+            "session_id": ses.id,
+            "summary": "",
+            "abandoned": False,
+            "summary_origin": "assistant",
+        },
+        idempotency_key=f"session_complete:{ses.id}",
+    )
+    claimed = q.claim("w-complete")
+    assert claimed is not None and claimed.id == job.id
+    result = dispatch(store, cfg, embedder, claimed)
+    assert q.complete(claimed, result)
+    done = store.get_session(ses.id)
+    assert done.consolidation_status == ConsolidationStatus.completed
+    assert done.summary_percept_id
+    assert "dexter" in store.get_percept(done.summary_percept_id).content.lower()
+
+
+def test_session_domain_resolve_job_freezes_from_dialogue(store, cfg, embedder, monkeypatch):
+    from twin.cognition.host_session import bind_and_start
+    from twin.cognition.observer import ObserverReading
+    from twin.cognition.sessions import observe_session
+
+    started = bind_and_start(
+        store, cfg, embedder,
+        host_type="claude-code",
+        external_session_id="bg-domain-1",
+        query="native host session",
+    )
+    binding = started.binding
+    assert binding.domain == "unclassified"
+    observe_session(store, binding.cognitive_session_id, {
+        "kind": "user_message",
+        "note": "get ready for the Atlas stakeholder sync tomorrow",
+    })
+
+    monkeypatch.setattr(
+        "twin.cognition.observer.read_context",
+        lambda *_a, **_k: ObserverReading(
+            domain="work", task_profile="meeting_prep", mode="llm",
+            confidences={"domain": 0.9, "task_profile": 0.8, "project": 0.0},
+        ),
+    )
+
+    q = RuntimeQueue(store)
+    job = q.enqueue(
+        JobKind.session_domain_resolve,
+        payload={"binding_id": binding.id, "session_id": binding.cognitive_session_id},
+        idempotency_key=f"session_domain_resolve:{binding.id}",
+    )
+    claimed = q.claim("w-domain")
+    assert claimed.id == job.id
+    result = dispatch(store, cfg, embedder, claimed)
+    assert result["ok"] is True
+    assert result["domain"] == "work"
+    assert q.complete(claimed, result)
+    updated = store.get_host_session_binding(binding.id)
+    assert updated.domain == "work"
+    assert updated.metadata.get("domain_resolved_background") is True

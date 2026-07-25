@@ -334,9 +334,13 @@ def resolve_context_domain(
     client=None,
     existing_domain: Optional[str] = None,
 ) -> ObserverReading:
-    """Resolve domain for an open session: search vote first, local LLM second.
+    """Resolve domain on the request hot path: search vote only.
 
     Skips inference when ``existing_domain`` is already a real frozen domain.
+    When retrieval cannot name a domain the reading stays ``unclassified`` —
+    never call the local LLM here (hooks / session start must stay fast).
+    Background ``session_domain_resolve`` jobs and client/MCP explicit domain
+    upgrade the binding later from multi-message evidence.
     """
     if existing_domain and existing_domain != UNCLASSIFIED_DOMAIN:
         return ObserverReading(
@@ -350,4 +354,12 @@ def resolve_context_domain(
     voted = infer_domain_from_search(store, embedder, text)
     if voted is not None:
         return voted
-    return read_context(store, cfg, text, cwd=cwd, client=client)
+    return ObserverReading(
+        domain=UNCLASSIFIED_DOMAIN,
+        task_profile="general",
+        project_id=None,
+        confidences={"domain": 0.0, "task_profile": 0.0, "project": 0.0},
+        uncertain=True,
+        mode=DOMAIN_MODE_UNRESOLVED,
+        fallback_reason="awaiting_background_or_client",
+    )

@@ -21,6 +21,7 @@ from ...cognition.host_session import (
     NativeSessionStart,
     bind_and_start,
     end_host_session,
+    maybe_enqueue_domain_resolve,
     maybe_upgrade_domain_and_pack,
     observe_host_event,
     recommend_intervention,
@@ -222,8 +223,9 @@ class NativeHostService:
         extras: dict[str, Any] = {"duplicated": result.duplicated}
 
         # Claude SessionStart often has no prompt → unclassified empty pack.
-        # First user_message with enough signal upgrades domain and emits pack
-        # (UserPromptSubmit additionalContext). Skip duplicates / empty text.
+        # First user_message: hot path is search-vote only (maybe_upgrade).
+        # If still unclassified, enqueue background LLM resolve from dialogue —
+        # never block the hook on the local model.
         if (
             kind == "user_message"
             and not result.duplicated
@@ -250,6 +252,12 @@ class NativeHostService:
                     sources=list(pack.sources or []),
                     extras=extras,
                 )
+            job_id = maybe_enqueue_domain_resolve(
+                self.store, result.binding, cwd=event.cwd,
+            )
+            if job_id:
+                extras["domain_resolve_job_id"] = job_id
+                extras["needs_domain_confirmation"] = True
 
         return NativeEventResult(
             binding=result.binding,

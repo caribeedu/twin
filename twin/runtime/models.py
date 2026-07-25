@@ -25,6 +25,8 @@ class JobKind(str, Enum):
     reembed_memory = "reembed_memory"
     integrity_check = "integrity_check"
     connector_reconcile = "connector_reconcile"
+    session_domain_resolve = "session_domain_resolve"
+    session_complete = "session_complete"
 
 
 class JobStatus(str, Enum):
@@ -48,6 +50,8 @@ class ErrorClass(str, Enum):
 MODEL_GATED_KINDS = frozenset({
     JobKind.interpret_percept,
     JobKind.workspace_tick,
+    JobKind.session_domain_resolve,
+    JobKind.session_complete,
 })
 
 

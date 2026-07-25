@@ -550,11 +550,15 @@ def request_context_pack(
     """Proactive Context Pack — assembled only by the cognitive core.
 
     When ``binding`` is set, frozen security fields win; divergent caller
-    fields must already have been rejected by the caller.
+    fields must already have been rejected by the caller. Never calls the
+    local LLM for domain on this path — domain comes from the binding /
+    session / explicit argument, or a search vote when unbound.
     """
+    from ..config import UNCLASSIFIED_DOMAIN
     from ..privacy.identity import ensure_local_identity, resolve_access
     from ..privacy.yaml_io import bootstrap_policy_set
-    from .observer import read_context
+    from .observer import resolve_context_domain
+    from .task_profiles import infer_task_profile
 
     if binding is not None:
         session_id = binding.cognitive_session_id
@@ -573,8 +577,16 @@ def request_context_pack(
                 raise ValueError(f"project {project!r} not found")
             project_id = found.id
 
-    reading = read_context(store, cfg, query, cwd=cwd)
-    if binding is None:
+    if binding is not None:
+        session_domain = domain or UNCLASSIFIED_DOMAIN
+        if not task_profile or task_profile == "general":
+            inferred, _ = infer_task_profile(query)
+            if inferred != "general":
+                task_profile = inferred
+    else:
+        reading = resolve_context_domain(
+            store, cfg, embedder, query, cwd=cwd, existing_domain=domain,
+        )
         if project_id is None:
             project_id = reading.project_id
         if session_id:
@@ -583,8 +595,9 @@ def request_context_pack(
                 project_id = project_id or session.project_id
                 domain = domain or session.domain
                 task_profile = task_profile or session.task_profile
+        session_domain = domain or reading.domain
+        task_profile = task_profile or reading.task_profile
 
-    session_domain = domain or reading.domain
     bootstrap_policy_set(store, policies_path=cfg.policies_path)
     ensure_local_identity(store)
     access = resolve_access(
@@ -613,10 +626,91 @@ def request_context_pack(
         store, cfg, embedder, query,
         target_domain=session_domain,
         max_tokens=max_tokens,
-        task_profile=task_profile or reading.task_profile,
+        task_profile=task_profile or "general",
         project_id=project_id,
         access=access,
     )
+
+
+def _dialogue_text_for_domain(store: MemoryStore, session_id: str) -> str:
+    """Fold user/assistant session artifacts into multi-message evidence."""
+    session = store.get_session(session_id)
+    if session is None:
+        return ""
+    lines: list[str] = []
+    if session.initial_query:
+        lines.append(session.initial_query)
+    for art in session.artifacts or []:
+        kind = str(art.get("kind") or "")
+        if kind not in ("user_message", "assistant_result", "note"):
+            continue
+        note = (art.get("note") or art.get("ref") or "").strip()
+        if note:
+            lines.append(note)
+    return "\n".join(lines).strip()
+
+
+def maybe_enqueue_domain_resolve(
+    store: MemoryStore,
+    binding: HostSessionBinding,
+    *,
+    cwd: Optional[str] = None,
+) -> str:
+    """Enqueue background LLM domain resolve when binding is still unclassified.
+
+    Hot-path session start / UserPromptSubmit only search-vote. When that fails,
+    a ``session_domain_resolve`` job (twin-runtime) reads multi-message evidence
+    and freezes the domain. No-op without a runtime-capable store.
+    """
+    if _domain_is_frozen(binding.domain):
+        return ""
+    if not hasattr(store, "insert_runtime_job"):
+        return ""
+    from twin.runtime.models import JobKind
+    from twin.runtime.queue import RuntimeQueue
+
+    job = RuntimeQueue(store).enqueue(
+        JobKind.session_domain_resolve,
+        payload={
+            "binding_id": binding.id,
+            "session_id": binding.cognitive_session_id,
+            "cwd": cwd or "",
+        },
+        idempotency_key=f"session_domain_resolve:{binding.id}",
+        priority=35,
+        vault_id=binding.vault_id or "vault_general",
+    )
+    return job.id
+
+
+def maybe_enqueue_session_complete(
+    store: MemoryStore,
+    *,
+    session_id: str,
+    summary: str = "",
+    abandoned: bool = False,
+    summary_origin: str = "assistant",
+    vault_id: str = "vault_general",
+) -> str:
+    """Enqueue background session consolidation + extract (twin-runtime)."""
+    if not hasattr(store, "insert_runtime_job"):
+        return ""
+    from twin.runtime.models import JobKind
+    from twin.runtime.queue import RuntimeQueue
+
+    job = RuntimeQueue(store).enqueue(
+        JobKind.session_complete,
+        payload={
+            "session_id": session_id,
+            "summary": summary,
+            "abandoned": abandoned,
+            "summary_origin": summary_origin,
+        },
+        idempotency_key=f"session_complete:{session_id}",
+        priority=30,
+        vault_id=vault_id or "vault_general",
+    )
+    return job.id
 
 
 def end_host_session(
@@ -630,7 +724,13 @@ def end_host_session(
     abandoned: bool = False,
     summary_origin: str = "assistant",
 ) -> Optional[HostSessionBinding]:
-    """End the active binding. Returns None when no active binding (orphan SessionEnd)."""
+    """End the active binding. Consolidation runs in the background when possible.
+
+    Closes the binding immediately so the next SessionStart can open occurrence
+    N+1 without waiting for extract. Prefers a ``session_complete`` runtime job;
+    falls back to in-process ``complete_session`` when the store has no runtime
+    queue (tests / single-process installs).
+    """
     binding = resolve_active_binding(
         store, host_type=host_type, external_session_id=external_session_id,
     )
@@ -640,15 +740,93 @@ def end_host_session(
             host_type, external_session_id,
         )
         return None
-    if not binding.ended_at:
+    if binding.ended_at:
+        return binding
+
+    # Close binding first — occurrence N+1 must not wait on extract/LLM.
+    binding.ended_at = now_iso()
+    store.update_host_session_binding(binding)
+
+    job_id = maybe_enqueue_session_complete(
+        store,
+        session_id=binding.cognitive_session_id,
+        summary=summary,
+        abandoned=abandoned,
+        summary_origin=summary_origin,
+        vault_id=binding.vault_id or "vault_general",
+    )
+    if not job_id:
         complete_session(
             store, cfg, embedder, binding.cognitive_session_id,
             summary=summary, abandoned=abandoned,
             summary_origin=summary_origin,
         )
-        binding.ended_at = now_iso()
-        store.update_host_session_binding(binding)
+    else:
+        logger.info(
+            "session_complete enqueued job=%s session=%s binding=%s",
+            job_id, binding.cognitive_session_id, binding.id,
+        )
     return binding
+
+
+def apply_background_domain_resolve(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    binding_id: str,
+    cwd: Optional[str] = None,
+) -> dict[str, Any]:
+    """Worker path: LLM-classify domain from multi-message session evidence.
+
+    Used by the ``session_domain_resolve`` runtime handler. Safe to call when
+    the binding is already frozen (no-op). Never emits host stdout.
+    """
+    from .observer import read_context
+
+    binding = store.get_host_session_binding(binding_id)
+    if binding is None:
+        return {"ok": False, "reason": "binding_not_found"}
+    if _domain_is_frozen(binding.domain):
+        return {"ok": True, "reason": "already_frozen", "domain": binding.domain}
+
+    text = _dialogue_text_for_domain(store, binding.cognitive_session_id)
+    if not text:
+        return {"ok": False, "reason": "no_dialogue"}
+
+    reading = read_context(store, cfg, text, cwd=cwd)
+    resolved = reading.domain or UNCLASSIFIED_DOMAIN
+    if not _domain_is_frozen(resolved):
+        return {
+            "ok": False,
+            "reason": reading.fallback_reason or "still_unclassified",
+            "mode": reading.mode,
+        }
+
+    access = _refresh_placeholder_access(store, cfg, binding, resolved)
+    previous = binding.domain or UNCLASSIFIED_DOMAIN
+    _apply_upgraded_scope(binding, domain=resolved, reading=reading, access=access)
+    meta = dict(binding.metadata or {})
+    meta["domain_upgraded_from"] = previous
+    meta["domain_upgraded_at"] = now_iso()
+    meta["domain_resolved_via"] = reading.mode
+    meta["domain_resolved_background"] = True
+    binding.metadata = meta
+    store.update_host_session_binding(binding)
+
+    session = store.get_session(binding.cognitive_session_id)
+    if session is not None:
+        _apply_upgraded_scope(session, domain=resolved, reading=reading, access=access)
+        store.update_session(session)
+
+    return {
+        "ok": True,
+        "domain": resolved,
+        "previous_domain": previous,
+        "mode": reading.mode,
+        "binding_id": binding.id,
+        "session_id": binding.cognitive_session_id,
+    }
 
 
 def recommend_intervention(

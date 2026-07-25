@@ -193,20 +193,21 @@ def test_resolve_uses_search_before_llm(store, cfg, embedder, monkeypatch):
     assert reading.domain == "technical"
 
 
-def test_resolve_falls_back_to_llm_when_search_empty(store, cfg, embedder, monkeypatch):
-    from twin.cognition.observer import ObserverReading
+def test_resolve_stays_unclassified_without_search_vote(store, cfg, embedder, monkeypatch):
+    """Hot path never calls the LLM — unclassified awaits background/client."""
+    called = {"llm": 0}
+
+    def boom(*_a, **_k):
+        called["llm"] += 1
+        raise AssertionError("read_context must not run on hot-path resolve")
 
     monkeypatch.setattr(
         "twin.cognition.observer.infer_domain_from_search",
         lambda *_a, **_k: None,
     )
-    monkeypatch.setattr(
-        "twin.cognition.observer.read_context",
-        lambda *_a, **_k: ObserverReading(
-            domain="work", task_profile="meeting_prep", mode="llm",
-            confidences={"domain": 0.8, "task_profile": 0.7, "project": 0.0},
-        ),
-    )
+    monkeypatch.setattr("twin.cognition.observer.read_context", boom)
     reading = resolve_context_domain(store, cfg, embedder, "get ready for tomorrow")
-    assert reading.mode == "llm"
-    assert reading.domain == "work"
+    assert reading.mode == "unresolved"
+    assert reading.domain == "unclassified"
+    assert reading.fallback_reason == "awaiting_background_or_client"
+    assert called["llm"] == 0

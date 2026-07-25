@@ -18,6 +18,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lease", type=int, default=60)
     parser.add_argument("--schedule-interval", type=float, default=30.0)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument(
+        "--no-live", action="store_true",
+        help="disable live processing panel (logs only)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -26,18 +30,20 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
+    from twin.interfaces import ux
     from twin.runtime.service import TwinRuntime
     from twin.workspace import Workspace
 
     ws = Workspace(args.home)
-    TwinRuntime(
+    rt = TwinRuntime(
         ws.store, ws.cfg, ws.embedder,
         workers=args.workers,
         vault_id=args.vault,
         lease_seconds=args.lease,
         schedule_interval=args.schedule_interval,
         offline=args.offline,
-    ).run()
+    )
+    ux.run_runtime_with_live(rt, live=not args.no_live and not args.verbose)
 
 
 if __name__ == "__main__":

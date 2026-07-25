@@ -10,7 +10,8 @@
  twin observe "current text" memory observer suggestion
  twin workspace tick "text" parallel memory tick (recall + optional interpret)
  twin consolidate daily|weekly scheduled consolidation cycle
- twin runtime start|status|enqueue durable cognitive runtime (v1.0)
+ twin runtime start|status|enqueue|job|retry|cancel durable cognitive runtime
+ (live processing panel on start; session_domain_resolve / session_complete)
  twin promote <memory_id> promote a memory into the judgment profile
  twin supersede <new_id> <old_id> new memory replaces the old one
  twin contradict <id_a> <id_b> flag two memories as contradictory
@@ -934,10 +935,17 @@ def cmd_runtime(args) -> None:
             schedule_interval=float(getattr(args, "schedule_interval", 30) or 30),
             offline=bool(getattr(args, "offline", False)),
         )
-        if not _want_json(args):
+        want_live = (
+            not _want_json(args)
+            and not bool(getattr(args, "no_live", False))
+        )
+        if not _want_json(args) and not want_live:
             ux.print_rule("runtime · start")
             ux.print_ok("runtime started — Ctrl+C to stop")
-        rt.run()
+        elif not _want_json(args):
+            ux.print_rule("runtime · start")
+            ux.print_dim("live panel — Ctrl+C to stop  (--no-live for logs only)")
+        ux.run_runtime_with_live(rt, live=want_live)
         return
 
     if cmd == "status":
@@ -2847,6 +2855,10 @@ def main(argv: list[str] | None = None) -> None:
     rst.add_argument("--schedule-interval", type=float, default=30.0)
     rst.add_argument("--offline", action="store_true",
                      help="scheduler only; do not claim jobs")
+    rst.add_argument(
+        "--no-live", action="store_true",
+        help="disable live processing panel (logs only)",
+    )
     rst.set_defaults(func=cmd_runtime)
     rs.add_parser("status", help="queue depth + recent jobs").set_defaults(func=cmd_runtime)
     rs.add_parser("schedule", help="enqueue due temporal jobs once").set_defaults(
@@ -2857,6 +2869,7 @@ def main(argv: list[str] | None = None) -> None:
         "interpret_percept", "workspace_tick", "attention_evaluate",
         "consolidate_daily", "consolidate_weekly", "reembed_memory",
         "integrity_check", "connector_reconcile",
+        "session_domain_resolve", "session_complete",
     ])
     re.add_argument("--payload-json", default=None)
     re.add_argument("--idempotency-key", default="")

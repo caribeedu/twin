@@ -188,6 +188,84 @@ def handle_connector_reconcile(
     }
 
 
+def handle_session_domain_resolve(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    """Background domain freeze from multi-message session evidence (LLM)."""
+    from twin.cognition.host_session import apply_background_domain_resolve
+    from twin.cognition.interpreter import service as interp_service
+
+    p = job.payload or {}
+    binding_id = p.get("binding_id") or ""
+    if not binding_id:
+        raise HandlerError("missing binding_id", error_class=ErrorClass.permanent, stage="validate")
+
+    if interp_service.interpreting_mode(cfg) and cfg.extractor != "echo":
+        runtime = interp_service.InterpretationRuntime(cfg)
+        try:
+            if not runtime.available:
+                raise HandlerError(
+                    "cognitive model unavailable",
+                    error_class=ErrorClass.model_unavailable,
+                    stage="domain_resolve",
+                )
+        finally:
+            runtime.close()
+
+    return apply_background_domain_resolve(
+        store, cfg, embedder,
+        binding_id=binding_id,
+        cwd=p.get("cwd") or None,
+    )
+
+
+def handle_session_complete(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    """Background session consolidation + extract after native SessionEnd."""
+    from twin.cognition.sessions import complete_session
+    from twin.cognition.interpreter import service as interp_service
+
+    p = job.payload or {}
+    session_id = p.get("session_id") or ""
+    if not session_id:
+        raise HandlerError("missing session_id", error_class=ErrorClass.permanent, stage="validate")
+
+    if (
+        not p.get("abandoned")
+        and interp_service.interpreting_mode(cfg)
+        and cfg.extractor != "echo"
+    ):
+        runtime = interp_service.InterpretationRuntime(cfg)
+        try:
+            if not runtime.available:
+                raise HandlerError(
+                    "cognitive model unavailable",
+                    error_class=ErrorClass.model_unavailable,
+                    stage="session_complete",
+                )
+        finally:
+            runtime.close()
+
+    session = complete_session(
+        store, cfg, embedder, session_id,
+        summary=p.get("summary") or "",
+        abandoned=bool(p.get("abandoned", False)),
+        summary_origin=p.get("summary_origin") or "assistant",
+    )
+    return {
+        "session_id": session.id,
+        "status": session.status.value if hasattr(session.status, "value") else str(session.status),
+        "consolidation_status": (
+            session.consolidation_status.value
+            if hasattr(session.consolidation_status, "value")
+            else str(session.consolidation_status)
+        ),
+        "summary_percept_id": session.summary_percept_id,
+        "created_memory_ids": list(session.created_memory_ids or []),
+    }
+
+
 HANDLERS: dict[JobKind, Handler] = {
     JobKind.interpret_percept: handle_interpret_percept,
     JobKind.workspace_tick: handle_workspace_tick,
@@ -197,6 +275,8 @@ HANDLERS: dict[JobKind, Handler] = {
     JobKind.reembed_memory: handle_reembed_memory,
     JobKind.integrity_check: handle_integrity_check,
     JobKind.connector_reconcile: handle_connector_reconcile,
+    JobKind.session_domain_resolve: handle_session_domain_resolve,
+    JobKind.session_complete: handle_session_complete,
 }
 
 

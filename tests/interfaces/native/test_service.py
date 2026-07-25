@@ -24,6 +24,22 @@ from twin.interfaces.native.events import HostEvent
 from twin.interfaces.native.redact import redact_text
 from twin.interfaces.native.service import NativeHostService
 from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
+from twin.runtime.handlers import dispatch
+from twin.runtime.queue import RuntimeQueue
+
+
+def _drain_runtime_jobs(store, cfg, embedder, *, limit: int = 10) -> int:
+    """Run pending runtime jobs in-process (native SessionEnd / domain resolve)."""
+    q = RuntimeQueue(store)
+    n = 0
+    for i in range(limit):
+        job = q.claim(f"test-drain-{i}", lease_seconds=60)
+        if job is None:
+            break
+        result = dispatch(store, cfg, embedder, job)
+        assert q.complete(job, result)
+        n += 1
+    return n
 
 
 def test_normalize_requires_session_id():
@@ -165,6 +181,8 @@ def test_turn_stop_keeps_binding_open_for_followup(store, cfg, embedder):
         external_session_id="multi_turn", summary="prompt_input_exit",
     ))
     assert close.ok and close.binding.ended_at
+    # Consolidation is async (session_complete job) — drain the worker path.
+    assert _drain_runtime_jobs(store, cfg, embedder) >= 1
     ses = store.get_session(start.session_id)
     notes = " ".join(str(a.get("note") or "") for a in ses.artifacts)
     assert "Dexter" in notes
@@ -729,9 +747,12 @@ def test_user_message_keeps_unclassified_without_signal(store, cfg, embedder):
     msg = svc.handle(HostEvent(
         kind="user_message", host_type="claude-code",
         external_session_id="repack2",
-        text="hey there",  # no domain keywords
+        text="hey there",  # no domain keywords / no search vote
     ))
     assert msg.ok
     assert msg.binding.domain == "unclassified"
     assert msg.context_pack is None
     assert msg.extras.get("emit_pack") is not True
+    # Background LLM resolve is enqueued — never sync on the hook.
+    assert msg.extras.get("domain_resolve_job_id")
+    assert msg.extras.get("needs_domain_confirmation") is True

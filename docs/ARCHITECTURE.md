@@ -541,7 +541,7 @@ compact suggestion for the main AI
 
 The consumer domain is never guessed from the text: it is the frozen domain of the open session or an explicit argument. With no such domain the firewall target is `unclassified` and the suggestion comes back empty — ambiguity yields *less* context, never another domain's memories.
 
-Opening a session scope is a separate decision (`resolve_context_domain`): a retrieval vote across confirmed memories names the domain, and only when that vote is inconclusive does the local LLM classify it. The domain freezes once. Native hosts follow the same rule — Claude's **Stop** is end-of-turn (observe only), and **SessionEnd** closes the session and consolidates the `session_summary` Percept (see [INTERFACES.md](INTERFACES.md)).
+Opening a session scope on the request path (`resolve_context_domain`) is a retrieval vote across confirmed memories only — no local LLM in the hot path. When the vote is inconclusive the session stays `unclassified` until a background `session_domain_resolve` job (multi-message evidence) or an explicit client/MCP domain freezes it. Native hosts: Claude's **Stop** is end-of-turn (observe only); **SessionEnd** closes the binding and enqueues background `session_complete` for the `session_summary` Percept (see [INTERFACES.md](INTERFACES.md); requires `twin-runtime`).
 
 This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
 

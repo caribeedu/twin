@@ -264,6 +264,11 @@ def test_session_summary_excludes_tool_io(store, cfg, embedder):
     assert percept is not None
     assert "dexter" in percept.content.lower()
     assert "Dexter's ending" in percept.content
+    # human speaker labels — not machine kind tags that leak into evidence
+    assert "[user_message]" not in percept.content
+    assert "[assistant_result]" not in percept.content
+    assert "User:" in percept.content
+    assert "Assistant:" in percept.content
     assert "tool_requested" not in percept.content
     assert "tool_completed" not in percept.content
     assert "grep -ril" not in percept.content

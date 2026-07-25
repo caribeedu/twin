@@ -116,8 +116,10 @@ def start_session(
     ``unclassified``: the firewall blocks all memories, the pack carries no
     judgment, and ``needs_domain_confirmation`` asks the client to confirm.
 
-    Domain inference (search vote → local LLM) runs only when the caller did
-    not already supply a real domain.
+    Domain inference on this hot path is search-vote only (no local LLM).
+    When the vote is inconclusive the session opens ``unclassified``; a
+    background ``session_domain_resolve`` job or an explicit client/MCP domain
+    freezes it later.
     """
     if domain and domain != UNCLASSIFIED_DOMAIN:
         reading = ObserverReading(
@@ -308,7 +310,8 @@ def complete_session(
             continue
         note = artifact.get("note") or artifact.get("ref") or ""
         if note:
-            lines.append(f"[{kind}] {note}")
+            from .evidence_text import fold_summary_line
+            lines.append(fold_summary_line(kind, str(note)))
     if not lines:
         session.consolidation_status = ConsolidationStatus.skipped
         store.update_session(session)

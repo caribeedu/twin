@@ -55,9 +55,9 @@ This is **not** a connector. Connectors ingest external systems (repos, Slack, �
 | Power | What happens |
 |---|---|
 | Bind a host session | `session_start` / `pack_request` creates or resumes a `CognitiveSession` and a `HostSessionBinding` |
-| Emit a context pack | On **SessionStart** (and explicit `pack_request`), and on the first **UserPromptSubmit** that resolves a previously `unclassified` domain, Twin builds a firewall-filtered pack and prints it on stdout for the host to inject |
+| Emit a context pack | On **SessionStart** (and explicit `pack_request`), and on the first **UserPromptSubmit** that **search-votes** a previously `unclassified` domain, Twin builds a firewall-filtered pack and prints it on stdout for the host to inject. Hook paths never wait on the local LLM for domain |
 | Observe work | User prompts, tool request/completion, and related events are recorded as **session artifacts** (notes on the cognitive session) |
-| Form new percepts | On **SessionEnd** (chat actually closes), Twin may `complete_session` and fold **user prompts, assistant replies and deliberate observations** (file/commit/doc/note and host file/project context) into a **`session_summary` Percept** (tool I/O and session boilerplate stay on the session for replay, not in the percept) — then extract/review can form candidate memories. Claude's **Stop** is only end-of-turn and must not close the Twin binding. Native never auto-confirms Memory or Judgment |
+| Form new percepts | On **SessionEnd**, Twin closes the binding immediately and enqueues a background `session_complete` job (`twin-runtime`) that folds **user prompts, assistant replies and deliberate observations** into a **`session_summary` Percept** and extracts candidates. Claude's **Stop** is only end-of-turn and must not close the Twin binding. Native never auto-confirms Memory or Judgment |
 | Fail open | With `--fail-open`, Twin failures return `ok=false` + `error_id` and exit 0 so the host is not blocked; diagnostics go to stderr/logs |
 
 Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md) (sessions / observer) and cognition host binding in-tree (`twin/cognition/host_session.py`). Threat notes in [ARCHITECTURE.md](ARCHITECTURE.md#threat-model).
@@ -67,16 +67,16 @@ Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md)
 1. `twin native install` writes a snippet under Twin home **and** merges Twin's `hooks` into `~/.claude/settings.json` (user-global). Prior Twin handlers are replaced; other hooks/settings are kept. Use `--no-merge` for snippet-only, or `--settings <path>` to target another file. A `.twin-bak` backup is written when an existing settings file is patched.
 2. Restart Claude Code (or start a new session). Confirm with `/hooks`.
 3. Each hook runs `twin native event --host claude-code --stdin --fail-open`. The event name comes from Claude's stdin JSON (`hook_event_name`).
-4. Twin normalizes the event, updates the binding/session, and may emit Claude's `hookSpecificOutput.additionalContext` with a context pack on **SessionStart** (when domain is already known) or on the first **UserPromptSubmit** that resolves a previously `unclassified` domain (Claude SessionStart often has no prompt text). Other observation hooks stay silent on stdout. Twin sets per-hook `timeout` (120s for SessionStart / UserPromptSubmit / SessionEnd) so pack and consolidation work is not discarded by Claude's 30s default.
+4. Twin normalizes the event, updates the binding/session, and may emit Claude's `hookSpecificOutput.additionalContext` with a context pack on **SessionStart** (when domain is already known) or on the first **UserPromptSubmit** that **search-votes** a previously `unclassified` domain (Claude SessionStart often has no prompt text). If search cannot name a domain, Twin enqueues a background `session_domain_resolve` job for multi-message LLM classification — the hook returns immediately. Other observation hooks stay silent on stdout. Keep `twin-runtime` / `twin runtime start` running so domain resolve and SessionEnd consolidation are processed.
 
 | Claude Code hook | Twin event kind | Typical effect |
 |---|---|---|
-| `SessionStart` | `session_start` | Bind/start session; **may emit context pack** if domain is known |
-| `UserPromptSubmit` | `user_message` | Observe; if domain was `unclassified`, **upgrade once + emit pack** |
+| `SessionStart` | `session_start` | Bind/start session; **may emit context pack** if domain is known (search vote / explicit) |
+| `UserPromptSubmit` | `user_message` | Observe; search-vote upgrade + pack once, else enqueue background domain resolve |
 | `PreToolUse` | `tool_requested` | Observe |
 | `PostToolUse` | `tool_completed` | Observe |
 | `Stop` | `assistant_result` | End of **agent turn** — observe only; binding stays open |
-| `SessionEnd` | `session_end` | Chat closes; may consolidate **`session_summary` Percept** |
+| `SessionEnd` | `session_end` | Close binding; enqueue background **`session_complete`** (summary + extract) |
 
 Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist on the native service for hosts that can send them; not all are in the default Claude install snippet.
 
@@ -428,17 +428,72 @@ Add `--json` to any of them to get machine-readable output for scripting and pip
 | `twin judgment conflicts [--refresh]` | List / refresh conflicts. |
 | `twin judgment explain <trace_id>` | Explain a judgment application trace. |
 
-### Workspace, runtime, evals
+### Workspace, evals, connectors
 
 | Command | What it does |
 |---|---|
 | `twin workspace tick …` | Parallel-memory observation/interpret tick. |
 | `twin consolidate daily\|weekly [--apply]` | Consolidation cycle (dry-run by default). |
-| `twin runtime start\|status\|enqueue\|…` | Durable cognitive runtime / job queue. |
 | `twin eval extraction\|retrieval\|golden\|…` | Benchmarks and golden work-loop. |
 | `twin source …` | Show source-trust calibration. |
 | `twin connector …` | Connector setup, sync, health, contract matrices (see `twin connector -h`). |
 | `twin export` | Export portable dump of the cognitive store. |
+
+### Runtime
+
+Durable background workers (`twin runtime` / `twin-runtime`) for jobs that must not block Claude Code hooks or the interactive CLI. Handlers call the same cognitive core as MCP/CLI/API — this is not an autonomous agent. Day-2 ops notes in [OPERATIONS.md](OPERATIONS.md).
+
+With Claude Code native hooks, keep a runtime process running so deferred domain resolve and SessionEnd consolidation are processed:
+
+```bash
+twin runtime start          # foreground live panel; Ctrl+C to stop
+twin runtime start --no-live
+# or:
+twin-runtime                # same entrypoint (python -m twin.runtime)
+```
+
+On an interactive TTY (with `rich` installed), `start` refreshes a panel of queue depth, per-worker in-flight jobs, and recent completed/failed work. Use `--no-live` (or `TWIN_RUNTIME_NO_LIVE=1`) for plain logs; `--json` also skips the panel.
+
+| Command | What it does |
+|---|---|
+| `twin runtime start` | Run scheduler + worker pool with a live processing panel on a TTY (`--workers`, `--vault`, `--lease`, `--schedule-interval`, `--offline`, `--no-live`) |
+| `twin runtime status` | Queue depth, dead-letter count, recent jobs (`--json` for scripts) |
+| `twin runtime schedule` | Enqueue due temporal jobs once (daily/weekly/integrity) |
+| `twin runtime enqueue <kind>` | Enqueue one job (`--payload-json`, `--idempotency-key`, `--vault`, `--priority`) |
+| `twin runtime job <job_id>` | Show one job |
+| `twin runtime retry <job_id>` | Requeue a failed or dead-lettered job |
+| `twin runtime cancel <job_id>` | Cancel a pending/failed job |
+
+**Job kinds** (`twin runtime enqueue <kind>`):
+
+| Kind | Role |
+|---|---|
+| `interpret_percept` | Extract one percept (`payload.percept_id`) |
+| `workspace_tick` | Parallel-memory tick |
+| `attention_evaluate` | Session attention evaluation |
+| `consolidate_daily` / `consolidate_weekly` | Consolidation cycle |
+| `reembed_memory` | Re-embed one memory |
+| `integrity_check` | Store integrity checks |
+| `connector_reconcile` | Run due connector syncs |
+| `session_domain_resolve` | Background LLM domain freeze from multi-message dialogue (`payload.binding_id`, optional `cwd`) — enqueued by native UserPromptSubmit when search cannot name a domain |
+| `session_complete` | Background session consolidation + extract (`payload.session_id`, optional `summary` / `abandoned` / `summary_origin`) — enqueued by native SessionEnd |
+
+`session_domain_resolve` and `session_complete` are model-gated: when the chat model is unavailable they stay pending/retry and do not burn into the dead letter queue. Manual enqueue examples:
+
+```bash
+twin runtime enqueue session_domain_resolve \
+  --payload-json '{"binding_id":"hsb_…","session_id":"ses_…"}' \
+  --idempotency-key "session_domain_resolve:hsb_…"
+
+twin runtime enqueue session_complete \
+  --payload-json '{"session_id":"ses_…","summary":"","abandoned":false,"summary_origin":"assistant"}' \
+  --idempotency-key "session_complete:ses_…"
+
+twin runtime status --json
+twin runtime job <job_id> --json
+```
+
+Without a running runtime, native SessionEnd falls back to in-process `complete_session`; domain stays `unclassified` until a later search vote or an explicit client/MCP domain.
 
 ---
 
