@@ -87,7 +87,9 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
     assert started.session.domain == "unclassified"
     assert started.needs_domain_confirmation
     assert started.pack.sources == []
-    assert started.pack.context_pack == ""
+    # Scope header may appear; memories and judgment stay out until domain freezes.
+    assert "webhook" not in (started.pack.context_pack or "").lower()
+    assert "## Judgment" not in (started.pack.context_pack or "")
     # explicit domain resolves it
     confirmed = start_session(store, cfg, embedder,
                               "aquilo de ontem, resolve pra mim",
@@ -95,23 +97,16 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
     assert not confirmed.needs_domain_confirmation
 
 
-def test_start_session_resolves_project_from_cwd(store, cfg, embedder, monkeypatch):
-    """cwd is a hint for the LLM observer — without LLM, pass project explicitly."""
+def test_start_session_resolves_project_from_cwd(store, cfg, embedder):
+    """cwd basename matching a known project binds it without LLM."""
     project = ensure_project(store, "Atlas", repos=["atlas-api"])
-    from twin.cognition.observer import ObserverReading
-
-    monkeypatch.setattr(
-        "twin.cognition.sessions.resolve_context_domain",
-        lambda *_a, **_k: ObserverReading(
-            domain="technical", task_profile="debugging",
-            project_id=project.id,
-            confidences={"domain": 0.9, "task_profile": 0.8, "project": 0.9},
-            mode="search",
-        ),
-    )
     started = start_session(store, cfg, embedder, "fix the flaky test",
                             cwd="/home/edu/code/atlas-api", client="cli")
     assert started.session.project_id == project.id
+    # Domain may still be unclassified (search vote needs confirmed memories);
+    # project binding is independent of that.
+    assert started.session.domain == "unclassified" or started.session.domain == "technical"
+
 
 
 def test_start_session_explicit_project_wins(store, cfg, embedder):

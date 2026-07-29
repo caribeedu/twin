@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from ..config import UNCLASSIFIED_DOMAIN, Config
@@ -35,6 +36,26 @@ DOMAIN_MODE_LLM = "llm"              # configured local chat model
 DOMAIN_MODE_UNRESOLVED = "unresolved"  # nothing could name it → unclassified
 DOMAIN_MODE_EXPLICIT = "explicit"    # caller supplied a real domain
 DOMAIN_MODE_FROZEN = "frozen"        # already frozen on the binding/session
+
+
+def infer_project_from_cwd(store: MemoryStore, cwd: Optional[str]) -> Optional[str]:
+    """Deterministic project id from a working-directory signal.
+
+    Matches the cwd basename against project name / alias / repo — no LLM,
+    no keyword domain guess. Used so ``session_start(..., cwd=...)`` still
+    binds a known project when search has nothing to vote on.
+    """
+    if not cwd:
+        return None
+    try:
+        name = Path(cwd).expanduser().name
+    except Exception:
+        name = str(cwd).rstrip("/\\").split("/")[-1].split("\\")[-1]
+    name = (name or "").strip()
+    if not name or name in (".", ".."):
+        return None
+    found = store.find_project(name)
+    return found.id if found is not None else None
 
 
 @dataclass
@@ -341,25 +362,38 @@ def resolve_context_domain(
     never call the local LLM here (hooks / session start must stay fast).
     Background ``session_domain_resolve`` jobs and client/MCP explicit domain
     upgrade the binding later from multi-message evidence.
+
+    Project binding is separate: a cwd basename that matches a known project
+    is applied deterministically even when the domain stays unclassified.
     """
     if existing_domain and existing_domain != UNCLASSIFIED_DOMAIN:
-        return ObserverReading(
+        reading = ObserverReading(
             domain=existing_domain,
             task_profile="general",
             confidences={"domain": 1.0, "task_profile": 0.0, "project": 0.0},
             uncertain=False,
             mode=DOMAIN_MODE_FROZEN,
         )
+    else:
+        voted = infer_domain_from_search(store, embedder, text)
+        if voted is not None:
+            reading = voted
+        else:
+            reading = ObserverReading(
+                domain=UNCLASSIFIED_DOMAIN,
+                task_profile="general",
+                project_id=None,
+                confidences={"domain": 0.0, "task_profile": 0.0, "project": 0.0},
+                uncertain=True,
+                mode=DOMAIN_MODE_UNRESOLVED,
+                fallback_reason="awaiting_background_or_client",
+            )
 
-    voted = infer_domain_from_search(store, embedder, text)
-    if voted is not None:
-        return voted
-    return ObserverReading(
-        domain=UNCLASSIFIED_DOMAIN,
-        task_profile="general",
-        project_id=None,
-        confidences={"domain": 0.0, "task_profile": 0.0, "project": 0.0},
-        uncertain=True,
-        mode=DOMAIN_MODE_UNRESOLVED,
-        fallback_reason="awaiting_background_or_client",
-    )
+    if not reading.project_id:
+        cwd_project = infer_project_from_cwd(store, cwd)
+        if cwd_project:
+            reading.project_id = cwd_project
+            conf = dict(reading.confidences or {})
+            conf["project"] = max(float(conf.get("project") or 0.0), 0.9)
+            reading.confidences = conf
+    return reading
