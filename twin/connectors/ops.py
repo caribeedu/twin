@@ -24,6 +24,45 @@ class SetupStep:
     command: str = ""
 
 
+# Per-connector-type scope: (configuration key that holds the selection,
+# the discovery helper that lists candidates). Used to tell whether the
+# "select scope" step is already satisfied.
+_SCOPE_BY_TYPE: dict[str, tuple[str, str]] = {
+    "github": ("repositories", "twin connector github repositories {cid}"),
+    "slack": ("channels", "twin connector slack channels {cid}"),
+    "gmail": ("labels", "twin connector gmail labels {cid}"),
+}
+
+
+def _find_setup_instance(store, connector_type: str, owner: OwnershipClass,
+                         org_key: Optional[str], connector_id: Optional[str]):
+    """Locate the connector this setup is about: an explicit id wins, else the
+    most recent non-revoked instance matching (type, owner[, org_key]). Returns
+    (instance, account) or (None, None)."""
+    from .models import ConnectorStatus
+
+    if connector_id:
+        inst = store.get_connector_instance(connector_id)
+        if inst is None:
+            return None, None
+        return inst, store.get_source_account(inst.account_id)
+
+    revoked = {ConnectorStatus.revoked, ConnectorStatus.revoked_with_residual_secret}
+    best = None
+    best_acc = None
+    for inst in store.list_connector_instances():
+        if inst.connector_type != connector_type or inst.status in revoked:
+            continue
+        acc = store.get_source_account(inst.account_id)
+        if acc is None or acc.source_owner != owner:
+            continue
+        if org_key and acc.org_key != org_key:
+            continue
+        if best is None or (inst.created_at or "") > (best.created_at or ""):
+            best, best_acc = inst, acc
+    return best, best_acc
+
+
 def _setup_warnings(
     owner: OwnershipClass,
     vault_id: Optional[str],
@@ -64,11 +103,18 @@ def plan_connector_setup(
     display_name: str = "",
     configuration: Optional[dict[str, Any]] = None,
     home: Optional[Path] = None,
+    connector_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Guided setup plan — never starts ingestion .
+    """Guided, STATE-AWARE setup plan — never starts ingestion.
 
     Order: ownership/vault → authenticate → scope → backfill preview → confirm.
+    If a matching connector already exists (same type + owner, or an explicit
+    ``connector_id``), each step reflects the connector's real state so the
+    wizard advances as you complete it instead of always showing the same
+    static plan.
     """
+    from .models import ConnectorStatus
+
     adapters = list_adapters()
     if connector_type not in adapters:
         return {
@@ -88,72 +134,117 @@ def plan_connector_setup(
     manifest = get_manifest(connector_type)
     cfg = dict(configuration or {})
     warnings = _setup_warnings(owner, vault_id, org_key)
+
+    # -- reflect the real connector, if one already exists ----------------------
+    inst, account = _find_setup_instance(store, connector_type, owner,
+                                          org_key, connector_id)
+    cid = inst.id if inst else "<conn_id>"
+    scope_key, scope_cmd_tmpl = _SCOPE_BY_TYPE.get(
+        connector_type, ("streams", "twin connector configure {cid} --config '{{…}}'"))
+    inst_cfg = dict(inst.configuration) if inst else {}
+    if inst:
+        # merged view of what scope is selected (existing + this call's config)
+        inst_cfg.update(cfg)
+    scope_selected = bool(inst_cfg.get(scope_key))
+    authed = bool(inst and inst.credential_ref
+                  and inst.status not in (ConnectorStatus.awaiting_auth,
+                                          ConnectorStatus.provisioning,
+                                          ConnectorStatus.provisioning_failed,
+                                          ConnectorStatus.unauthorized))
+    synced = bool(inst and store.list_connector_checkpoints(inst.id))
+
+    # 1. ownership / vault
+    if inst:
+        s_owner = "done"
+        owner_detail = (f"registered as {inst.id} · owner={account.source_owner.value} "
+                        f"vault={account.vault_id} status={inst.status.value}")
+        owner_cmd = f"twin connector list   # {inst.id} already registered"
+    else:
+        s_owner = "ready" if not warnings else "blocked"
+        owner_detail = (f"source_owner={owner.value} vault={vault_id or '(auto)'} "
+                        f"org_key={org_key or '—'}")
+        owner_cmd = (
+            f"twin connector add {connector_type} --source-owner {owner.value}"
+            + (f" --vault-id {vault_id}" if vault_id else "")
+            + (f" --org-key {org_key}" if org_key else "")
+            + (f" --name {display_name!r}" if display_name else "")
+        )
+
+    # 2. authenticate
+    if authed:
+        s_auth = "done"
+        auth_detail = f"credential set · status={inst.status.value} (verify: twin connector test {cid})"
+    elif inst and inst.status == ConnectorStatus.unauthorized:
+        s_auth = "blocked"
+        auth_detail = "credential rejected by the provider — rotate the token"
+    else:
+        s_auth = "ready" if inst else "pending"
+        auth_detail = "Use --secret on add/configure; credentials never appear in exports"
+    auth_cmd = f"twin connector configure {cid} --secret <TOKEN>"
+
+    # 3. select scope
+    if scope_selected:
+        s_scope = "done"
+        scope_detail = f"{scope_key}={inst_cfg.get(scope_key)}"
+    elif authed:
+        s_scope = "ready"
+        scope_detail = f"pick {scope_key}; discover candidates with the command below"
+    else:
+        s_scope = "pending"
+        scope_detail = f"authenticate first, then select {scope_key}"
+    scope_cmd = scope_cmd_tmpl.format(cid=cid)
+
+    # 4. backfill preview
+    s_preview = "ready" if scope_selected else "pending"
+    # 5. confirm sync
+    if synced:
+        s_sync = "done"
+        sync_detail = "sync has run at least once (checkpoints exist)"
+    elif scope_selected:
+        s_sync = "ready"
+        sync_detail = "scope selected — safe to run the first sync"
+    else:
+        s_sync = "pending"
+        sync_detail = "Only after ownership, vault, scope and preview are accepted"
+
     steps: list[SetupStep] = [
-        SetupStep(
-            id="classify_ownership",
-            title="Confirm ownership and vault",
-            status="ready" if not warnings else "blocked",
-            detail=(
-                f"source_owner={owner.value} vault={vault_id or '(auto)'} "
-                f"org_key={org_key or '—'}"
-            ),
-            command=(
-                f"twin connector add {connector_type} "
-                f"--source-owner {owner.value}"
-                + (f" --vault-id {vault_id}" if vault_id else "")
-                + (f" --org-key {org_key}" if org_key else "")
-                + (f" --name {display_name!r}" if display_name else "")
-            ),
-        ),
-        SetupStep(
-            id="authenticate",
-            title="Provide credential (never logged)",
-            status="pending",
-            detail="Use --secret on add/configure; credentials never appear in exports",
-            command="twin connector configure <conn_id> --secret <TOKEN>",
-        ),
-        SetupStep(
-            id="select_scope",
-            title="Select repositories / channels / folders",
-            status="pending",
-            detail=f"streams={list(manifest.streams) if manifest else []}",
-            command=f"twin connector {connector_type} … <conn_id>  # discovery helper",
-        ),
-        SetupStep(
-            id="backfill_preview",
-            title="Preview backfill scope (no ingest)",
-            status="pending",
-            detail="Always run preview before historical import",
-            command="twin connector backfill <conn_id> --preview",
-        ),
-        SetupStep(
-            id="confirm_sync",
-            title="Confirm continuous sync",
-            status="pending",
-            detail="Only after ownership, vault, scope and preview are accepted",
-            command="twin connector sync <conn_id>",
-        ),
+        SetupStep("classify_ownership", "Confirm ownership and vault",
+                  s_owner, owner_detail, owner_cmd),
+        SetupStep("authenticate", "Provide credential (never logged)",
+                  s_auth, auth_detail, auth_cmd),
+        SetupStep("select_scope", "Select repositories / channels / folders",
+                  s_scope, scope_detail, scope_cmd),
+        SetupStep("backfill_preview", "Preview backfill scope (no ingest)",
+                  s_preview, "Always run preview before historical import",
+                  f"twin connector backfill {cid} --preview"),
+        SetupStep("confirm_sync", "Confirm continuous sync",
+                  s_sync, sync_detail, f"twin connector sync {cid}"),
     ]
-    if cfg:
-        steps[2].detail += f" configuration_keys={sorted(cfg.keys())}"
+
+    # what to do next — the first step that is not yet done
+    next_step = next((s for s in steps if s.status != "done"), None)
 
     return {
         "ok": True,
         "connector_type": connector_type,
-        "source_owner": owner.value,
-        "vault_id": vault_id,
-        "org_key": org_key,
+        "connector_id": inst.id if inst else None,
+        "source_owner": (account.source_owner.value if account else owner.value),
+        "vault_id": (account.vault_id if account else vault_id),
+        "org_key": (account.org_key if account else org_key),
         "display_name": display_name,
         "configuration": cfg,
+        "status": inst.status.value if inst else None,
         "auth_mode": getattr(manifest, "auth_mode", None) if manifest else None,
         "started": False,
         "ingests": False,
+        "complete": next_step is None,
+        "next_step": next_step.id if next_step else None,
         "warnings": warnings,
         "steps": [s.__dict__ for s in steps],
         "note": (
-            "Setup plan only — nothing is registered or fetched until you run "
-            "the listed commands. Order: ownership → authenticate → scope → "
-            "preview → confirm. Never import full history without preview."
+            "Setup reflects the connector's real state; nothing is fetched until "
+            "you run the listed commands. Order: ownership → authenticate → "
+            "scope → preview → confirm. Never import full history without preview."
         ),
         "planned_at": now_iso(),
     }

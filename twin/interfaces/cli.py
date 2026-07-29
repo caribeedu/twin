@@ -1942,6 +1942,7 @@ def cmd_connector(args) -> None:
             display_name=args.name or "",
             configuration=_json.loads(args.config) if args.config else None,
             home=ws.cfg.home,
+            connector_id=getattr(args, "connector_id", None),
         )
 
         def pretty():
@@ -1954,20 +1955,35 @@ def cmd_connector(args) -> None:
                 return
             ux.print_kv([
                 ("connector_type", plan.get("connector_type")),
+                ("connector_id", str(plan.get("connector_id") or "(not registered yet)")),
                 ("source_owner", plan.get("source_owner")),
                 ("vault_id", str(plan.get("vault_id") or "(auto)")),
+                ("status", str(plan.get("status") or "—")),
                 ("auth_mode", str(plan.get("auth_mode") or "—")),
                 ("ingests", "no — plan only"),
             ])
             for w in plan.get("warnings", []):
                 ux.print_warn(w)
+            next_id = plan.get("next_step")
             for i, step in enumerate(plan.get("steps", []), start=1):
+                marker = {"done": "✓", "ready": "→", "blocked": "✗"}.get(
+                    step.get("status"), "·")
                 body = f"{step.get('detail', '')}\n\n$ {step.get('command', '')}"
                 ux.print_panel(
                     body,
-                    title=f"{i}. {step.get('title')} · {step.get('status')}",
+                    title=f"{marker} {i}. {step.get('title')} · {step.get('status')}"
+                    + ("   ← you are here" if step.get("id") == next_id else ""),
                 )
-            ux.print_ok("plan only — nothing registered or fetched yet")
+            if plan.get("complete"):
+                ux.print_ok("setup complete — this connector is authenticated, "
+                            "scoped and has synced at least once")
+            else:
+                nxt = next((s for s in plan.get("steps", [])
+                            if s.get("id") == next_id), None)
+                if nxt:
+                    ux.print_next([("→", nxt.get("command", ""))])
+                ux.print_ok("plan reflects the connector's real state — nothing "
+                            "fetched until you run the command above")
 
         _emit(args, plan, pretty)
         if not plan.get("ok"):
@@ -3141,6 +3157,8 @@ def main(argv: list[str] | None = None) -> None:
     csetup.add_argument("--org-key", default=None)
     csetup.add_argument("--name", default=None)
     csetup.add_argument("--config", default=None, help="JSON instance configuration")
+    csetup.add_argument("--connector-id", default=None,
+                        help="reflect a specific connector's setup progress")
     csetup.set_defaults(func=cmd_connector)
     cs.add_parser("due", help="list connectors the local scheduler would run now"
                   ).set_defaults(func=cmd_connector)

@@ -467,6 +467,57 @@ def test_setup_plan_never_ingests(store, creds):
     assert store.list_connector_instances() == []
 
 
+def test_setup_plan_reflects_real_connector_state(store, creds):
+    """Regression: once a connector is registered and authenticated, the setup
+    plan must ADVANCE — the 'authenticate' step becomes done and the wizard
+    points at scope, instead of forever showing step 2 as pending."""
+    acc = register_source_account(
+        store, connector_type="github", source_owner="personal",
+        owner_principal_id=PRINCIPAL,
+    )
+    inst = add_connector_instance(
+        store, creds, account_id=acc.id, secret="gh-token",
+    )
+
+    # authenticated but no scope yet → step 2 done, wizard points at scope
+    plan = plan_connector_setup(store, connector_type="github",
+                                source_owner="personal")
+    assert plan["connector_id"] == inst.id
+    steps = {s["id"]: s["status"] for s in plan["steps"]}
+    assert steps["classify_ownership"] == "done"
+    assert steps["authenticate"] == "done"      # NOT stuck on step 2
+    assert steps["select_scope"] == "ready"
+    assert plan["next_step"] == "select_scope"
+    assert plan["complete"] is False
+
+    # select repositories → scope done, wizard points at preview/sync
+    store.update_connector_instance(
+        inst.id, configuration={"repositories": ["caribeedu/twin"]})
+    plan = plan_connector_setup(store, connector_type="github",
+                                source_owner="personal")
+    steps = {s["id"]: s["status"] for s in plan["steps"]}
+    assert steps["select_scope"] == "done"
+    assert plan["next_step"] == "backfill_preview"
+    # commands carry the real connector id, not a placeholder
+    assert all("<conn_id>" not in s["command"] for s in plan["steps"])
+
+
+def test_setup_awaiting_auth_still_points_at_authenticate(store, creds):
+    acc = register_source_account(
+        store, connector_type="github", source_owner="personal",
+        owner_principal_id=PRINCIPAL,
+    )
+    # no secret → awaiting_auth
+    inst = add_connector_instance(store, creds, account_id=acc.id)
+    plan = plan_connector_setup(store, connector_type="github",
+                                source_owner="personal")
+    assert plan["connector_id"] == inst.id
+    steps = {s["id"]: s["status"] for s in plan["steps"]}
+    assert steps["classify_ownership"] == "done"
+    assert steps["authenticate"] == "ready"
+    assert plan["next_step"] == "authenticate"
+
+
 def test_setup_warns_on_inconsistent_ownership(store):
     plan = plan_connector_setup(
         store, connector_type="github", source_owner="personal",
