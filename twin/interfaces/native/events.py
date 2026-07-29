@@ -11,6 +11,7 @@ ALLOWED_HOST_EVENT_KINDS = frozenset({
     "pack_request",
     "user_message",
     "assistant_result",
+    "turn_completed",
     "tool_requested",
     "tool_completed",
     "tool_failed",
@@ -26,6 +27,7 @@ OBSERVATION_KINDS = frozenset({
     "session_start",
     "user_message",
     "assistant_result",
+    "turn_completed",
     "tool_requested",
     "tool_completed",
     "tool_failed",
@@ -36,9 +38,20 @@ OBSERVATION_KINDS = frozenset({
 # Events whose stdout may include a Context Pack for the host
 PACK_EMIT_KINDS = frozenset({"session_start", "pack_request"})
 
+# Structural lifecycle markers — observed for replay, never cognitive content.
+STRUCTURAL_EVENT_KINDS = frozenset({
+    "turn_completed",
+    "session_start",
+    "session_end",
+})
+
 
 class HostCapabilities(BaseModel):
-    """What the host can accept from Twin ."""
+    """What the host can accept from Twin (provider-agnostic).
+
+    Adapters declare these; the generic native service never branches on
+    provider hook names. Defaults are conservative.
+    """
 
     observe_session: bool = True
     request_context_pack: bool = True
@@ -47,16 +60,32 @@ class HostCapabilities(BaseModel):
     modify_action: bool = False
     stream_observations: bool = True
     structured_stdout: bool = True
+    supports_session_start: bool = True
+    supports_session_end: bool = True
+    supports_turn_end: bool = True
+    supports_user_message: bool = True
+    supports_tool_events: bool = True
+    supports_context_injection: bool = True
+    # Universal kinds that may carry ``additionalContext`` / pack injection.
+    context_injection_events: list[str] = Field(
+        default_factory=lambda: ["session_start", "user_message"],
+    )
+    supports_parallel_observation: bool = False
+    supports_file_context: bool = False
 
 
-CLAUDE_CODE_CAPABILITIES = HostCapabilities()
+CLAUDE_CODE_CAPABILITIES = HostCapabilities(
+    supports_file_context=False,
+    supports_tool_events=True,
+    context_injection_events=["session_start", "user_message"],
+)
 
 
 class HostEvent(BaseModel):
     """Provider-agnostic host observation."""
 
     kind: str
-    host_type: str = "claude-code"
+    host_type: str = "native"
     external_session_id: str = ""
     event_id: Optional[str] = None
     delivery_id: Optional[str] = None

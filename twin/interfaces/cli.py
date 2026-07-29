@@ -949,10 +949,23 @@ def cmd_runtime(args) -> None:
         return
 
     if cmd == "status":
-        recent = [j.model_dump(mode="json") for j in ws.store.list_runtime_jobs(limit=20)]
+        limit = int(getattr(args, "limit", 20) or 20)
+        recent = [j.model_dump(mode="json") for j in ws.store.list_runtime_jobs(limit=limit)]
+        failed = [
+            j.model_dump(mode="json")
+            for j in ws.store.list_runtime_jobs(status="failed", limit=limit)
+        ]
+        dlq = [d.model_dump(mode="json") for d in ws.store.list_runtime_dead_letters(limit=limit)]
+
+        def _clip(s, n=60):
+            s = str(s or "")
+            return s if len(s) <= n else s[: n - 1] + "…"
+
         data = {
             "queue": ws.store.runtime_queue_depth(),
-            "dead_letters": len(ws.store.list_runtime_dead_letters(limit=500)),
+            "dead_letters": len(dlq),
+            "failed": failed,
+            "dead_letter_items": dlq,
             "recent": recent,
         }
 
@@ -960,13 +973,37 @@ def cmd_runtime(args) -> None:
             ux.print_rule("runtime · status")
             ux.print_kv([
                 ("queue depth", str(data["queue"])),
-                ("dead letters", str(data["dead_letters"])),
+                ("failed jobs", str(len(failed))),
+                ("dead letters", str(len(dlq))),
                 ("recent jobs", str(len(recent))),
             ])
+            if failed:
+                ux.print_warn(f"{len(failed)} failed job(s) — retry with `twin runtime retry <job_id>`")
+                ux.print_table(
+                    ["job", "kind", "attempts", "stage", "error"],
+                    [[
+                        j.get("id"), j.get("kind"),
+                        f"{j.get('attempts')}/{j.get('max_attempts')}",
+                        _clip(j.get("stage"), 24), _clip(j.get("error")),
+                    ] for j in failed],
+                    title="failed",
+                )
+            if dlq:
+                ux.print_warn(f"{len(dlq)} dead-letter job(s) — inspect with `twin runtime job <job_id>`")
+                ux.print_table(
+                    ["dlq", "job", "kind", "attempts", "error_class", "error"],
+                    [[
+                        d.get("id"), d.get("job_id"), d.get("kind"),
+                        d.get("attempts"), _clip(d.get("error_class"), 20),
+                        _clip(d.get("error")),
+                    ] for d in dlq],
+                    title="dead letters",
+                )
             if recent:
                 ux.print_table(
                     ["job", "kind", "status"],
                     [[j.get("id"), j.get("kind"), j.get("status")] for j in recent],
+                    title="recent",
                 )
 
         _emit(args, data, pretty)
@@ -2340,6 +2377,7 @@ def cmd_native(args) -> None:
         claude_hooks_stdout,
         install_claude_code_hooks,
         normalize_claude_code_hook,
+        uninstall_claude_code_hooks,
     )
     from .native.events import HostEvent
     from .native.service import NativeHostService, should_emit_pack
@@ -2358,11 +2396,13 @@ def cmd_native(args) -> None:
                 snippet_dir=Path(target),
                 settings_path=Path(settings_path) if settings_path else None,
                 merge=merge,
+                profile=getattr(args, "profile", None) or "standard",
             )
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
         ux.print_rule("native install")
         ux.print_ok(f"snippet {result['snippet']}")
+        ux.print_dim(f"observation profile: {result.get('profile', 'standard')}")
         if result.get("merged"):
             ux.print_ok(f"merged into {result['settings']}")
             if result.get("backup"):
@@ -2377,6 +2417,31 @@ def cmd_native(args) -> None:
                 ("→", "merge hooks from the snippet into ~/.claude/settings.json"),
                 ("→", "restart Claude Code to activate host-native observation"),
             ])
+        return
+
+    if args.native_command == "uninstall":
+        from . import ux
+
+        settings_path = getattr(args, "settings", None)
+        try:
+            result = uninstall_claude_code_hooks(
+                settings_path=Path(settings_path) if settings_path else None,
+                restore_backup=bool(getattr(args, "restore_backup", False)),
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        ux.print_rule("native uninstall")
+        if result.get("restored"):
+            ux.print_ok(f"restored {result['settings']} from {result['backup']}")
+        elif result.get("removed"):
+            ux.print_ok(f"removed Twin hooks from {result['settings']}")
+            if result.get("backup"):
+                ux.print_dim(f"backup {result['backup']}")
+        else:
+            ux.print_dim(f"no Twin hooks found in {result['settings']} — nothing to remove")
+        ux.print_next([
+            ("→", "restart Claude Code (or start a new session) to drop the hooks"),
+        ])
         return
 
     if args.native_command == "bindings":
@@ -2463,6 +2528,7 @@ def cmd_native(args) -> None:
             "tool_requested": "PreToolUse",
             "tool_completed": "PostToolUse",
             "assistant_result": "Stop",
+            "turn_completed": "Stop",
             "session_end": "SessionEnd",
         }
         if not hook_name and getattr(event, "kind", "") in kind_to_hook:
@@ -2860,7 +2926,14 @@ def main(argv: list[str] | None = None) -> None:
         help="disable live processing panel (logs only)",
     )
     rst.set_defaults(func=cmd_runtime)
-    rs.add_parser("status", help="queue depth + recent jobs").set_defaults(func=cmd_runtime)
+    rstat = rs.add_parser(
+        "status", help="queue depth + failed / dead-letter / recent jobs",
+    )
+    rstat.add_argument(
+        "--limit", type=int, default=20,
+        help="max rows per section (failed / dead-letter / recent)",
+    )
+    rstat.set_defaults(func=cmd_runtime)
     rs.add_parser("schedule", help="enqueue due temporal jobs once").set_defaults(
         func=cmd_runtime,
     )
@@ -3252,6 +3325,27 @@ def main(argv: list[str] | None = None) -> None:
     ni.add_argument(
         "--no-merge", action="store_true",
         help="write snippet only; do not patch Claude Code settings",
+    )
+    ni.add_argument(
+        "--profile", default="standard",
+        choices=("minimal", "standard", "verbose"),
+        help=(
+            "observation profile: minimal (lifecycle only), "
+            "standard (+ PostToolUse, default), verbose (+ PreToolUse)"
+        ),
+    )
+    ni.set_defaults(func=cmd_native)
+    ni = nat.add_parser(
+        "uninstall",
+        help="remove Twin hooks from ~/.claude/settings.json",
+    )
+    ni.add_argument(
+        "--settings", default=None,
+        help="Claude Code settings.json to clean (default: ~/.claude/settings.json)",
+    )
+    ni.add_argument(
+        "--restore-backup", action="store_true",
+        help="restore the most recent .twin-bak instead of unmerging",
     )
     ni.set_defaults(func=cmd_native)
     ni = nat.add_parser("bindings", help="list HostSessionBindings")

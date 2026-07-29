@@ -95,7 +95,7 @@ Twin must not be understood as a chatbot, note-taking app, generic RAG, autonomo
 
 ### Principles
 
-These are the constitution. Features may change; these should not. Learn more about they in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#architecture-principles).
+These are the constitution. Features may change; these should not. Learn more about them in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#architecture-principles).
 
 - **Knowledge is not understanding** — packs should explain *why* a fact matters now, not only that it matched.
 - **Memory is compression** — keep what changes future action; do not archive life indiscriminately.
@@ -114,7 +114,7 @@ Twin is open-source, local-first cognitive infrastructure: a personal, interoper
 
 > I don't want to just use an AI. I want to feel integrated with the machine, as if part of my cognition could exist outside my brain, with safety, continuity and control.
 
-The initial concepts starts small: reliable technical memory via MCP. The destination is bigger: a personal, portable, private and evolving extended brain.
+The initial implementation started small: reliable technical memory via MCP. The destination is bigger: a personal, portable, private and evolving extended brain.
 
 ---
 
@@ -124,7 +124,11 @@ The initial concepts starts small: reliable technical memory via MCP. The destin
   <img src="assets/how-it-works.png" alt="One evolving mind across every interface — Twin as the persistent cognitive substrate connecting ChatGPT, Claude, Cursor, Codex and local models" width="100%">
 </p>
 
-Twin does not treat raw files as “memory”. Cognition moves through three friendly stages:
+Twin does not treat raw files as “memory”. The cognitive pipeline is:
+
+**Artifact → Percept → Candidate Memory → Confirmed Memory → Judgment → Action**
+
+For a first pass, that loop reads as three stages:
 
 1. **Obtain** — Twin captures sources as *artifacts* (docs you ingest, [connectors](#connectors) like Slack/GitHub, and **session notes** from LLMs). Sensors normalize them into **Percepts**: what was seen, with provenance — not yet trusted knowledge.
 2. **Form** — A cognitive interpreter reads percepts and proposes **Candidate Memories** (decisions, facts, preferences, …) with **Evidence** quotes. You review and confirm what should be trusted. **Judgment** (how you decide) stays separate from facts. The graph is the canonical store; embeddings are only search indexes.

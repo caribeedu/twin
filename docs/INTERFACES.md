@@ -64,27 +64,48 @@ Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md)
 
 #### How Claude Code hooks work
 
-1. `twin native install` writes a snippet under Twin home **and** merges Twin's `hooks` into `~/.claude/settings.json` (user-global). Prior Twin handlers are replaced; other hooks/settings are kept. Use `--no-merge` for snippet-only, or `--settings <path>` to target another file. A `.twin-bak` backup is written when an existing settings file is patched.
+1. `twin native install` writes a snippet under Twin home **and** merges Twin's `hooks` into `~/.claude/settings.json` (user-global). Prior Twin handlers are replaced; other hooks/settings are kept. Use `--no-merge` for snippet-only, or `--settings <path>` to target another file. A `.twin-bak` backup is written when an existing settings file is patched. `--profile` picks the **observation profile** (see below). `twin native uninstall` removes only Twin-owned handlers (third-party hooks stay); `--restore-backup` restores the most recent `.twin-bak`.
 2. Restart Claude Code (or start a new session). Confirm with `/hooks`.
 3. Each hook runs `twin native event --host claude-code --stdin --fail-open`. The event name comes from Claude's stdin JSON (`hook_event_name`).
-4. Twin normalizes the event, updates the binding/session, and may emit Claude's `hookSpecificOutput.additionalContext` with a context pack on **SessionStart** (when domain is already known) or on the first **UserPromptSubmit** that **search-votes** a previously `unclassified` domain (Claude SessionStart often has no prompt text). If search cannot name a domain, Twin enqueues a background `session_domain_resolve` job for multi-message LLM classification — the hook returns immediately. Other observation hooks stay silent on stdout. Keep `twin-runtime` / `twin runtime start` running so domain resolve and SessionEnd consolidation are processed.
+4. Twin normalizes the event, updates the binding/session, and may emit Claude's `hookSpecificOutput.additionalContext` with a context pack on **SessionStart** (when domain is already known) or on the first **UserPromptSubmit** that **search-votes** a previously `unclassified` domain (hosts may open without semantic input). If search cannot name a domain, Twin enqueues a background `session_domain_resolve` job for multi-message LLM classification — the hook returns immediately. When that job freezes the domain it sets `pending_context_pack`; the **next** injection-capable host event (`user_message`) emits the pack. Background resolve never pushes mid-turn (Claude has no async context push). Other observation hooks stay silent on stdout.
 
 | Claude Code hook | Twin event kind | Typical effect |
 |---|---|---|
 | `SessionStart` | `session_start` | Bind/start session; **may emit context pack** if domain is known (search vote / explicit) |
-| `UserPromptSubmit` | `user_message` | Observe; search-vote upgrade + pack once, else enqueue background domain resolve |
-| `PreToolUse` | `tool_requested` | Observe |
-| `PostToolUse` | `tool_completed` | Observe |
-| `Stop` | `assistant_result` | End of **agent turn** — observe only; binding stays open |
+| `UserPromptSubmit` | `user_message` | Observe; search-vote upgrade + pack once, else enqueue background domain resolve; emit `pending_context_pack` from a prior background freeze |
+| `PostToolUse` | `tool_completed` | Observe (default install) |
+| `Stop` | `turn_completed` | End of **agent turn** — structural observe only; binding stays open |
 | `SessionEnd` | `session_end` | Close binding; enqueue background **`session_complete`** (summary + extract) |
 
-Other event kinds (`pack_request`, `file_context`, `intervene_check`, …) exist on the native service for hosts that can send them; not all are in the default Claude install snippet.
+**Observation profiles** (`twin native install --profile`)
+
+| Profile | Hooks wired | When |
+|---|---|---|
+| `minimal` | lifecycle only (SessionStart, UserPromptSubmit, Stop, SessionEnd) | lowest noise; no tool observation |
+| `standard` (default) | + `PostToolUse` | tool results that changed state |
+| `verbose` | + `PreToolUse` | every tool request (noisiest) |
+
+The chosen profile is recorded in the snippet as `twin_native.observation_profile`. Reinstall with a different `--profile` to change coverage.
+
+**Pack latency budget.** Pack assembly on the hot path has a soft wall-clock budget (SessionStart ≈ 300ms, UserPromptSubmit upgrade+pack ≈ 500ms). Budgets never interrupt work mid-flight: if assembly blows the budget, the binding/domain state still persists, the pack is dropped from the host response, and `pack_skipped_budget` is set. The pack recovers on the next injection-capable turn or via MCP.
+
+**Runtime degradation**
+
+| State | Behavior |
+|---|---|
+| Runtime active | Full experience (domain resolve, SessionEnd extract) |
+| Runtime stopped briefly | Hooks stay fast; jobs remain pending until workers claim them |
+| Store without queue | Limited sync fallback where implemented; otherwise jobs unavailable |
+| Runtime down for long | `twin doctor` warns (`runtime:queue` pending, `runtime:dead_letter` failed); observed events are still stored |
+
+Keep `twin-runtime` / `twin runtime start` running for deferred work.
 
 #### Native CLI / MCP status
 
 | Command / tool | What it does |
 |---|---|
-| `twin native install` | Write Claude Code hooks snippet + merge into `~/.claude/settings.json` (`--no-merge` / `--settings` / `--dir`) |
+| `twin native install` | Write Claude Code hooks snippet + merge into `~/.claude/settings.json` (`--profile` / `--no-merge` / `--settings` / `--dir`) |
+| `twin native uninstall` | Remove Twin hooks from settings (`--restore-backup` to restore the latest `.twin-bak`) |
 | `twin native bindings` | List `HostSessionBinding`s |
 | `twin native event` | Ingest a host event (JSON or `--stdin`) |
 | MCP `native_bindings` | List native host bindings |

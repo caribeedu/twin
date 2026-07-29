@@ -73,9 +73,17 @@ _SUMMARY_PERCEPT_KINDS = frozenset({
     "file_context",
     "project_context",
 })
-# SessionEnd reason codes — not conversational content.
+# Structural / protocol markers — never cognitive content for extraction.
 _SUMMARY_IGNORE_TEXT = frozenset({
     "prompt_input_exit", "clear", "logout", "other", "abort", "stop",
+    "[turn_end]",
+})
+_SUMMARY_IGNORE_KINDS = frozenset({
+    "turn_completed",
+    "tool_requested",
+    "tool_completed",
+    "tool_failed",
+    "session_start",
 })
 
 
@@ -106,6 +114,7 @@ def start_session(
     audience: str = "self",
     tool_id: Optional[str] = None,
     api_token: Optional[str] = None,
+    surface: Optional[str] = None,
 ) -> SessionStart:
     """Identify project/domain/task profile (unless given explicitly), build
     a task-aware pack and open the session that records what was supplied.
@@ -167,28 +176,42 @@ def start_session(
     from ..privacy.yaml_io import bootstrap_policy_set
     # Surface identity is resolved server-side. Missing/unknown client →
     # restricted mode — never silently elevate to local-cli.
-    # Native host adapters  run as local hook/CLI processes: the
-    # CognitiveSession.client still records the host, but auth surface is cli.
+    # Native host adapters run as local hooks: CognitiveSession.client records
+    # the host product, auth surface is ``native`` (not CLI).
     _native = frozenset({
         "claude-code", "codex", "codex-app-server", "native",
     })
-    surface = "cli" if client in ("cli", "local-cli", "twin-cli") or client in _native else "mcp"
-    if client in ("unknown", "", None) and not tool_id:
-        surface = "unknown"
-    if surface == "cli":
+    if client in _native or (surface or "").lower() == "native":
+        resolved_surface = "native"
+    elif client in ("cli", "local-cli", "twin-cli"):
+        resolved_surface = "cli"
+    else:
+        resolved_surface = "mcp"
+    if client in ("unknown", "", None) and not tool_id and resolved_surface != "native":
+        resolved_surface = "unknown"
+    if resolved_surface in ("cli", "native"):
         bootstrap_policy_set(store, policies_path=cfg.policies_path)
         ensure_local_identity(store)
+    # ``unclassified`` is not a real allowlist domain — pass it and identity
+    # collapses to restricted. Auth identity comes from host/persona defaults;
+    # the firewall still blocks memories until domain freezes.
+    access_domains = (
+        [session_domain]
+        if session_domain and session_domain != UNCLASSIFIED_DOMAIN
+        else []
+    )
     access = resolve_access(
         store,
-        surface=surface,
-        client=("cli" if client in _native else client)
-        if client not in ("unknown", "") else None,
-        tool_id=tool_id or (client if client in _native else None),
+        surface=resolved_surface,
+        client=client if client not in ("unknown", "") else None,
+        # Native: never pass host product name as tool_id — identity layer
+        # uses ``native-host``. Concrete tools only on real tool calls.
+        tool_id=None if resolved_surface == "native" else tool_id,
         persona=persona,
         purpose=purpose,
         audience=audience,
         project_id=project_id,
-        requested_domains=[session_domain] if session_domain else [],
+        requested_domains=access_domains,
         api_token=api_token,
     )
     session = CognitiveSession(
@@ -306,12 +329,13 @@ def complete_session(
         if artifact.get("percept_id"):
             continue  # already a first-class percept — never duplicated as text
         kind = str(artifact.get("kind") or "").strip()
-        if kind not in _SUMMARY_PERCEPT_KINDS:
+        if kind not in _SUMMARY_PERCEPT_KINDS or kind in _SUMMARY_IGNORE_KINDS:
             continue
         note = artifact.get("note") or artifact.get("ref") or ""
-        if note:
-            from .evidence_text import fold_summary_line
-            lines.append(fold_summary_line(kind, str(note)))
+        if not note or str(note).strip().lower() in _SUMMARY_IGNORE_TEXT:
+            continue
+        from .evidence_text import fold_summary_line
+        lines.append(fold_summary_line(kind, str(note)))
     if not lines:
         session.consolidation_status = ConsolidationStatus.skipped
         store.update_session(session)

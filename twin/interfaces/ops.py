@@ -45,6 +45,50 @@ def _mcp_config_paths() -> dict[str, Path]:
     }
 
 
+def _runtime_queue_checks(store) -> list[Check]:
+    """Report runtime queue health without pretending a worker is up.
+
+    No pidfile means we can't claim "process up"; instead we surface backlog so
+    the operator knows whether ``twin runtime start`` needs to run. Pending or
+    dead-lettered jobs degrade native SessionEnd consolidation + domain resolve.
+    """
+    checks: list[Check] = []
+    try:
+        depth = store.runtime_queue_depth()
+    except Exception as exc:
+        return [Check("runtime:queue", WARN, f"queue depth unavailable: {exc}")]
+
+    pending = int(depth.get("pending", 0))
+    failed = int(depth.get("failed", 0))
+    dead = int(depth.get("dead_letter", 0))
+    running = int(depth.get("running", 0))
+
+    if pending:
+        checks.append(Check(
+            "runtime:queue", WARN,
+            f"{pending} jobs pending"
+            + (f", {running} running" if running else "")
+            + " — run `twin runtime start`",
+        ))
+    else:
+        checks.append(Check(
+            "runtime:queue", OK,
+            "no pending jobs" + (f" ({running} running)" if running else ""),
+        ))
+
+    if failed:
+        checks.append(Check(
+            "runtime:failed", WARN,
+            f"{failed} jobs failed (retrying with backoff)",
+        ))
+    if dead:
+        checks.append(Check(
+            "runtime:dead_letter", FAIL,
+            f"{dead} dead-letter jobs — inspect with `twin runtime jobs`",
+        ))
+    return checks
+
+
 def doctor(cfg: Config) -> list[Check]:
     checks: list[Check] = []
 
@@ -78,6 +122,7 @@ def doctor(cfg: Config) -> list[Check]:
             checks.append(Check("review:queue", WARN, f"{pending} memories awaiting review"))
         else:
             checks.append(Check("review:queue", OK, "empty"))
+        checks.extend(_runtime_queue_checks(store))
         store.close()
     except Exception as exc:
         checks.append(Check("store:connection", FAIL, f"{url} → {exc}"))

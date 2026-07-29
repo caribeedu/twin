@@ -20,8 +20,10 @@ from ..redact import redact_payload, redact_text
 
 # Claude Code hook name → HostEvent.kind
 #
-# Stop = end of *agent turn* (fires every reply). SessionEnd = chat actually
-# closes (/clear, exit, …). Twin only consolidates on SessionEnd.
+# Provider Stop = end of *agent turn* (fires every reply) → universal
+# ``turn_completed``. SessionEnd = chat actually closes → ``session_end``.
+# Twin only consolidates on SessionEnd. Never invent cognitive text for
+# structural turn boundaries.
 _HOOK_KIND = {
     "SessionStart": "session_start",
     "session_start": "session_start",
@@ -31,8 +33,8 @@ _HOOK_KIND = {
     "post_tool_use": "tool_completed",
     "PreToolUse": "tool_requested",
     "pre_tool_use": "tool_requested",
-    "Stop": "assistant_result",
-    "stop": "assistant_result",
+    "Stop": "turn_completed",
+    "stop": "turn_completed",
     "SessionEnd": "session_end",
     "session_end": "session_end",
     "Notification": "assistant_result",
@@ -132,9 +134,12 @@ def normalize_claude_code_hook(
         or data.get("assistant_message")
         or ""
     )
-    # Turn-end Stop often has no prompt text — still record a boundary note.
-    if not text and kind == "assistant_result" and str(name) in ("Stop", "stop"):
-        text = "[turn_end]"
+    # Structural turn end: never invent cognitive text (no "[turn_end]" markers).
+    # Provider reply body, if present, stays in metadata for audit only.
+    provider_assistant_text = ""
+    if kind == "turn_completed":
+        provider_assistant_text = text
+        text = ""
     tool_phase = None
     tool_call_id = (
         data.get("tool_use_id")
@@ -202,6 +207,20 @@ def normalize_claude_code_hook(
         meta["hook_event_name"] = str(name)
     if not known:
         meta["unrecognized_hook"] = str(name) or True
+    # Declare capabilities on the session_start event itself so the generic
+    # service can gate pack/turn/session behavior without ever branching on
+    # Claude hook names. The install snippet is only a hint for humans.
+    if kind == "session_start":
+        meta.setdefault("host_capabilities", CLAUDE_CODE_CAPABILITIES.model_dump())
+    if provider_assistant_text:
+        clean_asst, asst_cats = redact_text(provider_assistant_text)
+        if asst_cats:
+            redacted = True
+            for c in asst_cats:
+                if c not in redaction_categories:
+                    redaction_categories.append(c)
+        meta["provider_assistant_text"] = clean_asst[:2000]
+        meta["provider_event"] = str(name) or "Stop"
     if data.get("transcript_path"):
         meta["transcript_identity"] = session_id if session_id.startswith("transcript:") else (
             normalize_transcript_identity(str(data["transcript_path"]))
@@ -248,14 +267,42 @@ TWIN_HOOK_MARKER = "native event --host claude-code"
 # Events Twin wires by default. Schema matches Claude Code settings:
 #   hooks.<Event> = [ { matcher?, hooks: [ { type, command } ] } ]
 # See https://code.claude.com/docs/en/hooks-guide
-_DEFAULT_HOOK_EVENTS = (
+#
+# Observation profiles trade latency/noise for coverage. Lifecycle hooks
+# (SessionStart / UserPromptSubmit / Stop / SessionEnd) are always present;
+# tool observation grows with the profile:
+#   minimal  — lifecycle only (no tool events)
+#   standard — + PostToolUse (results that changed state) [default]
+#   verbose  — + PreToolUse (every tool request; noisiest)
+_LIFECYCLE_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
-    "PreToolUse",
-    "PostToolUse",
     "Stop",
     "SessionEnd",
 )
+OBSERVATION_PROFILES: dict[str, tuple[str, ...]] = {
+    "minimal": _LIFECYCLE_HOOK_EVENTS,
+    "standard": _LIFECYCLE_HOOK_EVENTS + ("PostToolUse",),
+    "verbose": _LIFECYCLE_HOOK_EVENTS + ("PostToolUse", "PreToolUse"),
+}
+DEFAULT_OBSERVATION_PROFILE = "standard"
+
+
+def _profile_hook_events(profile: str) -> tuple[str, ...]:
+    """Ordered hook events for an observation profile (SessionStart first)."""
+    events = OBSERVATION_PROFILES.get(profile)
+    if events is None:
+        raise ValueError(
+            f"unknown observation profile {profile!r} — "
+            f"choose from {sorted(OBSERVATION_PROFILES)}"
+        )
+    order = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+             "Stop", "SessionEnd"]
+    return tuple(e for e in order if e in events)
+
+
+# Back-compat: default install event tuple (standard profile).
+_DEFAULT_HOOK_EVENTS = _profile_hook_events(DEFAULT_OBSERVATION_PROFILE)
 
 # Claude Code defaults UserPromptSubmit command hooks to 30s and discards
 # stdout on timeout. Pack assembly needs headroom; SessionEnd consolidates
@@ -303,12 +350,17 @@ def _matcher_group(
     return group
 
 
-def build_hooks_object(*, twin_bin: str = "twin", home: Optional[str] = None) -> dict[str, Any]:
-    """Claude Code ``hooks`` object (matcher-group schema)."""
+def build_hooks_object(
+    *,
+    twin_bin: str = "twin",
+    home: Optional[str] = None,
+    profile: str = DEFAULT_OBSERVATION_PROFILE,
+) -> dict[str, Any]:
+    """Claude Code ``hooks`` object (matcher-group schema) for a profile."""
     cmd = twin_hook_command(twin_bin=twin_bin, home=home)
     return {
         event: [_matcher_group(cmd, timeout=_HOOK_TIMEOUTS_SEC.get(event))]
-        for event in _DEFAULT_HOOK_EVENTS
+        for event in _profile_hook_events(profile)
     }
 
 
@@ -366,9 +418,102 @@ def merge_hooks_into_settings(
     return out
 
 
+def unmerge_hooks_from_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Strip Twin-owned hooks from a Claude Code settings document.
+
+    Idempotent inverse of :func:`merge_hooks_into_settings`: drops Twin matcher
+    groups (and legacy flat handlers) while keeping third-party hooks and all
+    other settings keys. Empty hook-event lists are pruned; an empty ``hooks``
+    object is removed entirely.
+    """
+    out = dict(settings)
+    existing = out.get("hooks")
+    if not isinstance(existing, dict):
+        return out
+    cleaned: dict[str, Any] = {}
+    for event, current in existing.items():
+        if not isinstance(current, list):
+            cleaned[event] = current
+            continue
+        kept = [
+            item for item in current
+            if not is_twin_matcher_group(item) and not is_twin_hook_handler(item)
+        ]
+        if kept:
+            cleaned[event] = kept
+    if cleaned:
+        out["hooks"] = cleaned
+    else:
+        out.pop("hooks", None)
+    return out
+
+
 def default_claude_settings_path() -> Path:
     """User-scoped Claude Code settings (all projects on this machine)."""
     return Path.home() / ".claude" / "settings.json"
+
+
+def _latest_twin_backup(settings_path: Path) -> Optional[Path]:
+    """Most recent ``.twin-bak`` sibling for a settings file, if any."""
+    backup = settings_path.with_suffix(settings_path.suffix + ".twin-bak")
+    return backup if backup.exists() else None
+
+
+def uninstall_claude_code_hooks(
+    *,
+    settings_path: Optional[Path] = None,
+    restore_backup: bool = False,
+) -> dict[str, Any]:
+    """Remove Twin hooks from Claude Code settings (inverse of install).
+
+    - default: unmerge only Twin-owned handlers, preserving third-party hooks;
+    - ``restore_backup``: overwrite settings with the newest ``.twin-bak``.
+
+    Returns paths + a ``removed`` / ``restored`` flag for the CLI to report.
+    """
+    path = Path(settings_path) if settings_path else default_claude_settings_path()
+    result: dict[str, Any] = {
+        "settings": str(path),
+        "removed": False,
+        "restored": False,
+        "backup": None,
+    }
+    if not path.exists():
+        return result
+
+    if restore_backup:
+        backup = _latest_twin_backup(path)
+        if backup is None:
+            raise ValueError(
+                f"no {path.name}.twin-bak backup found next to {path} — "
+                "re-run without --restore-backup to unmerge Twin hooks instead"
+            )
+        path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
+        result["restored"] = True
+        result["removed"] = True
+        result["backup"] = str(backup)
+        return result
+
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        return result
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{path} is not valid JSON — fix it manually before uninstalling ({exc})"
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path} must be a JSON object")
+
+    cleaned = unmerge_hooks_from_settings(loaded)
+    if cleaned != loaded:
+        backup = path.with_suffix(path.suffix + ".twin-bak")
+        backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        result["backup"] = str(backup)
+        path.write_text(json.dumps(cleaned, indent=2) + "\n", encoding="utf-8")
+        result["removed"] = True
+    return result
 
 
 def install_claude_code_hooks(
@@ -378,12 +523,13 @@ def install_claude_code_hooks(
     snippet_dir: Optional[Path] = None,
     settings_path: Optional[Path] = None,
     merge: bool = True,
+    profile: str = DEFAULT_OBSERVATION_PROFILE,
 ) -> dict[str, Any]:
     """Write the snippet and optionally merge into Claude Code settings.
 
     Returns paths + merged flag for the CLI to report.
     """
-    twin_hooks = build_hooks_object(twin_bin=twin_bin, home=home)
+    twin_hooks = build_hooks_object(twin_bin=twin_bin, home=home, profile=profile)
     snippet_dir = Path(snippet_dir) if snippet_dir else None
     if snippet_dir is None:
         raise ValueError("snippet_dir is required")
@@ -393,6 +539,7 @@ def install_claude_code_hooks(
         "hooks": twin_hooks,
         "twin_native": {
             "host": "claude-code",
+            "observation_profile": profile,
             "capabilities": CLAUDE_CODE_CAPABILITIES.model_dump(),
             "protocol": {
                 "stdout": (
@@ -418,6 +565,7 @@ def install_claude_code_hooks(
         "merged": False,
         "settings": None,
         "backup": None,
+        "profile": profile,
     }
     if not merge:
         return result
@@ -454,6 +602,7 @@ def write_hooks_config(
     *,
     twin_bin: str = "twin",
     home: Optional[str] = None,
+    profile: str = DEFAULT_OBSERVATION_PROFILE,
 ) -> Path:
     """Write a Claude Code hooks snippet that calls Twin (snippet only, no merge).
 
@@ -465,6 +614,7 @@ def write_hooks_config(
         home=home,
         snippet_dir=Path(target_dir),
         merge=False,
+        profile=profile,
     )
     return Path(result["snippet"])
 

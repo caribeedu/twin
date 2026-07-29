@@ -12,15 +12,18 @@ from twin import ids
 from twin.cognition.host_session import recommend_intervention
 from twin.cognition.sessions import start_session
 from twin.interfaces.native.claude_code import (
+    OBSERVATION_PROFILES,
     MissingExternalSessionId,
     build_hooks_object,
     claude_hooks_stdout,
     install_claude_code_hooks,
     merge_hooks_into_settings,
     normalize_claude_code_hook,
+    uninstall_claude_code_hooks,
+    unmerge_hooks_from_settings,
     write_hooks_config,
 )
-from twin.interfaces.native.events import HostEvent
+from twin.interfaces.native.events import HostCapabilities, HostEvent
 from twin.interfaces.native.redact import redact_text
 from twin.interfaces.native.service import NativeHostService
 from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
@@ -75,19 +78,21 @@ def test_normalize_tool_phases_and_unknown():
 
 
 def test_normalize_stop_is_turn_end_session_end_closes():
-    """Claude Stop = turn done; SessionEnd = chat closes."""
+    """Provider Stop = turn_completed; SessionEnd = chat closes."""
     stop = normalize_claude_code_hook({
         "hook_event_name": "Stop",
         "session_id": "s1",
         "last_assistant_message": "Done with Atlas.",
     })
-    assert stop.kind == "assistant_result"
-    assert "Atlas" in stop.text
+    assert stop.kind == "turn_completed"
+    assert stop.text == ""
+    assert "Atlas" in (stop.metadata or {}).get("provider_assistant_text", "")
     bare_stop = normalize_claude_code_hook({
         "hook_event_name": "Stop", "session_id": "s1",
     })
-    assert bare_stop.kind == "assistant_result"
-    assert bare_stop.text == "[turn_end]"
+    assert bare_stop.kind == "turn_completed"
+    assert bare_stop.text == ""
+    assert "[turn_end]" not in bare_stop.text
     end = normalize_claude_code_hook({
         "hook_event_name": "SessionEnd",
         "session_id": "s1",
@@ -155,8 +160,8 @@ def test_turn_stop_keeps_binding_open_for_followup(store, cfg, embedder):
         event_id="um-atlas",
     ))
     turn = svc.handle(HostEvent(
-        kind="assistant_result", host_type="claude-code",
-        external_session_id="multi_turn", text="[turn_end]",
+        kind="turn_completed", host_type="claude-code",
+        external_session_id="multi_turn", text="",
         event_id="stop-1",
         metadata={"hook_event_name": "Stop"},
     ))
@@ -577,13 +582,132 @@ def test_write_hooks_config_matcher_group_schema(tmp_path):
     # undocumented env var must not be required
     assert "CLAUDE_HOOK_EVENT" not in cmd
     assert data["twin_native"]["capabilities"]["block_action"] is False
-    for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"):
+    for event in ("UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"):
         assert event in data["hooks"]
         assert data["hooks"][event][0]["hooks"][0]["type"] == "command"
+    assert "PreToolUse" not in data["hooks"]  # omitted by default (noise)
     assert data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["timeout"] == 120
-    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == 30
+    assert data["hooks"]["PostToolUse"][0]["hooks"][0]["timeout"] == 30
     assert data["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 30
     assert data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"] == 120
+
+
+def test_observation_profiles_scope_hook_events():
+    """minimal ⊂ standard ⊂ verbose; lifecycle hooks always present."""
+    minimal = build_hooks_object(profile="minimal")
+    standard = build_hooks_object(profile="standard")
+    verbose = build_hooks_object(profile="verbose")
+
+    lifecycle = {"SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"}
+    for hooks in (minimal, standard, verbose):
+        assert lifecycle <= set(hooks)
+
+    assert "PostToolUse" not in minimal
+    assert "PreToolUse" not in minimal
+    assert "PostToolUse" in standard
+    assert "PreToolUse" not in standard  # standard default keeps PreToolUse off
+    assert "PostToolUse" in verbose
+    assert "PreToolUse" in verbose
+
+    assert set(OBSERVATION_PROFILES) == {"minimal", "standard", "verbose"}
+
+
+def test_unknown_observation_profile_rejected():
+    with pytest.raises(ValueError):
+        build_hooks_object(profile="chatty")
+
+
+def test_install_records_observation_profile(tmp_path):
+    result = install_claude_code_hooks(
+        twin_bin="twin",
+        home="/tmp/h",
+        snippet_dir=tmp_path / "snippet",
+        merge=False,
+        profile="minimal",
+    )
+    assert result["profile"] == "minimal"
+    data = json.loads(Path(result["snippet"]).read_text())
+    assert data["twin_native"]["observation_profile"] == "minimal"
+    assert "PostToolUse" not in data["hooks"]
+
+
+def test_uninstall_unmerges_only_twin_hooks(tmp_path):
+    settings = tmp_path / "settings.json"
+    install_claude_code_hooks(
+        twin_bin="twin",
+        home="/tmp/h",
+        snippet_dir=tmp_path / "snippet",
+        settings_path=settings,
+        merge=True,
+    )
+    # Add a foreign hook that uninstall must preserve.
+    data = json.loads(settings.read_text())
+    data["hooks"].setdefault("Stop", []).append(
+        {"matcher": "", "hooks": [{"type": "command", "command": "echo keep"}]}
+    )
+    settings.write_text(json.dumps(data) + "\n")
+
+    result = uninstall_claude_code_hooks(settings_path=settings)
+    assert result["removed"] is True
+    cleaned = json.loads(settings.read_text())
+    all_cmds = [
+        h.get("command", "")
+        for groups in cleaned.get("hooks", {}).values()
+        for g in groups for h in g.get("hooks", [])
+    ]
+    assert any("echo keep" in c for c in all_cmds)
+    assert not any("native event --host claude-code" in c for c in all_cmds)
+
+
+def test_uninstall_is_symmetric_with_install(tmp_path):
+    settings = tmp_path / "settings.json"
+    original = {"permissions": {"allow": ["Bash"]}}
+    settings.write_text(json.dumps(original) + "\n")
+
+    install_claude_code_hooks(
+        twin_bin="twin",
+        home="/tmp/h",
+        snippet_dir=tmp_path / "snippet",
+        settings_path=settings,
+        merge=True,
+    )
+    uninstall_claude_code_hooks(settings_path=settings)
+    cleaned = json.loads(settings.read_text())
+    assert cleaned.get("permissions") == {"allow": ["Bash"]}
+    assert "hooks" not in cleaned  # no residual empty Twin hooks
+
+
+def test_uninstall_restore_backup(tmp_path):
+    settings = tmp_path / "settings.json"
+    original = '{"hooks": {"Stop": [{"matcher": "", "hooks": ' \
+               '[{"type": "command", "command": "echo keep"}]}]}}\n'
+    settings.write_text(original)
+    install_claude_code_hooks(
+        twin_bin="twin",
+        home="/tmp/h",
+        snippet_dir=tmp_path / "snippet",
+        settings_path=settings,
+        merge=True,
+    )
+    result = uninstall_claude_code_hooks(settings_path=settings, restore_backup=True)
+    assert result["restored"] is True
+    assert json.loads(settings.read_text()) == json.loads(original)
+
+
+def test_uninstall_missing_backup_raises(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"hooks": {}}\n')
+    with pytest.raises(ValueError):
+        uninstall_claude_code_hooks(settings_path=settings, restore_backup=True)
+
+
+def test_uninstall_noop_when_no_twin_hooks(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"permissions": {"allow": ["Bash"]}}\n')
+    result = uninstall_claude_code_hooks(settings_path=settings)
+    assert result["removed"] is False
+    assert unmerge_hooks_from_settings(json.loads(settings.read_text())) == \
+        json.loads(settings.read_text())
 
 
 def test_merge_hooks_preserves_foreign_and_replaces_twin(tmp_path):
@@ -712,7 +836,9 @@ def test_user_message_upgrades_unclassified_and_emits_pack(store, cfg, embedder)
     ))
     assert start.ok
     assert start.binding.domain == "unclassified"
-    assert not (start.context_pack or "").strip()
+    # Fail-closed: scope header may appear, but no memories until domain freezes.
+    assert not (start.sources or [])
+    assert "webhook" not in (start.context_pack or "").lower()
 
     msg = svc.handle(HostEvent(
         kind="user_message", host_type="claude-code",
@@ -738,6 +864,183 @@ def test_user_message_upgrades_unclassified_and_emits_pack(store, cfg, embedder)
     assert again.context_pack is None
 
 
+def test_caps_without_user_message_injection_hold_pack(store, cfg, embedder):
+    """Host that can't inject on user_message: domain upgrades, pack is held."""
+    _seed_confirmed_memory(
+        store, embedder,
+        title="Atlas webhook stack",
+        summary="Atlas webhooks run on FastAPI with schema_version.",
+    )
+    caps = HostCapabilities(context_injection_events=["session_start"]).model_dump()
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="native",
+        external_session_id="caps-noinject",
+        text="native host session",
+        metadata={"host_capabilities": caps},
+    ))
+    assert start.ok
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="native",
+        external_session_id="caps-noinject",
+        text="What retry strategy did we decide for Atlas webhooks?",
+    ))
+    assert msg.ok
+    # Domain still upgraded (binding scope is host-independent)…
+    assert msg.binding.domain == "technical"
+    # …but no pack is emitted where the host cannot surface it.
+    assert msg.context_pack is None
+    assert msg.extras.get("emit_pack") is not True
+    assert msg.extras.get("pack_held_no_injection_point") is True
+
+
+def test_caps_display_intervention_false_suppresses(store, cfg, embedder):
+    caps = HostCapabilities(display_intervention=False).model_dump()
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="native",
+        external_session_id="caps-nointervene",
+        text="hi", domain="technical",
+        metadata={"host_capabilities": caps},
+    ))
+    res = svc.handle(HostEvent(
+        kind="intervene_check", host_type="native",
+        external_session_id="caps-nointervene",
+        text="I think we should ship without the migration.",
+    ))
+    assert res.ok
+    assert res.interventions == []
+    assert res.extras.get("intervention_suppressed") == "display_intervention"
+
+
+def test_caps_turn_end_unsupported_rejects_turn_completed(store, cfg, embedder):
+    caps = HostCapabilities(supports_turn_end=False).model_dump()
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="native",
+        external_session_id="caps-noturn",
+        text="hi", domain="technical",
+        metadata={"host_capabilities": caps},
+    ))
+    res = svc.handle(HostEvent(
+        kind="turn_completed", host_type="native",
+        external_session_id="caps-noturn", text="", event_id="tc1",
+    ))
+    assert res.ok is False
+    assert res.extras.get("rejected") is True
+    assert res.extras.get("capability") == "supports_turn_end"
+
+
+def test_caps_session_end_unsupported_rejects(store, cfg, embedder):
+    caps = HostCapabilities(supports_session_end=False).model_dump()
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="native",
+        external_session_id="caps-noend",
+        text="hi", domain="technical",
+        metadata={"host_capabilities": caps},
+    ))
+    res = svc.handle(HostEvent(
+        kind="session_end", host_type="native",
+        external_session_id="caps-noend", summary="done",
+    ))
+    assert res.ok is False
+    assert res.extras.get("capability") == "supports_session_end"
+
+
+def test_claude_session_start_declares_capabilities(store, cfg, embedder):
+    """Claude adapter stamps host_capabilities onto the session_start event."""
+    event = normalize_claude_code_hook({
+        "hook_event_name": "SessionStart",
+        "session_id": "caps-decl",
+        "prompt": "hi",
+    })
+    assert event.kind == "session_start"
+    assert "host_capabilities" in (event.metadata or {})
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(event)
+    assert start.ok
+    assert start.binding.metadata.get("host_capabilities")
+
+
+def test_session_start_pack_skipped_over_budget(store, cfg, embedder, monkeypatch):
+    """Blown SessionStart budget drops the pack but keeps the binding."""
+    from twin.interfaces.native import service as native_service
+
+    monkeypatch.setattr(
+        native_service, "_PACK_BUDGET_MS",
+        {"session_start": 0.0001, "user_message": 0.0001},
+    )
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="budget-start", text="hi", domain="technical",
+    ))
+    assert start.ok
+    assert start.binding is not None  # session/binding persisted
+    assert start.context_pack is None
+    assert start.extras.get("pack_skipped_budget") is True
+    assert start.extras.get("emit_pack") is not True
+
+
+def test_user_message_pack_skipped_over_budget(store, cfg, embedder, monkeypatch):
+    """Blown user_message budget keeps the domain upgrade, drops the pack."""
+    from twin.interfaces.native import service as native_service
+
+    _seed_confirmed_memory(
+        store, embedder,
+        title="Atlas webhook stack",
+        summary="Atlas webhooks run on FastAPI with schema_version.",
+    )
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="budget-msg", text="native host session",
+    ))
+    monkeypatch.setattr(
+        native_service, "_PACK_BUDGET_MS",
+        {"session_start": 300.0, "user_message": 0.0001},
+    )
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="budget-msg",
+        text="What retry strategy did we decide for Atlas webhooks?",
+    ))
+    assert msg.ok
+    assert msg.binding.domain == "technical"  # upgrade persisted
+    assert msg.context_pack is None
+    assert msg.extras.get("pack_skipped_budget") is True
+    assert msg.extras.get("emit_pack") is not True
+
+
+def test_session_start_stamps_stable_host_instance(store, cfg, embedder):
+    """host_instance is stable per (home, host, user) and never a raw path."""
+    from twin.cognition.host_session import host_instance_id
+
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="hostid-1", text="hi", domain="technical",
+    ))
+    assert start.ok
+    hi = start.binding.metadata.get("host_instance")
+    assert hi and hi.startswith("host:")
+    assert hi == host_instance_id(cfg, "claude-code")
+    # No raw home path leaks into the identifier.
+    assert str(cfg.home) not in hi
+
+    # New occurrence on the same install → same host_instance.
+    svc.handle(HostEvent(
+        kind="session_end", host_type="claude-code",
+        external_session_id="hostid-1", summary="done",
+    ))
+    again = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="hostid-1", text="hi2", domain="technical",
+    ))
+    assert again.binding.metadata.get("host_instance") == hi
+
+
 def test_user_message_keeps_unclassified_without_signal(store, cfg, embedder):
     svc = NativeHostService(store, cfg, embedder)
     svc.handle(HostEvent(
@@ -756,3 +1059,185 @@ def test_user_message_keeps_unclassified_without_signal(store, cfg, embedder):
     # Background LLM resolve is enqueued — never sync on the hook.
     assert msg.extras.get("domain_resolve_job_id")
     assert msg.extras.get("needs_domain_confirmation") is True
+
+
+def test_domain_upgrade_does_not_widen_auth_identity(store, cfg, embedder):
+    """Semantic domain resolve must not rewrite persona/vault/principal."""
+    _seed_confirmed_memory(
+        store, embedder,
+        title="Atlas webhook stack",
+        summary="Atlas webhooks run on FastAPI with schema_version.",
+    )
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="auth-freeze",
+        text="native host session",
+        persona="individual",
+        purpose="task_execution",
+        audience="self",
+    ))
+    assert start.ok
+    b0 = start.binding
+    persona0, purpose0, audience0 = b0.persona, b0.purpose, b0.audience
+    principal0, vault0 = b0.principal_id, b0.vault_id
+    ses0 = store.get_session(start.session_id)
+    assert ses0 is not None
+    assert ses0.tool_id == "native-host"
+    assert ses0.client == "claude-code"
+
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="auth-freeze",
+        text="What retry strategy did we decide for Atlas webhooks?",
+    ))
+    assert msg.ok
+    assert msg.binding.domain == "technical"
+    assert msg.binding.persona == persona0
+    assert msg.binding.purpose == purpose0
+    assert msg.binding.audience == audience0
+    assert msg.binding.principal_id == principal0
+    assert msg.binding.vault_id == vault0
+
+
+def test_turn_completed_never_enters_session_summary(store, cfg, embedder):
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="turn-clean",
+        text="hi", domain="technical",
+    ))
+    svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="turn-clean",
+        text="i like pineapple juice", event_id="um1",
+    ))
+    svc.handle(HostEvent(
+        kind="turn_completed", host_type="claude-code",
+        external_session_id="turn-clean", text="", event_id="tc1",
+        metadata={"provider_assistant_text": "Noted.", "provider_event": "Stop"},
+    ))
+    end = svc.handle(HostEvent(
+        kind="session_end", host_type="claude-code",
+        external_session_id="turn-clean", summary="done",
+    ))
+    assert end.ok
+    assert _drain_runtime_jobs(store, cfg, embedder) >= 1
+    ses = store.get_session(start.session_id)
+    assert ses.summary_percept_id
+    content = store.get_percept(ses.summary_percept_id).content
+    assert "pineapple" in content.lower()
+    assert "[turn_end]" not in content
+    assert "turn_completed" not in content
+
+
+def test_hot_path_user_message_never_calls_llm(store, cfg, embedder, monkeypatch):
+    """Search-vote / observe must not call read_context on the hook path."""
+    calls = {"n": 0}
+
+    def boom(*_a, **_k):
+        calls["n"] += 1
+        raise AssertionError("read_context must not run on native hot path")
+
+    monkeypatch.setattr("twin.cognition.observer.read_context", boom)
+    svc = NativeHostService(store, cfg, embedder)
+    svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="no-llm-hot", text="hi",
+    ))
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="no-llm-hot",
+        text="hey there random chatter",
+    ))
+    assert msg.ok
+    assert calls["n"] == 0
+
+
+def test_pending_context_pack_emitted_on_next_user_message(store, cfg, embedder, monkeypatch):
+    from twin.cognition.observer import ObserverReading
+    from twin.runtime.handlers import handle_session_domain_resolve
+    from twin.runtime.models import JobKind, RuntimeJob
+
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(HostEvent(
+        kind="session_start", host_type="claude-code",
+        external_session_id="pending-pack",
+        text="native host session",
+    ))
+    assert start.binding.domain == "unclassified"
+    msg = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="pending-pack",
+        text="hey", event_id="um0",
+    ))
+    assert msg.extras.get("domain_resolve_job_id")
+    monkeypatch.setattr(
+        "twin.cognition.observer.read_context",
+        lambda *_a, **_k: ObserverReading(
+            domain="technical", task_profile="coding", mode="llm",
+            confidences={"domain": 0.9, "task_profile": 0.8, "project": 0.0},
+        ),
+    )
+    job = RuntimeJob(
+        kind=JobKind.session_domain_resolve,
+        payload={"binding_id": start.binding.id},
+    )
+    result = handle_session_domain_resolve(store, cfg, embedder, job)
+    assert result["ok"] is True
+    binding = store.get_host_session_binding(start.binding.id)
+    assert binding.domain == "technical"
+    assert binding.metadata.get("pending_context_pack") is True
+
+    nxt = svc.handle(HostEvent(
+        kind="user_message", host_type="claude-code",
+        external_session_id="pending-pack",
+        text="continue with Atlas", event_id="um1",
+    ))
+    assert nxt.ok
+    assert nxt.extras.get("pending_context_pack_emitted") is True
+    assert nxt.extras.get("emit_pack") is True
+    assert nxt.context_pack is not None
+    refreshed = store.get_host_session_binding(start.binding.id)
+    assert refreshed.metadata.get("pending_context_pack") is not True
+
+
+def test_fake_host_adapter_uses_universal_events_only(store, cfg, embedder):
+    """A host that never imports claude_code still drives the same core."""
+    # Local fake adapter — only HostEvent, no provider module.
+    def fake_normalize(payload: dict) -> HostEvent:
+        return HostEvent(
+            kind=payload["kind"],
+            host_type="fake-host",
+            external_session_id=payload["session_id"],
+            text=payload.get("text", ""),
+            event_id=payload.get("event_id"),
+            domain=payload.get("domain"),
+            metadata={"host_capabilities": {
+                "supports_context_injection": True,
+                "context_injection_events": ["session_start", "user_message"],
+            }},
+        )
+
+    svc = NativeHostService(store, cfg, embedder)
+    start = svc.handle(fake_normalize({
+        "kind": "session_start", "session_id": "fake-1",
+        "text": "build the queue", "domain": "technical",
+    }))
+    assert start.ok
+    assert start.binding.host_type == "fake-host"
+    ses = store.get_session(start.session_id)
+    assert ses.client == "fake-host"
+    assert ses.tool_id == "native-host"
+    turn = svc.handle(fake_normalize({
+        "kind": "turn_completed", "session_id": "fake-1", "event_id": "t1",
+    }))
+    assert turn.ok and turn.binding.ended_at is None
+    end = svc.handle(fake_normalize({
+        "kind": "session_end", "session_id": "fake-1", "text": "done",
+    }))
+    assert end.ok and end.binding.ended_at
+    import twin.interfaces.native.service as ns
+    src = Path(ns.__file__).read_text(encoding="utf-8")
+    assert "from .claude_code" not in src
+    assert "from twin.interfaces.native.claude_code" not in src

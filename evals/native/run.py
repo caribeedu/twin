@@ -149,7 +149,15 @@ def main() -> int:
         print(f"[{tag}] {case.get('id', path.stem)}: {detail}")
         if not ok:
             failed += 1
-    total = len(cases)
+
+    from evals.native.fake_host import CONTRACT_CASES
+    for name, fn in CONTRACT_CASES:
+        ok, detail = fn()
+        tag = "PASS" if ok else "FAIL"
+        print(f"[{tag}] {name}: {detail}")
+        if not ok:
+            failed += 1
+    total = len(cases) + len(CONTRACT_CASES)
     print(f"\n{total - failed}/{total} native eval cases passed")
     return 1 if failed else 0
 

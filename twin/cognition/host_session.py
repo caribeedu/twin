@@ -12,8 +12,10 @@ Binding contract:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from .. import ids
@@ -37,10 +39,32 @@ NATIVE_HOSTS = frozenset({
     "claude-code", "codex", "codex-app-server", "native",
 })
 
+
+def host_instance_id(cfg: Config, host_type: str) -> str:
+    """Stable, non-reversible id for *this* host installation.
+
+    Derived from the Twin home + host type + user home so the same machine +
+    host produces the same id across sessions, without ever leaking a raw path.
+    Used for provenance / identity — never as the privacy ``tool_id`` (native
+    sessions always resolve to ``native-host``).
+    """
+    try:
+        user_home = str(Path.home())
+    except Exception:
+        user_home = ""
+    key = "\x1f".join([
+        str(getattr(cfg, "home", "") or ""),
+        (host_type or "native").lower(),
+        user_home,
+    ])
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return f"host:{digest}"
+
 ALLOWED_OBSERVE_KINDS = frozenset({
     "session_start",
     "user_message",
     "assistant_result",
+    "turn_completed",
     "tool_requested",
     "tool_completed",
     "tool_failed",
@@ -124,8 +148,9 @@ def _assert_frozen_scope(
     """Reject silent scope widening on an open binding.
 
     ``unclassified`` domain and ``unknown`` persona/purpose/audience are not
-    frozen — a later real scope may upgrade them once (Claude SessionStart
-    often opens with no prompt text).
+    frozen — a later real *domain* may upgrade once when the host later
+    supplies semantic input. Authorization fields (persona/purpose/audience/
+    principal) are not inferred from dialogue.
     """
     if (
         domain
@@ -234,7 +259,8 @@ def bind_and_start(
         cwd=cwd, domain=domain, project=project,
         task_profile=task_profile, max_tokens=max_tokens,
         persona=persona, purpose=purpose, audience=audience,
-        tool_id=host_type,
+        tool_id=None,
+        surface="native",
     )
     # Vault comes from project / explicit metadata — never inferred from domain name.
     vault_id = None
@@ -246,6 +272,10 @@ def bind_and_start(
         vault_id = metadata.get("vault_id")
     if not vault_id:
         vault_id = None
+    binding_meta = dict(metadata or {})
+    # Stable installation identity for provenance — never the raw path, never
+    # the privacy tool_id (native sessions stay ``native-host``).
+    binding_meta.setdefault("host_instance", host_instance_id(cfg, host_type))
     binding = HostSessionBinding(
         host_type=host_type,
         external_session_id=external_session_id,
@@ -260,7 +290,7 @@ def bind_and_start(
         audience=started.session.audience or audience,
         task_profile=started.session.task_profile or task_profile,
         started_at=started.session.started_at or now_iso(),
-        metadata=dict(metadata or {}),
+        metadata=binding_meta,
     )
     try:
         store.insert_host_session_binding(binding)
@@ -403,11 +433,11 @@ def _refresh_placeholder_access(
     store: MemoryStore, cfg: Config,
     binding: HostSessionBinding, resolved: str,
 ):
-    """Re-resolve access now that an unclassified binding has a real domain.
+    """Re-resolve access for packing after a domain upgrade.
 
-    An unclassified SessionStart freezes persona/purpose/audience as ``unknown``
-    (restricted access); left as-is the upgraded pack stays empty. Placeholder
-    scope fields fall back to local-cli defaults; already-frozen ones are kept.
+    Uses the binding's existing authorization identity (persona/purpose/
+    audience/principal). Domain upgrade never invents a more permissive
+    identity from dialogue — only ``requested_domains`` changes.
     """
     from ..privacy.identity import ensure_local_identity, resolve_access
     from ..privacy.yaml_io import bootstrap_policy_set
@@ -416,47 +446,38 @@ def _refresh_placeholder_access(
     ensure_local_identity(store)
     return resolve_access(
         store,
-        surface="cli",
-        client="cli",
-        tool_id=binding.host_type or "claude-code",
-        persona=(
-            "individual" if not _scope_field_is_frozen(binding.persona)
-            else binding.persona
-        ),
-        purpose=(
-            "task_execution" if not _scope_field_is_frozen(binding.purpose)
-            else binding.purpose
-        ),
-        audience=(
-            "self" if not _scope_field_is_frozen(binding.audience)
-            else binding.audience
+        surface="native",
+        client=binding.host_type or "native",
+        tool_id=None,
+        persona=binding.persona if _scope_field_is_frozen(binding.persona) else "individual",
+        purpose=binding.purpose if _scope_field_is_frozen(binding.purpose) else "task_execution",
+        audience=binding.audience if _scope_field_is_frozen(binding.audience) else "self",
+        principal_id=(
+            binding.principal_id
+            if binding.principal_id and binding.principal_id != "unknown"
+            else None
         ),
         project_id=binding.project_id,
         session_id=binding.cognitive_session_id,
-        requested_domains=[resolved],
+        requested_domains=(
+            [resolved] if resolved and resolved != UNCLASSIFIED_DOMAIN else []
+        ),
     )
 
 
 def _apply_upgraded_scope(target, *, domain: str, reading, access) -> None:
-    """Apply the resolved domain + refreshed access to a binding or session.
+    """Apply resolved *domain* (and optional task profile) only.
 
-    Placeholder scope fields (``unknown`` / empty) are filled from ``access``;
-    intentionally frozen ones are preserved. Task profile only fills a generic
-    slot. Shared shape lets binding and session take the same upgrade.
+    Persona / purpose / audience / principal are authorization identity —
+    they stay as bound at session start. ``access`` is used for packing, not
+    to rewrite those fields from semantic classification.
     """
+    _ = access  # packing path consumes access; scope fields stay frozen
     target.domain = domain
     if reading.task_profile and (
         not target.task_profile or target.task_profile == "general"
     ):
         target.task_profile = reading.task_profile
-    if not _scope_field_is_frozen(target.persona):
-        target.persona = access.persona
-    if not _scope_field_is_frozen(target.purpose):
-        target.purpose = access.purpose
-    if not _scope_field_is_frozen(target.audience):
-        target.audience = access.audience
-    if not target.principal_id or target.principal_id == "unknown":
-        target.principal_id = access.principal_id
 
 
 def maybe_upgrade_domain_and_pack(
@@ -471,13 +492,11 @@ def maybe_upgrade_domain_and_pack(
 ) -> Optional[DomainUpgradePack]:
     """If binding domain is unclassified, try to resolve it from ``query`` and pack.
 
-    Used when Claude Code SessionStart had no prompt text (empty pack), then
-    the first ``UserPromptSubmit`` carries enough signal to name a domain.
-    Returns ``None`` when domain is already frozen, still unclassified, or
-    ``query`` is empty. Never widens a frozen real domain.
-
-    Resolution order when domain is still open: retrieval vote → local LLM.
-    No-op when domain already frozen. Hook timeouts must cover LLM fallback.
+    Used when a host opens a session without semantic input (empty pack), then
+    the first semantic user event carries enough signal for a search-vote
+    domain. Returns ``None`` when domain is already frozen, still unclassified,
+    or ``query`` is empty. Never widens a frozen real domain. Never rewrites
+    persona / purpose / audience / principal.
     """
     if not (query or "").strip():
         return None
@@ -515,7 +534,7 @@ def maybe_upgrade_domain_and_pack(
         binding=binding,
         cwd=cwd,
         max_tokens=max_tokens,
-        client=binding.host_type or "claude-code",
+        client=binding.host_type or "native",
     )
     logger.info(
         "host binding %s domain %s → %s persona=%s (pack sources=%s)",
@@ -545,7 +564,7 @@ def request_context_pack(
     persona: str = "individual",
     purpose: str = "memory_retrieval",
     audience: str = "self",
-    client: str = "claude-code",
+    client: str = "native",
 ) -> ContextPack:
     """Proactive Context Pack — assembled only by the cognitive core.
 
@@ -600,17 +619,32 @@ def request_context_pack(
 
     bootstrap_policy_set(store, policies_path=cfg.policies_path)
     ensure_local_identity(store)
+    # Any HostSessionBinding is a native surface; unbound packs keep CLI/MCP.
+    if binding is not None:
+        surface = "native"
+        client_key = binding.host_type or client
+    elif (client or "") in NATIVE_HOSTS:
+        surface = "native"
+        client_key = client
+    else:
+        surface = "cli"
+        client_key = client
+    access_domains = (
+        [session_domain]
+        if session_domain and session_domain != UNCLASSIFIED_DOMAIN
+        else []
+    )
     access = resolve_access(
         store,
-        surface="cli",
-        client="cli",
-        tool_id=client,
+        surface=surface,
+        client=client_key or None,
+        tool_id=None if surface == "native" else client,
         persona=persona,
         purpose=purpose,
         audience=audience,
         project_id=project_id,
         session_id=session_id,
-        requested_domains=[session_domain] if session_domain else [],
+        requested_domains=access_domains,
     )
     # Frozen vault is an explicit pack invariant: session/project resolve the
     # same vault; binding.vault_id is the audit anchor and cannot widen silently.
@@ -645,8 +679,9 @@ def _dialogue_text_for_domain(store: MemoryStore, session_id: str) -> str:
         if kind not in ("user_message", "assistant_result", "note"):
             continue
         note = (art.get("note") or art.get("ref") or "").strip()
-        if note:
-            lines.append(note)
+        if not note or note == "[turn_end]":
+            continue
+        lines.append(note)
     return "\n".join(lines).strip()
 
 
@@ -811,6 +846,9 @@ def apply_background_domain_resolve(
     meta["domain_upgraded_at"] = now_iso()
     meta["domain_resolved_via"] = reading.mode
     meta["domain_resolved_background"] = True
+    # Option A: pack is not pushed mid-turn. Mark pending so the next host
+    # event that supports context injection can emit it.
+    meta["pending_context_pack"] = True
     binding.metadata = meta
     store.update_host_session_binding(binding)
 

@@ -49,6 +49,12 @@ curl -s localhost:PORT/api/health/cognition
 twin connector due
 ```
 
+`twin doctor` reports runtime queue health from the store (no pidfile, so it never claims a worker is "up"):
+
+- `runtime:queue` — warns with `N jobs pending — run \`twin runtime start\`` when work is backlogged (native SessionEnd consolidation + domain resolve run here).
+- `runtime:failed` — jobs retrying with backoff.
+- `runtime:dead_letter` — fails; inspect and requeue with `twin runtime retry <job_id>`.
+
 ## Connector recovery
 
 ```bash

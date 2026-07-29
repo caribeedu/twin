@@ -407,7 +407,8 @@ Delivered:
 
 - hot-path session domain is search-vote only (keyword/graph guess removed); inconclusive make it stay `unclassified` and enqueue background `session_domain_resolve` (multi-message LLM) or wait for client/MCP explicit domain;
 - Memory Observer no longer invents the consumer domain from text: uses the frozen session domain or an explicit argument (else `unclassified` → default-deny), with a soft same-domain ranking boost on hybrid search;
-- `session_summary` consolidation folds dialogue plus deliberate observations (`file` / `commit` / `doc` / `note` / host file/project context) with human speaker labels (`User:` / `Assistant:` …) so machine kind tags do not leak into evidence quotes; tool I/O and session boilerplate stay on the session for replay.
+- `session_summary` consolidation folds dialogue plus deliberate observations (`file` / `commit` / `doc` / `note` / host file/project context) with human speaker labels (`User:` / `Assistant:` …) so machine kind tags do not leak into evidence quotes; tool I/O, `turn_completed`, and session boilerplate stay on the session for replay;
+- native auth uses `surface=native` + host `client` with allowlist tool `native-host` (not CLI masquerade); provider Stop maps to structural `turn_completed` (no `[turn_end]` text); background domain resolve marks `pending_context_pack` for the next injection-capable event.
 
 **Interpreter, CLI and release hygiene**
 
@@ -418,6 +419,18 @@ Delivered:
 - drop versioned completion gates and phase folklore (`twin eval v1-completion` / connector completion matrices → behavior tests and `twin connector contract` / production-ready report);
 - docs/README polish: `CONNECTION.md` → `INTERFACES.md`, ROADMAP for future majors, CHANGELOG as release history, clearer how-to-use and visuals;
 - package/`__version__` to `1.2.0`.
+
+### Unreleased — Native adapter hardening (post-v1.2.0 review)
+
+Follow-up to the v1.2.0 native review: make the universal host contract do real work, not just carry declarations.
+
+- **Observation profiles**: `twin native install --profile minimal|standard|verbose` scopes which hooks are wired (lifecycle only → `+PostToolUse` default → `+PreToolUse`); recorded as `twin_native.observation_profile`;
+- **Uninstall**: `twin native uninstall` removes only Twin-owned handlers (keeps third-party hooks); `--restore-backup` restores the most recent `.twin-bak`;
+- **Capabilities drive the service**: `HostCapabilities` (attached to the `session_start` event) now gate behavior — `context_injection_events` decides where a pack may surface (domain still upgrades but the pack is held otherwise), `supports_turn_end` / `supports_session_end` reject contract breaches fail-closed, `display_intervention` skips intervention LLM calls;
+- **Stable `host_instance`**: bindings carry a non-reversible install id (Twin home + host + user home) for provenance — never a raw path, never the privacy `tool_id` (native stays `native-host`);
+- **Pack latency budget**: soft wall-clock deadline on hot-path pack assembly (SessionStart ≈ 300ms, UserPromptSubmit ≈ 500ms); over budget drops the pack and sets `pack_skipped_budget` while keeping binding/domain state;
+- **Runtime health in doctor**: `twin doctor` reports `runtime:queue` (pending), `runtime:failed`, and `runtime:dead_letter` from the store instead of pretending a worker is up;
+- **Adapter contract + evals**: documented native adapter checklist + identity tuple; fake-host evals cover lifecycle, security, capabilities and budget.
 
 
 
