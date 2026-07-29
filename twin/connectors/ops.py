@@ -28,9 +28,12 @@ class SetupStep:
 # the discovery helper that lists candidates). Used to tell whether the
 # "select scope" step is already satisfied.
 _SCOPE_BY_TYPE: dict[str, tuple[str, str]] = {
-    "github": ("repositories", "twin connector github repositories {cid}"),
-    "slack": ("channels", "twin connector slack channels {cid}"),
-    "gmail": ("labels", "twin connector gmail labels {cid}"),
+    "github": ("repositories",
+               "twin connector github repositories {cid} --select <owner/name> …"),
+    "slack": ("channels",
+              "twin connector slack channels {cid} --select <channel_id> …"),
+    "gmail": ("labels",
+              "twin connector gmail labels {cid} --select <label_id> …"),
 }
 
 

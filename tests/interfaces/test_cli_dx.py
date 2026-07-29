@@ -56,6 +56,51 @@ def test_connector_list_empty_state_guides_next_step(tmp_path, capsys):
     assert "twin connector setup" in out
 
 
+def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
+    """`twin connector github repositories <id> --select …` picks the sync
+    scope: it writes the `repositories` config key, preserves other config,
+    and never crashes on a repo the credential cannot see."""
+    import types
+
+    from twin.connectors.models import (
+        ConnectorInstance, ConnectorStatus, OwnershipClass, SourceAccount,
+    )
+    from twin.interfaces import cli
+    from twin.memory.store.sqlite import SqliteStore
+
+    store = SqliteStore(str(tmp_path / "twin.db"))
+    acc = SourceAccount(connector_type="github", source_owner=OwnershipClass.personal,
+                        owner_principal_id="p", vault_id="vault_personal")
+    store.insert_source_account(acc)
+    inst = ConnectorInstance(connector_type="github", account_id=acc.id,
+                             status=ConnectorStatus.active, credential_ref="cred_x",
+                             configuration={"lookback_seconds": 3600})
+    store.insert_connector_instance(inst)
+
+    fake = types.SimpleNamespace(list_repositories=lambda: [
+        {"full_name": "caribeedu/twin", "private": True,
+         "open_issues": 3, "pushed_at": "x"},
+    ])
+    monkeypatch.setattr(cli, "_connector_adapter", lambda ws, creds, cid: fake)
+
+    args = types.SimpleNamespace(
+        connector_id=inst.id, connector_command="repositories",
+        select=["caribeedu/twin", "ghost/missing"], json=False)
+    ws = types.SimpleNamespace(store=store)
+    cli._connector_discovery(
+        args, ws, None, method="list_repositories",
+        headers=["repository"], row=lambda r: [r["full_name"]],
+        scope_key="repositories", id_of=lambda r: r.get("full_name"))
+
+    updated = store.get_connector_instance(inst.id)
+    assert updated.configuration["repositories"] == ["caribeedu/twin", "ghost/missing"]
+    assert updated.configuration["lookback_seconds"] == 3600   # preserved
+    out = capsys.readouterr().out
+    assert "repositories set to 2" in out
+    assert "not visible to this credential" in out             # ghost/missing warned
+    store.close()
+
+
 def test_connector_setup_plan_is_stepped_and_never_ingests(tmp_path, capsys):
     out = _run(
         tmp_path / "home", capsys,

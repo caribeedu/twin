@@ -1460,12 +1460,47 @@ def _connector_adapter(ws, creds, connector_id: str):
     return build_adapter(inst, acc, secret)
 
 
-def _connector_discovery(args, ws, creds, *, method, headers, row):
-    """Shared render for github/slack/gmail/... scope-discovery helpers."""
+def _connector_discovery(args, ws, creds, *, method, headers, row,
+                         scope_key=None, id_of=None):
+    """Shared render for github/slack/gmail/... scope-discovery helpers.
+
+    Lists what the credential can reach. With ``--select`` (when the connector
+    has a ``scope_key``) it also WRITES the selection into that configuration
+    key — merging safely, so other configuration is preserved — turning the
+    discovery command into the way you actually pick your scope."""
     from . import ux
 
     adapter = _connector_adapter(ws, creds, args.connector_id)
     items = list(getattr(adapter, method)())
+
+    select = list(getattr(args, "select", None) or [])
+    if select and scope_key:
+        visible = {id_of(it) for it in items} if id_of else set()
+        unknown = [s for s in select if visible and s not in visible]
+        # replace the scope selection (dedup, keep order); preserve other config
+        seen: set = set()
+        chosen = [s for s in select if not (s in seen or seen.add(s))]
+        inst = ws.store.get_connector_instance(args.connector_id)
+        config = dict(inst.configuration or {})
+        config[scope_key] = chosen
+        ws.store.update_connector_instance(args.connector_id, configuration=config)
+        data = {"connector_id": args.connector_id, "scope_key": scope_key,
+                "selected": chosen, "unknown_to_credential": unknown,
+                "count": len(items)}
+
+        def pretty_select():
+            ux.print_rule(f"connector · {args.connector_command} · select")
+            for u in unknown:
+                ux.print_warn(f"{u!r} is not visible to this credential — "
+                              "kept anyway; sync will skip what it cannot read")
+            ux.print_kv([("connector", args.connector_id),
+                         (scope_key, ", ".join(chosen) or "(none)")])
+            ux.print_ok(f"{scope_key} set to {len(chosen)} item(s)")
+            ux.print_next([("→", f"twin connector backfill {args.connector_id} --preview"),
+                           ("→", f"twin connector sync {args.connector_id}")])
+
+        _emit(args, data, pretty_select)
+        return
 
     def pretty():
         ux.print_rule(f"connector · {args.connector_command}")
@@ -1474,6 +1509,10 @@ def _connector_discovery(args, ws, creds, *, method, headers, row):
             return
         ux.print_table(headers, [row(it) for it in items])
         ux.print_ok(f"{len(items)} item(s) visible")
+        if scope_key:
+            ux.print_next([("→",
+                f"twin connector {args.connector_command} … {args.connector_id} "
+                f"--select <id> [<id> …]   # pick your {scope_key}")])
 
     _emit(args, {"items": items, "count": len(items)}, pretty)
 
@@ -1678,6 +1717,7 @@ def cmd_connector(args) -> None:
                 r["full_name"], "private" if r.get("private") else "public",
                 r.get("open_issues"), r.get("pushed_at"),
             ],
+            scope_key="repositories", id_of=lambda r: r.get("full_name"),
         )
     elif cmd == "slack":
         if args.slack_command != "channels":
@@ -1690,6 +1730,7 @@ def cmd_connector(args) -> None:
                 "private" if ch.get("is_private") else "im" if ch.get("is_im") else "public",
                 ch.get("num_members"),
             ],
+            scope_key="channels", id_of=lambda ch: ch.get("id"),
         )
     elif cmd == "gmail":
         if args.gmail_command != "labels":
@@ -1701,6 +1742,7 @@ def cmd_connector(args) -> None:
                 lab["id"], lab.get("name") or "?", lab.get("type"),
                 lab.get("messages_total"),
             ],
+            scope_key="labels", id_of=lambda lab: lab.get("id"),
         )
     elif cmd == "outlook":
         if args.outlook_command != "folders":
@@ -3080,19 +3122,27 @@ def main(argv: list[str] | None = None) -> None:
     cgh = cs.add_parser("github", help="github-specific helpers")
     cghs = cgh.add_subparsers(dest="github_command", required=True)
     cghr = cghs.add_parser("repositories",
-                           help="repositories the token can reach")
+                           help="list repositories the token can reach; "
+                                "--select picks them as the sync scope")
     cghr.add_argument("connector_id")
+    cghr.add_argument("--select", nargs="+", metavar="OWNER/NAME",
+                      help="set the repositories to sync (owner/name …)")
     cghr.set_defaults(func=cmd_connector)
     csl = cs.add_parser("slack", help="slack-specific helpers")
     csls = csl.add_subparsers(dest="slack_command", required=True)
     cslc = csls.add_parser("channels",
-                           help="channels the token can see")
+                           help="list channels; --select picks them as the scope")
     cslc.add_argument("connector_id")
+    cslc.add_argument("--select", nargs="+", metavar="CHANNEL_ID",
+                      help="set the channels to sync (channel ids)")
     cslc.set_defaults(func=cmd_connector)
     cgm = cs.add_parser("gmail", help="gmail-specific helpers")
     cgms = cgm.add_subparsers(dest="gmail_command", required=True)
-    cgml = cgms.add_parser("labels", help="labels the token can see")
+    cgml = cgms.add_parser("labels",
+                           help="list labels; --select picks them as the scope")
     cgml.add_argument("connector_id")
+    cgml.add_argument("--select", nargs="+", metavar="LABEL_ID",
+                      help="set the labels to sync (label ids)")
     cgml.set_defaults(func=cmd_connector)
     cout = cs.add_parser("outlook", help="outlook-specific helpers")
     couts = cout.add_subparsers(dest="outlook_command", required=True)
