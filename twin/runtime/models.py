@@ -1,4 +1,4 @@
-"""Durable cognitive runtime models (v1.0 / v0.9.0).
+"""Durable cognitive runtime models.
 
 Jobs are the unit of background cognitive work. Leases give exclusive
 execution; dead letters capture terminal failures. This is not an autonomous
@@ -25,6 +25,9 @@ class JobKind(str, Enum):
     reembed_memory = "reembed_memory"
     integrity_check = "integrity_check"
     connector_reconcile = "connector_reconcile"
+    backfill_partition = "backfill_partition"
+    session_domain_resolve = "session_domain_resolve"
+    session_complete = "session_complete"
 
 
 class JobStatus(str, Enum):
@@ -48,6 +51,8 @@ class ErrorClass(str, Enum):
 MODEL_GATED_KINDS = frozenset({
     JobKind.interpret_percept,
     JobKind.workspace_tick,
+    JobKind.session_domain_resolve,
+    JobKind.session_complete,
 })
 
 

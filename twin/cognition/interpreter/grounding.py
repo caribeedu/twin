@@ -1,4 +1,4 @@
-"""Deterministic evidence-span grounding (v0.7 Blocker 2).
+"""Deterministic evidence-span grounding.
 
 An interpreted item is only allowed into the pipeline if its ``evidence_span``
 is a **verbatim** excerpt of the text the interpreter actually read. The model

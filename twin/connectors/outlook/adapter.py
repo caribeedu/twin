@@ -1,9 +1,9 @@
-"""OutlookConnector — Microsoft Graph mail adapter (v0.6 Phase 4).
+"""OutlookConnector — Microsoft Graph mail adapter.
 
 Streams:
 
-    folder:{folder_id}
-    backfill:{job}:{partition}:folder:{folder_id}
+ folder:{folder_id}
+ backfill:{job}:{partition}:folder:{folder_id}
 
 Continuous sync uses Graph delta queries (``delta_link`` in the checkpoint).
 Backfill is a receivedDateTime window on a namespaced stream. ``@removed``

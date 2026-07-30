@@ -1,4 +1,4 @@
-"""Shared professional-mail cognitive layer (v0.6 Phase 4).
+"""Shared professional-mail cognitive layer.
 
 Provider adapters live in ``twin.connectors.gmail`` and
 ``twin.connectors.outlook``; this package owns MIME normalization,

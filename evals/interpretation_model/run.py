@@ -1,4 +1,4 @@
-"""Optional real-model interpretation evals (v0.7).
+"""Optional real-model interpretation evals.
 
 Runs the actual cognitive interpreter against labelled cases and scores the
 qualities the deterministic suite cannot: act classification, type precision,
@@ -7,7 +7,7 @@ attribution, evidence literality, ambiguity recall, invented-item rate.
 Never gates CI. Skips cleanly (exit 0) unless ``TWIN_EVAL_MODEL=1`` is set and
 a local model is reachable — so a nightly job without a GPU is harmless.
 
-    TWIN_EVAL_MODEL=1 python -m evals.interpretation_model.run
+ TWIN_EVAL_MODEL=1 python -m evals.interpretation_model.run
 """
 
 from __future__ import annotations

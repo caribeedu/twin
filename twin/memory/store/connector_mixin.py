@@ -755,7 +755,7 @@ class ConnectorStoreMixin:
         rows = self._j_fetchall("SELECT * FROM connector_sync_state", ())
         return [row_to_sync_state(r) for r in rows]
 
-    # -- backfill jobs (v0.6 Phase 4) --------------------------------------
+    # -- backfill jobs  --------------------------------------
 
     def insert_backfill_job(self, job: BackfillJob) -> str:
         self._c_insert("connector_backfill_jobs", backfill_job_to_row(job))
@@ -772,6 +772,16 @@ class ConnectorStoreMixin:
             "SELECT * FROM connector_backfill_jobs WHERE connector_id = ?"
             " ORDER BY created_at DESC",
             (connector_id,),
+        )
+        return [row_to_backfill_job(r) for r in rows]
+
+    def list_active_backfill_jobs(self) -> list[BackfillJob]:
+        """BackfillJobs the runtime scheduler should keep driving."""
+        rows = self._j_fetchall(
+            "SELECT * FROM connector_backfill_jobs"
+            " WHERE status IN ('planned', 'running')"
+            " ORDER BY created_at ASC",
+            (),
         )
         return [row_to_backfill_job(r) for r in rows]
 

@@ -146,26 +146,47 @@ class GeminiEmbedder:
         return vector
 
 
+def sanitize_base_url(base_url: str) -> str:
+    """Strip whitespace and terminal/env junk that breaks httpx URL parsing.
+
+    WSL and mis-decoded ``.env`` values sometimes inject UTF-16 surrogates
+    (e.g. ``\\udcc3`` from a lone ``0xC3`` byte). Those are not valid in a
+    URL and raise ``UnicodeEncodeError`` inside httpx before any request.
+    """
+    text = (base_url or "").strip()
+    return "".join(
+        ch for ch in text
+        if ch.isprintable() and not (0xD800 <= ord(ch) <= 0xDFFF)
+    ).strip()
+
+
 def ollama_reachable(base_url: str, timeout: float = 1.5) -> bool:
     import httpx
 
+    base = sanitize_base_url(base_url).rstrip("/")
+    if not base:
+        return False
     try:
-        return httpx.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout).status_code == 200
-    except httpx.HTTPError:
+        return httpx.get(f"{base}/api/tags", timeout=timeout).status_code == 200
+    except Exception:
+        # Probe helper: network, timeout, bad URL, TLS — never crash callers
+        # (twin init / doctor). httpx.HTTPError alone misses UnicodeEncodeError.
         return False
 
 
 def openai_compat_reachable(base_url: str, api_key: str = "", timeout: float = 1.5) -> bool:
     import httpx
 
-    base = base_url.rstrip("/")
+    base = sanitize_base_url(base_url).rstrip("/")
+    if not base:
+        return False
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     probe = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
     try:
         return httpx.get(probe, headers=headers, timeout=timeout).status_code < 500
-    except httpx.HTTPError:
+    except Exception:
         return False
 
 

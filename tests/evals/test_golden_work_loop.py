@@ -1,4 +1,4 @@
-"""Golden cognitive work-loop scenario (v0.9.9)."""
+"""Golden cognitive work-loop scenario."""
 
 from twin.evals.golden import run_golden_work_loop
 

@@ -1,4 +1,4 @@
-"""Render modes for context packs (v0.9.5)."""
+"""Render modes for context packs."""
 
 from __future__ import annotations
 

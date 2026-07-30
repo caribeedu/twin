@@ -1,26 +1,26 @@
-"""Interpretation pipeline (v0.7): quarantine → cognitive interpreter →
+"""Interpretation pipeline: quarantine → cognitive interpreter →
 grounding → classification checks → dedupe → persist (memory + entities +
 relations + evidence + embedding).
 
 Mode selection (``TWIN_EXTRACTOR``):
-    auto      → cognitive interpreter if the local model is reachable,
-                otherwise DEFER (retry later — never fabricate conclusions)
-    ollama    → cognitive interpreter; DEFER when the model is unreachable
-    stub      → deterministic offline interpreter (test/CI stand-in for the LLM)
-    heuristic → NOT an interpreter — conservative detection only. It records
-                ``DetectionSignal``s (routing/prioritization hints) and NEVER a
-                ``MemoryItem``: lexical rules must not establish a memory type,
-                domain, entity or cognitive confidence.
+ auto → cognitive interpreter if the local model is reachable,
+ otherwise DEFER (retry later — never fabricate conclusions)
+ ollama → cognitive interpreter; DEFER when the model is unreachable
+ stub → deterministic offline interpreter (test/CI stand-in for the LLM)
+ heuristic → NOT an interpreter — conservative detection only. It records
+ ``DetectionSignal``s (routing/prioritization hints) and NEVER a
+ ``MemoryItem``: lexical rules must not establish a memory type,
+ domain, entity or cognitive confidence.
 
-Load-bearing v0.7 rules:
+Load-bearing rules:
 - a Percept is understood only when a cognitive interpreter actually ran; an
-  unavailable model DEFERS (retryable) and a service outage never consumes a
-  Percept's retry budget;
+ unavailable model DEFERS (retryable) and a service outage never consumes a
+ Percept's retry budget;
 - every catalogued item is grounded by a verbatim evidence span validated
-  deterministically against the (masked) text the interpreter read — an
-  invented span, even a non-empty one, is dropped;
+ deterministically against the (masked) text the interpreter read — an
+ invented span, even a non-empty one, is dropped;
 - deterministic governance (quarantine, source policy, confidentiality floor,
-  dedupe, calibration, review) is unchanged and still decides *use*.
+ dedupe, calibration, review) is unchanged and still decides *use*.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class ExtractReport:
     duplicates: int = 0
     flagged_for_review: int = 0
     pii_findings: int = 0
-    policy_dropped: int = 0  # candidates blocked by the source policy (§70)
+    policy_dropped: int = 0  # candidates blocked by the source policy ()
     deferred: bool = False   # interpreter unavailable — nothing catalogued, retryable
     interpretation_status: str = ""
     unresolved_references: int = 0
@@ -256,7 +256,7 @@ def _needs_review(cfg: Config, mem: ExtractedMemory, percept: Percept) -> Option
     if mem.type in ("belief", "procedure"):
         return "judgment-adjacent memory type"
     if mem.domain not in ("work", "technical", "personal_preferences", "assistant_preferences"):
-        return f"non-MVP domain {mem.domain}"
+        return f"non-base domain {mem.domain}"
     return None
 
 

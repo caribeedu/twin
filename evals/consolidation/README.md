@@ -1,4 +1,4 @@
-# Consolidation / parallel memory evals (v0.8)
+# Consolidation / parallel memory evals
 
 Offline contract checks for the Global-Workspace-shaped spine:
 

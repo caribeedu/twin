@@ -1,4 +1,4 @@
-"""Explicit memory formation pipeline (v0.9.2).
+"""Explicit memory formation pipeline.
 
 Turns grounded interpretations into durable candidates with deterministic
 identity, evidence aggregation, review gates, and auditable confirm/reject.
@@ -310,6 +310,9 @@ def propose_or_corroborate(
     Returns ``(memory, action)`` where action is ``created`` | ``corroborated``.
     Never confirms.
     """
+    from twin.cognition.evidence_text import sanitize_evidence_quote
+
+    evidence_quote = sanitize_evidence_quote(evidence_quote)
     mem = apply_formation_policy(mem)
     identity = mem.payload["formation_identity"]
     existing = find_by_formation_identity(store, identity)

@@ -1,4 +1,4 @@
-"""Durable cumulative connector counters (Phase 9 — exactly-once per batch).
+"""Durable cumulative connector counters.
 
 Each terminal batch contributes to ``ConnectorSyncState`` counters **at most
 once**, gated by the ``connector_counter_batches`` ledger

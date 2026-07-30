@@ -22,6 +22,9 @@ from .models import (
 
 DEFAULT_TOOLS: dict[str, ToolIdentity] = {
     "local-cli": ToolIdentity(id="local-cli", execution_location="local", trusted_level="local"),
+    "native-host": ToolIdentity(
+        id="native-host", execution_location="local", trusted_level="local",
+    ),
     "local-ollama": ToolIdentity(id="local-ollama", execution_location="local", trusted_level="local"),
     "cursor": ToolIdentity(id="cursor", execution_location="local", provider="Cursor", trusted_level="trusted"),
     "claude-code": ToolIdentity(

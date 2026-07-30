@@ -34,7 +34,10 @@ from .yaml_io import resolve_tool
 
 
 LOCAL_SURFACES = frozenset({"cli", "local-cli", "twin-cli"})
+NATIVE_SURFACES = frozenset({"native"})
 EXTERNAL_SURFACES = frozenset({"mcp", "http", "api", "unknown", ""})
+# Allowlist tool for native local hooks — never the host product name.
+NATIVE_HOST_TOOL_ID = "native-host"
 
 # No wildcards — unknown persona on a vault is deny.
 DEFAULT_VAULT_PERSONAS: dict[str, set[str]] = {
@@ -233,8 +236,14 @@ def resolve_access(
         "principal_id": principal_id,
     }
 
-    # Authenticated local CLI surface — principal must already exist (bootstrap).
-    if surface_l in LOCAL_SURFACES or _authenticated_local(surface_l, api_token, store):
+    # Authenticated local CLI — or native local-hook transport. Native uses the
+    # same local principal bootstrap but records surface=native + host client;
+    # tool allowlists use ``native-host``, never the host product name as tool_id.
+    if (
+        surface_l in LOCAL_SURFACES
+        or surface_l in NATIVE_SURFACES
+        or _authenticated_local(surface_l, api_token, store)
+    ):
         principal = None
         if hasattr(store, "get_principal"):
             principal = store.get_principal(principal_id or "principal_local_cli")
@@ -243,10 +252,20 @@ def resolve_access(
                 project_id=project_id, session_id=session_id,
                 requested_domains=requested_domains, claims=claims,
             )
+        if surface_l in NATIVE_SURFACES:
+            resolved_tool = NATIVE_HOST_TOOL_ID
+            extra_meta = {
+                "surface": "native",
+                "client": client_l or "",
+                "trusted_level": "local",
+            }
+        else:
+            resolved_tool = "local-cli"
+            extra_meta = {"surface": "cli", "trusted_level": "local"}
         return _apply_allowlists(
             store=store,
             principal=principal,
-            tool_id="local-cli",
+            tool_id=resolved_tool,
             persona=persona,
             purpose=purpose,
             audience=audience,
@@ -255,7 +274,7 @@ def resolve_access(
             requested_domains=requested_domains,
             claims=claims,
             binding=None,
-            extra_meta={"surface": "cli", "trusted_level": "local"},
+            extra_meta=extra_meta,
         )
 
     # External / MCP / HTTP — require registered + authenticated binding

@@ -1,4 +1,4 @@
-"""Golden cognitive scenarios for v0.9.9 / v1.
+"""Golden cognitive scenarios for / v1.
 
 Runs in an isolated store. Never touches the caller's production DB.
 """

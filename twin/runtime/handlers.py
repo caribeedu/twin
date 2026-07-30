@@ -188,6 +188,152 @@ def handle_connector_reconcile(
     }
 
 
+def handle_backfill_partition(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    """Advance one BackfillJob partition (historical; not continuous sync)."""
+    if not hasattr(store, "get_backfill_job"):
+        return {"done": True, "note": "backfill unavailable"}
+    from twin.connectors.credentials import build_credential_store
+    from twin.connectors.service import run_backfill_partition
+    from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
+    from twin.runtime.queue import RuntimeQueue
+
+    payload = job.payload or {}
+    backfill_job_id = payload.get("backfill_job_id") or ""
+    if not backfill_job_id:
+        raise HandlerError(
+            "missing backfill_job_id",
+            error_class=ErrorClass.permanent,
+            stage="validate",
+        )
+    emit = bool(payload.get("emit_percepts", True))
+    worker_id = job.worker_id or f"runtime_{job.id[:12]}"
+    creds = build_credential_store(cfg.home)
+    try:
+        out = run_backfill_partition(
+            store, creds, backfill_job_id,
+            emit_percepts=emit,
+            worker_id=worker_id,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "already claimed" in msg:
+            raise HandlerError(
+                msg, error_class=ErrorClass.transient, stage="claim",
+            ) from exc
+        if "not found" in msg:
+            raise HandlerError(
+                msg, error_class=ErrorClass.permanent, stage="validate",
+            ) from exc
+        if " is completed" in msg or " is cancelled" in msg:
+            return {
+                "job_id": backfill_job_id,
+                "done": True,
+                "note": msg,
+            }
+        raise HandlerError(
+            msg, error_class=ErrorClass.permanent, stage="validate",
+        ) from exc
+
+    # Keep draining without waiting for the next scheduler tick.
+    if not out.get("done") and out.get("partition_status") != "failed":
+        try:
+            bf = store.get_backfill_job(backfill_job_id)
+            vault = (
+                ((bf.metadata or {}).get("vault_id") if bf else None)
+                or job.vault_id
+                or "vault_general"
+            )
+            enqueue_backfill_partition_jobs(
+                RuntimeQueue(store), store,
+                vault_id=str(vault),
+                backfill_job_id=backfill_job_id,
+            )
+        except Exception:
+            # Scheduler tick remains the recovery path.
+            pass
+    return out
+
+
+def handle_session_domain_resolve(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    """Background domain freeze from multi-message session evidence (LLM)."""
+    from twin.cognition.host_session import apply_background_domain_resolve
+    from twin.cognition.interpreter import service as interp_service
+
+    p = job.payload or {}
+    binding_id = p.get("binding_id") or ""
+    if not binding_id:
+        raise HandlerError("missing binding_id", error_class=ErrorClass.permanent, stage="validate")
+
+    if interp_service.interpreting_mode(cfg) and cfg.extractor != "echo":
+        runtime = interp_service.InterpretationRuntime(cfg)
+        try:
+            if not runtime.available:
+                raise HandlerError(
+                    "cognitive model unavailable",
+                    error_class=ErrorClass.model_unavailable,
+                    stage="domain_resolve",
+                )
+        finally:
+            runtime.close()
+
+    return apply_background_domain_resolve(
+        store, cfg, embedder,
+        binding_id=binding_id,
+        cwd=p.get("cwd") or None,
+    )
+
+
+def handle_session_complete(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    """Background session consolidation + extract after native SessionEnd."""
+    from twin.cognition.sessions import complete_session
+    from twin.cognition.interpreter import service as interp_service
+
+    p = job.payload or {}
+    session_id = p.get("session_id") or ""
+    if not session_id:
+        raise HandlerError("missing session_id", error_class=ErrorClass.permanent, stage="validate")
+
+    if (
+        not p.get("abandoned")
+        and interp_service.interpreting_mode(cfg)
+        and cfg.extractor != "echo"
+    ):
+        runtime = interp_service.InterpretationRuntime(cfg)
+        try:
+            if not runtime.available:
+                raise HandlerError(
+                    "cognitive model unavailable",
+                    error_class=ErrorClass.model_unavailable,
+                    stage="session_complete",
+                )
+        finally:
+            runtime.close()
+
+    session = complete_session(
+        store, cfg, embedder, session_id,
+        summary=p.get("summary") or "",
+        abandoned=bool(p.get("abandoned", False)),
+        summary_origin=p.get("summary_origin") or "assistant",
+    )
+    return {
+        "session_id": session.id,
+        "status": session.status.value if hasattr(session.status, "value") else str(session.status),
+        "consolidation_status": (
+            session.consolidation_status.value
+            if hasattr(session.consolidation_status, "value")
+            else str(session.consolidation_status)
+        ),
+        "summary_percept_id": session.summary_percept_id,
+        "created_memory_ids": list(session.created_memory_ids or []),
+    }
+
+
 HANDLERS: dict[JobKind, Handler] = {
     JobKind.interpret_percept: handle_interpret_percept,
     JobKind.workspace_tick: handle_workspace_tick,
@@ -197,6 +343,9 @@ HANDLERS: dict[JobKind, Handler] = {
     JobKind.reembed_memory: handle_reembed_memory,
     JobKind.integrity_check: handle_integrity_check,
     JobKind.connector_reconcile: handle_connector_reconcile,
+    JobKind.backfill_partition: handle_backfill_partition,
+    JobKind.session_domain_resolve: handle_session_domain_resolve,
+    JobKind.session_complete: handle_session_complete,
 }
 
 

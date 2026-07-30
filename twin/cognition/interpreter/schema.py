@@ -1,4 +1,4 @@
-"""Output schema of the cognitive interpreter (v0.7).
+"""Output schema of the cognitive interpreter.
 
 The interpreter is the production path for *semantic identification and
 cataloguing*: it decides what a Percept means. Its job is richer than the
@@ -13,7 +13,7 @@ Deterministic governance downstream (dedupe, source policy, confidentiality
 floor, review) is unchanged: this module only describes what the interpreter
 is allowed to *say*, never what the system is allowed to *do* with it. The
 bridge to :class:`ExtractedMemory` keeps the existing persistence path intact
-so v0.7 is an evolution of the pipeline, not a rewrite.
+so is an evolution of the pipeline, not a rewrite.
 """
 
 from __future__ import annotations
@@ -208,8 +208,14 @@ INTERPRETATION_JSON_SCHEMA: dict = {
                         "type": "string",
                         "enum": [a.value for a in CognitiveAct],
                     },
-                    "title": {"type": "string"},
-                    "summary": {"type": "string"},
+                    "title": {
+                        "type": "string",
+                        "description": "Short label for the item (required; not description).",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-sentence meaning (required; not description).",
+                    },
                     "domain": {"type": "string", "enum": ALL_DOMAINS},
                     "sensitivity": {"type": "string", "enum": SENSITIVITIES},
                     "confidence": {"type": "number"},
@@ -231,7 +237,10 @@ INTERPRETATION_JSON_SCHEMA: dict = {
                             "additionalProperties": False,
                         },
                     },
-                    "evidence_span": {"type": "string"},
+                    "evidence_span": {
+                        "type": "string",
+                        "description": "Verbatim excerpt from the source text.",
+                    },
                     "unresolved_references": {
                         "type": "array", "items": {"type": "string"},
                     },

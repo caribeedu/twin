@@ -1,6 +1,6 @@
 """DocumentProvider — future Drive / OneDrive / Notion adapters plug here.
 
-Phase 6 ships the local folder scanner against this cognitive contract.
+ ships the local folder scanner against this cognitive contract.
 Cloud providers implement the same surface without changing normalize.
 """
 

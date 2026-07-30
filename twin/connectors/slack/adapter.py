@@ -2,7 +2,7 @@
 
 Streams are dynamic, one per allowlisted channel:
 
-    channel:{channel_id}
+ channel:{channel_id}
 
 Each stream syncs channel history then thread replies. Configuration is an
 EXPLICIT channel allowlist — workspace-wide ingest is never a default.
@@ -161,8 +161,7 @@ class SlackConnector:
                 "incremental_sync": True,
                 "webhooks": True,
                 "deletions": True,
-                "attachments": False,   # metadata refs only in Phase 3
-                "threads": True,
+                "attachments": False,   # metadata refs only in "threads": True,
             },
             supported_external_types=[
                 "channel", "message", "thread_reply",
@@ -364,7 +363,7 @@ class SlackConnector:
         if not (token.startswith("xoxb-") or token.startswith("xoxp-")):
             return ConnectorHealth(
                 status=HealthStatus.degraded,
-                detail=("token prefix is not xoxb-/xoxp-; Phase 3 expects a "
+                detail=("token prefix is not xoxb-/xoxp-; expects a "
                         "Slack bot or user token (prefix is a signal only)"),
             )
         try:

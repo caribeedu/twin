@@ -1,4 +1,4 @@
-"""Provider-agnostic shared document model (v0.6 Phase 6 §43–44).
+"""Provider-agnostic shared document model.
 
 Adapters (local folder now; Drive / OneDrive / Notion later) normalize into
 this shape before becoming ``ConnectorRecord``s. A Memory may keep pointing

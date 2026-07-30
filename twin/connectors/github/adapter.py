@@ -2,12 +2,16 @@
 
 Streams are dynamic, one per (repository, object family):
 
-    repo:{owner}/{name}:issues     issues + issue comments
-    repo:{owner}/{name}:pulls      PRs + reviews + review comments + CI summary
-    repo:{owner}/{name}:commits    default-branch commits
-    repo:{owner}/{name}:releases
+ repo:{owner}/{name}:issues issues + issue comments
+ repo:{owner}/{name}:pulls PRs + reviews + review comments + CI summary
+ repo:{owner}/{name}:commits default-branch commits
+ repo:{owner}/{name}:releases
 
-Incremental strategy (§23): per-substream pagination with continuation
+Backfill partitions reuse those bases under a separate checkpoint namespace:
+
+ backfill:{job_id}:{partition_key}:repo:{owner}/{name}:{family}
+
+Incremental strategy: per-substream pagination with continuation
 cursors. A committed ``watermark`` advances only after every endpoint in
 the family finishes the current lookback window — page budget exhausted
 never means the stream is fully consumed.
@@ -33,6 +37,7 @@ from ..models import (
     HealthStatus,
     RawConnectorItem,
     SourceAccount,
+    SyncExecutionContext,
 )
 from ..protocol import (
     AdapterManifest,
@@ -46,6 +51,7 @@ from ..registry import register_adapter
 from .client import GITHUB_API, GitHubClient
 from . import normalize as norm
 from . import sync_state as ss
+from .streams import parse_github_stream
 
 FAMILIES = ("issues", "pulls", "commits", "releases")
 DEFAULT_LOOKBACK_SECONDS = 86400
@@ -56,9 +62,26 @@ RECENT_COMMITS = 20
 CLASSIC_WRITE_SCOPES = {"write:org", "admin:org", "workflow", "delete_repo"}
 
 
+def _base_stream(stream: str) -> str:
+    """Strip a backfill namespace ``backfill:{job}:{partition}:{base}`` down to
+    the provider-native base stream. Continuous streams pass through unchanged.
+    The historical time window travels via the SyncExecutionContext, not the
+    stream name, so only the base ``repo:{owner}/{name}:{family}`` is parsed."""
+    if stream.startswith("backfill:"):
+        parts = stream.split(":", 3)   # backfill : job : partition : base
+        if len(parts) != 4 or not parts[1] or not parts[2] or not parts[3]:
+            raise ConnectorError(
+                f"unknown backfill stream layout: {stream!r}",
+                failure_class=FailureClass.schema_change,
+            )
+        return parts[3]
+    return stream
+
+
 def _parse_stream(stream: str) -> tuple[str, str]:
-    """'repo:{owner}/{name}:{family}' → (repo, family)."""
-    parts = stream.split(":")
+    """'repo:{owner}/{name}:{family}' (optionally backfill-namespaced) →
+    (repo, family)."""
+    parts = _base_stream(stream).split(":")
     if len(parts) != 3 or parts[0] != "repo" or parts[2] not in FAMILIES:
         raise ConnectorError(
             f"unknown github stream layout: {stream!r}",
@@ -71,6 +94,18 @@ def _minus_seconds(iso_ts: str, seconds: int) -> str:
     ts = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
     out = ts - timedelta(seconds=seconds)
     return out.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _as_github_since(value: Optional[str]) -> Optional[str]:
+    """Normalize an optional lower bound for GitHub list ``since`` params.
+
+    Accepts ISO timestamps or date-only strings from backfill config /
+    ``SyncExecutionContext.range_start``. Empty → ``None`` (full history).
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _stable_hash8(obj: Any) -> str:
@@ -117,6 +152,14 @@ class GithubConnector:
         self.api_base_url: str = cfg.get("api_base_url", GITHUB_API)
         self._client: Optional[GitHubClient] = None
         self._repo_meta: dict[str, dict[str, Any]] = {}
+        # Set by the runtime per invocation. Backfill bounds (range_start /
+        # range_end) travel here — never via ConnectorInstance.configuration —
+        # so a backfill partition cannot race the continuous scheduler.
+        self._execution_context = SyncExecutionContext()
+
+    @property
+    def exec_ctx(self) -> SyncExecutionContext:
+        return getattr(self, "_execution_context", None) or SyncExecutionContext()
 
     # -- plumbing -----------------------------------------------------------
 
@@ -125,6 +168,10 @@ class GithubConnector:
         if self._client is None:
             self._client = GitHubClient(self.secret, base_url=self.api_base_url)
         return self._client
+
+    @property
+    def exec_ctx(self) -> SyncExecutionContext:
+        return getattr(self, "_execution_context", None) or SyncExecutionContext()
 
     @staticmethod
     def adapter_manifest() -> AdapterManifest:
@@ -276,21 +323,77 @@ class GithubConnector:
                 failure_class=FailureClass.configuration,
                 human_action_required=True,
             )
-        repo, family = _parse_stream(stream)
+        parsed = parse_github_stream(stream)
         return SyncPlan(
             stream=stream,
             cursor_before=dict(checkpoint.cursor) if checkpoint else {},
             lookback_seconds=self.lookback_seconds,
-            metadata={"repo": repo, "family": family},
+            metadata={
+                "repo": parsed["repo"],
+                "family": parsed["family"],
+                "mode": parsed["mode"],
+                "job_id": parsed.get("job_id"),
+                "partition_key": parsed.get("partition_key"),
+            },
         )
 
     # -- fetch ----------------------------------------------------------------
 
+    def _partition_until(self) -> Optional[str]:
+        ctx = self.exec_ctx
+        if ctx.mode == "backfill":
+            return ctx.range_end
+        return None
+
     def _since(self, cursor: Optional[dict[str, Any]]) -> Optional[str]:
+        ctx = self.exec_ctx
+        if ctx.mode == "backfill":
+            # Partition floor from SyncExecutionContext — namespaced checkpoints
+            # never share continuous watermarks, so skip lookback softening.
+            return _as_github_since(ctx.range_start or self.backfill_since)
         watermark = (cursor or {}).get("watermark")
         if watermark:
             return _minus_seconds(watermark, self.lookback_seconds)
-        return self.backfill_since  # None = full history (explicit choice)
+        return _as_github_since(self.backfill_since)  # None = full history
+
+    @staticmethod
+    def _item_window_ts(item: RawFetchItem) -> Optional[str]:
+        """Timestamp used for partition upper-bound clipping."""
+        rev = str(item.external_revision or "")
+        if len(rev) >= 10 and rev[0:4].isdigit() and rev[4:5] == "-":
+            return rev
+        return item.occurred_at
+
+    def _apply_partition_until(
+        self,
+        items: list[RawFetchItem],
+        cursor: dict[str, Any],
+        substream: str,
+        sub_done: bool,
+    ) -> tuple[list[RawFetchItem], bool]:
+        """Drop items past ``range_end`` and stop the substream when any hit.
+
+        GitHub list endpoints only accept a lower ``since`` bound, so an
+        ascending month partition must not keep walking into later months.
+        """
+        until = self._partition_until()
+        if not until:
+            return items, sub_done
+        kept: list[RawFetchItem] = []
+        hit_end = False
+        for item in items:
+            ts = self._item_window_ts(item)
+            if ts and ts > until:
+                hit_end = True
+                continue
+            kept.append(item)
+        if hit_end:
+            state = ss.substream_state(cursor, substream)
+            state["next_url"] = None
+            state.pop("reviews_next_url", None)
+            state.pop("awaiting_reviews", None)
+            return kept, True
+        return kept, sub_done
 
     def fetch_batch(
         self, plan: SyncPlan, cursor: Optional[dict[str, Any]],
@@ -311,6 +414,9 @@ class GithubConnector:
             sub = cur["substream"]
             batch_items, pages_used, sub_done = self._fetch_substream(
                 repo, family, sub, cur, pages_budget,
+            )
+            batch_items, sub_done = self._apply_partition_until(
+                batch_items, cur, sub, sub_done,
             )
             items.extend(batch_items)
             pages_budget -= pages_used
@@ -423,15 +529,24 @@ class GithubConnector:
             max_pages=pages_budget,
         )
         state["next_url"] = next_url
+        until = self._partition_until()
+        hit_end = False
         for issue in page_items:
             if not issue.get("pull_request"):
+                continue
+            updated = issue.get("updated_at")
+            if until and updated and updated > until:
+                hit_end = True
                 continue
             number = int(issue["number"])
             if number not in seen:
                 seen.add(number)
                 queue.append(number)
-            ss.bump_window_max(cursor, issue.get("updated_at"))
+            ss.bump_window_max(cursor, updated)
         enrich["seen"] = sorted(seen)
+        if hit_end:
+            state["next_url"] = None
+            return [], pages, True
         return [], pages, next_url is None
 
     def _substream_pr_enrich(

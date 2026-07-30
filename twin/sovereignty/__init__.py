@@ -1,4 +1,4 @@
-"""Data sovereignty — export, backup, validate, integrity (v0.9.8)."""
+"""Data sovereignty — export, backup, validate, integrity."""
 
 from twin.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
 from twin.sovereignty.export import write_export_bundle

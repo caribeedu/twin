@@ -1,4 +1,4 @@
-"""Provider-agnostic meeting transcript model (v0.6 Phase 5 §40–42).
+"""Provider-agnostic meeting transcript model.
 
 Adapters (Fireflies, future Meetily, …) normalize into this shape before
 becoming ``ConnectorRecord``s. Provider-generated summaries are derived

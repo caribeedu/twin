@@ -1,4 +1,4 @@
-"""Continuous attention evaluation (v0.9.6) — low-intrusion, policy-gated.
+"""Continuous attention evaluation — low-intrusion, policy-gated.
 
 Not an autonomous agent. Consumes session working memory (checkpoint + recent
 deltas), runs workspace/recall signals, and emits typed outcomes only when

@@ -2,10 +2,10 @@
 
 A session closes the read-only flow (twin → LLM) into a maintained loop:
 
-    session_start     → identify project/domain/task, supply a context pack
-    session_observe   → record artifacts produced or changed during the work
-    session_complete  → turn what happened into a percept and candidate memories
-    session_feedback  → record explicit usefulness feedback
+ session_start → identify project/domain/task, supply a context pack
+ session_observe → record artifacts produced or changed during the work
+ session_complete → turn what happened into a percept and candidate memories
+ session_feedback → record explicit usefulness feedback
 
 Sessions are the unit product metrics hang from: what was supplied, what
 came back, and whether it was actually useful.
@@ -13,13 +13,13 @@ came back, and whether it was actually useful.
 Design rules this module enforces:
 
 - ambiguity fails visibly and conservatively — an unknown explicit project
-  raises instead of being replaced by inference, and an unclassified domain
-  yields an empty (default-deny) pack plus ``needs_domain_confirmation``;
+ raises instead of being replaced by inference, and an unclassified domain
+ yields an empty (default-deny) pack plus ``needs_domain_confirmation``;
 - completion (the work ended) and consolidation (twin learned from it) are
-  separate states: consolidation is idempotent and retryable, anchored on a
-  deterministic percept dedup key;
+ separate states: consolidation is idempotent and retryable, anchored on a
+ deterministic percept dedup key;
 - artifact and feedback writes are append-only store operations, safe under
-  concurrent clients.
+ concurrent clients.
 """
 
 from __future__ import annotations
@@ -43,9 +43,10 @@ from ..memory.models import (
 )
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
-from .context_pack import ContextPack, build_context_pack
-from .observer import read_context
+from .context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
+from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain
 from .pipeline import extract_percept
+from .task_profiles import infer_task_profile
 
 logger = logging.getLogger("twin.cognition.sessions")
 
@@ -57,6 +58,34 @@ logger = logging.getLogger("twin.cognition.sessions")
 SUMMARY_TRUST = {"user": 0.9, "derived": 0.85, "client": 0.7, "assistant": 0.6}
 DEFAULT_STALE_HOURS = 24.0
 
+# Folded into the extractable session_summary Percept: the dialogue plus the
+# deliberate observations a human or host records (twin session observe, and
+# the host's file/project context). Tool I/O (tool_requested / tool_completed /
+# tool_failed) and session_start boilerplate stay on session.artifacts for
+# replay — copied into the percept they drown the interpreter with pack dumps.
+_SUMMARY_PERCEPT_KINDS = frozenset({
+    "user_message",
+    "assistant_result",
+    "file",
+    "commit",
+    "doc",
+    "note",
+    "file_context",
+    "project_context",
+})
+# Structural / protocol markers — never cognitive content for extraction.
+_SUMMARY_IGNORE_TEXT = frozenset({
+    "prompt_input_exit", "clear", "logout", "other", "abort", "stop",
+    "[turn_end]",
+})
+_SUMMARY_IGNORE_KINDS = frozenset({
+    "turn_completed",
+    "tool_requested",
+    "tool_completed",
+    "tool_failed",
+    "session_start",
+})
+
 
 @dataclass
 class SessionStart:
@@ -66,6 +95,7 @@ class SessionStart:
     observer_mode: str
     needs_domain_confirmation: bool = False
     observer_fallback: Optional[str] = None
+    pack_skipped_deadline: bool = False
 
 
 def start_session(
@@ -85,6 +115,8 @@ def start_session(
     audience: str = "self",
     tool_id: Optional[str] = None,
     api_token: Optional[str] = None,
+    surface: Optional[str] = None,
+    deadline_monotonic: Optional[float] = None,
 ) -> SessionStart:
     """Identify project/domain/task profile (unless given explicitly), build
     a task-aware pack and open the session that records what was supplied.
@@ -94,8 +126,28 @@ def start_session(
     the caller nor observation can name a domain, the session opens as
     ``unclassified``: the firewall blocks all memories, the pack carries no
     judgment, and ``needs_domain_confirmation`` asks the client to confirm.
+
+    Domain inference on this hot path is search-vote only (no local LLM).
+    When the vote is inconclusive the session opens ``unclassified``; a
+    background ``session_domain_resolve`` job or an explicit client/MCP domain
+    freezes it later.
     """
-    reading = read_context(store, cfg, query, cwd=cwd)
+    if domain and domain != UNCLASSIFIED_DOMAIN:
+        reading = ObserverReading(
+            domain=domain,
+            task_profile=task_profile or "general",
+            confidences={
+                "domain": 1.0,
+                "task_profile": 1.0 if task_profile else 0.0,
+                "project": 0.0,
+            },
+            uncertain=False,
+            mode=DOMAIN_MODE_EXPLICIT,
+        )
+    else:
+        reading = resolve_context_domain(
+            store, cfg, embedder, query, cwd=cwd,
+        )
 
     if project:
         found = store.get_project(project) or store.find_project(project)
@@ -112,33 +164,56 @@ def start_session(
     session_domain = domain or reading.domain
     needs_confirmation = session_domain == UNCLASSIFIED_DOMAIN
 
+    # Task profile orders the pack and is independent of the domain decision:
+    # infer it from the query whenever the caller did not pin it and the
+    # reading only carries the generic default.
+    resolved_task_profile = task_profile or reading.task_profile or "general"
+    if not task_profile and resolved_task_profile == "general":
+        inferred_profile, _ = infer_task_profile(query)
+        if inferred_profile != "general":
+            resolved_task_profile = inferred_profile
+
     started_at = now_iso()
     from ..privacy.identity import ensure_local_identity, resolve_access
     from ..privacy.yaml_io import bootstrap_policy_set
     # Surface identity is resolved server-side. Missing/unknown client →
     # restricted mode — never silently elevate to local-cli.
-    # Native host adapters (Phase 8) run as local hook/CLI processes: the
-    # CognitiveSession.client still records the host, but auth surface is cli.
+    # Native host adapters run as local hooks: CognitiveSession.client records
+    # the host product, auth surface is ``native`` (not CLI).
     _native = frozenset({
-        "claude-code", "codex", "codex-app-server", "native",
+        "claude-code", "codex", "codex-app-server", "native", "fake-host",
     })
-    surface = "cli" if client in ("cli", "local-cli", "twin-cli") or client in _native else "mcp"
-    if client in ("unknown", "", None) and not tool_id:
-        surface = "unknown"
-    if surface == "cli":
+    if client in _native or (surface or "").lower() == "native":
+        resolved_surface = "native"
+    elif client in ("cli", "local-cli", "twin-cli"):
+        resolved_surface = "cli"
+    else:
+        resolved_surface = "mcp"
+    if client in ("unknown", "", None) and not tool_id and resolved_surface != "native":
+        resolved_surface = "unknown"
+    if resolved_surface in ("cli", "native"):
         bootstrap_policy_set(store, policies_path=cfg.policies_path)
         ensure_local_identity(store)
+    # ``unclassified`` is not a real allowlist domain — pass it and identity
+    # collapses to restricted. Auth identity comes from host/persona defaults;
+    # the firewall still blocks memories until domain freezes.
+    access_domains = (
+        [session_domain]
+        if session_domain and session_domain != UNCLASSIFIED_DOMAIN
+        else []
+    )
     access = resolve_access(
         store,
-        surface=surface,
-        client=("cli" if client in _native else client)
-        if client not in ("unknown", "") else None,
-        tool_id=tool_id or (client if client in _native else None),
+        surface=resolved_surface,
+        client=client if client not in ("unknown", "") else None,
+        # Native: never pass host product name as tool_id — identity layer
+        # uses ``native-host``. Concrete tools only on real tool calls.
+        tool_id=None if resolved_surface == "native" else tool_id,
         persona=persona,
         purpose=purpose,
         audience=audience,
         project_id=project_id,
-        requested_domains=[session_domain] if session_domain else [],
+        requested_domains=access_domains,
         api_token=api_token,
     )
     session = CognitiveSession(
@@ -146,7 +221,7 @@ def start_session(
         client=client,
         project_id=project_id,
         domain=session_domain,
-        task_profile=task_profile or reading.task_profile,
+        task_profile=resolved_task_profile,
         initial_query=query,
         started_at=started_at,
         last_activity_at=started_at,
@@ -157,15 +232,29 @@ def start_session(
         tool_id=access.tool_id,
     )
     access = access.model_copy(update={"session_id": session.id})
-    pack = build_context_pack(
-        store, cfg, embedder, query,
-        target_domain=session.domain, max_tokens=max_tokens,
-        include_candidates=include_candidates,
-        # an unconfirmed domain gets nothing, not even the judgment profile
-        include_judgment=not needs_confirmation,
-        task_profile=session.task_profile, project_id=project_id,
-        access=access,
-    )
+    pack_skipped_deadline = False
+    try:
+        pack = build_context_pack(
+            store, cfg, embedder, query,
+            target_domain=session.domain, max_tokens=max_tokens,
+            include_candidates=include_candidates,
+            # an unconfirmed domain gets nothing, not even the judgment profile
+            include_judgment=not needs_confirmation,
+            task_profile=session.task_profile, project_id=project_id,
+            access=access,
+            deadline_monotonic=deadline_monotonic,
+        )
+    except PackDeadlineExceeded:
+        # Session must still open; pack recovers on next injection / MCP.
+        pack_skipped_deadline = True
+        pack = ContextPack(
+            context_pack="",
+            sources=[],
+            confidence=0.0,
+            blocked=[],
+            task_profile=session.task_profile or "general",
+            project_id=project_id,
+        )
     session.supplied_memory_ids = [s["memory_id"] for s in pack.sources]
     session.pack_chars = len(pack.context_pack)
     session.judgment_snapshot_id = pack.judgment_snapshot_id
@@ -180,6 +269,7 @@ def start_session(
         reading_confidences=reading.confidences, observer_mode=reading.mode,
         needs_domain_confirmation=needs_confirmation,
         observer_fallback=reading.fallback_reason,
+        pack_skipped_deadline=pack_skipped_deadline,
     )
 
 
@@ -214,12 +304,13 @@ def complete_session(
     """Close the session and consolidate what happened.
 
     Completion is a compare-and-set transition (two concurrent completes
-    cannot both win). Consolidation — summary + artifact notes become a
-    percept, extraction turns it into candidate memories — is tracked in
-    ``consolidation_status`` and is retryable: calling complete again on a
-    session whose consolidation failed re-runs only the consolidation,
-    without duplicating percepts or memories (the percept dedup key is
-    derived from the session id)."""
+    cannot both win). Consolidation — an optional summary plus **user /
+    assistant** artifact notes become a ``session_summary`` percept;
+    tool I/O stays on the session for replay but is not folded into that
+    percept. Extraction then turns the percept into candidate memories.
+    Retryable: calling complete again on a failed consolidation re-runs
+    only consolidation, without duplicating percepts (dedup key =
+    session id)."""
     if summary_origin not in SUMMARY_TRUST:
         raise ValueError(f"summary_origin must be one of {sorted(SUMMARY_TRUST)}")
     session = store.get_session(session_id)
@@ -247,13 +338,21 @@ def complete_session(
         store.update_session(session)
         return session
 
-    lines = [summary] if summary else []
+    lines: list[str] = []
+    summary_text = (summary or "").strip()
+    if summary_text and summary_text.lower() not in _SUMMARY_IGNORE_TEXT:
+        lines.append(summary_text)
     for artifact in session.artifacts:
         if artifact.get("percept_id"):
             continue  # already a first-class percept — never duplicated as text
+        kind = str(artifact.get("kind") or "").strip()
+        if kind not in _SUMMARY_PERCEPT_KINDS or kind in _SUMMARY_IGNORE_KINDS:
+            continue
         note = artifact.get("note") or artifact.get("ref") or ""
-        if note:
-            lines.append(f"[{artifact.get('kind', 'artifact')}] {note}")
+        if not note or str(note).strip().lower() in _SUMMARY_IGNORE_TEXT:
+            continue
+        from .evidence_text import fold_summary_line
+        lines.append(fold_summary_line(kind, str(note)))
     if not lines:
         session.consolidation_status = ConsolidationStatus.skipped
         store.update_session(session)

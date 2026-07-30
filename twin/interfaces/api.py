@@ -1,6 +1,6 @@
 """Local HTTP API + Twin review / continuity UI.
 
-Run:  twin serve   →  http://127.0.0.1:8765
+Run: twin serve → http://127.0.0.1:8765
 
 JSON API powers MCP, CLI and the static SPA under ``twin/interfaces/web``.
 The UI follows the Twin brand (purple + white) — review, search, pack,
@@ -264,7 +264,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, "action must be approve | reject | update")
         return _mem_dict(ws.store.get_memory(memory_id))
 
-    # -- v0.9.2 memory formation ----------------------------------------------
+    # -- memory formation ----------------------------------------------
 
     @app.get("/api/memory/candidates")
     def api_memory_candidates(state: Optional[str] = None, limit: int = 100):
@@ -574,7 +574,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         )
         return result.to_dict()
 
-    # -- v1.0 durable cognitive runtime ---------------------------------------
+    # -- durable cognitive runtime ---------------------------------------
 
     @app.post("/api/runtime/jobs")
     def api_runtime_enqueue(req: RuntimeEnqueueRequest):
@@ -789,7 +789,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "closure not found")
         return closure.model_dump(mode="json")
 
-    # -- v0.3 review / quality / consolidation --------------------------------
+    # -- review / quality / consolidation --------------------------------
 
     @app.get("/api/review/queue")
     def api_review_queue(
@@ -1137,7 +1137,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             project_id=req.project_id, options=req.options,
         )
 
-    # -- connectors (v0.6) ------------------------------------------------
+    # -- connectors  ------------------------------------------------
     #
     # Connector administration is a privileged surface: every endpoint
     # resolves the caller's identity (x-twin-client / x-twin-token headers)

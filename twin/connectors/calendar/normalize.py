@@ -1,4 +1,4 @@
-"""Calendar events → ConnectorRecord (v0.6 Phase 5 §38–39)."""
+"""Calendar events → ConnectorRecord."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def record_from_event(
         if aid not in participants:
             participants.append(aid)
 
-    # Privacy: expose free/busy fields separately from rich details (§39).
+    # Privacy: expose free/busy fields separately from rich details ().
     freebusy_only = bool(event.get("freebusy_only"))
     transparency = event.get("transparency") or "opaque"
     trust, kind = trust_for_calendar("calendar_event", {

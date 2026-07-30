@@ -1,4 +1,4 @@
-"""Source independence groups (v0.6 Phase 7 §20).
+"""Source independence groups.
 
 A GitHub notification email and the PR it restates share one informational
 root — they must not count as independent corroboration.

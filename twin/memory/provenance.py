@@ -131,6 +131,8 @@ def attach_corroborating_evidence(
     bump_confidence: bool = True,
 ) -> Evidence:
     """Paraphrase/corroboration: same memory, additional evidence, capped confidence."""
+    from twin.cognition.evidence_text import sanitize_evidence_quote
+
     mem = store.get_memory(memory_id)
     if mem is None:
         raise ValueError(f"memory {memory_id} not found")
@@ -138,7 +140,7 @@ def attach_corroborating_evidence(
         id=ids.evidence_id(),
         memory_id=memory_id,
         percept_id=percept_id,
-        quote=quote,
+        quote=sanitize_evidence_quote(quote),
         evidence_type="verbatim",  # type: ignore[arg-type]
         directness=0.9,
         source_trust=source_trust,

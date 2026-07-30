@@ -2,18 +2,18 @@
 
 Not a distributed queue: an interval map (from ``$TWIN_HOME/connectors.yaml``)
 that decides which connectors are due, in the same spirit as ``twin watch``.
-Phase 1 queues are the logical stages inside ``runtime.py``.
+ queues are the logical stages inside ``runtime.py``.
 
 Robustness rules:
 
 - an invalid schedule config is an explicit error, never a silent fall back
-  to defaults;
+ to defaults;
 - one failing connector never interrupts the others — each run is isolated,
-  the failure is recorded on its sync state with backoff;
+ the failure is recorded on its sync state with backoff;
 - stream-level mutual exclusion comes from the runtime's leases, so two
-  schedulers racing the same connector degrade to one no-op, not duplicates;
+ schedulers racing the same connector degrade to one no-op, not duplicates;
 - webhook ``targeted_streams`` hints are consumed via CAS so concurrent
-  deliveries are never lost.
+ deliveries are never lost.
 """
 
 from __future__ import annotations

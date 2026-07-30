@@ -1,4 +1,4 @@
-"""Run Phase 8 native-host eval cases."""
+"""Run native-host eval cases."""
 
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
             text="second conversation", domain=case.get("domain", "technical"),
         ))
         if not again.ok or again.binding.occurrence != 2:
-            return False, "reuse after Stop did not open occurrence 2"
+            return False, "reuse after SessionEnd did not open occurrence 2"
         if again.session_id == start.session_id:
             return False, "reuse attached to old CognitiveSession"
 
@@ -149,7 +149,15 @@ def main() -> int:
         print(f"[{tag}] {case.get('id', path.stem)}: {detail}")
         if not ok:
             failed += 1
-    total = len(cases)
+
+    from evals.native.fake_host import CONTRACT_CASES
+    for name, fn in CONTRACT_CASES:
+        ok, detail = fn()
+        tag = "PASS" if ok else "FAIL"
+        print(f"[{tag}] {name}: {detail}")
+        if not ok:
+            failed += 1
+    total = len(cases) + len(CONTRACT_CASES)
     print(f"\n{total - failed}/{total} native eval cases passed")
     return 1 if failed else 0
 

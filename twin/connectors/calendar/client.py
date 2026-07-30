@@ -1,7 +1,7 @@
 """Thin Google Calendar API v3 client (read-only).
 
 Outlook/Graph calendar can share the same cognitive normalize path later;
-Phase 5 ships one technical adapter against this shape (mocked in CI).
+ ships one technical adapter against this shape (mocked in CI).
 """
 
 from __future__ import annotations

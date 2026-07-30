@@ -1,10 +1,10 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ARCHITECTURE](ARCHITECTURE.md) · [CONNECTION](CONNECTION.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
+[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
 
 # Foundations
 
 **Source of truth for:** why Twin exists — philosophy and academic inspirations (Extended Mind, 4E, memory systems, GWT, ACT-R, …).
 
-This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built: [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers: [PRODUCT.md](PRODUCT.md). Short narrative: [README](../README.md).
+This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built in [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers in [PRODUCT.md](PRODUCT.md). Versions in [CHANGELOG.md](CHANGELOG.md) / [ROADMAP.md](ROADMAP.md). Short narrative in [README](../README.md).
 
 ## Academic and conceptual foundations
 
@@ -45,7 +45,7 @@ This line matters because the project does not treat thinking as something isola
 
 Cognitive psychology and neuroscience distinguish episodic, semantic, procedural and working memory, plus executive control. Twin mirrors those separations in software (events vs graph vs procedures vs context packs vs firewall/judgment).
 
-The **engineering mapping** (brain region → Twin component, and how it wires through the pipeline) lives in [Brain analogies](ARCHITECTURE.md#brain-analogies). The subsections below stay with the academic / conceptual motivation.
+The **engineering mapping** (brain region to Twin component, and how it wires through the pipeline) lives in [Brain analogies](ARCHITECTURE.md#brain-analogies). The subsections below stay with the academic / conceptual motivation.
 
 ### Hippocampus, consolidation and temporality
 
@@ -100,7 +100,7 @@ The amygdala and limbic circuits are associated with emotional salience, fear, r
 - is this important for future decisions?
 - should this become a memory or be discarded?
 
-In the MVP, this function partially shows up as `sensitivity`, `confidence`, `needs_review` and `review_reason`.
+In the initial concepts, this function partially shows up as `sensitivity`, `confidence`, `needs_review` and `review_reason`.
 
 ### Basal ganglia and action selection
 
@@ -114,7 +114,7 @@ selection of a possible action
 draft / reminder / suggestion / automation with approval
 ```
 
-The MVP deliberately does not execute autonomous actions. Before acting, the system needs to learn to remember, filter and judge.
+The initial concepts deliberately does not execute autonomous actions. Before acting, the system needs to learn to remember, filter and judge.
 
 ### Global Workspace Theory — Bernard Baars, Stanislas Dehaene
 
@@ -222,4 +222,4 @@ The long-term experience can draw on sci-fi and human–machine interfaces (exoc
 
 ---
 
-Next: product shape in [PRODUCT.md](PRODUCT.md). Architecture principles and brain analogies: [ARCHITECTURE.md](ARCHITECTURE.md).
+Next: product shape in [PRODUCT.md](PRODUCT.md). Architecture principles and brain analogies in [ARCHITECTURE.md](ARCHITECTURE.md).

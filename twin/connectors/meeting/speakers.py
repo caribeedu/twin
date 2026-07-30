@@ -1,4 +1,4 @@
-"""Speaker mapping heuristics (v0.6 Phase 5 §42).
+"""Speaker mapping heuristics.
 
 Never assume ``Speaker 1`` is a person. Confidence stays explicit; low-
 confidence mappings remain candidates for review, not auto-merges.

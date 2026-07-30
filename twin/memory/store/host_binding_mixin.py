@@ -1,4 +1,4 @@
-"""HostSessionBinding + observed-event idempotency (v0.6 Phase 8)."""
+"""HostSessionBinding + observed-event idempotency."""
 
 from __future__ import annotations
 

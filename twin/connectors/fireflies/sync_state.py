@@ -1,4 +1,4 @@
-"""Fireflies cursor helpers (v0.6 Phase 5 follow-up).
+"""Fireflies cursor helpers.
 
 ``creation_watermark`` tracks the latest *meeting creation* time safely
 observed via ``transcripts(fromDate:…)``. It is NOT an update cursor —

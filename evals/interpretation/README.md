@@ -1,4 +1,4 @@
-# Cognitive interpretation evals (v0.7)
+# Cognitive interpretation evals
 
 Offline, deterministic checks that the pipeline catalogues an interpreter's
 output correctly and safely. A **scripted interpreter** is injected via

@@ -1,4 +1,4 @@
-"""Calendar professional connector (v0.6 Phase 5)."""
+"""Calendar professional connector."""
 
 from .adapter import CalendarConnector
 

@@ -1,4 +1,4 @@
-"""Session events / checkpoints / closures persistence (v0.9.1)."""
+"""Session events / checkpoints / closures persistence."""
 
 from __future__ import annotations
 

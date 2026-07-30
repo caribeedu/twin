@@ -1,4 +1,4 @@
-"""Selection helpers for mature context packs (v0.9.5)."""
+"""Selection helpers for mature context packs."""
 
 from __future__ import annotations
 

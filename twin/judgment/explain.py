@@ -1,4 +1,4 @@
-"""Explain Judgment influence on packs / sessions (v0.9.4)."""
+"""Explain Judgment influence on packs / sessions."""
 
 from __future__ import annotations
 

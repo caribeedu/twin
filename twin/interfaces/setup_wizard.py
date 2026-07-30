@@ -1,4 +1,4 @@
-"""Guided first-run setup for Twin (v1.1+).
+"""Guided first-run setup for Twin (+).
 
 Encourages local Ollama by default; optionally configures Anthropic,
 Gemini, or any OpenAI-compatible chat + embedding endpoint.
@@ -10,7 +10,11 @@ import os
 
 from ..cognition.llm import PROVIDER_PRESETS, list_wizard_providers, provider_kind
 from ..config import Config
-from ..memory.embeddings import ollama_reachable, openai_compat_reachable
+from ..memory.embeddings import (
+    ollama_reachable,
+    openai_compat_reachable,
+    sanitize_base_url,
+)
 from . import ux
 
 
@@ -28,7 +32,10 @@ _CHOICE_TO_PROVIDER = {
 def _list_ollama_models(url: str) -> list[str]:
     try:
         import httpx
-        tags = httpx.get(f"{url.rstrip('/')}/api/tags", timeout=5).json()
+        base = sanitize_base_url(url).rstrip("/")
+        if not base:
+            return []
+        tags = httpx.get(f"{base}/api/tags", timeout=5).json()
         return [m.get("name", "") for m in tags.get("models", []) if m.get("name")]
     except Exception:
         return []
@@ -66,7 +73,7 @@ def _apply_env(cfg: Config, values: dict[str, str], env_path) -> None:
 
 def _setup_ollama_flow(cfg: Config, env_path, *, interactive: bool) -> list[str]:
     lines: list[str] = []
-    url = cfg.ollama_url
+    url = sanitize_base_url(cfg.ollama_url)
     model = cfg.resolved_llm_model
     embed = cfg.resolved_embed_model
 
@@ -100,7 +107,7 @@ def _setup_ollama_flow(cfg: Config, env_path, *, interactive: bool) -> list[str]
     if not ollama_reachable(url):
         ux.print_warn(f"No Ollama at {url}")
         if ux.prompt_yes_no("Change server URL now?", default=True):
-            url = ux.prompt_line("Ollama URL", default=url)
+            url = sanitize_base_url(ux.prompt_line("Ollama URL", default=url))
         if not ollama_reachable(url):
             ux.print_err(f"Still unreachable: {url}")
             ux.print_dim("Start it with:  ollama serve")
@@ -118,7 +125,7 @@ def _setup_ollama_flow(cfg: Config, env_path, *, interactive: bool) -> list[str]
     else:
         ux.print_ok(f"Ollama reachable at {url}")
         if not ux.prompt_yes_no("Keep this URL?", default=True):
-            url = ux.prompt_line("Ollama URL", default=url)
+            url = sanitize_base_url(ux.prompt_line("Ollama URL", default=url))
 
     available = _list_ollama_models(url)
     if available:
@@ -209,7 +216,7 @@ def _setup_openai_compat_flow(cfg: Config, env_path, *, interactive: bool) -> li
         "Prefer local open models when you can — this path is opt-in.",
         title="openai-compatible",
     )
-    base = ux.prompt_line("API base URL", default=base)
+    base = sanitize_base_url(ux.prompt_line("API base URL", default=base))
     key = ux.prompt_line("API key (leave empty if local/unauthenticated)", default=key)
     model = ux.prompt_line("Chat / extraction model", default=model)
     embed = ux.prompt_line("Embedding model", default=embed)
@@ -277,7 +284,7 @@ def _prompt_embed_backend(cfg: Config) -> tuple[str, str, str, str]:
         return "gemini", "https://generativelanguage.googleapis.com", model, key
     if choice == "4":
         return "hash", "", "", ""
-    url = ux.prompt_line("Ollama URL", default=cfg.ollama_url)
+    url = sanitize_base_url(ux.prompt_line("Ollama URL", default=cfg.ollama_url))
     model = ux.prompt_line(
         "Embedding model", default=cfg.ollama_embed_model or "nomic-embed-text",
     )

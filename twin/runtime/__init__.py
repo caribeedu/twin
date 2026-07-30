@@ -1,4 +1,4 @@
-"""Durable cognitive runtime — queue, workers, scheduler (v1.0 / v0.9.0)."""
+"""Durable cognitive runtime — queue, workers, scheduler."""
 
 from twin.runtime.models import (
     DeadLetterItem,

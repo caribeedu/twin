@@ -1,16 +1,16 @@
-"""Slack API objects → ConnectorRecords (v0.6 §27–31).
+"""Slack API objects → ConnectorRecords.
 
 One record per message (root or reply). Conventions:
 
 - ``actor_ids``: ``slack:{team_id}:{user_id}`` — workspace-qualified;
 - ``thread_key``: ``slack:{team_id}:{channel}:{thread_ts}`` shared by a
-  root and its replies — cross-source correlation anchors here;
+ root and its replies — cross-source correlation anchors here;
 - ``source_metadata.lineage_root``: informational root for the thread;
 - ``external_revision``: ``edited.ts`` when present, else message ``ts`` —
-  an edit becomes a NEW revision, never a silent overwrite;
+ an edit becomes a NEW revision, never a silent overwrite;
 - bots / notification-like posts carry ``derived=likely_notification``;
 - file attachments appear as ``artifact_refs`` with ``download_status=
-  metadata_only`` (Phase 3 does not fetch file bytes).
+ metadata_only`` ( does not fetch file bytes).
 """
 
 from __future__ import annotations

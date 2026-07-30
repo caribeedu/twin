@@ -1,4 +1,4 @@
-"""Fireflies meeting connector (v0.6 Phase 5)."""
+"""Fireflies meeting connector."""
 
 from .adapter import FirefliesConnector, meeting_from_fireflies
 

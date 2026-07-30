@@ -1,4 +1,4 @@
-"""v0.6 connector framework — persisted entities and enums.
+"""Connector framework — persisted entities and enums.
 
 Connectors capture evidence; the cognitive core creates understanding. These
 models describe *accounts*, *instances*, *sync bookkeeping* and the normalized
@@ -94,7 +94,7 @@ class HealthStatus(str, Enum):
     unauthorized = "unauthorized"
     revoked = "revoked"
     failed = "failed"
-    # never synced / no durable health evidence yet (Phase 9 review)
+    # never synced / no durable health evidence yet 
     unknown = "unknown"
 
 
@@ -344,7 +344,7 @@ class ConnectorSyncState(BaseModel):
     lag_seconds: int = Field(default=0, ge=0)
     pending_items: int = Field(default=0, ge=0)
     dead_letters: int = Field(default=0, ge=0)
-    # durable §58 counters — never decrease
+    # durable counters — never decrease
     fetch_total: int = Field(default=0, ge=0)
     failed_batches_total: int = Field(default=0, ge=0)
     normalized_total: int = Field(default=0, ge=0)
@@ -369,7 +369,7 @@ class BackfillJobStatus(str, Enum):
 
 
 class BackfillJob(BaseModel):
-    """Partitionable historical backfill (v0.6 §34) — separate from continuous sync.
+    """Partitionable historical backfill  — separate from continuous sync.
 
     Progress.partitions is a list of year-month windows. Completing a partition
     is durable; the job can pause and resume without redoing finished months.

@@ -1,4 +1,4 @@
-"""Project mapping from external containers (v0.6 Phase 7 §18 + lifecycle)."""
+"""Project mapping from external containers."""
 
 from __future__ import annotations
 

@@ -1,14 +1,25 @@
 """MCP server (stdio) — exposes the memory layer to Cursor, Claude Desktop,
 Claude Code and any other MCP client.
 
-Run:  twin mcp          (or: python -m twin.interfaces.mcp_server)
+Run: twin mcp (or: python -m twin.interfaces.mcp_server)
 
-Client config example (Claude Desktop / Cursor):
-    {
-      "mcpServers": {
-        "twin": { "command": "twin", "args": ["mcp"] }
-      }
-    }
+Identity is process-env only (``TWIN_MCP_CLIENT`` + ``TWIN_MCP_CLIENT_TOKEN``).
+Tool calls cannot supply or override credentials — provision via
+``twin setup mcp <client>``.
+
+Client config example:
+ {
+ "mcpServers": {
+ "twin": {
+ "command": "twin",
+ "args": ["mcp"],
+ "env": {
+ "TWIN_MCP_CLIENT": "cursor",
+ "TWIN_MCP_CLIENT_TOKEN": "…"
+ }
+ }
+ }
+ }
 """
 
 from __future__ import annotations
@@ -27,6 +38,7 @@ from ..cognition.sessions import (
 from ..judgment.profile import load_profile
 from ..memory.search import search
 from ..workspace import Workspace
+from .mcp_auth import MCP_CLIENT_ENV, mcp_process_identity, resolve_mcp_access
 
 
 def _memory_to_dict(mem) -> dict[str, Any]:
@@ -50,9 +62,16 @@ def create_server(home: Optional[str] = None):
             "Personal memory layer for the user. Call memory_safe_context_pack "
             "at the start of technical tasks to load the user's relevant context "
             "(decisions, preferences, projects) without re-asking. All results "
-            "are already filtered by the user's privacy Domain Firewall."
+            "are already filtered by the user's privacy Domain Firewall. "
+            "Identity is configured by the host via process env "
+            f"({MCP_CLIENT_ENV} / TWIN_MCP_CLIENT_TOKEN) — never pass credentials "
+            "as tool arguments."
         ),
     )
+
+    def _mcp_client_label() -> str:
+        client, _ = mcp_process_identity()
+        return client or "mcp"
 
     @mcp.tool()
     def memory_search(
@@ -175,21 +194,18 @@ def create_server(home: Optional[str] = None):
         include_candidates: bool = False,
         task_profile: str = "general",
         project: Optional[str] = None,
-        client: Optional[str] = None,
-        client_token: Optional[str] = None,
         persona: str = "individual",
         purpose: str = "memory_retrieval",
         audience: str = "self",
         mode: str = "compact",
         session_id: Optional[str] = None,
     ) -> str:
-        """Alias of memory_safe_context_pack with mature pack modes (v0.9.5+)."""
+        """Alias of memory_safe_context_pack with mature pack modes ."""
         return memory_safe_context_pack(
             query=query, target_domain=target_domain, max_tokens=max_tokens,
             include_judgment=include_judgment, include_candidates=include_candidates,
-            task_profile=task_profile, project=project, client=client,
-            client_token=client_token, persona=persona, purpose=purpose,
-            audience=audience, mode=mode, session_id=session_id,
+            task_profile=task_profile, project=project, persona=persona,
+            purpose=purpose, audience=audience, mode=mode, session_id=session_id,
         )
 
     @mcp.tool()
@@ -201,8 +217,6 @@ def create_server(home: Optional[str] = None):
         include_candidates: bool = False,
         task_profile: str = "general",
         project: Optional[str] = None,
-        client: Optional[str] = None,
-        client_token: Optional[str] = None,
         persona: str = "individual",
         purpose: str = "memory_retrieval",
         audience: str = "self",
@@ -220,15 +234,14 @@ def create_server(home: Optional[str] = None):
         (general, coding, architecture, debugging, writing, planning, review,
         meeting_prep) reorders sections for that kind of task; `project` is
         an optional project name/alias to boost project-linked memories.
-        Identity: pass registered `client` + `client_token` (credential).
-        Omitting them activates restricted mode — MCP never inherits local-cli."""
-        from ..privacy.identity import resolve_access
-        access = resolve_access(
-            ws.store, surface="mcp", client=client,
+        Identity comes from process env (TWIN_MCP_CLIENT +
+        TWIN_MCP_CLIENT_TOKEN) provisioned by ``twin setup mcp`` — never
+        from tool arguments."""
+        access = resolve_mcp_access(
+            ws.store,
             persona=persona, purpose=purpose, audience=audience,
             project_id=_resolve_project_id(project),
             requested_domains=[target_domain],
-            api_token=client_token,
         )
         if mode not in ("compact", "explainable", "references_only"):
             mode = "compact"
@@ -273,8 +286,6 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def session_start(
         query: str,
-        client: str = "mcp",
-        client_token: Optional[str] = None,
         cwd: Optional[str] = None,
         domain: Optional[str] = None,
         project: Optional[str] = None,
@@ -294,13 +305,17 @@ def create_server(home: Optional[str] = None):
         ask the user which domain applies (work, technical,
         personal_preferences, assistant_preferences) and start again with
         `domain` set explicitly. An unknown explicit `project` is an error —
-        it is never silently replaced by an inferred one."""
+        it is never silently replaced by an inferred one.
+
+        Host identity is process env only (twin setup mcp)."""
+        client = _mcp_client_label()
+        _, token = mcp_process_identity()
         try:
             started = start_session(
                 ws.store, ws.cfg, ws.embedder, query,
                 client=client, cwd=cwd, domain=domain, project=project,
                 task_profile=task_profile, max_tokens=max_tokens,
-                api_token=client_token,
+                api_token=token,
             )
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
@@ -358,14 +373,14 @@ def create_server(home: Optional[str] = None):
         text: str,
         sequence: Optional[int] = None,
         external_session_id: str = "",
-        client: str = "mcp",
     ) -> str:
         """Append an ordered session delta (enqueues attention evaluate job)."""
         from ..cognition.session_lifecycle import append_session_delta as _append
         try:
             ev = _append(
                 ws.store, session_id, text=text, sequence=sequence,
-                external_session_id=external_session_id, client=client,
+                external_session_id=external_session_id,
+                client=_mcp_client_label(),
             )
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
@@ -446,11 +461,17 @@ def create_server(home: Optional[str] = None):
         queue = {}
         if hasattr(ws.store, "runtime_queue_depth"):
             queue = ws.store.runtime_queue_depth()
+        client, token = mcp_process_identity()
         return json.dumps({
             "ok": True,
             "queue": queue,
             "extractor": ws.cfg.extractor,
             "embedder": ws.cfg.embedder,
+            "identity": {
+                "client": client,
+                "token_configured": bool(token),
+                "source": "env",
+            },
         }, ensure_ascii=False)
 
     @mcp.tool()
@@ -515,7 +536,7 @@ def create_server(home: Optional[str] = None):
 
     @mcp.tool()
     def native_bindings(host_type: Optional[str] = None, limit: int = 50) -> str:
-        """List HostSessionBindings from the Phase 8 native adapter.
+        """List HostSessionBindings from the native adapter.
 
         Proves MCP and native observation share the same store: bindings
         point at CognitiveSession ids that session_* tools already use.
@@ -591,7 +612,7 @@ def create_server(home: Optional[str] = None):
         sequence: Optional[int] = None,
         idempotency_key: Optional[str] = None,
     ) -> str:
-        """Workspace evaluation tick (v0.8 spine): reading → recall → optional
+        """Workspace evaluation tick : reading → recall → optional
         delta interpretation (candidates only). Idempotent via session+sequence
         or idempotency_key. Never confirms Memory or Judgment."""
         from ..cognition.workspace import workspace_tick as _tick
@@ -623,7 +644,7 @@ def create_server(home: Optional[str] = None):
         )
         return json.dumps(result.to_dict(), ensure_ascii=False, default=str)
 
-    # -- v0.3 quality / review (read tools + gated mutations) -----------------
+    # -- quality / review (read tools + gated mutations) -----------------
 
     @mcp.tool()
     def memory_quality(memory_id: str) -> str:
@@ -754,7 +775,7 @@ def create_server(home: Optional[str] = None):
         return json.dumps({"children": result.extras.get("children"),
                            "operation_id": result.operation_id})
 
-    # -- v0.4 judgment (read tools + gated mutations) ----------------------
+    # -- judgment (read tools + gated mutations) ----------------------
 
     @mcp.tool()
     def judgment_applicable(domain: str = "technical", task_profile: str = "general",
@@ -838,22 +859,17 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def privacy_evaluate(
         memory_ids: Optional[list[str]] = None,
-        client: Optional[str] = None,
-        client_token: Optional[str] = None,
         persona: str = "individual",
         purpose: str = "memory_retrieval",
         audience: str = "self",
     ) -> str:
-        """Evaluate privacy policies for memories under a resolved client identity.
-        Omitting `client`/`client_token` activates restricted mode (never local-cli)."""
+        """Evaluate privacy policies for memories under the MCP process identity
+        (env credentials from ``twin setup mcp``)."""
         from ..privacy.engine import evaluate_access
-        from ..privacy.identity import resolve_access
         from ..privacy.yaml_io import bootstrap_policy_set
         bootstrap_policy_set(ws.store, policies_path=ws.cfg.policies_path)
-        access = resolve_access(
-            ws.store, surface="mcp", client=client,
-            persona=persona, purpose=purpose, audience=audience,
-            api_token=client_token,
+        access = resolve_mcp_access(
+            ws.store, persona=persona, purpose=purpose, audience=audience,
         )
         memories = []
         for mid in memory_ids or []:
@@ -886,39 +902,31 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def privacy_validate_output(text: str, client: Optional[str] = None,
-                                client_token: Optional[str] = None) -> str:
+    def privacy_validate_output(text: str) -> str:
         """Scan generated/exported text before release."""
         from ..privacy.engine import validate_output
-        from ..privacy.identity import resolve_access
-        access = resolve_access(
-            ws.store, surface="mcp", client=client, api_token=client_token,
-        )
+        access = resolve_mcp_access(ws.store)
         return json.dumps(validate_output(text, access=access, store=ws.store), ensure_ascii=False)
 
-    # -- connectors (v0.6) — admin/read only; never exposes raw payloads ---
+    # -- connectors  — admin/read only; never exposes raw payloads ---
     #
-    # Every tool resolves the caller's identity and checks a connector:*
+    # Every tool resolves the MCP process identity and checks a connector:*
     # capability. read_context_pack never implies connector:read, and
     # connector:read never implies connector:sync.
 
-    def _connector_access(client: Optional[str], client_token: Optional[str]):
-        from ..privacy.identity import resolve_access
-        return resolve_access(
-            ws.store, surface="mcp", client=client, api_token=client_token,
-        )
+    def _connector_access():
+        return resolve_mcp_access(ws.store)
 
     def _connector_denied(auth) -> str:
         return json.dumps({"error": "not_authorized", "reason": auth.reason})
 
     @mcp.tool()
-    def connector_list(client: Optional[str] = None,
-                       client_token: Optional[str] = None) -> str:
+    def connector_list() -> str:
         """List connector instances (type, status, ownership) this client is
         allowed to see. Requires capability connector:read. No secrets."""
         from ..connectors import CAP_READ, authorize_connector, connector_health
         from ..connectors import visible_connectors
-        access = _connector_access(client, client_token)
+        access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ)
         if not auth.allowed:
             return _connector_denied(auth)
@@ -936,12 +944,11 @@ def create_server(home: Optional[str] = None):
         return json.dumps(out, ensure_ascii=False)
 
     @mcp.tool()
-    def connector_status(connector_id: str, client: Optional[str] = None,
-                         client_token: Optional[str] = None) -> str:
+    def connector_status(connector_id: str) -> str:
         """Health, last batch, checkpoints and dead-letter depth for a
         connector. Requires capability connector:read on that connector."""
         from ..connectors import CAP_READ, authorize_connector, connector_health
-        access = _connector_access(client, client_token)
+        access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ,
                                    connector_id=connector_id)
         if not auth.allowed:
@@ -949,13 +956,12 @@ def create_server(home: Optional[str] = None):
         return json.dumps(connector_health(ws.store, connector_id), ensure_ascii=False)
 
     @mcp.tool()
-    def connector_health_all(client: Optional[str] = None,
-                             client_token: Optional[str] = None) -> str:
+    def connector_health_all() -> str:
         """Aggregate health across the connectors this client may read.
         Requires capability connector:read."""
         from ..connectors import CAP_READ, authorize_connector, connector_health
         from ..connectors import visible_connectors
-        access = _connector_access(client, client_token)
+        access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ)
         if not auth.allowed:
             return _connector_denied(auth)
@@ -966,12 +972,11 @@ def create_server(home: Optional[str] = None):
         )
 
     @mcp.tool()
-    def connector_dead_letters(connector_id: str, client: Optional[str] = None,
-                               client_token: Optional[str] = None) -> str:
+    def connector_dead_letters(connector_id: str) -> str:
         """Open dead letters for a connector (sanitized errors only).
         Requires capability connector:read (or connector:read:errors)."""
         from ..connectors import CAP_READ_ERRORS, authorize_connector
-        access = _connector_access(client, client_token)
+        access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ_ERRORS,
                                    connector_id=connector_id)
         if not auth.allowed:
@@ -985,9 +990,7 @@ def create_server(home: Optional[str] = None):
         ], ensure_ascii=False)
 
     @mcp.tool()
-    def connector_backfill_preview(connector_id: str,
-                                   client: Optional[str] = None,
-                                   client_token: Optional[str] = None) -> str:
+    def connector_backfill_preview(connector_id: str) -> str:
         """What a backfill WOULD ingest for a connector — per-stream scope,
         vault, ingestion policy and provider-side volume estimates. Read
         only: previewing never starts ingestion. Requires capability
@@ -998,7 +1001,7 @@ def create_server(home: Optional[str] = None):
             backfill_preview,
             build_credential_store,
         )
-        access = _connector_access(client, client_token)
+        access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_BACKFILL,
                                    connector_id=connector_id)
         if not auth.allowed:
@@ -1017,8 +1020,6 @@ def create_server(home: Optional[str] = None):
         connector_id: str,
         confirm: bool = False,
         confirm_token: Optional[str] = None,
-        client: Optional[str] = None,
-        client_token: Optional[str] = None,
     ) -> str:
         """Trigger one sync pass (mutating). Requires capability
         connector:sync on the connector's vault.
@@ -1036,7 +1037,7 @@ def create_server(home: Optional[str] = None):
             sync_connector,
             sync_fingerprint,
         )
-        access = _connector_access(client, client_token)
+        access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_SYNC,
                                    connector_id=connector_id)
         if not auth.allowed:

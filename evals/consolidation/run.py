@@ -1,9 +1,9 @@
-"""Offline eval for v0.8 workspace / consolidation spine.
+"""Offline eval for workspace / consolidation spine.
 
 Proves stage separation, retrieval-score gates, idempotency, and that cycles
 do not expand the confirmed Memory/Judgment sets — by state, not by notes.
 
-    python -m evals.consolidation.run
+ python -m evals.consolidation.run
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 """PostgreSQL backend — the primary, scalable store.
 
 - pgvector for server-side semantic search (``CREATE EXTENSION vector``);
-  degrades gracefully to client-side cosine when the extension is missing.
+ degrades gracefully to client-side cosine when the extension is missing.
 - Native full-text search (tsvector generated column + GIN index, 'simple'
-  config so pt-BR and English coexist without stemming surprises).
+ config so pt-BR and English coexist without stemming surprises).
 
 Requires ``pip install "twin[postgres]"`` (psycopg 3).
 """
@@ -677,7 +677,7 @@ CREATE TABLE IF NOT EXISTS connector_backfill_jobs (
 );
 ALTER TABLE connector_backfill_jobs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_cbf_conn ON connector_backfill_jobs(connector_id);
--- Phase 9: exactly-once counter contributions per terminal batch
+-- exactly-once counter contributions per terminal batch
 CREATE TABLE IF NOT EXISTS connector_counter_batches (
     connector_id TEXT NOT NULL,
     batch_id TEXT NOT NULL,
@@ -855,7 +855,7 @@ class PostgresStore(
         )
         return [self._row_to_percept(r) for r in rows]
 
-    # -- interpretation state (v0.7) --------------------------------------
+    # -- interpretation state  --------------------------------------
 
     def _row_to_interpretation(self, row: dict) -> PerceptInterpretation:
         return PerceptInterpretation(
@@ -905,7 +905,7 @@ class PostgresStore(
             ),
         )
 
-    # -- detection signals (v0.7 heuristic mode) --------------------------
+    # -- detection signals  --------------------------
 
     def insert_detection_signal(self, signal: DetectionSignal) -> str:
         signal.created_at = signal.created_at or now_iso()
@@ -1461,7 +1461,7 @@ class PostgresStore(
             (memory_id, target_domain, rule, action, now_iso()),
         )
 
-    # -- v0.3 artifacts / findings / batches / operations -------------------------
+    # -- artifacts / findings / batches / operations -------------------------
 
     def delete_embedding(self, ref_id: str) -> None:
         self._exec("DELETE FROM embeddings WHERE ref_id = %s", (ref_id,))

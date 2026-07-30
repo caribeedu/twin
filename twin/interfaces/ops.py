@@ -45,6 +45,50 @@ def _mcp_config_paths() -> dict[str, Path]:
     }
 
 
+def _runtime_queue_checks(store) -> list[Check]:
+    """Report runtime queue health without pretending a worker is up.
+
+    No pidfile means we can't claim "process up"; instead we surface backlog so
+    the operator knows whether ``twin runtime start`` needs to run. Pending or
+    dead-lettered jobs degrade native SessionEnd consolidation + domain resolve.
+    """
+    checks: list[Check] = []
+    try:
+        depth = store.runtime_queue_depth()
+    except Exception as exc:
+        return [Check("runtime:queue", WARN, f"queue depth unavailable: {exc}")]
+
+    pending = int(depth.get("pending", 0))
+    failed = int(depth.get("failed", 0))
+    dead = int(depth.get("dead_letter", 0))
+    running = int(depth.get("running", 0))
+
+    if pending:
+        checks.append(Check(
+            "runtime:queue", WARN,
+            f"{pending} jobs pending"
+            + (f", {running} running" if running else "")
+            + " — run `twin runtime start`",
+        ))
+    else:
+        checks.append(Check(
+            "runtime:queue", OK,
+            "no pending jobs" + (f" ({running} running)" if running else ""),
+        ))
+
+    if failed:
+        checks.append(Check(
+            "runtime:failed", WARN,
+            f"{failed} jobs failed (retrying with backoff)",
+        ))
+    if dead:
+        checks.append(Check(
+            "runtime:dead_letter", FAIL,
+            f"{dead} dead-letter jobs — inspect with `twin runtime jobs`",
+        ))
+    return checks
+
+
 def doctor(cfg: Config) -> list[Check]:
     checks: list[Check] = []
 
@@ -78,6 +122,7 @@ def doctor(cfg: Config) -> list[Check]:
             checks.append(Check("review:queue", WARN, f"{pending} memories awaiting review"))
         else:
             checks.append(Check("review:queue", OK, "empty"))
+        checks.extend(_runtime_queue_checks(store))
         store.close()
     except Exception as exc:
         checks.append(Check("store:connection", FAIL, f"{url} → {exc}"))
@@ -174,7 +219,7 @@ def doctor(cfg: Config) -> list[Check]:
         checks.append(Check("mcp:clients", WARN,
                             "no client configured — twin setup mcp <client>"))
 
-    # Phase 9 — connector schedule / credentials / instance health
+    # connector schedule / credentials / instance health
     try:
         from ..connectors.ops import doctor_connector_checks
         from ..memory.store import create_store
@@ -237,11 +282,34 @@ def setup_postgres(cfg: Config) -> list[str]:
 
 
 def setup_mcp(cfg: Config, client: str) -> list[str]:
-    """Write/merge the twin server entry into a client's MCP config."""
+    """Write/merge the twin server entry into a client's MCP config.
+
+    Provisions a ClientBinding + durable token and injects
+    ``TWIN_MCP_CLIENT`` / ``TWIN_MCP_CLIENT_TOKEN`` into the host env block.
+    The model never sees or passes these credentials.
+    """
+    from pathlib import Path
+
+    from twin.interfaces.mcp_auth import (
+        MCP_CLIENT_ENV,
+        provision_mcp_client,
+    )
+    from twin.workspace import Workspace
+
     paths = _mcp_config_paths()
     if client not in paths:
         return [f"unknown client '{client}'. Options: {', '.join(paths)}"]
     path = paths[client]
+
+    ws = Workspace(cfg.home)
+    try:
+        ident_env = provision_mcp_client(
+            ws.store, Path(cfg.home), client,
+            policies_path=cfg.policies_path,
+        )
+    finally:
+        ws.close()
+
     entry: dict = {"command": shutil.which("twin") or "twin", "args": ["mcp"]}
     env: dict[str, str] = {}
     for key in (
@@ -276,13 +344,15 @@ def setup_mcp(cfg: Config, client: str) -> list[str]:
             env[key] = os.environ[key]
     # Prefer values from ~/.twin/env when process env lacks them
     try:
-        from .ux import load_env_file
+        from .ux import load_env_file, write_env_file
         for key, value in load_env_file(cfg.home / "env").items():
             env.setdefault(key, value)
+        # Persist identity into ~/.twin/env for this machine's last setup.
+        write_env_file(cfg.home / "env", ident_env)
     except Exception:
         pass
-    if env:
-        entry["env"] = env
+    env.update(ident_env)
+    entry["env"] = env
     config: dict = {}
     if path.exists():
         try:
@@ -292,9 +362,16 @@ def setup_mcp(cfg: Config, client: str) -> list[str]:
     config.setdefault("mcpServers", {})["twin"] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    lines = [f"wrote {path}"]
+    lines = [
+        f"wrote {path}",
+        f"provisioned MCP identity {MCP_CLIENT_ENV}={client} "
+        f"(token in env + ~/.twin/secrets/mcp/)",
+    ]
     if client == "claude-desktop":
         lines.append("restart Claude Desktop to load the server")
     if client == "claude-code":
         lines.append("scope: project (.mcp.json in the current directory)")
+        lines.append("restart Claude Code / reload MCP to pick up env")
+    if client == "cursor":
+        lines.append("reload Cursor MCP / restart to pick up env")
     return lines

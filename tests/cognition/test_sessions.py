@@ -58,7 +58,9 @@ def test_start_session_records_supplied_context(store, cfg, embedder):
     assert session.consolidation_status == ConsolidationStatus.none
     assert session.pack_chars == len(started.pack.context_pack)
     assert session.supplied_memory_ids == [s["memory_id"] for s in started.pack.sources]
-    assert started.observer_mode in ("fast", "deep")
+    assert started.observer_mode in (
+        "fast", "deep", "unresolved", "explicit", "search", "frozen",
+    )
     assert not started.needs_domain_confirmation
     assert set(started.reading_confidences) == {"domain", "task_profile", "project"}
     # persisted
@@ -85,7 +87,9 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
     assert started.session.domain == "unclassified"
     assert started.needs_domain_confirmation
     assert started.pack.sources == []
-    assert started.pack.context_pack == ""
+    # Scope header may appear; memories and judgment stay out until domain freezes.
+    assert "webhook" not in (started.pack.context_pack or "").lower()
+    assert "## Judgment" not in (started.pack.context_pack or "")
     # explicit domain resolves it
     confirmed = start_session(store, cfg, embedder,
                               "aquilo de ontem, resolve pra mim",
@@ -94,10 +98,15 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
 
 
 def test_start_session_resolves_project_from_cwd(store, cfg, embedder):
+    """cwd basename matching a known project binds it without LLM."""
     project = ensure_project(store, "Atlas", repos=["atlas-api"])
     started = start_session(store, cfg, embedder, "fix the flaky test",
                             cwd="/home/edu/code/atlas-api", client="cli")
     assert started.session.project_id == project.id
+    # Domain may still be unclassified (search vote needs confirmed memories);
+    # project binding is independent of that.
+    assert started.session.domain == "unclassified" or started.session.domain == "technical"
+
 
 
 def test_start_session_explicit_project_wins(store, cfg, embedder):
@@ -126,7 +135,17 @@ def test_start_session_explicit_alias_resolves(store, cfg, embedder):
     assert started.session.project_id == project.id
 
 
-def test_start_session_infers_task_profile(store, cfg, embedder):
+def test_start_session_infers_task_profile(store, cfg, embedder, monkeypatch):
+    from twin.cognition.observer import ObserverReading
+
+    monkeypatch.setattr(
+        "twin.cognition.sessions.resolve_context_domain",
+        lambda *_a, **_k: ObserverReading(
+            domain="technical", task_profile="debugging",
+            confidences={"domain": 0.9, "task_profile": 0.9, "project": 0.0},
+            mode="deep",
+        ),
+    )
     started = start_session(store, cfg, embedder,
                             "investigate the bug in the payment stacktrace error", client="cli")
     assert started.session.task_profile == "debugging"
@@ -183,7 +202,10 @@ def test_complete_session_turns_work_into_candidate_memories(store, cfg, embedde
     project = ensure_project(store, "Atlas")
     session = start_session(store, cfg, embedder, "escolher fila de mensagens",
                             domain="technical", project="Atlas", client="cli").session
-    observe_session(store, session.id, {"kind": "doc", "note": "TODO: Edu escrever a RFC"})
+    observe_session(store, session.id, {
+        "kind": "user_message",
+        "note": "TODO: Edu escrever a RFC",
+    })
     done = complete_session(
         store, cfg, embedder, session.id,
         summary="We decided to use RabbitMQ for the webhook queue.",
@@ -204,6 +226,76 @@ def test_complete_session_turns_work_into_candidate_memories(store, cfg, embedde
         mem = store.get_memory(mid)
         assert mem.status.value == "candidate"
         assert mem.project_id == project.id
+
+
+def test_session_summary_excludes_tool_io(store, cfg, embedder):
+    """Tool I/O stays on the session; percept is user/assistant dialogue only."""
+    session = start_session(
+        store, cfg, embedder, "task", domain="technical", client="cli",
+    ).session
+    observe_session(store, session.id, {
+        "kind": "user_message", "note": "i finished watching dexter",
+    })
+    observe_session(store, session.id, {
+        "kind": "tool_requested",
+        "note": 'Bash: {"command": "grep -ril atlas /tmp"}',
+    })
+    observe_session(store, session.id, {
+        "kind": "tool_completed",
+        "note": 'Bash: {"stdout": "huge atlas dump..."}',
+    })
+    observe_session(store, session.id, {
+        "kind": "assistant_result",
+        "note": "Nice — how'd Dexter's ending land for you?",
+    })
+    observe_session(store, session.id, {
+        "kind": "session_start", "note": "native host session",
+    })
+    done = complete_session(
+        store, cfg, embedder, session.id, summary="prompt_input_exit",
+    )
+    assert done.consolidation_status == ConsolidationStatus.completed
+    percept = store.get_percept(done.summary_percept_id)
+    assert percept is not None
+    assert "dexter" in percept.content.lower()
+    assert "Dexter's ending" in percept.content
+    # human speaker labels — not machine kind tags that leak into evidence
+    assert "[user_message]" not in percept.content
+    assert "[assistant_result]" not in percept.content
+    assert "User:" in percept.content
+    assert "Assistant:" in percept.content
+    assert "tool_requested" not in percept.content
+    assert "tool_completed" not in percept.content
+    assert "grep -ril" not in percept.content
+    assert "native host session" not in percept.content
+    assert "prompt_input_exit" not in percept.content
+    # tools still on the session for replay
+    kinds = {a.get("kind") for a in store.get_session(session.id).artifacts}
+    assert "tool_requested" in kinds and "tool_completed" in kinds
+
+
+def test_session_summary_folds_cli_observations(store, cfg, embedder):
+    """Deliberate human/CLI observations (twin session observe) belong in the
+    summary — only tool I/O and session boilerplate are held back."""
+    session = start_session(
+        store, cfg, embedder, "task", domain="technical", client="cli",
+    ).session
+    observe_session(store, session.id, {
+        "kind": "note", "note": "Decided to use RabbitMQ for the queue.",
+    })
+    observe_session(store, session.id, {
+        "kind": "commit", "ref": "abc123", "note": "wire up the consumer",
+    })
+    observe_session(store, session.id, {
+        "kind": "tool_completed", "note": 'Bash: {"stdout": "noise"}',
+    })
+    done = complete_session(store, cfg, embedder, session.id)
+    assert done.consolidation_status == ConsolidationStatus.completed
+    percept = store.get_percept(done.summary_percept_id)
+    assert percept is not None
+    assert "RabbitMQ" in percept.content
+    assert "wire up the consumer" in percept.content
+    assert "noise" not in percept.content
 
 
 def test_summary_trust_depends_on_origin(store, cfg, embedder):

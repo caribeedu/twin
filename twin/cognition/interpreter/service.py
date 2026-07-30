@@ -1,15 +1,15 @@
-"""Interpreter selection, availability and deferral (v0.7).
+"""Interpreter selection, availability and deferral.
 
 Selection follows ``cfg.extractor`` for backward compatibility:
 
-    auto      → cognitive interpreter if the local model is reachable,
-                otherwise DEFER (never fabricate conclusions from lexical rules)
-    ollama    → cognitive interpreter; DEFER when unreachable
-    echo      → non-interpreting offline mock (test/CI stand-in; makes no
-                semantic classification — see ``echo.py``)
-    heuristic → NOT an interpreter — detection-only mode (see ``pipeline``)
+ auto → cognitive interpreter if the local model is reachable,
+ otherwise DEFER (never fabricate conclusions from lexical rules)
+ ollama → cognitive interpreter; DEFER when unreachable
+ echo → non-interpreting offline mock (test/CI stand-in; makes no
+ semantic classification — see ``echo.py``)
+ heuristic → NOT an interpreter — detection-only mode (see ``pipeline``)
 
-The load-bearing rule of v0.7: in an interpreting mode, an unavailable model
+The load-bearing rule of : in an interpreting mode, an unavailable model
 yields a ``deferred`` result, not a heuristic guess. A Percept is understood
 only when a cognitive interpreter actually ran.
 

@@ -1,7 +1,7 @@
-"""Calendar ↔ meeting correlation keys (v0.6 Phase 5).
+"""Calendar ↔ meeting correlation keys.
 
-Phase 5 correlates at ``ConnectorRecord`` metadata / artifact_refs level.
-Phase 7 promotes strong keys into ``WorkEpisode`` via
+ correlates at ``ConnectorRecord`` metadata / artifact_refs level.
+ promotes strong keys into ``WorkEpisode`` via
 ``twin.cognition.correlation`` (fingerprints remain weak until corroborated).
 """
 

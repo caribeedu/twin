@@ -1,4 +1,4 @@
-"""Cross-source cognition models (v0.6 Phase 7).
+"""Cross-source cognition models.
 
 Connectors capture evidence; this package proposes identities, project maps,
 WorkEpisodes, independence groups and conflict findings — never confirmed
@@ -26,7 +26,7 @@ class IdentityStatus(str, Enum):
 
 
 class ProjectLinkStatus(str, Enum):
-    """Lifecycle for ProjectLink (Phase 7 debt closed in v0.6).
+    """Lifecycle for ProjectLink.
 
     ``historical`` keeps provenance after a project closes without implying
     current ownership; ``rejected`` is an explicit negative decision.
@@ -81,7 +81,7 @@ class ProjectLink(BaseModel):
     external_id: str
     confidence: float = 0.5
     status: ProjectLinkStatus = ProjectLinkStatus.candidate
-    # Deprecated mirror of ``status == confirmed`` — kept so Phase 7 callers
+    # Deprecated mirror of ``status == confirmed`` — kept so callers
     # and persisted payloads keep working.
     confirmed: bool = False
     created_at: str = Field(default_factory=now_iso)

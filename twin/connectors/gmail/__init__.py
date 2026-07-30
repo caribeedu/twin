@@ -1,4 +1,4 @@
-"""Gmail professional connector (v0.6 Phase 4)."""
+"""Gmail professional connector."""
 
 from .adapter import GmailConnector
 

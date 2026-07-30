@@ -4,7 +4,7 @@ Health is derived from the last batch, checkpoint freshness, dead-letter depth
 and auth state — never from a single boolean. Stored on ``ConnectorSyncState``
 so the CLI/API/MCP can read it without re-running a sync.
 
-Phase 9 (§57) + review fixes:
+ + review fixes:
 - ``lag_seconds`` = schedule lag (``max(0, now - next_run_at)``), not checkpoint age
 - ``checkpoint_age_seconds`` / ``source_lag_seconds`` exposed separately
 - never-run connectors report ``health=unknown``, not healthy

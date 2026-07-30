@@ -162,7 +162,7 @@ class PerceptInterpretation(BaseModel):
     # pipeline/governance terminals that did NOT interpret:
     #   quarantined | heuristic_detection | not_attempted
     status: str = "deferred"
-    # v0.7: distinguishes a service outage from a Percept-specific failure so a
+    # distinguishes a service outage from a Percept-specific failure so a
     # prolonged outage never consumes a Percept's retry budget:
     #   unavailable | transient | input | schema | permanent | ""
     failure_class: str = ""
@@ -483,7 +483,7 @@ class HostSessionBinding(BaseModel):
 
 
 class InterventionRecommendation(BaseModel):
-    """Display-only heuristic cue — Phase 8 does not act on the host.
+    """Display-only heuristic cue — does not act on the host.
 
     Reasons are *possible decision reversal cues*, not proven semantic
     contradictions. May false-positive; never modifies host state.

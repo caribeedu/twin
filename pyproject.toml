@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "twin"
-version = "1.1.0"
+version = "1.2.0"
 description = "Personal Cognitive Operating System — local-first memory, judgment and context layer exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,11 +18,11 @@ dependencies = [
 
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn>=0.27"]
-mcp = ["mcp>=1.0"]
+mcp = ["mcp>=1.0,<2"]
 postgres = ["psycopg[binary]>=3.1"]
 crypto = ["cryptography>=42.0"]
 dev = [
-    "pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.27", "mcp>=1.0",
+    "pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.27", "mcp>=1.0,<2",
     "psycopg[binary]>=3.1", "cryptography>=42.0", "rich>=13.0",
 ]
 

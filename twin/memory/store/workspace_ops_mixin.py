@@ -1,4 +1,4 @@
-"""Workspace tick + consolidation-run operational persistence (v0.8).
+"""Workspace tick + consolidation-run operational persistence.
 
 Identity / idempotency for synchronous workspace evaluation and scheduled
 consolidation cycles. Not a background worker — just durable run records so

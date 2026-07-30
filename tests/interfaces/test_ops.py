@@ -35,6 +35,22 @@ def test_doctor_flags_review_backlog(cfg, store, embedder):
     assert "awaiting review" in queue.detail
 
 
+def test_doctor_runtime_queue_ok_when_empty(cfg):
+    check = {c.name: c for c in doctor(cfg)}["runtime:queue"]
+    assert check.status == "ok"
+    assert "no pending" in check.detail
+
+
+def test_doctor_flags_pending_runtime_jobs(cfg, store):
+    from twin.runtime.models import JobKind
+    from twin.runtime.queue import RuntimeQueue
+
+    RuntimeQueue(store).enqueue(JobKind.session_domain_resolve, payload={"x": 1})
+    checks = {c.name: c for c in doctor(cfg)}
+    assert checks["runtime:queue"].status == "warn"
+    assert "twin runtime start" in checks["runtime:queue"].detail
+
+
 def test_setup_mcp_writes_and_merges_config(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     lines = setup_mcp(cfg, "cursor")

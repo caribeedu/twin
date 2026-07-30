@@ -1,4 +1,4 @@
-"""CLI UX helpers (v1.1)."""
+"""CLI UX helpers."""
 
 from __future__ import annotations
 
@@ -71,3 +71,23 @@ def test_brand_and_legend_helpers(capsys):
     assert "approve" in out
     assert "quit" in out
     assert "0.500" in ux.score_bar(0.5)
+
+
+def test_print_table_renders_headers_and_rows(capsys):
+    ux.print_table(["id", "status"], [["c1", "healthy"], ["c2", "paused"]])
+    out = capsys.readouterr().out
+    assert "id" in out and "status" in out
+    assert "c1" in out and "healthy" in out
+    assert "c2" in out and "paused" in out
+
+
+def test_print_table_empty_prints_nothing(capsys):
+    ux.print_table(["id"], [])
+    assert capsys.readouterr().out == ""
+
+
+def test_print_next_uses_next_title(capsys):
+    ux.print_next([("→", "twin extract")])
+    out = capsys.readouterr().out
+    assert "next" in out
+    assert "twin extract" in out

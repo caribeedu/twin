@@ -1,4 +1,4 @@
-"""v0.7 Blocker 1: heuristic mode is detection-only.
+"""Blocker 1: heuristic mode is detection-only.
 
 Lexical rules may flag that a span *looks like* it could carry a decision or
 task, but they must never establish a memory type, domain, entity or cognitive

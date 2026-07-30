@@ -2,7 +2,7 @@
 
 Stream:
 
-    meetings
+ meetings
 
 Discovery uses ``transcripts(fromDate)`` which filters by *creation* time.
 Incomplete transcripts are kept in ``pending_transcripts`` and re-fetched by
@@ -421,7 +421,7 @@ class FirefliesConnector:
         pages_done = int(progress.get("pages_done") or 0)
         phase = progress.get("phase") or "pending"
 
-        # Phase 1: re-fetch incomplete transcripts by ID (independent of fromDate).
+        # re-fetch incomplete transcripts by ID (independent of fromDate).
         if phase == "pending":
             pending_ids = list(pending.keys())
             start_idx = int(progress.get("pending_idx") or 0)
@@ -447,7 +447,7 @@ class FirefliesConnector:
             pages_done = 0
             progress = {}
 
-        # Phase 2: discover newly *created* meetings via fromDate.
+        # discover newly *created* meetings via fromDate.
         if phase == "discover":
             skip = int(progress.get("skip") or 0)
             from_date = (
@@ -497,7 +497,7 @@ class FirefliesConnector:
             phase = "reconcile"
             pages_done = 0
 
-        # Phase 3: re-fetch recent known completes for late summary/sentence edits.
+        # re-fetch recent known completes for late summary/sentence edits.
         if phase == "reconcile":
             if ss.reconcile_due(
                 base, interval_seconds=self.reconcile_interval_seconds,

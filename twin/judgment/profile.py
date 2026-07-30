@@ -38,7 +38,7 @@ def promote_memory(path: Path | str, mem: "MemoryItem",
                    store: Optional["MemoryStore"] = None) -> str:
     """Promote a memory into judgment.
 
-    When a store is provided (v0.4+), creates a pending JudgmentProposal and
+    When a store is provided , creates a pending JudgmentProposal and
     does **not** auto-activate judgment. Falls back to appending the legacy
     YAML section only when no store is available (tests / recovery).
     """

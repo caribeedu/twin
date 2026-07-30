@@ -1,9 +1,9 @@
-"""GmailConnector — read-only Gmail adapter (v0.6 Phase 4).
+"""GmailConnector — read-only Gmail adapter.
 
 Streams:
 
-    label:{label_id}                              continuous change feed
-    backfill:{job}:{partition}:label:{label_id}   historical time-range scan
+ label:{label_id} continuous change feed
+ backfill:{job}:{partition}:label:{label_id} historical time-range scan
 
 Continuous sync prefers History API (``history_id`` in the checkpoint).
 Backfill is a pure date-window search on a namespaced stream so it never

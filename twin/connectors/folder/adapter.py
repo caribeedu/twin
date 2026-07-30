@@ -1,8 +1,8 @@
-"""FolderConnector — local/shared watched folders (v0.6 Phase 6).
+"""FolderConnector — local/shared watched folders.
 
 Streams (explicit root allowlist):
 
-    folder:{root_id}
+ folder:{root_id}
 
 Each sync performs a **full scan** of the root (not page-budgeted), emits
 ``document_manifest`` + ``document_revision_chunk`` records for new/changed

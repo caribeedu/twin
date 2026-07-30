@@ -1,4 +1,4 @@
-"""Slack Events API receiver support (v0.6 §24 / Phase 3).
+"""Slack Events API receiver support.
 
 A delivery is a *hint*, never a source of truth. Valid events may:
 

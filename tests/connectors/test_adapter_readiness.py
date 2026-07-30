@@ -1,4 +1,4 @@
-"""v0.9.7 — at least two real adapters are production-ready."""
+"""GitHub and Slack adapters meet the production-ready contract."""
 
 from twin.connectors import (
     check_adapter_contract,
@@ -11,7 +11,7 @@ def test_github_and_slack_contract_rows_are_ok():
     assert check_adapter_contract("slack")["ok"] is True
 
 
-def test_production_ready_attests_two_real_adapters():
+def test_production_ready_reports_two_real_adapters():
     report = production_ready_adapters()
     ready_types = {r["connector_type"] for r in report["ready"]}
     assert "fake" not in ready_types

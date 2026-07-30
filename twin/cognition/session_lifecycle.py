@@ -1,4 +1,4 @@
-"""Closed cognitive session ops — deltas, checkpoints, structured closure (v0.9.1).
+"""Closed cognitive session ops — deltas, checkpoints, structured closure.
 
 Extends the existing CognitiveSession loop without replacing it. Completion
 still uses ``complete_session``; this module adds ordered events, checkpoints,

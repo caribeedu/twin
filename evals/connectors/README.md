@@ -1,8 +1,7 @@
-# Connector evals (v0.6)
+# Connector evals
 
-Deterministic, offline evaluation cases for the connector framework. Phase 1
-seeds the harness with the `FakeConnector`; real adapters (GitHub first) add
-their own fixtures under this directory in later phases.
+Deterministic, offline evaluation cases for the connector framework. The harness
+seeds with `FakeConnector`; real adapters add fixtures under `cases/`.
 
 ## What these check
 
@@ -29,23 +28,22 @@ their own fixtures under this directory in later phases.
 evals/connectors/
   README.md
   cases/
-    normalization_basic.json    # input fixture + expected record shape
-    idempotency_replay.json     # two identical passes → one record/percept
-    partial_batch.json          # failure → nothing cognitive; retry → all
-    revision_collision.json     # same revision, different content → DLQ
-    checkpoint_failure.json     # finalize fault → consistent state
-    quarantine.json             # injection content never reaches extraction
-    source_deletion.json        # tombstone → lineage impact event
-    github_pr_lifecycle.json    # Phase 2 PR revisions + merged wins
-    github_bot_lineage.json     # Phase 2 bot trust / review
-    slack_thread_bot_lineage.json  # Phase 3 thread + bot
-    gmail_thread_lineage.json   # Phase 4 thread + notification
-    calendar_meeting_correlation.json  # Phase 5 calendar↔meeting fingerprint
-    folder_document_revisions.json     # Phase 6 local folder revisions + delete
-    cross_source_work_episode.json     # Phase 7 WorkEpisode + independence + conflict
-    ops_health_metrics.json            # Phase 9 §57 health + §58 metrics + setup/preview safe
-    connector_completion.json          # live completion_matrix ok + evidence + no auto-confirm
-  run.py                        # tiny runner over Fake + real adapters
+    normalization_basic.json
+    idempotency_replay.json
+    partial_batch.json
+    revision_collision.json
+    checkpoint_failure.json
+    quarantine.json
+    source_deletion.json
+    github_pr_lifecycle.json
+    github_bot_lineage.json
+    slack_thread_bot_lineage.json
+    gmail_thread_lineage.json
+    calendar_meeting_correlation.json
+    folder_document_revisions.json
+    cross_source_work_episode.json
+    ops_health_metrics.json
+  run.py
 ```
 
 ## Run
@@ -53,6 +51,3 @@ evals/connectors/
 ```bash
 python -m evals.connectors.run
 ```
-
-Cases are data, not instructions. Any content that looks like a prompt (see the
-quarantine case) must never reach extraction.

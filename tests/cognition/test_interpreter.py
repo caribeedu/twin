@@ -1,4 +1,4 @@
-"""v0.7 cognitive interpreter: deferral, cognitive-act governance, grounding,
+"""Cognitive interpreter: deferral, cognitive-act governance, grounding,
 interpretation metadata, and the deterministic gates that still run first.
 
 The interpreter (an LLM) is stubbed with a deterministic override so these
@@ -496,9 +496,19 @@ def test_coerce_item_tolerates_messy_llm_fields():
                 "extra_junk": True,
             },
             {"memory_type": "fact"},  # unusable — no title/summary
+            {
+                # Wrong field name — must not be silently aliased.
+                "memory_type": "preference",
+                "cognitive_act": "statement",
+                "description": "The user likes bananas.",
+                "domain": "personal_preferences",
+                "sensitivity": "internal",
+                "confidence": 0.95,
+                "evidence_span": "i really like bananas",
+            },
         ],
     })
-    assert dropped == 1
+    assert dropped == 2
     assert len(items) == 1
     assert items[0].memory_type == "rejected_alternative"
     assert items[0].cognitive_act.value == "proposal"

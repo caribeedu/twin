@@ -1,4 +1,4 @@
-"""MIME body normalization helpers (v0.6 §36).
+"""MIME body normalization helpers.
 
 Split new authored content from quoted history / signatures when possible.
 Never execute HTML; produce plain text + a sanitized HTML stub.
