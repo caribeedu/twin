@@ -8,10 +8,13 @@ reconciled so removed/tombstoned members leave active membership.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional
 
 from ...clock import now_iso
+
+log = logging.getLogger(__name__)
 from .independence import evidence_directness_for, independence_group_for
 from .models import (
     EpisodeLink,
@@ -277,6 +280,18 @@ def _rebuild_episode_from_active_links(store, ep: WorkEpisode) -> WorkEpisode:
         ep.status = EpisodeStatus.closed
     ep.updated_at = now_iso()
     store.update_work_episode(ep)
+    # Derived structure: phases (arc) then narrative edges over those phases.
+    # Fail-open per layer — a store without the phase tables still correlates.
+    try:
+        from .phases import rebuild_phases
+        rebuild_phases(store, ep)
+    except Exception:
+        log.exception("rebuild_phases failed for %s", ep.id)
+    try:
+        from .edges import rebuild_edges
+        rebuild_edges(store, ep)
+    except Exception:
+        log.exception("rebuild_edges failed for %s", ep.id)
     return ep
 
 

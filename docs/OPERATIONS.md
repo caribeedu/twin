@@ -99,6 +99,17 @@ twin review
 
 **Default:** humans confirm Memory; Judgment always stays human-gated. Do not automate confirmation of Judgment. Opt-in `twin extract -A` (auto-confirm new *memory* candidates) is for trusted demos or tightly scoped pipelines only — not the recommended day-one path. See [INTERFACES.md](INTERFACES.md).
 
+## Correlation & episode reflection
+
+```bash
+twin correlate                 # full rebuild (correctness oracle)
+twin correlate --incremental   # only records marked dirty since last pass
+twin episode reflect <id>      # trajectory candidates from the episode arc
+```
+
+- **`--full` vs `--incremental`:** run `--full` as the periodic correctness oracle and after schema/logic changes; use `--incremental` for routine, cheap passes (it re-correlates only the vault partitions of records the connector commit/tombstone path marked dirty, then clears the dirty index). The weekly consolidation cycle runs reflection automatically for episodes with a narrative arc (≥2 phases and a `superseded|motivated` edge).
+- **`reflect` does not replace `extract`.** Extraction turns single percepts into atomic candidates; reflection reads a whole episode's phases + edges and adds *trajectory* candidates ("intended X → chose Y"). Both land as candidates for `twin review`; neither confirms Memory. Promote a confirmed trajectory into a pending Judgment proposal with `twin judgment propose-episode <id>` (human approval only).
+
 ## Release gate
 
 ```bash

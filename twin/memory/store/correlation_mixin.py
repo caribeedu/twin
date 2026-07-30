@@ -5,20 +5,26 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from twin.cognition.correlation.models import (
+    EpisodeEdge,
     EpisodeLink,
+    EpisodePhase,
     ExternalIdentity,
     IdentityLink,
     ProjectLink,
     WorkEpisode,
 )
 from twin.cognition.correlation.persistence import (
+    episode_edge_to_row,
     episode_link_to_row,
+    episode_phase_to_row,
     episode_to_row,
     identity_link_to_row,
     identity_to_row,
     project_link_to_row,
     row_to_episode,
+    row_to_episode_edge,
     row_to_episode_link,
+    row_to_episode_phase,
     row_to_identity,
     row_to_identity_link,
     row_to_project_link,
@@ -106,6 +112,38 @@ CREATE TABLE IF NOT EXISTS episode_anchors (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ep_anchor
     ON episode_anchors(vault_id, anchor_type, anchor_value);
 CREATE INDEX IF NOT EXISTS idx_ep_anchor_episode ON episode_anchors(episode_id);
+
+CREATE TABLE IF NOT EXISTS episode_phases (
+    id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    vault_id TEXT NOT NULL DEFAULT '',
+    phase_key TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'other',
+    status TEXT NOT NULL DEFAULT 'proposed',
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_epphase_episode ON episode_phases(episode_id);
+CREATE INDEX IF NOT EXISTS idx_epphase_vault ON episode_phases(vault_id);
+
+CREATE TABLE IF NOT EXISTS episode_edges (
+    id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    vault_id TEXT NOT NULL DEFAULT '',
+    relation TEXT NOT NULL DEFAULT 'continues',
+    status TEXT NOT NULL DEFAULT 'proposed',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_epedge_episode ON episode_edges(episode_id);
+CREATE INDEX IF NOT EXISTS idx_epedge_vault ON episode_edges(vault_id);
+
+CREATE TABLE IF NOT EXISTS correlation_dirty (
+    connector_record_id TEXT PRIMARY KEY,
+    vault_id TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    marked_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_corr_dirty_vault ON correlation_dirty(vault_id);
 """
 
 
@@ -464,3 +502,136 @@ class CorrelationStoreMixin:
             (episode_id,),
         )
         return [row_to_episode_link(r, decrypt=self._corr_dec) for r in rows]
+
+    # -- episode phases ----------------------------------------------------
+
+    def insert_episode_phase(self, phase: EpisodePhase) -> str:
+        self._c_insert(
+            "episode_phases", self._corr_enc_row(episode_phase_to_row(phase)),
+        )
+        return phase.id
+
+    def update_episode_phase(self, phase: EpisodePhase) -> None:
+        self._c_update(
+            "episode_phases", phase.id,
+            self._corr_enc_row(episode_phase_to_row(phase)),
+        )
+
+    def get_episode_phase(self, phase_id: str) -> Optional[EpisodePhase]:
+        row = self._j_fetchone(
+            "SELECT * FROM episode_phases WHERE id = ?", (phase_id,),
+        )
+        return row_to_episode_phase(row, decrypt=self._corr_dec) if row else None
+
+    def list_episode_phases(self, episode_id: str) -> list[EpisodePhase]:
+        rows = self._j_fetchall(
+            "SELECT * FROM episode_phases WHERE episode_id = ? "
+            "ORDER BY ordinal ASC, id ASC",
+            (episode_id,),
+        )
+        return [row_to_episode_phase(r, decrypt=self._corr_dec) for r in rows]
+
+    def delete_episode_phase(self, phase_id: str) -> None:
+        self._j_exec("DELETE FROM episode_phases WHERE id = ?", (phase_id,))
+        self._j_commit()
+
+    # -- episode edges -----------------------------------------------------
+
+    def insert_episode_edge(self, edge: EpisodeEdge) -> str:
+        self._c_insert(
+            "episode_edges", self._corr_enc_row(episode_edge_to_row(edge)),
+        )
+        return edge.id
+
+    def update_episode_edge(self, edge: EpisodeEdge) -> None:
+        self._c_update(
+            "episode_edges", edge.id,
+            self._corr_enc_row(episode_edge_to_row(edge)),
+        )
+
+    def get_episode_edge(self, edge_id: str) -> Optional[EpisodeEdge]:
+        row = self._j_fetchone(
+            "SELECT * FROM episode_edges WHERE id = ?", (edge_id,),
+        )
+        return row_to_episode_edge(row, decrypt=self._corr_dec) if row else None
+
+    def list_episode_edges(self, episode_id: str) -> list[EpisodeEdge]:
+        rows = self._j_fetchall(
+            "SELECT * FROM episode_edges WHERE episode_id = ? ORDER BY id",
+            (episode_id,),
+        )
+        return [row_to_episode_edge(r, decrypt=self._corr_dec) for r in rows]
+
+    def delete_episode_edge(self, edge_id: str) -> None:
+        self._j_exec("DELETE FROM episode_edges WHERE id = ?", (edge_id,))
+        self._j_commit()
+
+    # -- incremental correlation dirty index -------------------------------
+
+    def mark_correlation_dirty(
+        self, connector_record_id: str, *, vault_id: str = "", reason: str = "",
+    ) -> None:
+        from twin.clock import now_iso as _now
+        if not connector_record_id:
+            return
+        existing = self._j_fetchone(
+            "SELECT connector_record_id FROM correlation_dirty "
+            "WHERE connector_record_id = ?",
+            (connector_record_id,),
+        )
+        if existing:
+            self._j_exec(
+                "UPDATE correlation_dirty SET vault_id = ?, reason = ?, "
+                "marked_at = ? WHERE connector_record_id = ?",
+                (vault_id or "", reason or "", _now(), connector_record_id),
+            )
+            self._j_commit()
+            return
+        self._c_insert("correlation_dirty", {
+            "connector_record_id": connector_record_id,
+            "vault_id": vault_id or "",
+            "reason": reason or "",
+            "marked_at": _now(),
+        })
+
+    def list_correlation_dirty(
+        self, *, vault_id: Optional[str] = None, limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        if vault_id:
+            rows = self._j_fetchall(
+                "SELECT connector_record_id, vault_id, reason, marked_at "
+                "FROM correlation_dirty WHERE vault_id = ? "
+                "ORDER BY marked_at ASC LIMIT ?",
+                (vault_id, limit),
+            )
+        else:
+            rows = self._j_fetchall(
+                "SELECT connector_record_id, vault_id, reason, marked_at "
+                "FROM correlation_dirty ORDER BY marked_at ASC LIMIT ?",
+                (limit,),
+            )
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            if hasattr(r, "keys"):
+                out.append({
+                    "connector_record_id": r["connector_record_id"],
+                    "vault_id": r["vault_id"],
+                    "reason": r["reason"],
+                    "marked_at": r["marked_at"],
+                })
+            else:
+                out.append({
+                    "connector_record_id": r[0],
+                    "vault_id": r[1],
+                    "reason": r[2],
+                    "marked_at": r[3],
+                })
+        return out
+
+    def clear_correlation_dirty(self, connector_record_ids: list[str]) -> None:
+        for rid in connector_record_ids:
+            self._j_exec(
+                "DELETE FROM correlation_dirty WHERE connector_record_id = ?",
+                (rid,),
+            )
+        self._j_commit()

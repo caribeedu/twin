@@ -167,3 +167,84 @@ class EpisodeLink(BaseModel):
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EpisodePhaseKind(str, Enum):
+    """Structured arc of a WorkEpisode — goal → decision → execution → outcome.
+
+    ``other`` is the conservative default when a member does not map cleanly;
+    phases are revisable structure, never Memory or Judgment.
+    """
+    goal = "goal"
+    decision = "decision"
+    execution = "execution"
+    outcome = "outcome"
+    other = "other"
+
+
+class EpisodePhaseStatus(str, Enum):
+    proposed = "proposed"
+    active = "active"
+    superseded = "superseded"
+
+
+class EpisodePhase(BaseModel):
+    """One contiguous same-kind stretch of an episode's timeline.
+
+    ``phase_key`` is deterministic within an episode so edges can reference a
+    phase stably across rebuilds. ``id`` is derived from ``phase_key`` too.
+    """
+    id: str = Field(default_factory=lambda: ids.new_id("epphase"))
+    episode_id: str
+    vault_id: str = ""
+    kind: EpisodePhaseKind = EpisodePhaseKind.other
+    phase_key: str = ""                 # stable within episode (kind|anchor ref)
+    order: int = 0
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    status: EpisodePhaseStatus = EpisodePhaseStatus.proposed
+    member_external_refs: list[str] = Field(default_factory=list)
+    member_link_ids: list[str] = Field(default_factory=list)
+    summary: str = ""
+    confidence: float = 0.5
+    # provenance: {"method": "heuristic"|"llm", "twin_influenced": bool}
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EpisodeEdgeRelation(str, Enum):
+    motivated = "motivated"             # A led to / prompted B
+    superseded = "superseded"           # B overturns / replaces A
+    resolved = "resolved"               # B closed / answered A
+    continues = "continues"             # B carries on A
+    contradicts = "contradicts"         # A and B disagree (cross-source)
+
+
+class EpisodeEdgeStatus(str, Enum):
+    proposed = "proposed"
+    confirmed = "confirmed"
+    rejected = "rejected"
+
+
+class EpisodeEdge(BaseModel):
+    """Revisable causal / narrative edge between two phases (or links).
+
+    ``from_ref`` / ``to_ref`` are ``{"kind": "phase"|"link", "id": <key>}``.
+    Phase refs use ``EpisodePhase.phase_key`` so they survive rebuilds. Never
+    auto-writes Memory or Judgment; default status is ``proposed``.
+    """
+    id: str = Field(default_factory=lambda: ids.new_id("epedge"))
+    episode_id: str
+    vault_id: str = ""
+    from_ref: dict[str, Any] = Field(default_factory=dict)
+    to_ref: dict[str, Any] = Field(default_factory=dict)
+    relation: EpisodeEdgeRelation = EpisodeEdgeRelation.continues
+    status: EpisodeEdgeStatus = EpisodeEdgeStatus.proposed
+    confidence: float = 0.5
+    evidence_quote: str = ""
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    metadata: dict[str, Any] = Field(default_factory=dict)

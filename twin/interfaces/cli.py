@@ -1123,8 +1123,8 @@ def cmd_judgment(args) -> None:
     from . import ux
     from ..judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
     from ..judgment.proposals import (
-        approve_proposal, defer_proposal, preview_proposal, propose_from_memory,
-        propose_from_pattern, reject_proposal,
+        approve_proposal, defer_proposal, preview_proposal, propose_from_episode,
+        propose_from_memory, propose_from_pattern, reject_proposal,
     )
     from ..judgment.simulate import counterfactual, simulate
     from ..judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
@@ -1258,6 +1258,22 @@ def cmd_judgment(args) -> None:
             ux.print_next([("→", f"twin judgment preview {p.id}")])
 
         _emit(args, {"id": p.id, "reason": p.reason}, pretty)
+    elif cmd == "propose-episode":
+        p = propose_from_episode(ws.store, args.episode_id, domain=args.domain)
+        if p is None:
+            raise SystemExit(
+                f"episode {args.episode_id} has no confirmed memories to "
+                "generalize (confirm reflected candidates first)"
+            )
+
+        def pretty():
+            ux.print_rule("judgment · propose-episode")
+            ux.print_ok(f"proposal {p.id}")
+            ux.print_dim(p.reason)
+            ux.print_next([("→", f"twin judgment preview {p.id}")])
+
+        _emit(args, {"id": p.id, "reason": p.reason, "episode_id": args.episode_id},
+              pretty)
     elif cmd == "preview":
         text = preview_proposal(ws.store, args.proposal_id)
 
@@ -2693,6 +2709,7 @@ def cmd_correlate(args) -> None:
         ws.store,
         connector_ids=args.connector or None,
         detect_conflicts=not args.no_conflicts,
+        mode=getattr(args, "mode", "full"),
     )
     print(
         f"scanned={report.records_scanned} "
@@ -2729,6 +2746,85 @@ def cmd_episode(args) -> None:
                 f"  link {link.kind.value} conf={link.confidence:.2f} "
                 f"{link.external_type}:{link.external_id}"
             )
+        phases = ws.store.list_episode_phases(ep.id)
+        if phases:
+            print("  phases:")
+            for ph in phases:
+                span = f"{ph.started_at or '?'}→{ph.ended_at or '?'}"
+                print(
+                    f"    {ph.order}. [{ph.kind.value}] {span} "
+                    f"{ph.summary[:60]}"
+                )
+        edges = ws.store.list_episode_edges(ep.id)
+        if edges:
+            print("  edges:")
+            for ed in edges:
+                print(
+                    f"    {ed.relation.value} [{ed.status.value}] "
+                    f"{ed.from_ref.get('id')} → {ed.to_ref.get('id')} "
+                    f"({ed.id})"
+                )
+    elif args.episode_command == "phases":
+        ep = ws.store.get_work_episode(args.episode_id)
+        if ep is None:
+            raise SystemExit(f"episode {args.episode_id} not found")
+        phases = ws.store.list_episode_phases(ep.id)
+        if not phases:
+            print("(no phases — run twin correlate first)")
+        for ph in phases:
+            span = f"{ph.started_at or '?'} → {ph.ended_at or '?'}"
+            method = (ph.provenance or {}).get("method", "heuristic")
+            print(
+                f"{ph.order}. [{ph.kind.value}] {span}  conf={ph.confidence:.2f} "
+                f"({method})"
+            )
+            if ph.summary:
+                print(f"     {ph.summary}")
+            print(f"     members: {', '.join(ph.member_external_refs) or '—'}")
+    elif args.episode_command == "edges":
+        ep = ws.store.get_work_episode(args.episode_id)
+        if ep is None:
+            raise SystemExit(f"episode {args.episode_id} not found")
+        edges = ws.store.list_episode_edges(ep.id)
+        if not edges:
+            print("(no edges — run twin correlate first)")
+        for ed in edges:
+            print(
+                f"{ed.id}  {ed.relation.value} [{ed.status.value}] "
+                f"conf={ed.confidence:.2f}"
+            )
+            print(
+                f"     {ed.from_ref.get('id')} → {ed.to_ref.get('id')}"
+            )
+            if ed.evidence_quote:
+                print(f"     “{ed.evidence_quote[:100]}”")
+    elif args.episode_command == "edge":
+        from ..cognition.correlation.edges import confirm_edge, reject_edge
+        if args.edge_action == "confirm":
+            ed = confirm_edge(ws.store, args.edge_id)
+        else:
+            ed = reject_edge(ws.store, args.edge_id)
+        print(f"{args.edge_action}ed {ed.id} status={ed.status.value}")
+    elif args.episode_command == "reflect":
+        from ..cognition.episode_reflect import reflect_episode
+        result = reflect_episode(
+            ws.store, ws.cfg, ws.embedder, args.episode_id,
+            dry_run=args.dry_run,
+        )
+        print(
+            f"episode {args.episode_id}: {len(result.claims)} trajectory "
+            f"claim(s) {'(dry-run)' if args.dry_run else ''}"
+        )
+        for claim in result.claims:
+            marker = "+" if claim.get("created") else "~"
+            print(
+                f"  {marker} [{claim.get('type')}] {claim.get('title')} "
+                f"(valid_from={claim.get('valid_from') or '?'})"
+            )
+            if claim.get("memory_id"):
+                print(f"      → candidate {claim['memory_id']}")
+        if result.skipped_reason:
+            print(f"  skipped: {result.skipped_reason}")
     elif args.episode_command == "explain":
         import json as _json
         from ..cognition.correlation.explain import explain_episode
@@ -3119,6 +3215,13 @@ def main(argv: list[str] | None = None) -> None:
     ppr = js.add_parser("propose")
     ppr.add_argument("--from-memory"); ppr.add_argument("--domain", default="technical")
     ppr.set_defaults(func=cmd_judgment)
+    ppe = js.add_parser(
+        "propose-episode",
+        help="seed a judgment proposal from an episode's confirmed trajectory",
+    )
+    ppe.add_argument("episode_id")
+    ppe.add_argument("--domain", default=None)
+    ppe.set_defaults(func=cmd_judgment)
     ppv = js.add_parser("preview"); ppv.add_argument("proposal_id"); ppv.set_defaults(func=cmd_judgment)
     pap = js.add_parser("approve")
     pap.add_argument("proposal_id"); pap.add_argument("--token", required=True)
@@ -3408,7 +3511,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--connector", action="append",
                    help="limit to connector instance id (repeatable)")
     p.add_argument("--no-conflicts", action="store_true")
-    p.set_defaults(func=cmd_correlate)
+    mode_grp = p.add_mutually_exclusive_group()
+    mode_grp.add_argument(
+        "--full", dest="mode", action="store_const", const="full",
+        help="full rebuild (correctness oracle; default)",
+    )
+    mode_grp.add_argument(
+        "--incremental", dest="mode", action="store_const", const="incremental",
+        help="only re-correlate records marked dirty since last pass",
+    )
+    p.set_defaults(func=cmd_correlate, mode="full")
 
     p = sub.add_parser("episode", help="WorkEpisode inspection")
     ep_sub = p.add_subparsers(dest="episode_command", required=True)
@@ -3417,6 +3529,23 @@ def main(argv: list[str] | None = None) -> None:
     ep.set_defaults(func=cmd_episode)
     ep = ep_sub.add_parser("show")
     ep.add_argument("episode_id")
+    ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser("phases", help="list the arc phases of an episode")
+    ep.add_argument("episode_id")
+    ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser("edges", help="list causal/narrative edges of an episode")
+    ep.add_argument("episode_id")
+    ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser("edge", help="confirm/reject a narrative edge")
+    ep.add_argument("edge_action", choices=["confirm", "reject"])
+    ep.add_argument("edge_id")
+    ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser(
+        "reflect", help="synthesize trajectory MemoryCandidates from the episode arc",
+    )
+    ep.add_argument("episode_id")
+    ep.add_argument("--dry-run", action="store_true",
+                    help="show trajectory claims without persisting candidates")
     ep.set_defaults(func=cmd_episode)
     ep = ep_sub.add_parser("explain", help="why this episode exists (anchors/links)")
     ep.add_argument("episode_id")

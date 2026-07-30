@@ -193,7 +193,7 @@ Phase 7 — Cross-source cognition:
 - CLI: `twin correlate`, `twin episode list|show|explain`, `twin identity list|links|confirm|unconfirm|reject|why`, `twin project link|links|confirm|reject|historical|explain`;
 - `tests/cognition/correlation/test_service.py`, `tests/cognition/correlation/test_lifecycle.py`, and eval `cross_source_work_episode`.
 
-Still deferred to **[Correlation depth](ROADMAP.md#correlation-depth-planned-vx--after-phase-7)** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
+Still deferred to **[Correlation depth](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14)** (remainder in 1.3.x / 1.4 — not a Phase 10 blocker): multi-factor confidence, identity graphs + Entity resolution, HTTP/MCP explain APIs, scale/replay evals.
 
 Phase 8 — Native proof:
 
@@ -226,7 +226,7 @@ Phase 10 — Final Review:
 - documents §94 out-of-scope and §95 thesis alongside the matrix payload;
 - eval `connector_completion`.
 
-v0.6 is complete when `twin connector completion` reports `ok: true` and the connector/correlation/native suites remain green. [Correlation depth](ROADMAP.md#correlation-depth-planned-vx--after-phase-7) (episode phases, multi-factor confidence, identity graphs, causality, incremental correlation, HTTP/MCP explain, scale evals) stays deferred to later `vX` — not a Phase 10 blocker.
+v0.6 is complete when `twin connector completion` reports `ok: true` and the connector/correlation/native suites remain green. [Correlation depth](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14) remainder (multi-factor confidence, identity graphs, HTTP/MCP explain, scale evals) stays deferred to 1.3.x / 1.4 — not a Phase 10 blocker.
 
 ### v0.7 — Cognitive Interpretation
 
@@ -249,7 +249,7 @@ Delivered:
 
 ### v0.8 — Parallel Memory and Consolidation
 
-Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model. Natural consumer of [Correlation depth](ROADMAP.md#correlation-depth-planned-vx--after-phase-7): incremental correlation and episode-phase updates should feed consolidation without full rescans.
+Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model. Natural consumer of [Correlation depth](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14): incremental correlation and episode-phase updates feed consolidation without full rescans.
 
 Delivered:
 
@@ -419,6 +419,25 @@ Delivered:
 - drop versioned completion gates and phase folklore (`twin eval v1-completion` / connector completion matrices → behavior tests and `twin connector contract` / production-ready report);
 - docs/README polish: `CONNECTION.md` → `INTERFACES.md`, ROADMAP for future majors, CHANGELOG as release history, clearer how-to-use and visuals;
 - package/`__version__` to `1.2.0`.
+
+### v1.3.0 — Correlation depth, episode arc and reflect
+
+Goal: deepen `WorkEpisode` from a flat cluster into an explainable arc (phases and narrative edges) and let cognition synthesize cross-source trajectory claims as MemoryCandidates — without auto-confirming Memory or Judgment.
+
+Delivered:
+
+- deterministic `EpisodePhase` arc over active members (`goal → decision → execution → outcome`), rebuilt on every membership change; a decision reversal stays two decision phases instead of collapsing the pivot;
+- revisable `EpisodeEdge`s (`motivated | superseded | resolved | continues | contradicts`) proposed from the phase arc and member language; human `confirm` / `reject` survives rebuilds; edges never alone create Memory;
+- incremental correlation MVP: `correlation_dirty` index (marked on connector commit / tombstone) drives `twin correlate --incremental`; full rebuild (`--full`, default) remains the correctness oracle; parity-tested on fixtures;
+- `twin episode reflect` reads phases and edges and synthesizes trajectory claims (e.g. intended approach X, then chose Y) as MemoryCandidates only (`needs_review=True`, `review_reason=episode_reflect`); `valid_from` tracks the decision phase, not the extract clock; idempotent via formation identity; `twin_influenced` when a model is used; structural offline path or model-backed;
+- weekly consolidation reflects eligible episodes (≥2 phases and a `superseded|motivated` edge) into candidates; the confirm-snapshot invariant still forbids any auto-confirm;
+- `propose_from_episode` / `propose_from_episode_patterns` seed pending `JudgmentProposal`s (`provenance.source=episode_pattern`) from confirmed trajectory memories or confirmed pivots across episodes; complements the weekly demo detector; still preview-token + human `judgment proposal approve`;
+- CLI: `twin episode phases|edges|edge confirm|reject|reflect`, `twin correlate --incremental|--full`, `twin judgment propose-episode`;
+- docs: ROADMAP Correlation depth split into delivered (v1.3.0) and remainder (1.3.x / 1.4); INTERFACES + OPERATIONS cover correlate modes and episode reflect.
+
+Follow-on (not blocking v1.3.0): multi-factor confidence composition, identity-as-graph / entity resolution, HTTP/MCP episode graph APIs, full load/replay eval suite — see [Correlation depth remainder](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14).
+
+
 
 ---
 

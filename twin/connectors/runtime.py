@@ -368,6 +368,19 @@ def _persist_partial(store, batch: ConnectorBatch, staged: _Staged) -> None:
         store.update_connector_batch(batch)
 
 
+def _mark_correlation_dirty(store, account: SourceAccount, rec: ConnectorRecord,
+                            *, reason: str) -> None:
+    """Thin, fail-open hook: flag a committed record for incremental
+    correlation. A store without the correlation mixin still commits."""
+    marker = getattr(store, "mark_correlation_dirty", None)
+    if marker is None:
+        return
+    try:
+        marker(rec.id, vault_id=account.vault_id or "", reason=reason)
+    except Exception:
+        pass
+
+
 def persist_committed_record(
     store, account: SourceAccount, instance: ConnectorInstance,
     rec: ConnectorRecord, batch: ConnectorBatch, *, emit_percepts: bool,
@@ -377,6 +390,7 @@ def persist_committed_record(
     if rec.deleted:
         rec.percept_id = None
         store.insert_connector_record(rec)
+        _mark_correlation_dirty(store, account, rec, reason="tombstone")
         return
     quar = screen_record(store, rec)
     if quar is not None:
@@ -386,6 +400,7 @@ def persist_committed_record(
         batch.quarantined_count += 1
         return
     store.insert_connector_record(rec)
+    _mark_correlation_dirty(store, account, rec, reason="commit")
     if emit_percepts:
         percept = build_percept(account, instance, rec)
         pid = store.insert_percept(percept)

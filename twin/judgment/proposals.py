@@ -180,6 +180,156 @@ def propose_from_pattern(
     return [proposal]
 
 
+def _episode_confirmed_memories(
+    store: MemoryStore, episode_id: str, *, limit: int = 2000,
+) -> list[MemoryItem]:
+    """Confirmed memories tied to an episode (typically from ``episode_reflect``)."""
+    out: list[MemoryItem] = []
+    for m in store.list_memories(status="confirmed", limit=limit):
+        if (m.payload or {}).get("episode_id") == episode_id:
+            out.append(m)
+    return out
+
+
+def propose_from_episode(
+    store: MemoryStore,
+    episode_id: str,
+    *,
+    domain: Optional[str] = None,
+) -> Optional[JudgmentProposal]:
+    """Seed a Judgment proposal from an episode's *confirmed* trajectory memories.
+
+    Only fires when the episode already has human-confirmed memories (from
+    reflect, or otherwise linked). Never confirms Judgment — produces a pending
+    proposal for human approval. Returns ``None`` when there is nothing stable.
+    """
+    mems = _episode_confirmed_memories(store, episode_id)
+    if not mems:
+        return None
+    # Prefer decision/belief trajectory claims from episode reflection.
+    trajectory = [
+        m for m in mems
+        if (m.payload or {}).get("trajectory")
+        or m.type.value in ("decision", "belief")
+    ] or mems
+    seed = max(trajectory, key=lambda m: m.confidence)
+    dom = domain or seed.domain
+    twin_influenced = bool(
+        (seed.payload or {}).get("twin_influenced")
+        or (seed.payload or {}).get("judgment_influenced")
+    )
+    memory_ids = [m.id for m in trajectory]
+    item = {
+        "kind": JudgmentKind.heuristic.value,
+        "statement": seed.summary or seed.title,
+        "description": (
+            f"Generalized from the confirmed trajectory of episode {episode_id}: "
+            f"{seed.title}. Detector: episode_pattern."
+        ),
+        "domain": dom,
+        "strength": 0.6,
+        "confidence": min(0.8, 0.5 + 0.05 * len(memory_ids)) if not twin_influenced else 0.55,
+        "stability": JudgmentStability.evolving.value,
+        "scope": {
+            "domains": [dom],
+            "projects": [seed.project_id] if seed.project_id else [],
+        },
+        "provenance": {
+            "memory_ids": memory_ids,
+            "source": "episode_pattern",
+            "twin_influenced": twin_influenced,
+            "independence_weight": 0.4 if twin_influenced else 1.0,
+        },
+    }
+    proposal = JudgmentProposal(
+        id=ids.judgment_proposal_id(),
+        action=ProposalAction.create,
+        proposed_item=item,
+        reason=(
+            f"Confirmed trajectory of episode {episode_id} "
+            f"(support={len(memory_ids)}) suggests a durable heuristic."
+        ),
+        supporting_memory_ids=memory_ids,
+        support_count=len(memory_ids),
+        confidence=float(item["confidence"]),
+        scope={"domain": dom},
+        status=ProposalStatus.pending,
+        created_at=now_iso(),
+        metadata={"detector": "episode_pattern", "episode_id": episode_id},
+    )
+    store.insert_judgment_proposal(proposal)
+    return proposal
+
+
+def propose_from_episode_patterns(
+    store: MemoryStore,
+    *,
+    domain: str = "technical",
+    min_evidence: int = 2,
+    min_episodes: int = 2,
+) -> list[JudgmentProposal]:
+    """Scan confirmed trajectory memories across episodes for a stable pattern.
+
+    Complements :func:`propose_from_pattern`; restricted to ``episode_reflect``
+    trajectory decisions so it only generalizes cross-source arcs a human has
+    confirmed. Returns pending proposals (never confirms Judgment).
+    """
+    trajectory = [
+        m for m in store.list_memories(
+            type_="decision", status="confirmed", limit=2000,
+        )
+        if (m.payload or {}).get("source") == "episode_reflect"
+        and (domain == "any" or m.domain == domain)
+    ]
+    episodes = {
+        (m.payload or {}).get("episode_id") for m in trajectory
+        if (m.payload or {}).get("episode_id")
+    }
+    if len(trajectory) < min_evidence or len(episodes) < min_episodes:
+        return []
+    supporting = [m.id for m in trajectory]
+    item = {
+        "kind": JudgmentKind.heuristic.value,
+        "statement": (
+            "Reconsiders early technical approaches when a simpler or more "
+            "reversible option emerges, rather than committing to the first choice."
+        ),
+        "description": (
+            f"Observed across {len(episodes)} episodes with confirmed pivots. "
+            "Detector: episode_pattern (trajectory cluster)."
+        ),
+        "domain": domain,
+        "strength": 0.6,
+        "confidence": min(0.8, 0.5 + 0.05 * len(supporting)),
+        "stability": JudgmentStability.evolving.value,
+        "scope": {"domains": [domain], "task_profiles": ["architecture", "planning"]},
+        "provenance": {
+            "memory_ids": supporting,
+            "source": "episode_pattern",
+            "twin_influenced": False,
+            "independence_weight": 1.0,
+        },
+    }
+    proposal = JudgmentProposal(
+        id=ids.judgment_proposal_id(),
+        action=ProposalAction.create,
+        proposed_item=item,
+        reason=(
+            f"[episode_pattern] Confirmed trajectory pivots across "
+            f"{len(episodes)} episodes (support={len(supporting)})."
+        ),
+        supporting_memory_ids=supporting,
+        support_count=len(supporting),
+        confidence=float(item["confidence"]),
+        scope={"domain": domain},
+        status=ProposalStatus.pending,
+        created_at=now_iso(),
+        metadata={"detector": "episode_pattern"},
+    )
+    store.insert_judgment_proposal(proposal)
+    return [proposal]
+
+
 def _memory_fingerprint(store: MemoryStore, memory_id: str) -> dict[str, Any]:
     m = store.get_memory(memory_id)
     if m is None:

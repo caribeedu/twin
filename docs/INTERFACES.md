@@ -451,9 +451,23 @@ Add `--json` to any of them to get machine-readable output for scripting and pip
 | `twin promote <mem_id>` | Open a judgment proposal from a memory (does **not** auto-write). |
 | `twin judgment import\|export\|list\|show\|history\|versions` | Bootstrap and inspect judgment store. |
 | `twin judgment proposals\|propose\|preview\|approve\|reject\|defer` | Proposal lifecycle (approve needs preview token). |
+| `twin judgment propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory memories (`provenance.source=episode_pattern`; human approval only). |
 | `twin judgment simulate <query> --domain …` | Simulate applicable judgment. |
 | `twin judgment conflicts [--refresh]` | List / refresh conflicts. |
 | `twin judgment explain <trace_id>` | Explain a judgment application trace. |
+
+### Correlation (Episodes)
+
+Correlation proposes revisable structure over connector evidence — never Memory or Judgment. See [Correlation depth](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14).
+
+| Command | What it does |
+|---|---|
+| `twin correlate [--full\|--incremental]` | Cross-source pass → identities, project maps, WorkEpisodes (phases + edges), conflicts. `--full` (default) rescans all records; `--incremental` re-correlates only records marked dirty since the last pass. |
+| `twin episode list\|show\|explain <id>` | Inspect an episode; `show` lists its phase arc and edges; `explain` dumps anchors/links/phases/edges as JSON. |
+| `twin episode phases <id>` | List the `goal → decision → execution → outcome` arc phases. |
+| `twin episode edges <id>` | List proposed causal/narrative edges (`motivated\|superseded\|resolved\|continues\|contradicts`). |
+| `twin episode edge confirm\|reject <edge_id>` | Human decision on an edge (survives rebuilds). |
+| `twin episode reflect <id> [--dry-run]` | Synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Does **not** replace `twin extract`. |
 
 ### Workspace, evals, connectors
 

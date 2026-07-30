@@ -16,6 +16,11 @@ from .interpreter import (
     InterpretedItem,
     set_interpreter_override,
 )
+from .episode_reflect import (
+    ReflectResult,
+    reflect_episode,
+    set_reflect_override,
+)
 from .pipeline import ExtractReport, extract_pending, extract_percept
 
 __all__ = [
@@ -24,7 +29,10 @@ __all__ = [
     "InterpretationResult",
     "InterpretationStatus",
     "InterpretedItem",
+    "ReflectResult",
     "extract_pending",
     "extract_percept",
+    "reflect_episode",
     "set_interpreter_override",
+    "set_reflect_override",
 ]

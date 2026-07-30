@@ -76,6 +76,36 @@ def explain_episode(store, episode_id: str) -> dict[str, Any]:
                 )),
             })
 
+    phases: list[dict[str, Any]] = []
+    if hasattr(store, "list_episode_phases"):
+        for p in store.list_episode_phases(episode_id):
+            phases.append({
+                "id": p.id,
+                "phase_key": p.phase_key,
+                "kind": getattr(p.kind, "value", p.kind),
+                "order": p.order,
+                "status": getattr(p.status, "value", p.status),
+                "started_at": p.started_at,
+                "ended_at": p.ended_at,
+                "summary": p.summary,
+                "members": list(p.member_external_refs or []),
+                "confidence": p.confidence,
+                "provenance": dict(p.provenance or {}),
+            })
+    edges: list[dict[str, Any]] = []
+    if hasattr(store, "list_episode_edges"):
+        for e in store.list_episode_edges(episode_id):
+            edges.append({
+                "id": e.id,
+                "relation": getattr(e.relation, "value", e.relation),
+                "status": getattr(e.status, "value", e.status),
+                "from": e.from_ref,
+                "to": e.to_ref,
+                "confidence": e.confidence,
+                "evidence_quote": e.evidence_quote,
+                "provenance": dict(e.provenance or {}),
+            })
+
     return {
         "episode_id": ep.id,
         "vault_id": ep.vault_id,
@@ -84,6 +114,8 @@ def explain_episode(store, episode_id: str) -> dict[str, Any]:
         "status": getattr(ep.status, "value", ep.status),
         "project_id": ep.project_id,
         "confidence": ep.confidence,
+        "phases": phases,
+        "edges": edges,
         "confidence_basis": (
             "max(active EpisodeLink.confidence); recomputed on membership rebuild"
         ),

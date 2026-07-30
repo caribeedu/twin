@@ -47,6 +47,7 @@ class ConsolidationCycleResult:
     temporal_updates: list[dict[str, Any]] = field(default_factory=list)
     goals_observed: list[dict[str, Any]] = field(default_factory=list)
     judgment_proposal_ids: list[str] = field(default_factory=list)
+    reflected_candidate_ids: list[str] = field(default_factory=list)
     closed_sessions: list[dict[str, Any]] = field(default_factory=list)
     open_tasks: list[dict[str, Any]] = field(default_factory=list)
     review_prepared: list[dict[str, Any]] = field(default_factory=list)
@@ -294,6 +295,48 @@ def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[s
         "total_candidates": sum(counts.values()),
         "corroboration_events": corroborating,
     }
+
+
+def reflect_recent_episodes(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    dry_run: bool = False,
+    max_episodes: int = 25,
+    scan_limit: int = 500,
+) -> list[str]:
+    """Reflect episodes with a narrative arc into trajectory MemoryCandidates.
+
+    Only episodes with ≥2 phases and a ``superseded|motivated`` edge are
+    reflected (``reflect_episode`` enforces this too). Candidates only — never
+    confirms. Returns the created candidate memory ids.
+    """
+    from .episode_reflect import reflect_episode
+
+    if not hasattr(store, "list_work_episodes"):
+        return []
+    created: list[str] = []
+    reflected = 0
+    for ep in store.list_work_episodes(limit=scan_limit):
+        if reflected >= max_episodes:
+            break
+        status = ep.status.value if hasattr(ep.status, "value") else str(ep.status)
+        if status not in ("active", "candidate", "closed"):
+            continue
+        try:
+            result = reflect_episode(
+                store, cfg, embedder, ep.id, dry_run=dry_run,
+            )
+        except Exception:
+            continue
+        if result.skipped_reason and not result.claims:
+            continue
+        reflected += 1
+        for claim in result.claims:
+            if claim.get("memory_id") and claim.get("created"):
+                created.append(claim["memory_id"])
+    return created
 
 
 def build_cognitive_change_report(
@@ -593,10 +636,23 @@ def run_consolidation_cycle(
         )
         result.candidate_stats = candidate_formation_stats(store)
 
+        if kind == "weekly":
+            stage = "episode_reflect"
+            result.stages.append("episode_reflect")
+            if dry_run:
+                result.notes.append("dry_run skipped episode reflection")
+            else:
+                result.reflected_candidate_ids = reflect_recent_episodes(
+                    store, cfg, embedder,
+                )
+
         if propose_judgment:
             stage = "judgment_proposals"
             result.stages.append("judgment_proposals")
-            from ..judgment.proposals import propose_from_pattern
+            from ..judgment.proposals import (
+                propose_from_episode_patterns,
+                propose_from_pattern,
+            )
             detector = "simplicity_cluster_demo"
             if dry_run:
                 result.notes.append("dry_run skipped judgment proposals")
@@ -604,11 +660,19 @@ def run_consolidation_cycle(
                 existing = _existing_window_proposals(
                     store, window_key=window_key, detector=detector,
                 )
-                if existing:
-                    result.judgment_proposal_ids = existing
+                episode_detector = "episode_pattern"
+                existing_ep = _existing_window_proposals(
+                    store, window_key=window_key, detector=episode_detector,
+                )
+                if existing or existing_ep:
+                    result.judgment_proposal_ids = existing + existing_ep
                     result.notes.append("reused judgment proposals for window")
                 else:
-                    proposals = propose_from_pattern(store, domain="technical")
+                    proposals = list(propose_from_pattern(store, domain="technical"))
+                    # Complement the demo detector with episode-arc patterns.
+                    proposals += list(
+                        propose_from_episode_patterns(store, domain="technical")
+                    )
                     for p in proposals:
                         meta = dict(getattr(p, "metadata", None) or {})
                         meta["consolidation_window"] = window_key

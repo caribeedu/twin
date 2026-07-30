@@ -19,10 +19,12 @@ def cfg(tmp_path):
 def _reset_interpreter_override():
     """Guarantee no scripted interpreter override leaks between tests — a test
     that authors an interpretation (set_interpreter_override) is isolated."""
-    from twin.cognition import set_interpreter_override
+    from twin.cognition import set_interpreter_override, set_reflect_override
     set_interpreter_override(None)
+    set_reflect_override(None)
     yield
     set_interpreter_override(None)
+    set_reflect_override(None)
 
 
 @pytest.fixture()
