@@ -370,6 +370,133 @@ def progress_bar(total: int, *, description: str = "Working") -> Iterator:
         yield advance
 
 
+def _current_backfill_partition(progress: dict) -> str:
+    for part in progress.get("partitions") or []:
+        status = part.get("status")
+        if status in ("running", "continuation_pending", "planned", "failed"):
+            return str(part.get("partition_key") or "")
+    return ""
+
+
+def watch_backfill_job(
+    store,
+    job_id: str,
+    *,
+    poll_seconds: float = 0.5,
+    stall_warn_seconds: float = 8.0,
+    stop_check=None,
+) -> dict:
+    """Poll a BackfillJob until terminal; show progress bar + ETA (watch only).
+
+    Does not execute partitions — the cognitive runtime must drain
+    ``backfill_partition`` jobs. Warns if progress stalls (runtime likely down).
+    """
+    job = store.get_backfill_job(job_id)
+    if job is None:
+        raise ValueError(f"backfill job {job_id} not found")
+    progress = job.progress or {}
+    total = int(progress.get("total_partitions") or 0)
+    completed = int(progress.get("completed_partitions") or 0)
+    terminal = {"completed", "failed", "cancelled"}
+    status = job.status.value if hasattr(job.status, "value") else str(job.status)
+    if status in terminal:
+        print_kv([
+            ("job", job_id),
+            ("status", status),
+            ("partitions", f"{completed}/{total}"),
+        ])
+        return {
+            "job_id": job_id,
+            "status": status,
+            "completed_partitions": completed,
+            "total_partitions": total,
+            "done": True,
+        }
+
+    print_rule("backfill · run")
+    print_kv([
+        ("job", job_id),
+        ("connector", job.connector_id),
+        ("partitions", f"{completed}/{total}"),
+    ])
+    print_dim("watching runtime · partitions execute via twin runtime start")
+
+    warned_stall = False
+    started = time.monotonic()
+    last_completed = completed
+    last_version = int(getattr(job, "version", 0) or 0)
+    last_progress_at = started
+    bar_total = max(total, 1)
+    stalled_exit = False
+
+    with progress_bar(bar_total, description="Backfill") as advance:
+        for _ in range(min(completed, bar_total)):
+            advance()
+        while True:
+            if stop_check is not None and stop_check():
+                break
+            job = store.get_backfill_job(job_id)
+            if job is None:
+                raise ValueError(f"backfill job {job_id} disappeared")
+            progress = job.progress or {}
+            new_completed = int(progress.get("completed_partitions") or 0)
+            label = _current_backfill_partition(progress)
+            while last_completed < new_completed:
+                last_completed += 1
+                last_progress_at = time.monotonic()
+                advance(label=label or f"{last_completed}/{total}")
+            ver = int(getattr(job, "version", 0) or 0)
+            if ver != last_version:
+                last_version = ver
+                last_progress_at = time.monotonic()
+                warned_stall = False
+            status = (
+                job.status.value if hasattr(job.status, "value") else str(job.status)
+            )
+            if status in terminal:
+                break
+            stalled_for = time.monotonic() - last_progress_at
+            if not warned_stall and stalled_for >= stall_warn_seconds:
+                warned_stall = True
+                print_warn(
+                    "no partition progress yet — is `twin runtime start` running?"
+                )
+            elif warned_stall and stalled_for >= stall_warn_seconds * 2:
+                print_err(
+                    "still no progress — start the runtime, then re-run --run"
+                )
+                stalled_exit = True
+                break
+            time.sleep(max(0.1, poll_seconds))
+
+    job = store.get_backfill_job(job_id)
+    progress = (job.progress if job else None) or {}
+    status = (
+        job.status.value if job and hasattr(job.status, "value")
+        else (str(job.status) if job else "unknown")
+    )
+    out = {
+        "job_id": job_id,
+        "status": status,
+        "completed_partitions": int(progress.get("completed_partitions") or 0),
+        "total_partitions": int(progress.get("total_partitions") or 0),
+        "done": status in terminal,
+        "stalled": stalled_exit,
+        "last_error": (job.last_error if job else None),
+        "elapsed_seconds": round(time.monotonic() - started, 1),
+    }
+    if status == "completed":
+        print_ok(
+            f"backfill complete · {out['completed_partitions']}/"
+            f"{out['total_partitions']} partitions"
+        )
+    elif status == "failed":
+        print_err(f"backfill failed · {(job.last_error if job else None) or 'see job status'}")
+    elif status == "cancelled":
+        print_warn("backfill cancelled")
+    return out
+
+
 @contextmanager
 def spinner(text: str = "Working…") -> Iterator[None]:
     r = _rich()

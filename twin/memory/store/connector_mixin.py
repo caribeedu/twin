@@ -775,6 +775,16 @@ class ConnectorStoreMixin:
         )
         return [row_to_backfill_job(r) for r in rows]
 
+    def list_active_backfill_jobs(self) -> list[BackfillJob]:
+        """BackfillJobs the runtime scheduler should keep driving."""
+        rows = self._j_fetchall(
+            "SELECT * FROM connector_backfill_jobs"
+            " WHERE status IN ('planned', 'running')"
+            " ORDER BY created_at ASC",
+            (),
+        )
+        return [row_to_backfill_job(r) for r in rows]
+
     def update_backfill_job(self, job: BackfillJob) -> None:
         job.updated_at = now_iso()
         self._c_update("connector_backfill_jobs", job.id, backfill_job_to_row(job))

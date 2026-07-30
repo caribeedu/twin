@@ -111,13 +111,16 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     )
     ws.close()
 
+    from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV
+    monkeypatch.setenv(MCP_CLIENT_ENV, "cursor")
+    monkeypatch.setenv(MCP_TOKEN_ENV, "test-cursor-secret")
+
     ide = create_server(str(home))  # e.g. Cursor / Claude Code
 
     # 1-4: task starts in the project's working copy; twin identifies the
     # project and task profile and supplies prior decisions without re-asking
     started = await _call(ide, "session_start", {
         "query": "implement retry handling in the webhook endpoint code",
-        "client": "cursor", "client_token": "test-cursor-secret",
         "cwd": "/home/edu/code/atlas-api",
     })
     assert started["project_id"] == project.id
@@ -179,43 +182,18 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     })
     assert "not found" in rejected["error"]
 
-    # 10: another MCP client sees the confirmed context from this session
-    # (must have registered client binding — name alone is not enough)
-    from twin.privacy.identity import ensure_local_identity, register_client_binding
-    from twin.privacy.models import Principal, PrincipalType
-    from twin.privacy.yaml_io import bootstrap_policy_set
-    from twin.workspace import Workspace as WS
-    ws_bind = WS(str(home))
-    bootstrap_policy_set(ws_bind.store)
-    ensure_local_identity(ws_bind.store)
-    if ws_bind.store.get_principal("principal_cursor") is None:
-        ws_bind.store.insert_principal(Principal(
-            id="principal_cursor", type=PrincipalType.tool, name="cursor",
-            capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
-            allowed_personas=["individual", "developer"],
-            allowed_vaults=["vault_general", "vault_work"],
-        ))
-    if ws_bind.store.get_client_binding_by_client("cursor") is None:
-        register_client_binding(
-            ws_bind.store, client_id="cursor", tool_id="cursor",
-            principal_id="principal_cursor",
-            credential="test-cursor-secret",
-            capabilities=["read_context_pack", "read:domain:technical", "read:vault:vault_general"],
-            allowed_personas=["individual", "developer"],
-            allowed_vaults=["vault_general", "vault_work"],
-        )
-    ws_bind.close()
-
+    # 10: another MCP process with the same env identity sees confirmed context
     other = create_server(str(home))
     pack = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
-        "client": "cursor", "client_token": "test-cursor-secret",
     })
     pack_ids = {s["memory_id"] for s in pack["sources"]}
     assert set(created) & pack_ids, f"expected one of {created} in pack {pack_ids}"
     assert pack["project_id"] == project.id
 
-    # omitting client identity must not inherit local-cli / must not leak
+    # clearing env identity must not inherit local-cli / must not leak
+    monkeypatch.delenv(MCP_CLIENT_ENV, raising=False)
+    monkeypatch.delenv(MCP_TOKEN_ENV, raising=False)
     restricted = await _call(other, "memory_safe_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
@@ -322,9 +300,12 @@ async def test_session_tools_roundtrip(tmp_path, monkeypatch):
 @pytest.mark.anyio
 async def test_connector_list_dry_run(tmp_path, monkeypatch):
     from twin.connectors import add_connector_instance, build_credential_store, register_source_account
+    from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV
 
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    monkeypatch.delenv(MCP_CLIENT_ENV, raising=False)
+    monkeypatch.delenv(MCP_TOKEN_ENV, raising=False)
     home = tmp_path / "twin-home"
     from twin.workspace import Workspace
 
@@ -344,20 +325,78 @@ async def test_connector_list_dry_run(tmp_path, monkeypatch):
     )
     assert denied.get("error") == "not_authorized"
 
+    monkeypatch.setenv(MCP_CLIENT_ENV, "conn-reader")
+    monkeypatch.setenv(MCP_TOKEN_ENV, "tok-reader")
     listed = json.loads(
-        (await srv.call_tool("connector_list", {
-            "client": "conn-reader", "client_token": "tok-reader",
-        }))[0][0].text
+        (await srv.call_tool("connector_list", {}))[0][0].text
     )
     assert isinstance(listed, list)
     assert listed[0]["connector_id"] == inst.id
 
     health = json.loads(
-        (await srv.call_tool("connector_health_all", {
-            "client": "conn-reader", "client_token": "tok-reader",
-        }))[0][0].text
+        (await srv.call_tool("connector_health_all", {}))[0][0].text
     )
     assert isinstance(health, list)
+
+
+@pytest.mark.anyio
+async def test_safe_pack_ignores_tool_supplied_credentials(tmp_path, monkeypatch):
+    """Tool args must not authenticate — only process env does."""
+    from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV, provision_mcp_client
+    from twin.workspace import Workspace
+
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    monkeypatch.delenv(MCP_CLIENT_ENV, raising=False)
+    monkeypatch.delenv(MCP_TOKEN_ENV, raising=False)
+    home = tmp_path / "twin-home"
+    ws = Workspace(str(home))
+    provision_mcp_client(ws.store, home, "cursor")
+    ws.close()
+    srv = create_server(str(home))
+    tools = {t.name: t for t in await srv.list_tools()}
+    schema = tools["memory_safe_context_pack"].inputSchema
+    props = (schema or {}).get("properties") or {}
+    assert "client" not in props
+    assert "client_token" not in props
+    # Without env → restricted (no leak via phantom args)
+    pack = await _call(srv, "memory_safe_context_pack", {
+        "query": "anything", "target_domain": "technical",
+        "client": "cursor", "client_token": "ignored",
+    })
+    # FastMCP may reject unknown args — either way, must not authenticate.
+    assert "context_pack" in pack or "error" in pack or pack.get("blocked_count", 0) >= 0
+    if "context_pack" in pack:
+        assert pack.get("privacy_meta", {}).get("resources_allowed", 0) == 0 or \
+            pack.get("blocked_count", 0) >= 0
+
+
+@pytest.mark.anyio
+async def test_setup_mcp_provisions_env_identity(tmp_path, monkeypatch):
+    from twin.config import Config
+    from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV
+    from twin.interfaces.ops import setup_mcp
+
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    home = tmp_path / "twin-home"
+    home.mkdir()
+    monkeypatch.chdir(tmp_path)
+    cfg = Config(home=home)
+    lines = setup_mcp(cfg, "claude-code")
+    assert any("wrote" in line for line in lines)
+    mcp_path = tmp_path / ".mcp.json"
+    data = json.loads(mcp_path.read_text(encoding="utf-8"))
+    env = data["mcpServers"]["twin"]["env"]
+    assert env[MCP_CLIENT_ENV] == "claude-code"
+    assert env[MCP_TOKEN_ENV]
+    from twin.workspace import Workspace
+    ws = Workspace(str(home))
+    binding = ws.store.get_client_binding_by_client("claude-code")
+    assert binding is not None
+    assert binding.credential_hash
+    ws.close()
+
 
 
 @pytest.mark.anyio

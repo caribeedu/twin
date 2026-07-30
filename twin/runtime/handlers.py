@@ -188,6 +188,74 @@ def handle_connector_reconcile(
     }
 
 
+def handle_backfill_partition(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    """Advance one BackfillJob partition (historical; not continuous sync)."""
+    if not hasattr(store, "get_backfill_job"):
+        return {"done": True, "note": "backfill unavailable"}
+    from twin.connectors.credentials import build_credential_store
+    from twin.connectors.service import run_backfill_partition
+    from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
+    from twin.runtime.queue import RuntimeQueue
+
+    payload = job.payload or {}
+    backfill_job_id = payload.get("backfill_job_id") or ""
+    if not backfill_job_id:
+        raise HandlerError(
+            "missing backfill_job_id",
+            error_class=ErrorClass.permanent,
+            stage="validate",
+        )
+    emit = bool(payload.get("emit_percepts", True))
+    worker_id = job.worker_id or f"runtime_{job.id[:12]}"
+    creds = build_credential_store(cfg.home)
+    try:
+        out = run_backfill_partition(
+            store, creds, backfill_job_id,
+            emit_percepts=emit,
+            worker_id=worker_id,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "already claimed" in msg:
+            raise HandlerError(
+                msg, error_class=ErrorClass.transient, stage="claim",
+            ) from exc
+        if "not found" in msg:
+            raise HandlerError(
+                msg, error_class=ErrorClass.permanent, stage="validate",
+            ) from exc
+        if " is completed" in msg or " is cancelled" in msg:
+            return {
+                "job_id": backfill_job_id,
+                "done": True,
+                "note": msg,
+            }
+        raise HandlerError(
+            msg, error_class=ErrorClass.permanent, stage="validate",
+        ) from exc
+
+    # Keep draining without waiting for the next scheduler tick.
+    if not out.get("done") and out.get("partition_status") != "failed":
+        try:
+            bf = store.get_backfill_job(backfill_job_id)
+            vault = (
+                ((bf.metadata or {}).get("vault_id") if bf else None)
+                or job.vault_id
+                or "vault_general"
+            )
+            enqueue_backfill_partition_jobs(
+                RuntimeQueue(store), store,
+                vault_id=str(vault),
+                backfill_job_id=backfill_job_id,
+            )
+        except Exception:
+            # Scheduler tick remains the recovery path.
+            pass
+    return out
+
+
 def handle_session_domain_resolve(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
@@ -275,6 +343,7 @@ HANDLERS: dict[JobKind, Handler] = {
     JobKind.reembed_memory: handle_reembed_memory,
     JobKind.integrity_check: handle_integrity_check,
     JobKind.connector_reconcile: handle_connector_reconcile,
+    JobKind.backfill_partition: handle_backfill_partition,
     JobKind.session_domain_resolve: handle_session_domain_resolve,
     JobKind.session_complete: handle_session_complete,
 }

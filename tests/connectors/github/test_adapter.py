@@ -491,6 +491,60 @@ def test_backfill_preview_reports_scope_and_never_ingests(store, creds, gh):
     assert issues["watermark"] == "2026-01-01T10:00:00Z"
 
 
+def test_parse_github_stream_accepts_backfill_namespace():
+    from twin.connectors.github.streams import parse_github_stream
+
+    parsed = parse_github_stream(
+        "backfill:backfill_01abc:2016-07:repo:caribeedu/twin:issues"
+    )
+    assert parsed["mode"] == "backfill"
+    assert parsed["job_id"] == "backfill_01abc"
+    assert parsed["partition_key"] == "2016-07"
+    assert parsed["repo"] == "caribeedu/twin"
+    assert parsed["family"] == "issues"
+    assert parsed["base_stream"] == "repo:caribeedu/twin:issues"
+
+
+def test_backfill_partition_does_not_regress_continuous(store, creds, gh):
+    """GitHub must accept Phase-4 namespaced streams and honor month windows."""
+    from twin.connectors import create_backfill_job, run_backfill_partition
+
+    gh.add_issue(REPO, 1, title="recent", updated_at="2026-01-15T10:00:00Z")
+    _acc, inst = _mk(store, creds, extra_config={
+        "backfill_since": "2020-01-01",
+        "backfill_until": "2020-01-31",
+    })
+    cont = sync_connector(store, creds, inst.id)
+    assert cont.health.value == "healthy"
+    cont_ckpt = store.get_connector_checkpoint(inst.id, f"repo:{REPO}:issues")
+    cont_wm = cont_ckpt.cursor.get("watermark")
+    cont_ver = cont_ckpt.version
+
+    gh.add_issue(REPO, 2, title="old jan", updated_at="2020-01-10T12:00:00Z")
+    gh.add_issue(REPO, 3, title="later", updated_at="2020-03-01T12:00:00Z")
+
+    cfg_before = dict(inst.configuration)
+    job = create_backfill_job(store, creds, inst.id)
+    out = run_backfill_partition(store, creds, job.id)
+    assert out["partition_status"] in ("completed", "continuation_pending")
+
+    cont2 = store.get_connector_checkpoint(inst.id, f"repo:{REPO}:issues")
+    assert cont2.cursor.get("watermark") == cont_wm
+    assert cont2.version == cont_ver
+
+    bf_stream = f"backfill:{job.id}:2020-01:repo:{REPO}:issues"
+    assert store.get_connector_checkpoint(inst.id, bf_stream) is not None
+
+    inst2 = store.get_connector_instance(inst.id)
+    assert inst2.configuration == cfg_before
+
+    ids = {r.external_id for r in store.list_connector_records(inst.id)
+           if r.external_type == "issue"}
+    assert f"{REPO}#1" in ids
+    assert f"{REPO}#2" in ids
+    assert f"{REPO}#3" not in ids
+
+
 def test_list_repositories_setup_helper(store, creds, gh):
     from twin.connectors.registry import build_adapter
 

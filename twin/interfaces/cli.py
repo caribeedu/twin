@@ -1794,9 +1794,77 @@ def cmd_connector(args) -> None:
 
             def pretty():
                 ux.print_rule("backfill · run-partition")
-                ux.print_panel(_json.dumps(out, indent=2, default=str), title="result")
+                ux.print_kv([
+                    ("job", str(out.get("job_id") or args.job_id)),
+                    ("partition", str(out.get("partition_key") or "—")),
+                    ("partition_status", str(out.get("partition_status") or "—")),
+                    ("job_status", str(out.get("job_status") or out.get("status") or "—")),
+                    ("done", "yes" if out.get("done") else "no"),
+                ])
+                if out.get("done"):
+                    ux.print_ok("backfill job complete")
+                else:
+                    ux.print_dim("one partition advanced · prefer --run under twin runtime start")
+                    ux.print_next([
+                        ("→", "twin runtime start"),
+                        ("→", f"twin connector backfill --run --job-id {args.job_id}"),
+                    ])
 
             _emit(args, out, pretty)
+            return
+        if getattr(args, "run", False):
+            from ..runtime.backfill_sched import enqueue_backfill_partition_jobs
+            from ..runtime.queue import RuntimeQueue
+
+            job_id = getattr(args, "job_id", None)
+            if not job_id:
+                if not args.connector_id:
+                    raise SystemExit("--run requires connector_id or --job-id")
+                candidates = [
+                    j for j in ws.store.list_backfill_jobs(args.connector_id)
+                    if j.status.value in ("planned", "running", "failed")
+                ]
+                if not candidates:
+                    raise SystemExit(
+                        "no active backfill job — create one with "
+                        f"`twin connector backfill {args.connector_id} --create`"
+                    )
+                job_id = candidates[0].id
+            job = ws.store.get_backfill_job(job_id)
+            if job is None:
+                raise SystemExit(f"backfill job {job_id} not found")
+            q = RuntimeQueue(ws.store)
+            enqueued = enqueue_backfill_partition_jobs(
+                q, ws.store,
+                vault_id=(job.metadata or {}).get("vault_id") or "vault_general",
+                backfill_job_id=job_id,
+            )
+            if _want_json(args):
+                # JSON path: enqueue only (no live watch loop).
+                prog = job.progress or {}
+                _print({
+                    "job_id": job_id,
+                    "status": job.status.value,
+                    "enqueued": enqueued,
+                    "completed_partitions": prog.get("completed_partitions", 0),
+                    "total_partitions": prog.get("total_partitions", 0),
+                    "mode": "watch",
+                    "note": "partitions execute via twin runtime start",
+                })
+                return
+            if enqueued:
+                ux.print_ok(f"enqueued {len(enqueued)} backfill_partition job(s)")
+            else:
+                ux.print_dim("no new runtime job needed (claim live or already queued)")
+            ux.print_next([
+                ("→", "twin runtime start   # drains backfill_partition jobs"),
+            ])
+            out = ux.watch_backfill_job(ws.store, job_id)
+            if not out.get("done"):
+                ux.print_next([
+                    ("→", "twin runtime start"),
+                    ("→", f"twin connector backfill --run --job-id {job_id}"),
+                ])
             return
         if not args.connector_id:
             raise SystemExit("connector_id required")
@@ -1814,7 +1882,8 @@ def cmd_connector(args) -> None:
                 ])
                 ux.print_ok("backfill job created (no ingest yet)")
                 ux.print_next([
-                    ("→", f"twin connector backfill {args.connector_id} --run-partition --job-id {job.id}"),
+                    ("→", "twin runtime start"),
+                    ("→", f"twin connector backfill {args.connector_id} --run --job-id {job.id}"),
                 ])
 
             _emit(args, data, pretty)
@@ -1838,14 +1907,24 @@ def cmd_connector(args) -> None:
                     ["id", "status", "partitions"],
                     [[j["id"], j["status"], f"{j['completed']}/{j['total']}"] for j in jobs],
                 )
+                active = next(
+                    (j for j in jobs if j["status"] in ("planned", "running", "failed")),
+                    None,
+                )
+                if active:
+                    ux.print_next([
+                        ("→", "twin runtime start"),
+                        ("→", f"twin connector backfill {args.connector_id} --run --job-id {active['id']}"),
+                    ])
 
             _emit(args, {"jobs": jobs, "count": len(jobs)}, pretty)
             return
         if not args.preview:
             raise SystemExit(
                 "use --preview to inspect scope, --create to open a "
-                "BackfillJob, --jobs to list, or --run-partition --job-id ID "
-                "to advance one month (previewing never ingests)")
+                "BackfillJob, --jobs to list, --run to watch runtime drain, "
+                "or --run-partition --job-id ID for one-shot debug "
+                "(previewing never ingests)")
         from ..connectors import backfill_preview
         preview = backfill_preview(ws.store, creds, args.connector_id,
                                    principal_id="principal_local_cli")
@@ -2999,7 +3078,7 @@ def main(argv: list[str] | None = None) -> None:
     re.add_argument("kind", choices=[
         "interpret_percept", "workspace_tick", "attention_evaluate",
         "consolidate_daily", "consolidate_weekly", "reembed_memory",
-        "integrity_check", "connector_reconcile",
+        "integrity_check", "connector_reconcile", "backfill_partition",
         "session_domain_resolve", "session_complete",
     ])
     re.add_argument("--payload-json", default=None)
@@ -3165,16 +3244,19 @@ def main(argv: list[str] | None = None) -> None:
     cfolr.add_argument("connector_id")
     cfolr.set_defaults(func=cmd_connector)
     cbf = cs.add_parser("backfill",
-                        help="preview / create / advance partitionable BackfillJob")
+                        help="preview / create / watch partitionable BackfillJob")
     cbf.add_argument("connector_id", nargs="?", default=None)
     cbf.add_argument("--preview", action="store_true")
     cbf.add_argument("--create", action="store_true",
                      help="create a year-month BackfillJob (no ingest)")
     cbf.add_argument("--jobs", action="store_true",
                      help="list BackfillJobs for the connector")
+    cbf.add_argument("--run", action="store_true",
+                     help="enqueue + watch runtime drain all partitions "
+                          "(requires twin runtime start; does not ingest in-CLI)")
     cbf.add_argument("--run-partition", dest="run_partition",
                      action="store_true",
-                     help="advance one partition; requires --job-id")
+                     help="debug: advance one partition in-process; requires --job-id")
     cbf.add_argument("--job-id", dest="job_id", default=None)
     cbf.add_argument("--no-percepts", action="store_true")
     cbf.set_defaults(func=cmd_connector)

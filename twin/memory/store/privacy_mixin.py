@@ -395,6 +395,20 @@ class PrivacyStoreMixin:
         )
         return row_to_binding(row) if row else None
 
+    def update_client_binding(self, binding: ClientBinding) -> ClientBinding:
+        existing = self.get_client_binding(binding.id)
+        if existing is None:
+            raise ValueError(f"client binding {binding.id} not found")
+        self._p_update_payload(
+            "privacy_client_bindings",
+            binding.id,
+            binding.model_dump(mode="json"),
+            client_id=binding.client_id,
+            tool_id=binding.tool_id,
+            principal_id=binding.principal_id,
+        )
+        return binding
+
     def insert_privacy_policy_revision(self, rev: PrivacyPolicyRevision) -> str:
         self._p_insert("privacy_policy_revisions", policy_revision_to_row(rev))
         return rev.id

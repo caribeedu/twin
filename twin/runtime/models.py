@@ -25,6 +25,7 @@ class JobKind(str, Enum):
     reembed_memory = "reembed_memory"
     integrity_check = "integrity_check"
     connector_reconcile = "connector_reconcile"
+    backfill_partition = "backfill_partition"
     session_domain_resolve = "session_domain_resolve"
     session_complete = "session_complete"
 

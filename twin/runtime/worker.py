@@ -24,7 +24,10 @@ def job_display_label(job: RuntimeJob) -> str:
     """Short human label for dashboards (kind + one payload id)."""
     kind = job.kind.value if hasattr(job.kind, "value") else str(job.kind)
     payload = job.payload or {}
-    for key in ("binding_id", "session_id", "percept_id", "memory_id", "text"):
+    for key in (
+        "backfill_job_id", "partition_key", "binding_id", "session_id",
+        "percept_id", "memory_id", "text",
+    ):
         val = payload.get(key)
         if val:
             text = str(val).replace("\n", " ").strip()

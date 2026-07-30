@@ -101,10 +101,13 @@ def anyio_backend():
 
 @pytest.mark.anyio
 async def test_mcp_connector_tools_require_identity_and_capability(tmp_path, monkeypatch):
+    from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV
     from twin.interfaces.mcp_server import create_server
 
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    monkeypatch.delenv(MCP_CLIENT_ENV, raising=False)
+    monkeypatch.delenv(MCP_TOKEN_ENV, raising=False)
     home = str(tmp_path / "twin-home")
     _acc, inst = _make_connector(home)
     server = create_server(home)
@@ -120,26 +123,22 @@ async def test_mcp_connector_tools_require_identity_and_capability(tmp_path, mon
         assert out.get("error") == "not_authorized", tool
 
     # read_context_pack does NOT imply connector:read
-    out = await _call(server, "connector_list", {
-        "client": "pack-only", "client_token": PACK_ONLY_TOKEN,
-    })
+    monkeypatch.setenv(MCP_CLIENT_ENV, "pack-only")
+    monkeypatch.setenv(MCP_TOKEN_ENV, PACK_ONLY_TOKEN)
+    out = await _call(server, "connector_list", {})
     assert out.get("error") == "not_authorized"
 
     # connector:read sees the connector…
-    listed = await _call(server, "connector_list", {
-        "client": "conn-reader", "client_token": READER_TOKEN,
-    })
+    monkeypatch.setenv(MCP_CLIENT_ENV, "conn-reader")
+    monkeypatch.setenv(MCP_TOKEN_ENV, READER_TOKEN)
+    listed = await _call(server, "connector_list", {})
     assert [c["connector_id"] for c in listed] == [inst.id]
-    status = await _call(server, "connector_status", {
-        "connector_id": inst.id,
-        "client": "conn-reader", "client_token": READER_TOKEN,
-    })
+    status = await _call(server, "connector_status", {"connector_id": inst.id})
     assert status["connector_id"] == inst.id
 
     # …but connector:read does NOT imply connector:sync
     denied = await _call(server, "connector_sync", {
         "connector_id": inst.id, "confirm": True,
-        "client": "conn-reader", "client_token": READER_TOKEN,
     })
     assert denied.get("error") == "not_authorized"
     assert "connector:sync" in denied["reason"]
@@ -147,36 +146,38 @@ async def test_mcp_connector_tools_require_identity_and_capability(tmp_path, mon
     # …nor connector:backfill
     denied = await _call(server, "connector_backfill_preview", {
         "connector_id": inst.id,
-        "client": "conn-reader", "client_token": READER_TOKEN,
     })
     assert denied.get("error") == "not_authorized"
+    monkeypatch.setenv(MCP_CLIENT_ENV, "conn-backfiller")
+    monkeypatch.setenv(MCP_TOKEN_ENV, BACKFILLER_TOKEN)
     preview = await _call(server, "connector_backfill_preview", {
         "connector_id": inst.id,
-        "client": "conn-backfiller", "client_token": BACKFILLER_TOKEN,
     })
     assert preview["started"] is False and preview["streams"]
 
 
 @pytest.mark.anyio
 async def test_mcp_connector_sync_confirm_token_is_state_aware(tmp_path, monkeypatch):
+    from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV
     from twin.interfaces.mcp_server import create_server
     from twin.workspace import Workspace
 
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    monkeypatch.setenv(MCP_CLIENT_ENV, "conn-syncer")
+    monkeypatch.setenv(MCP_TOKEN_ENV, SYNCER_TOKEN)
     home = str(tmp_path / "twin-home")
     _acc, inst = _make_connector(home)
     server = create_server(home)
-    ident = {"client": "conn-syncer", "client_token": SYNCER_TOKEN}
 
     # confirm=true without a token from a preview is refused
     blind = await _call(server, "connector_sync", {
-        "connector_id": inst.id, "confirm": True, **ident,
+        "connector_id": inst.id, "confirm": True,
     })
     assert blind.get("error") == "stale_preview"
 
     preview = await _call(server, "connector_sync", {
-        "connector_id": inst.id, **ident,
+        "connector_id": inst.id,
     })
     assert preview["requires_confirmation"] is True
     token = preview["confirm_token"]
@@ -186,15 +187,15 @@ async def test_mcp_connector_sync_confirm_token_is_state_aware(tmp_path, monkeyp
     ws.store.update_connector_instance(inst.id, configuration={"changed": True})
     ws.close()
     stale = await _call(server, "connector_sync", {
-        "connector_id": inst.id, "confirm": True, "confirm_token": token, **ident,
+        "connector_id": inst.id, "confirm": True, "confirm_token": token,
     })
     assert stale.get("error") == "stale_preview"
 
     # fresh preview against the current state executes
-    fresh = await _call(server, "connector_sync", {"connector_id": inst.id, **ident})
+    fresh = await _call(server, "connector_sync", {"connector_id": inst.id})
     done = await _call(server, "connector_sync", {
         "connector_id": inst.id, "confirm": True,
-        "confirm_token": fresh["confirm_token"], **ident,
+        "confirm_token": fresh["confirm_token"],
     })
     assert done["health"] == "healthy"
     assert done["percepts"] == 3

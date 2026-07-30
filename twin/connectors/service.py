@@ -436,10 +436,11 @@ def create_backfill_job(
 ) -> "BackfillJob":
     """Create a partitionable BackfillJob from the current configuration.
 
-    Does not ingest. Use ``run_backfill_partition`` (or CLI) to advance one
-    partition at a time through the normal sync spine. Stored ``streams`` are
-    continuous base streams (``label:…`` / ``folder:…``); each partition run
-    namespaces them under ``backfill:{job}:{partition}:…``.
+    Does not ingest. The cognitive runtime drains partitions via
+    ``JobKind.backfill_partition`` (``twin runtime start`` / ``--run`` watch).
+    ``run_backfill_partition`` advances one claim for workers/debug. Stored
+    ``streams`` are continuous bases; each partition namespaces them under
+    ``backfill:{job}:{partition}:…``.
     """
     from .mail.backfill import plan_year_month_partitions
     from .mail.streams import continuous_base_streams

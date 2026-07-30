@@ -123,6 +123,8 @@ twin setup mcp cursor          # or: claude-code | claude-desktop
 twin mcp                       # stdio server (what the client runs)
 ```
 
+`twin setup mcp <client>` registers that host with Twin and writes `TWIN_MCP_CLIENT` / `TWIN_MCP_CLIENT_TOKEN` into the host MCP `env` block. The model **cannot** pass credentials as tool arguments — identity is process-env only.
+
 Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 ```json
@@ -130,13 +132,17 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
   "mcpServers": {
     "twin": {
       "command": "twin",
-      "args": ["mcp"]
+      "args": ["mcp"],
+      "env": {
+        "TWIN_MCP_CLIENT": "cursor",
+        "TWIN_MCP_CLIENT_TOKEN": "…from twin setup mcp…"
+      }
     }
   }
 }
 ```
 
-`twin setup mcp` copies LLM/embed env from `~/.twin/env` into the client `env` block when present.
+`twin setup mcp` also copies LLM/embed env from `~/.twin/env` into the client `env` block when present.
 
 #### How agents should use it
 
@@ -163,7 +169,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `memory_safe_context_pack` | `query`, `target_domain="technical"`, `max_tokens=1200`, `include_judgment=true`, `include_candidates=false`, `task_profile="general"`, `project?`, `client?` | **Primary agent entry**: compact pack after firewall. Returns allowed memories + blocked reasons. |
+| `memory_safe_context_pack` | `query`, `target_domain="technical"`, `max_tokens=1200`, `include_judgment=true`, `include_candidates=false`, `task_profile="general"`, `project?` | **Primary agent entry**: compact pack after firewall. Identity from process env only. |
 | `get_context_pack` | same shape | Lower-level pack builder (prefer `memory_safe_context_pack` in clients). |
 | `memory_observe` | `current_text`, `target_domain?` | Parallel “what might be relevant?” suggestion for the current text/task. |
 
@@ -171,7 +177,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `session_start` | `query`, `client="mcp"`, `client_token?`, `cwd?`, `domain?`, `project?`, `task_profile?`, `max_tokens=1200` | Opens a cognitive session and returns an initial safe pack. |
+| `session_start` | `query`, `cwd?`, `domain?`, `project?`, `task_profile?`, `max_tokens=1200` | Opens a cognitive session and returns an initial safe pack. Host identity from env. |
 | `session_observe` | `session_id`, `kind`, `ref?`, `note?`, `percept_id?` | Records an observation on the session (artifact, note, …). |
 | `append_session_delta` | `session_id`, `text`, `sequence?`, `external_session_id=""`, `client="mcp"` | Appends a delta of conversation/work text for later interpretation. |
 | `get_active_session` | `session_id` | Session snapshot. |
@@ -218,15 +224,15 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `privacy_evaluate` | `memory_ids?`, `client?`, `client_token?`, `persona="individual"`, `purpose="memory_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed. |
+| `privacy_evaluate` | `memory_ids?`, `persona="individual"`, `purpose="memory_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
 | `privacy_explain` | `decision_id` | Explain a prior privacy decision. |
-| `privacy_validate_output` | `text`, `client?`, `client_token?` | Check model output for policy violations. |
+| `privacy_validate_output` | `text` | Check model output for policy violations. |
 
 #### Connectors & meta
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `connector_list` | `client?`, `client_token?` | Configured connectors. |
+| `connector_list` | — | Configured connectors. |
 | `connector_status` | `connector_id`, … | One connector’s sync/health state. |
 | `connector_health_all` | … | Health snapshot across connectors. |
 | `connector_dead_letters` | `connector_id`, … | Failed items / DLQ. |
@@ -496,6 +502,7 @@ On an interactive TTY (with `rich` installed), `start` refreshes a panel of queu
 | `reembed_memory` | Re-embed one memory |
 | `integrity_check` | Store integrity checks |
 | `connector_reconcile` | Run due connector syncs |
+| `backfill_partition` | Advance one month of a connector historical backfill (`payload.backfill_job_id`) — scheduled while a backfill is in progress; not continuous sync |
 | `session_domain_resolve` | Background LLM domain freeze from multi-message dialogue (`payload.binding_id`, optional `cwd`) — enqueued by native UserPromptSubmit when search cannot name a domain |
 | `session_complete` | Background session consolidation + extract (`payload.session_id`, optional `summary` / `abandoned` / `summary_origin`) — enqueued by native SessionEnd |
 
@@ -556,6 +563,8 @@ Shared CLI and per-type setup follow. Discovery helpers (`twin connector github 
 | `twin connector due` / `sync-due` | Scheduler: what is due / run due connectors. |
 | `twin connector pause` / `resume` / `revoke <id>` | Lifecycle controls. |
 | `twin connector backfill --preview <id>` | Historical import preview (**never** starts ingest). |
+| `twin connector backfill --create <id>` | Open a historical backfill job (no ingest yet). |
+| `twin connector backfill --run [--job-id …]` | Enqueue + watch runtime drain partitions (requires `twin runtime start`). |
 | `twin connector production-ready` | Report which real adapters close the production-ready contract. |
 | `twin connector contract` | Print adapter contract matrix (evidence pointers into pytest). |
 

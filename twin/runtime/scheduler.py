@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from twin.clock import now_iso
+from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
 from twin.runtime.models import JobKind
 from twin.runtime.queue import RuntimeQueue
 
@@ -27,9 +28,16 @@ def _week_key(now: Optional[datetime] = None) -> str:
 class RuntimeScheduler:
     """Enqueue due temporal jobs. Idempotency keys prevent duplicates."""
 
-    def __init__(self, queue: RuntimeQueue, *, vault_id: str = "vault_general"):
+    def __init__(
+        self,
+        queue: RuntimeQueue,
+        *,
+        vault_id: str = "vault_general",
+        store: Any = None,
+    ):
         self.queue = queue
         self.vault_id = vault_id
+        self.store = store if store is not None else queue.store
 
     def tick(self, *, now: Optional[datetime] = None) -> list[str]:
         """Enqueue any due scheduled work. Returns job ids created or reused."""
@@ -63,4 +71,14 @@ class RuntimeScheduler:
             priority=200,
         )
         created.append(integrity.id)
+
+        try:
+            created.extend(
+                enqueue_backfill_partition_jobs(
+                    self.queue, self.store, vault_id=self.vault_id,
+                )
+            )
+        except Exception:
+            log.exception("backfill partition enqueue failed")
+
         return created

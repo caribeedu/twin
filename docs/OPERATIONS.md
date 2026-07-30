@@ -28,6 +28,7 @@ Workers claim durable jobs, including:
 | `consolidate_daily` / `consolidate_weekly` | Scheduler (`twin runtime schedule` or start loop) |
 | `integrity_check` | Scheduler |
 | `connector_reconcile` | Recovery / manual enqueue |
+| `backfill_partition` | Scheduler / `twin connector backfill --run` (historical; not continuous sync) |
 | `reembed_memory` | Manual enqueue |
 
 Full CLI table and payload examples in [INTERFACES.md](INTERFACES.md#runtime).
