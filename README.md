@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <strong>Every AI should understand you better tomorrow than it did today — regardless of which AI you use.</strong><br/><br/>
   <strong>Personal Cognitive Layer</strong> for the LLM-powered tools you already use.<br/>
   One local source of memory, judgment, privacy and context — your cognitive core<br/>
   across models and interfaces.
@@ -21,6 +22,7 @@
 
 <p align="center">
   <a href="#why-twin">Why</a> ·
+  <a href="#what-twin-does">What it does</a> ·
   <a href="#vision">Vision</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#principles">Principles</a> ·
@@ -33,17 +35,19 @@
 
 ## Why Twin?
 
-Modern LLMs are powerful — and still forget who you are every new chat.
+Modern LLMs are powerful — and still start from zero whenever you open a new chat, switch models or change tools.
 
-You re-explain projects, decisions, rejected alternatives, tone preferences and hard domain boundaries. Product “memory” and RAG help a little; they still retrieve **text**, not a durable substrate. The industry keeps solving memory; Twin targets **cognitive continuity** across models, tools and sessions.
+You re-explain projects, decisions, rejected alternatives, tone preferences, constraints and hard domain boundaries. Product memory and RAG reduce repetition, but usually remain tied to one product or retrieve fragments of text without maintaining a durable, governed representation of what they mean.
 
-Twin’s bet:
+Twin targets **cognitive continuity** across models, tools and sessions.
 
-> Not building an AI that remembers you — building cognitive infrastructure that authorized tools can safely consult.
+> Not an AI that merely remembers you — a persistent cognitive layer that authorized tools can safely consult.
 
-Twin draws on philosophy of mind, cognitive science, neuroscience, psychology, symbolic AI, knowledge graphs, human-computer interaction and cognitive architectures — a reliable external tool that can become part of how you think, if it stays available, auditable and under your control. More inspiration in [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
+Twin starts from the human rather than from a single assistant. It builds a portable, local-first substrate for evidence, memory, judgment, privacy and context, so different LLM-powered tools can progressively understand you without owning your identity or locking your cognition into a proprietary silo.
 
 Local store. Evidence-backed memories. Domain firewall. Evolving judgment. Context packs over MCP so Cursor, Claude, Codex and friends stop starting from zero.
+
+Twin draws on philosophy of mind, cognitive science, neuroscience, psychology, symbolic AI, knowledge graphs, human-computer interaction and cognitive architectures. The objective is a reliable external tool that can become part of how you think while remaining available, auditable and under your control. More inspiration in [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
 
 ---
 
@@ -53,11 +57,11 @@ Even with long windows and product memory, users still repeat who they are, how 
 
 For people who already know RAG, MCP and agents, the hard problem is not “stuff files into context”. It is:
 
-> How do I create a persistent, safe, linkable, temporal representation of my mind/context so different LLMs need less explanation and more understanding?
+> How do I create a persistent, safe, linkable and temporal representation of my context so different LLMs need less explanation and gain more operational understanding?
 
 Integration is not only low latency. What is missing is **operational understanding**: what a memory means, when it holds, which domain may use it and how it should affect a decision.
 
-Twin’s concrete answer: store evidence-grounded memory locally, confirm what is trusted, let authorized LLM-powered tools pull a safe pack instead of asking you to re-explain.
+Twin’s concrete answer is to store evidence-grounded memory locally, distinguish what was observed from what is trusted, and let authorized LLM-powered tools pull a safe pack instead of asking you to re-explain.
 
 ---
 
@@ -70,6 +74,8 @@ Twin’s concrete answer: store evidence-grounded memory locally, confirm what i
 Long-term, Twin aims to work as a **personal exocortex**: continuity across tools, sessions, models and contexts — sober, local-first, auditable and incremental (aesthetic roots in [FOUNDATIONS](docs/FOUNDATIONS.md#aesthetic-inspiration)).
 
 It should preserve important facts, decisions, rejected alternatives, tasks, preferences, judgment patterns, beliefs that change over time, relationships, evidence, hard domain boundaries, privacy and human control.
+
+The destination is not a larger archive or a more autonomous chatbot. It is an open cognitive architecture for a persistent, self-correcting digital counterpart that can recall, understand, support judgment and eventually represent or act within explicit human authorization.
 
 ### What Twin is
 
@@ -91,7 +97,7 @@ Twin must not be understood as a chatbot, note-taking app, generic RAG, autonomo
 
 **Why not RAG?** RAG retrieves relevant text; Twin assembles safe cognitive context for the next decision.
 
-**Why not a vector database?** Vectors are indexes. The graph (memories, evidence, validity, domains, status) is the canonical store. Wipe embeddings, `twin reindex`, keep the substrate.
+**Why not a vector database?** Vectors are indexes. The graph — memories, evidence, validity, domains and status — is the canonical store. Wipe embeddings, run `twin reindex`, keep the substrate.
 
 ### Principles
 
@@ -107,6 +113,27 @@ These are the constitution. Features may change; these should not. Learn more ab
 - **Native where possible, MCP everywhere** — one cognitive core; no proprietary silo per host.
 - **Local-first + exportability** — default under `~/.twin`; leaving must stay easy (`twin export`).
 - **Human approval for durable judgment** — memory can be frequent; judgment stays conservative.
+- **Model independence** — cognition must survive model, vendor and interface replacement.
+- **Self-correction over accumulation** — memories and beliefs should remain revisable when stronger evidence appears.
+
+### Measuring success
+
+Twin should not be evaluated by how many features, connectors or cognitive terms it contains.
+
+Every release should answer:
+
+> Does this reduce the amount of explanation a person must give an AI while increasing correctness, safety and continuity?
+
+A meaningful change should strengthen at least one of these outcomes:
+
+- cognitive continuity;
+- understanding rather than retrieval;
+- evidence and self-correction;
+- human governance;
+- privacy and domain separation;
+- portability and interoperability;
+- consistent judgment across tools;
+- lower dependence on any single model or application.
 
 ### Final definition
 
@@ -225,7 +252,6 @@ A well-wired client calls `memory_safe_context_pack` or `session_start` with `ta
 
 ---
 
-
 ## Docs
 
 This README is the **overview**: problem, solution, architecture sketch and quickstart. Deeper docs do not hide ideas — they expand them.
@@ -245,28 +271,49 @@ This README is the **overview**: problem, solution, architecture sketch and quic
 
 ## FAQ
 
-**Is Twin another RAG app?**  
+### How is Twin different from RAG, knowledge graphs and agent frameworks?
+
+Twin does not compete with those approaches. It builds on top of them.
+
+Most existing projects optimize a specific capability:
+
+| Existing approach | What it optimizes | What remains unresolved |
+|---|---|---|
+| Product memory | Convenience inside one assistant | Portability, governance and cross-tool continuity |
+| RAG | Retrieving relevant text | Meaning, validity, judgment and authorization |
+| Knowledge graphs | Structured entities and relationships | How knowledge should affect a person's decisions |
+| Context engineering | Better prompts and lower token use | Persistent identity and cognition across interfaces |
+| Agent frameworks | Planning and task execution | Human-centered continuity and governed representation |
+| **Twin** | Persistent computational cognition | Integrates these capabilities under one controlled substrate |
+
+Twin uses retrieval, graphs, context engineering and agent integrations where appropriate. The difference is that they are implementation techniques, not the product itself.
+
+The objective is not to build another assistant, another graph database or another agent framework.
+
+The objective is to provide a persistent cognitive layer that any authorized AI can consult.
+
+### Is Twin another RAG app?
 No. Retrieval is one step; firewall, evidence, temporality and judgment are the product.
 
-**Is Twin a vector database?**  
+### Is Twin a vector database? 
 No. Embeddings help search; the temporal graph is authoritative ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-graph-is-truth-embeddings-are-indexes)).
 
-**Do I need the cloud?**  
+### Do I need the cloud? 
 No. Default path is local Ollama + SQLite. Cloud providers are opt-in.
 
-**Which LLM providers work?**  
+### Which LLM providers work? 
 Ollama (recommended), Anthropic, Gemini, OpenAI and any OpenAI-compatible gateway (Groq, OpenRouter, LM Studio, vLLM, …). See [docs/SETUP.md](docs/SETUP.md).
 
-**Does Anthropic do embeddings?**  
+### Does Anthropic do embeddings? 
 No. Pair Claude chat with Ollama / OpenAI-compatible / Gemini / hash embeddings.
 
-**Does Twin share my data?**  
+### Does Twin share my data? 
 No Twin cloud and no analytics phone-home. Memory stays on your machine. Nothing is sent to a provider unless **you** configure a cloud LLM or embedder for extract/search — and even then the Domain Firewall decides what may enter a context pack before any model sees it. Cross-domain leaks are blocked locally, not trusted to the LLM. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#firewall-before-reasoning) and [docs/PRODUCT.md](docs/PRODUCT.md#domain-separation).
 
-**Where does my data live?**  
+### Where does my data live? 
 Under `~/.twin` (or `$TWIN_HOME`). Export with `twin export`.
 
-**Can I leave later?**  
+### Can I leave later? 
 Yes — exportability is a first-class architecture principle ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#exportability-over-lock-in)).
 
 ---
