@@ -96,6 +96,18 @@ def _minus_seconds(iso_ts: str, seconds: int) -> str:
     return out.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _as_github_since(value: Optional[str]) -> Optional[str]:
+    """Normalize an optional lower bound for GitHub list ``since`` params.
+
+    Accepts ISO timestamps or date-only strings from backfill config /
+    ``SyncExecutionContext.range_start``. Empty → ``None`` (full history).
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _stable_hash8(obj: Any) -> str:
     """Deterministic key for objects lacking a natural id — a retried fetch
     must map the same malformed payload to the same dead letter."""
