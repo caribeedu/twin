@@ -33,6 +33,7 @@ from ..models import (
     HealthStatus,
     RawConnectorItem,
     SourceAccount,
+    SyncExecutionContext,
 )
 from ..protocol import (
     AdapterManifest,
@@ -56,9 +57,26 @@ RECENT_COMMITS = 20
 CLASSIC_WRITE_SCOPES = {"write:org", "admin:org", "workflow", "delete_repo"}
 
 
+def _base_stream(stream: str) -> str:
+    """Strip a backfill namespace ``backfill:{job}:{partition}:{base}`` down to
+    the provider-native base stream. Continuous streams pass through unchanged.
+    The historical time window travels via the SyncExecutionContext, not the
+    stream name, so only the base ``repo:{owner}/{name}:{family}`` is parsed."""
+    if stream.startswith("backfill:"):
+        parts = stream.split(":", 3)   # backfill : job : partition : base
+        if len(parts) != 4 or not parts[1] or not parts[2] or not parts[3]:
+            raise ConnectorError(
+                f"unknown backfill stream layout: {stream!r}",
+                failure_class=FailureClass.schema_change,
+            )
+        return parts[3]
+    return stream
+
+
 def _parse_stream(stream: str) -> tuple[str, str]:
-    """'repo:{owner}/{name}:{family}' → (repo, family)."""
-    parts = stream.split(":")
+    """'repo:{owner}/{name}:{family}' (optionally backfill-namespaced) →
+    (repo, family)."""
+    parts = _base_stream(stream).split(":")
     if len(parts) != 3 or parts[0] != "repo" or parts[2] not in FAMILIES:
         raise ConnectorError(
             f"unknown github stream layout: {stream!r}",
@@ -117,6 +135,14 @@ class GithubConnector:
         self.api_base_url: str = cfg.get("api_base_url", GITHUB_API)
         self._client: Optional[GitHubClient] = None
         self._repo_meta: dict[str, dict[str, Any]] = {}
+        # Set by the runtime per invocation. Backfill bounds (range_start /
+        # range_end) travel here — never via ConnectorInstance.configuration —
+        # so a backfill partition cannot race the continuous scheduler.
+        self._execution_context = SyncExecutionContext()
+
+    @property
+    def exec_ctx(self) -> SyncExecutionContext:
+        return getattr(self, "_execution_context", None) or SyncExecutionContext()
 
     # -- plumbing -----------------------------------------------------------
 
@@ -287,6 +313,13 @@ class GithubConnector:
     # -- fetch ----------------------------------------------------------------
 
     def _since(self, cursor: Optional[dict[str, Any]]) -> Optional[str]:
+        # Backfill: the partition's range_start is the authoritative floor
+        # (GitHub's `since` is updated_at-based; each partition scans forward
+        # from its start, and overlaps across partitions are idempotent via
+        # revision dedup). None range_start = from the beginning of history.
+        ctx = self.exec_ctx
+        if ctx.mode == "backfill":
+            return ctx.range_start
         watermark = (cursor or {}).get("watermark")
         if watermark:
             return _minus_seconds(watermark, self.lookback_seconds)

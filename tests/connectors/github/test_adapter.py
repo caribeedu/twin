@@ -897,3 +897,58 @@ def test_sync_failure_does_not_consume_webhook_hints(store, creds, gh, tmp_path)
     state = store.get_connector_sync_state(inst.id)
     assert state.metadata.get("targeted_streams") == [f"repo:{REPO}:issues"]
 
+
+
+# -- partitionable backfill (§34) ---------------------------------------------------
+
+
+def test_backfill_partition_runs_without_crash(store, creds, gh):
+    """Regression: a partitioned backfill stream
+    (``backfill:{job}:{partition}:repo:{owner}/{name}:{family}``) must not blow
+    up in the GitHub adapter — the base stream is parsed, the partition's
+    range_start is the fetch floor, and its checkpoint is separate from the
+    continuous one."""
+    from twin.connectors import create_backfill_job, run_backfill_partition
+    from twin.connectors.mail.streams import format_backfill_stream
+
+    gh.add_issue(REPO, 1, title="Historical decision",
+                 body="We decided to use PostgreSQL.",
+                 updated_at="2016-07-15T10:00:00Z")
+    _acc, inst = _mk(store, creds, extra_config={
+        "backfill_since": "2016-07-01", "backfill_until": "2016-07-31",
+    })
+    cfg_before = dict(inst.configuration)
+
+    job = create_backfill_job(store, creds, inst.id)
+    out = run_backfill_partition(store, creds, job.id)
+    # the crash was here — it must complete a partition instead
+    assert out.get("partition_status") in ("completed", "continuation_pending") \
+        or out.get("done") is True
+
+    # the historical issue was ingested through the backfill path
+    issues = [r for r in store.list_connector_records(inst.id)
+              if r.external_type == "issue"]
+    assert any("PostgreSQL" in r.content for r in issues)
+
+    # backfill has its own namespaced checkpoint; config untouched
+    bf_stream = format_backfill_stream(job.id, "2016-07", f"repo:{REPO}:issues")
+    assert store.get_connector_checkpoint(inst.id, bf_stream) is not None
+    assert store.get_connector_instance(inst.id).configuration == cfg_before
+
+
+def test_backfill_partition_floor_is_range_start(store, creds, gh):
+    """In backfill mode the adapter fetches from the partition's range_start,
+    not from a continuous watermark or the configured backfill_since."""
+    from twin.connectors.models import SyncExecutionContext
+    from twin.connectors.registry import build_adapter
+
+    _acc, inst = _mk(store, creds, extra_config={"backfill_since": "2000-01-01"})
+    account = store.get_source_account(inst.account_id)
+    adapter = build_adapter(inst, account, TOKEN)
+    adapter._execution_context = SyncExecutionContext(
+        mode="backfill", job_id="j", partition_key="2016-07",
+        range_start="2016-07-01", range_end="2016-07-31")
+    assert adapter._since({"watermark": "2026-01-01T00:00:00Z"}) == "2016-07-01"
+    # continuous mode ignores the (backfill) range and honors the watermark
+    adapter._execution_context = SyncExecutionContext()
+    assert adapter._since({}) == "2000-01-01"   # falls back to backfill_since
