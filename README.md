@@ -292,12 +292,6 @@ The objective is not to build another assistant, another graph database or anoth
 
 The objective is to provide a persistent cognitive layer that any authorized AI can consult.
 
-### Is Twin another RAG app?
-No. Retrieval is one step; firewall, evidence, temporality and judgment are the product.
-
-### Is Twin a vector database? 
-No. Embeddings help search; the temporal graph is authoritative ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#the-graph-is-truth-embeddings-are-indexes)).
-
 ### Do I need the cloud? 
 No. Default path is local Ollama + SQLite. Cloud providers are opt-in.
 
