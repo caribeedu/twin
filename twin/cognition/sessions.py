@@ -43,7 +43,7 @@ from ..memory.models import (
 )
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
-from .context_pack import ContextPack, build_context_pack
+from .context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
 from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain
 from .pipeline import extract_percept
 from .task_profiles import infer_task_profile
@@ -95,6 +95,7 @@ class SessionStart:
     observer_mode: str
     needs_domain_confirmation: bool = False
     observer_fallback: Optional[str] = None
+    pack_skipped_deadline: bool = False
 
 
 def start_session(
@@ -115,6 +116,7 @@ def start_session(
     tool_id: Optional[str] = None,
     api_token: Optional[str] = None,
     surface: Optional[str] = None,
+    deadline_monotonic: Optional[float] = None,
 ) -> SessionStart:
     """Identify project/domain/task profile (unless given explicitly), build
     a task-aware pack and open the session that records what was supplied.
@@ -179,7 +181,7 @@ def start_session(
     # Native host adapters run as local hooks: CognitiveSession.client records
     # the host product, auth surface is ``native`` (not CLI).
     _native = frozenset({
-        "claude-code", "codex", "codex-app-server", "native",
+        "claude-code", "codex", "codex-app-server", "native", "fake-host",
     })
     if client in _native or (surface or "").lower() == "native":
         resolved_surface = "native"
@@ -230,15 +232,29 @@ def start_session(
         tool_id=access.tool_id,
     )
     access = access.model_copy(update={"session_id": session.id})
-    pack = build_context_pack(
-        store, cfg, embedder, query,
-        target_domain=session.domain, max_tokens=max_tokens,
-        include_candidates=include_candidates,
-        # an unconfirmed domain gets nothing, not even the judgment profile
-        include_judgment=not needs_confirmation,
-        task_profile=session.task_profile, project_id=project_id,
-        access=access,
-    )
+    pack_skipped_deadline = False
+    try:
+        pack = build_context_pack(
+            store, cfg, embedder, query,
+            target_domain=session.domain, max_tokens=max_tokens,
+            include_candidates=include_candidates,
+            # an unconfirmed domain gets nothing, not even the judgment profile
+            include_judgment=not needs_confirmation,
+            task_profile=session.task_profile, project_id=project_id,
+            access=access,
+            deadline_monotonic=deadline_monotonic,
+        )
+    except PackDeadlineExceeded:
+        # Session must still open; pack recovers on next injection / MCP.
+        pack_skipped_deadline = True
+        pack = ContextPack(
+            context_pack="",
+            sources=[],
+            confidence=0.0,
+            blocked=[],
+            task_profile=session.task_profile or "general",
+            project_id=project_id,
+        )
     session.supplied_memory_ids = [s["memory_id"] for s in pack.sources]
     session.pack_chars = len(pack.context_pack)
     session.judgment_snapshot_id = pack.judgment_snapshot_id
@@ -253,6 +269,7 @@ def start_session(
         reading_confidences=reading.confidences, observer_mode=reading.mode,
         needs_domain_confirmation=needs_confirmation,
         observer_fallback=reading.fallback_reason,
+        pack_skipped_deadline=pack_skipped_deadline,
     )
 
 

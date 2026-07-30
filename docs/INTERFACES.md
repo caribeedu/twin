@@ -87,7 +87,7 @@ Session lifecycle, packs and consolidation in [ARCHITECTURE.md](ARCHITECTURE.md)
 
 The chosen profile is recorded in the snippet as `twin_native.observation_profile`. Reinstall with a different `--profile` to change coverage.
 
-**Pack latency budget.** Pack assembly on the hot path has a soft wall-clock budget (SessionStart ≈ 300ms, UserPromptSubmit upgrade+pack ≈ 500ms). Budgets never interrupt work mid-flight: if assembly blows the budget, the binding/domain state still persists, the pack is dropped from the host response, and `pack_skipped_budget` is set. The pack recovers on the next injection-capable turn or via MCP.
+**Pack assembly deadline.** Pack assembly on the hot path has a wall-clock deadline (SessionStart ≈ 300ms, UserPromptSubmit upgrade+pack ≈ 500ms). Stages of retrieval, privacy screening, and formatting check the deadline and abort early when it is reached. Binding and domain state still persist; the pack is not returned to the host (`pack_skipped_budget`), and Twin marks it pending so the next injection-capable turn (or MCP) can emit it. The deadline is a response-eligibility limit with stage-level abort — not a guarantee that the hook process exits the instant the clock hits zero.
 
 **Runtime degradation**
 

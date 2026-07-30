@@ -403,7 +403,7 @@ Delivered:
 - lifecycle fix: Claude's **Stop** is end-of-turn only (`assistant_result` — binding stays open); **SessionEnd** closes the binding immediately and enqueues background `session_complete` (summary + extract via `twin-runtime`) — default install wires `SessionEnd` with per-hook timeouts (120s SessionStart / UserPromptSubmit / SessionEnd);
 - deferred context pack: SessionStart with no prompt text opens `unclassified` (empty pack); the first `UserPromptSubmit` that **search-votes** a domain upgrades once and emits the pack — never waits on the local LLM in the hook;
 - host capabilities on `session_start` gate real behavior: where a pack may surface, turn/session-end contract breaches fail closed, and intervention LLM calls respect `display_intervention`;
-- stable install identity on bindings for provenance (derived from Twin home + host + user home — never a raw path); soft pack latency budgets drop over-budget packs while keeping binding/domain state;
+- stable install identity on bindings for provenance (derived from Twin home + host + user home — never a raw path); pack assembly deadlines abort stage-by-stage and mark skipped packs pending for the next injection-capable turn;
 - documented native adapter checklist + identity tuple; fake-host evals cover lifecycle, security, capabilities and budget.
 - hot-path session domain is search-vote only (keyword/graph guess removed); inconclusive make it stay `unclassified` and enqueue background `session_domain_resolve` (multi-message LLM) or wait for client/MCP explicit domain;
 - Memory Observer no longer invents the consumer domain from text: uses the frozen session domain or an explicit argument (else `unclassified` → default-deny), with a soft same-domain ranking boost on hybrid search;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -13,13 +14,28 @@ from twin.memory.embeddings import get_embedder
 from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
 from twin.memory.store.sqlite import SqliteStore
 
+# Claude-specific hook names / adapter imports must stay out of the generic
+# service and cognition host-session modules. Provider names may appear only
+# in the adapter frontier (registry / claude_code). Twin type names like
+# SessionStart are fine; these strings are Claude Code hook identifiers only.
+_CLAUDE_HOOK_NAMES = (
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+)
+_VENDOR_BRANCH_RE = re.compile(
+    r"""host_type\s*==\s*["']claude-code["']"""
+    r"""|["']claude-code["']\s*==\s*host_type"""
+)
+
 
 def normalize_fake_host(payload: dict) -> HostEvent:
     """Minimal adapter: provider JSON → HostEvent. No Claude imports."""
-    default_caps = HostCapabilities(
-        context_injection_events=["session_start", "user_message"],
-    ).model_dump()
+    default_caps = HostCapabilities.fake_host().model_dump()
     meta = payload.get("metadata") or {}
+    # Caller-supplied host_capabilities replace the default profile.
+    caps = meta.get("host_capabilities", default_caps)
+    merged = {**meta, "host_capabilities": caps}
     return HostEvent(
         kind=payload["kind"],
         host_type="fake-host",
@@ -27,7 +43,7 @@ def normalize_fake_host(payload: dict) -> HostEvent:
         text=payload.get("text", ""),
         event_id=payload.get("event_id"),
         domain=payload.get("domain"),
-        metadata={"host_capabilities": default_caps, **meta},
+        metadata=merged,
     )
 
 
@@ -63,6 +79,28 @@ def _seed_memory(store, embedder, *, title: str, summary: str, domain: str = "te
     return mem
 
 
+def _assert_no_vendor_coupling() -> tuple[bool, str]:
+    """Generic modules must not import adapters or branch on Claude."""
+    import twin.cognition.host_session as hs
+    import twin.interfaces.native.service as ns
+
+    for mod in (hs, ns):
+        text = Path(mod.__file__).read_text(encoding="utf-8")
+        if "from .claude_code" in text or "from twin.interfaces.native.claude_code" in text:
+            return False, f"{mod.__name__} imports claude_code adapter"
+        if "import twin.interfaces.native.claude_code" in text:
+            return False, f"{mod.__name__} imports claude_code adapter"
+        # service may import adapters.registry (frontier); never claude_code.
+        if mod is ns and "claude_code" in text:
+            return False, f"{mod.__name__} mentions claude_code"
+        if _VENDOR_BRANCH_RE.search(text):
+            return False, f"{mod.__name__} branches on host_type == claude-code"
+        for hook in _CLAUDE_HOOK_NAMES:
+            if hook in text:
+                return False, f"{mod.__name__} contains Claude hook name {hook!r}"
+    return True, "ok"
+
+
 def run_fake_host_case() -> tuple[bool, str]:
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp) / "twin-home"
@@ -90,6 +128,8 @@ def run_fake_host_case() -> tuple[bool, str]:
         ses = store.get_session(start.session_id)
         if ses is None or ses.tool_id != "native-host":
             return False, f"expected tool_id=native-host got {getattr(ses, 'tool_id', None)}"
+        if ses.client != "fake-host":
+            return False, f"expected client=fake-host got {ses.client}"
 
         turn = svc.handle(normalize_fake_host({
             "kind": "turn_completed",
@@ -107,19 +147,9 @@ def run_fake_host_case() -> tuple[bool, str]:
         if not end.ok or not end.binding.ended_at:
             return False, "session_end must close once"
 
-        # Core modules must not import provider adapters.
-        import twin.cognition.host_session as hs
-        import twin.interfaces.native.service as ns
-        for mod in (hs, ns):
-            text = Path(mod.__file__).read_text(encoding="utf-8")
-            if "claude_code" in text and "CLAUDE_CODE_CAPABILITIES" not in text.replace(
-                "CLAUDE_CODE_CAPABILITIES", ""
-            ):
-                # Allow the capabilities registry name only in service.
-                pass
-            if "from .claude_code" in text or "from twin.interfaces.native.claude_code" in text:
-                return False, f"{mod.__name__} imports claude_code adapter"
-
+        ok, msg = _assert_no_vendor_coupling()
+        if not ok:
+            return False, msg
         return True, "ok"
 
 
@@ -184,7 +214,10 @@ def run_caps_case() -> tuple[bool, str]:
         )
         svc = NativeHostService(store, cfg, embedder)
         ext = "caps-eval-1"
-        caps = HostCapabilities(context_injection_events=["session_start"]).model_dump()
+        # Broad observation surface, but only session_start may inject packs.
+        caps = HostCapabilities.fake_host().model_copy(update={
+            "context_injection_events": ["session_start"],
+        }).model_dump()
         start = svc.handle(normalize_fake_host({
             "kind": "session_start",
             "external_session_id": ext,
@@ -206,11 +239,15 @@ def run_caps_case() -> tuple[bool, str]:
             return False, "pack emitted where host cannot inject"
         if not msg.extras.get("pack_held_no_injection_point"):
             return False, "missing pack_held_no_injection_point flag"
+        if not msg.binding.metadata.get("pending_context_pack"):
+            return False, "held pack must be marked pending_context_pack"
+        if msg.binding.metadata.get("pending_context_reason") != "no_injection_point":
+            return False, "expected pending_context_reason=no_injection_point"
         return True, "ok"
 
 
 def run_budget_case() -> tuple[bool, str]:
-    """Budget: a blown deadline skips the pack, keeps the binding + domain."""
+    """Budget: a blown deadline skips the pack, keeps binding + marks pending."""
     import twin.interfaces.native.service as ns
 
     tmp, store, cfg, embedder = _fake_env()
@@ -234,6 +271,10 @@ def run_budget_case() -> tuple[bool, str]:
             return False, "pack should be skipped when over budget"
         if not start.extras.get("pack_skipped_budget"):
             return False, "missing pack_skipped_budget flag"
+        if not start.binding.metadata.get("pending_context_pack"):
+            return False, "skipped pack must be marked pending_context_pack"
+        if start.binding.metadata.get("pending_context_reason") != "latency_budget":
+            return False, "expected pending_context_reason=latency_budget"
         return True, "ok"
 
 

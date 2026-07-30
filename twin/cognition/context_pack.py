@@ -23,6 +23,7 @@ pass over the best remaining hits.
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
@@ -44,6 +45,21 @@ from .pack_select import (
 )
 from .retrieval import Reranker, retrieve
 from .task_profiles import get_profile
+
+
+class PackDeadlineExceeded(Exception):
+    """Pack assembly aborted because a monotonic deadline was reached."""
+
+    def __init__(self, stage: str = ""):
+        self.stage = stage
+        super().__init__(f"pack deadline exceeded at {stage or 'unknown'}")
+
+
+def _check_pack_deadline(deadline_monotonic: Optional[float], *, stage: str) -> None:
+    if deadline_monotonic is None:
+        return
+    if time.monotonic() >= deadline_monotonic:
+        raise PackDeadlineExceeded(stage)
 
 CHARS_PER_TOKEN = 4  # rough heuristic; packs are small so precision is not critical
 EVIDENCE_LINE_CHARS = 260  # reserved per evidence quote (id + 220-char quote)
@@ -125,15 +141,18 @@ def build_context_pack(
     session_id: Optional[str] = None,
     mode: PackMode = "compact",
     request_scope: Optional[str] = None,
+    deadline_monotonic: Optional[float] = None,
 ) -> ContextPack:
     firewall = firewall or Firewall(cfg.policies_path, store)
     profile = get_profile(task_profile)
+    _check_pack_deadline(deadline_monotonic, stage="before_retrieve")
     result = retrieve(
         store, embedder, query,
         target_domain=target_domain, firewall=firewall, limit=25,
         include_candidates=include_candidates, project_id=project_id,
         reranker=reranker,
     )
+    _check_pack_deadline(deadline_monotonic, stage="after_retrieve")
 
     # Missing identity → restricted mode (never elevate to local-cli).
     from ..privacy.identity import restricted_access
@@ -178,10 +197,13 @@ def build_context_pack(
                 redacted_ids.add(v["id"])
         result.hits = [h for h in result.hits if h.memory.id in authorized_views]
 
+    _check_pack_deadline(deadline_monotonic, stage="after_privacy")
+
     # Pack-time injection screen (stored memories are data, never instructions).
     result.hits, injection_blocked = screen_injection(result.hits)
     privacy_blocked.extend(injection_blocked)
     result.hits, drop_counts = dedupe_and_diversify(prefer_current(result.hits))
+    _check_pack_deadline(deadline_monotonic, stage="after_dedupe")
 
     budget = max_tokens * CHARS_PER_TOKEN
     sections: list[str] = []
@@ -200,6 +222,7 @@ def build_context_pack(
 
     judgment_snapshot_id: Optional[str] = None
     if include_judgment:
+        _check_pack_deadline(deadline_monotonic, stage="before_judgment")
         judgment_text = ""
         if hasattr(store, "list_judgment_items"):
             from ..judgment.application import applicable_pack, render_applicable
@@ -450,6 +473,7 @@ def build_context_pack(
         "max_chars": budget,
         "evidence_reserved_chars": evidence_reserve,
     }
+    _check_pack_deadline(deadline_monotonic, stage="before_format")
     pack_text = render_pack(
         mode=mode,
         sections_text=sections_text,

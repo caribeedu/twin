@@ -17,9 +17,10 @@ Also runs a **fake host** adapter (`fake_host.py`) that never imports
   dialogue-driven domain upgrade never widens persona/purpose/audience/vault.
 - `fake_host_caps` — a host without `user_message` in
   `context_injection_events` still upgrades the domain but holds the pack.
-- `fake_host_budget` — a blown pack deadline drops the pack yet persists the
-  binding + domain (`pack_skipped_budget`).
+- `fake_host_budget` — a blown pack deadline drops the pack, persists the
+  binding + domain (`pack_skipped_budget`), and marks `pending_context_pack`
+  for recovery on the next injection-capable turn.
 
 ```bash
-PYTHONPATH=tests python -m evals.native.run
+PYTHONPATH=. python -m evals.native.run
 ```

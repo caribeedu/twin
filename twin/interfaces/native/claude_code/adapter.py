@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-from ..events import CLAUDE_CODE_CAPABILITIES, HostEvent
+from ..events import HostCapabilities, HostEvent
 from ..redact import redact_payload, redact_text
 
 # Claude Code hook name → HostEvent.kind
@@ -211,7 +211,9 @@ def normalize_claude_code_hook(
     # service can gate pack/turn/session behavior without ever branching on
     # Claude hook names. The install snippet is only a hint for humans.
     if kind == "session_start":
-        meta.setdefault("host_capabilities", CLAUDE_CODE_CAPABILITIES.model_dump())
+        meta.setdefault(
+            "host_capabilities", HostCapabilities.claude_code().model_dump(),
+        )
     if provider_assistant_text:
         clean_asst, asst_cats = redact_text(provider_assistant_text)
         if asst_cats:
@@ -540,7 +542,7 @@ def install_claude_code_hooks(
         "twin_native": {
             "host": "claude-code",
             "observation_profile": profile,
-            "capabilities": CLAUDE_CODE_CAPABILITIES.model_dump(),
+            "capabilities": HostCapabilities.claude_code().model_dump(),
             "protocol": {
                 "stdout": (
                     "with --fail-open: Claude hook JSON "

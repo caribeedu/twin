@@ -871,7 +871,9 @@ def test_caps_without_user_message_injection_hold_pack(store, cfg, embedder):
         title="Atlas webhook stack",
         summary="Atlas webhooks run on FastAPI with schema_version.",
     )
-    caps = HostCapabilities(context_injection_events=["session_start"]).model_dump()
+    caps = HostCapabilities.claude_code().model_copy(update={
+        "context_injection_events": ["session_start"],
+    }).model_dump()
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
         kind="session_start", host_type="native",
@@ -892,10 +894,14 @@ def test_caps_without_user_message_injection_hold_pack(store, cfg, embedder):
     assert msg.context_pack is None
     assert msg.extras.get("emit_pack") is not True
     assert msg.extras.get("pack_held_no_injection_point") is True
+    assert msg.binding.metadata.get("pending_context_pack") is True
+    assert msg.binding.metadata.get("pending_context_reason") == "no_injection_point"
 
 
 def test_caps_display_intervention_false_suppresses(store, cfg, embedder):
-    caps = HostCapabilities(display_intervention=False).model_dump()
+    caps = HostCapabilities.claude_code().model_copy(update={
+        "display_intervention": False,
+    }).model_dump()
     svc = NativeHostService(store, cfg, embedder)
     svc.handle(HostEvent(
         kind="session_start", host_type="native",
@@ -914,7 +920,9 @@ def test_caps_display_intervention_false_suppresses(store, cfg, embedder):
 
 
 def test_caps_turn_end_unsupported_rejects_turn_completed(store, cfg, embedder):
-    caps = HostCapabilities(supports_turn_end=False).model_dump()
+    caps = HostCapabilities.claude_code().model_copy(update={
+        "supports_turn_end": False,
+    }).model_dump()
     svc = NativeHostService(store, cfg, embedder)
     svc.handle(HostEvent(
         kind="session_start", host_type="native",
@@ -932,7 +940,9 @@ def test_caps_turn_end_unsupported_rejects_turn_completed(store, cfg, embedder):
 
 
 def test_caps_session_end_unsupported_rejects(store, cfg, embedder):
-    caps = HostCapabilities(supports_session_end=False).model_dump()
+    caps = HostCapabilities.claude_code().model_copy(update={
+        "supports_session_end": False,
+    }).model_dump()
     svc = NativeHostService(store, cfg, embedder)
     svc.handle(HostEvent(
         kind="session_start", host_type="native",
@@ -981,6 +991,8 @@ def test_session_start_pack_skipped_over_budget(store, cfg, embedder, monkeypatc
     assert start.context_pack is None
     assert start.extras.get("pack_skipped_budget") is True
     assert start.extras.get("emit_pack") is not True
+    assert start.binding.metadata.get("pending_context_pack") is True
+    assert start.binding.metadata.get("pending_context_reason") == "latency_budget"
 
 
 def test_user_message_pack_skipped_over_budget(store, cfg, embedder, monkeypatch):
@@ -1011,6 +1023,8 @@ def test_user_message_pack_skipped_over_budget(store, cfg, embedder, monkeypatch
     assert msg.context_pack is None
     assert msg.extras.get("pack_skipped_budget") is True
     assert msg.extras.get("emit_pack") is not True
+    assert msg.binding.metadata.get("pending_context_pack") is True
+    assert msg.binding.metadata.get("pending_context_reason") == "latency_budget"
 
 
 def test_session_start_stamps_stable_host_instance(store, cfg, embedder):
@@ -1213,10 +1227,9 @@ def test_fake_host_adapter_uses_universal_events_only(store, cfg, embedder):
             text=payload.get("text", ""),
             event_id=payload.get("event_id"),
             domain=payload.get("domain"),
-            metadata={"host_capabilities": {
-                "supports_context_injection": True,
-                "context_injection_events": ["session_start", "user_message"],
-            }},
+            metadata={
+                "host_capabilities": HostCapabilities.fake_host().model_dump(),
+            },
         )
 
     svc = NativeHostService(store, cfg, embedder)
@@ -1241,3 +1254,41 @@ def test_fake_host_adapter_uses_universal_events_only(store, cfg, embedder):
     src = Path(ns.__file__).read_text(encoding="utf-8")
     assert "from .claude_code" not in src
     assert "from twin.interfaces.native.claude_code" not in src
+    assert "claude-code" not in src
+
+
+def test_host_capabilities_default_is_fail_closed():
+    caps = HostCapabilities.conservative_default()
+    assert caps.supports_session_start is True
+    assert caps.supports_session_end is False
+    assert caps.supports_turn_end is False
+    assert caps.supports_user_message is False
+    assert caps.supports_tool_events is False
+    assert caps.supports_context_injection is False
+    assert caps.context_injection_events == []
+    assert caps.display_intervention is False
+
+
+def test_capabilities_registry_is_adapter_frontier_only():
+    from twin.interfaces.native.adapters.registry import capabilities_for_host
+
+    unknown = capabilities_for_host("unknown-host-xyz")
+    assert unknown.supports_context_injection is False
+    claude = capabilities_for_host("claude-code")
+    assert claude.supports_context_injection is True
+    assert "user_message" in claude.context_injection_events
+
+
+def test_pack_deadline_aborts_before_retrieve(store, cfg, embedder):
+    """Deadline already past → PackDeadlineExceeded at before_retrieve."""
+    import time
+
+    from twin.cognition.context_pack import PackDeadlineExceeded, build_context_pack
+
+    with pytest.raises(PackDeadlineExceeded) as exc:
+        build_context_pack(
+            store, cfg, embedder, "anything",
+            target_domain="technical",
+            deadline_monotonic=time.monotonic() - 1.0,
+        )
+    assert exc.value.stage == "before_retrieve"

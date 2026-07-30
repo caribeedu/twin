@@ -36,7 +36,7 @@ from .sessions import SessionStart, complete_session, observe_session, start_ses
 logger = logging.getLogger("twin.cognition.host_session")
 
 NATIVE_HOSTS = frozenset({
-    "claude-code", "codex", "codex-app-server", "native",
+    "claude-code", "codex", "codex-app-server", "native", "fake-host",
 })
 
 
@@ -192,6 +192,7 @@ def bind_and_start(
     purpose: str = "task_execution",
     audience: str = "self",
     metadata: Optional[dict[str, Any]] = None,
+    deadline_monotonic: Optional[float] = None,
 ) -> NativeSessionStart:
     """Open or reuse an *active* binding; after SessionEnd, open a new occurrence."""
     if not (external_session_id or "").strip():
@@ -223,6 +224,7 @@ def bind_and_start(
             cwd=cwd,
             max_tokens=max_tokens,
             client=host_type,
+            deadline_monotonic=deadline_monotonic,
         )
         session = store.get_session(existing.cognitive_session_id)
         if session is None:
@@ -248,6 +250,7 @@ def bind_and_start(
             task_profile=task_profile, max_tokens=max_tokens,
             persona=persona, purpose=purpose, audience=audience,
             metadata=metadata,
+            deadline_monotonic=deadline_monotonic,
         )
 
     occurrence = store.next_host_binding_occurrence(
@@ -261,6 +264,7 @@ def bind_and_start(
         persona=persona, purpose=purpose, audience=audience,
         tool_id=None,
         surface="native",
+        deadline_monotonic=deadline_monotonic,
     )
     # Vault comes from project / explicit metadata — never inferred from domain name.
     vault_id = None
@@ -320,6 +324,7 @@ def bind_and_start(
             store, cfg, embedder,
             query=query, binding=winner, cwd=cwd,
             max_tokens=max_tokens, client=host_type,
+            deadline_monotonic=deadline_monotonic,
         )
         session = store.get_session(winner.cognitive_session_id)
         if session is None:
@@ -333,6 +338,10 @@ def bind_and_start(
                 reading_confidences={}, observer_mode="native",
             ),
         )
+    # Fresh start_session already built a pack; when a deadline was set and
+    # the pack is still needed under budget pressure, callers may re-request.
+    # For first-open we keep the session pack (domain may be unclassified /
+    # empty). Deadline applies to re-pack paths above and explicit pack_request.
     return NativeSessionStart(binding=binding, started=started)
 
 
@@ -420,6 +429,15 @@ def observe_host_event(
 
 
 @dataclass
+class DomainUpgrade:
+    """Result of upgrading an unclassified binding (domain only — no pack)."""
+
+    binding: HostSessionBinding
+    previous_domain: str
+    resolved_domain: str
+
+
+@dataclass
 class DomainUpgradePack:
     """Result of upgrading an unclassified binding and packing context."""
 
@@ -480,7 +498,7 @@ def _apply_upgraded_scope(target, *, domain: str, reading, access) -> None:
         target.task_profile = reading.task_profile
 
 
-def maybe_upgrade_domain_and_pack(
+def maybe_upgrade_domain(
     store: MemoryStore,
     cfg: Config,
     embedder: Embedder,
@@ -488,15 +506,14 @@ def maybe_upgrade_domain_and_pack(
     binding: HostSessionBinding,
     query: str,
     cwd: Optional[str] = None,
-    max_tokens: int = 1200,
-) -> Optional[DomainUpgradePack]:
-    """If binding domain is unclassified, try to resolve it from ``query`` and pack.
+) -> Optional[DomainUpgrade]:
+    """If binding domain is unclassified, try to resolve it from ``query``.
 
-    Used when a host opens a session without semantic input (empty pack), then
-    the first semantic user event carries enough signal for a search-vote
-    domain. Returns ``None`` when domain is already frozen, still unclassified,
-    or ``query`` is empty. Never widens a frozen real domain. Never rewrites
-    persona / purpose / audience / principal.
+    Does not assemble a context pack — callers decide whether injection is
+    possible before paying for retrieval. Returns ``None`` when domain is
+    already frozen, still unclassified, or ``query`` is empty. Never widens
+    a frozen real domain. Never rewrites persona / purpose / audience /
+    principal.
     """
     if not (query or "").strip():
         return None
@@ -528,23 +545,49 @@ def maybe_upgrade_domain_and_pack(
         _apply_upgraded_scope(session, domain=resolved, reading=reading, access=access)
         store.update_session(session)
 
+    logger.info(
+        "host binding %s domain %s → %s persona=%s",
+        binding.id, previous, resolved, binding.persona,
+    )
+    return DomainUpgrade(
+        binding=binding,
+        previous_domain=previous,
+        resolved_domain=resolved,
+    )
+
+
+def maybe_upgrade_domain_and_pack(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    binding: HostSessionBinding,
+    query: str,
+    cwd: Optional[str] = None,
+    max_tokens: int = 1200,
+    deadline_monotonic: Optional[float] = None,
+) -> Optional[DomainUpgradePack]:
+    """Upgrade domain then pack — prefer ``maybe_upgrade_domain`` when the
+    host cannot inject, so pack assembly is skipped."""
+    upgraded = maybe_upgrade_domain(
+        store, cfg, embedder, binding=binding, query=query, cwd=cwd,
+    )
+    if upgraded is None:
+        return None
     pack = request_context_pack(
         store, cfg, embedder,
         query=query,
-        binding=binding,
+        binding=upgraded.binding,
         cwd=cwd,
         max_tokens=max_tokens,
-        client=binding.host_type or "native",
-    )
-    logger.info(
-        "host binding %s domain %s → %s persona=%s (pack sources=%s)",
-        binding.id, previous, resolved, binding.persona, len(pack.sources or []),
+        client=upgraded.binding.host_type or "native",
+        deadline_monotonic=deadline_monotonic,
     )
     return DomainUpgradePack(
-        binding=binding,
+        binding=upgraded.binding,
         pack=pack,
-        previous_domain=previous,
-        resolved_domain=resolved,
+        previous_domain=upgraded.previous_domain,
+        resolved_domain=upgraded.resolved_domain,
     )
 
 
@@ -565,6 +608,7 @@ def request_context_pack(
     purpose: str = "memory_retrieval",
     audience: str = "self",
     client: str = "native",
+    deadline_monotonic: Optional[float] = None,
 ) -> ContextPack:
     """Proactive Context Pack — assembled only by the cognitive core.
 
@@ -663,6 +707,7 @@ def request_context_pack(
         task_profile=task_profile or "general",
         project_id=project_id,
         access=access,
+        deadline_monotonic=deadline_monotonic,
     )
 
 
@@ -693,7 +738,7 @@ def maybe_enqueue_domain_resolve(
 ) -> str:
     """Enqueue background LLM domain resolve when binding is still unclassified.
 
-    Hot-path session start / UserPromptSubmit only search-vote. When that fails,
+    Hot-path session start / user_message only search-vote. When that fails,
     a ``session_domain_resolve`` job (twin-runtime) reads multi-message evidence
     and freezes the domain. No-op without a runtime-capable store.
     """

@@ -13,11 +13,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-# Soft latency budgets (wall-clock, ms) for pack assembly on the native hot
-# path. These do NOT interrupt work mid-flight — the pack is assembled, then
-# dropped from the host response if it blew the budget (domain/binding state
-# already persisted stays). Keeps hooks responsive; the pack recovers on the
-# next injection-capable turn or via MCP. Override via ``cfg.native_pack_budget_ms``.
+# Monotonic pack-assembly deadlines (ms) on the native hot path. Stages of
+# retrieval/firewall/formatting check the deadline and abort early via
+# ``PackDeadlineExceeded``. Binding/domain state already persisted stays;
+# the skipped pack is marked ``pending_context_pack`` for the next
+# injection-capable turn (or MCP). Override via ``cfg.native_pack_budget_ms``.
 _PACK_BUDGET_MS: dict[str, float] = {
     "session_start": 300.0,
     "user_message": 500.0,
@@ -27,13 +27,14 @@ _PROTO_DENY_EXTRAS = frozenset({
     "traceback", "traceback_tail", "stack", "error_class",
 })
 
+from ...cognition.context_pack import PackDeadlineExceeded
 from ...cognition.host_session import (
     BindingScopeError,
     NativeSessionStart,
     bind_and_start,
     end_host_session,
     maybe_enqueue_domain_resolve,
-    maybe_upgrade_domain_and_pack,
+    maybe_upgrade_domain,
     observe_host_event,
     recommend_intervention,
     request_context_pack,
@@ -97,7 +98,12 @@ class NativeHostService:
         self.embedder = embedder
 
     def _pack_budget_ms(self, kind: str) -> float:
-        """Soft pack budget for a hot-path event kind (0 disables)."""
+        """Pack assembly deadline (ms) for a hot-path event kind (0 disables).
+
+        Stages abort early via ``PackDeadlineExceeded``; a late post-check
+        still suppresses emission if work somehow finished after the deadline.
+        Skipped packs are marked pending for the next injection-capable turn.
+        """
         override = getattr(self.cfg, "native_pack_budget_ms", None)
         if isinstance(override, dict) and kind in override:
             try:
@@ -110,10 +116,10 @@ class NativeHostService:
         """Resolve declared HostCapabilities from binding metadata.
 
         Adapters stash ``host_capabilities`` on the binding at session_start.
-        Missing declaration falls back to conservative per-host defaults —
-        never a provider-name branch in the hot path.
+        Missing/malformed declaration → fail-closed ``conservative_default``.
+        Never branches on provider host names here.
         """
-        from .events import CLAUDE_CODE_CAPABILITIES, HostCapabilities
+        from .events import HostCapabilities
         meta = (binding.metadata or {}) if binding is not None else {}
         raw = meta.get("host_capabilities")
         if isinstance(raw, dict):
@@ -121,10 +127,18 @@ class NativeHostService:
                 return HostCapabilities(**raw)
             except Exception:  # malformed declaration → conservative default
                 logger.warning("ignoring malformed host_capabilities on binding")
-        ht = host_type or (getattr(binding, "host_type", "") if binding else "")
-        if ht == "claude-code":
-            return CLAUDE_CODE_CAPABILITIES
-        return HostCapabilities()
+        return HostCapabilities.conservative_default()
+
+    def _mark_pending_pack(
+        self, binding: HostSessionBinding, *, reason: str,
+    ) -> HostSessionBinding:
+        """Persist that a pack should be emitted on the next injection point."""
+        meta = dict(binding.metadata or {})
+        meta["pending_context_pack"] = True
+        meta["pending_context_reason"] = reason
+        binding.metadata = meta
+        self.store.update_host_session_binding(binding)
+        return binding
 
     def handle(self, event: HostEvent) -> NativeEventResult:
         try:
@@ -309,46 +323,73 @@ class NativeHostService:
             and not result.duplicated
             and (event.text or "").strip()
         ):
-            # Can this host inject a pack on user_message? Domain resolution
-            # still runs (binding scope is host-independent), but a pack is only
-            # produced/emitted when the host can actually surface it here.
+            # Domain resolution is host-independent; pack assembly only when
+            # this host can inject on user_message.
             can_inject = "user_message" in self._capabilities(
                 result.binding
             ).context_injection_events
-            t0 = time.monotonic()
-            upgraded = maybe_upgrade_domain_and_pack(
+            upgraded = maybe_upgrade_domain(
                 self.store, self.cfg, self.embedder,
                 binding=result.binding,
                 query=event.text,
                 cwd=event.cwd,
             )
-            elapsed_ms = (time.monotonic() - t0) * 1000.0
             if upgraded is not None:
                 extras.update({
                     "domain": upgraded.resolved_domain,
                     "domain_upgraded_from": upgraded.previous_domain,
                     "needs_domain_confirmation": False,
                 })
-                budget = self._pack_budget_ms("user_message")
-                over_budget = budget > 0 and elapsed_ms > budget
                 if not can_inject:
-                    # Domain applied; hold the pack — host has no injection point.
+                    binding = self._mark_pending_pack(
+                        upgraded.binding, reason="no_injection_point",
+                    )
                     extras["pack_held_no_injection_point"] = True
                     return NativeEventResult(
-                        binding=upgraded.binding,
-                        session_id=upgraded.binding.cognitive_session_id,
+                        binding=binding,
+                        session_id=binding.cognitive_session_id,
                         extras=extras,
                     )
-                if over_budget:
-                    # Domain upgrade persisted; drop the pack to stay responsive.
+                budget = self._pack_budget_ms("user_message")
+                deadline = (
+                    time.monotonic() + budget / 1000.0 if budget > 0 else None
+                )
+                t0 = time.monotonic()
+                try:
+                    pack = request_context_pack(
+                        self.store, self.cfg, self.embedder,
+                        query=event.text,
+                        binding=upgraded.binding,
+                        cwd=event.cwd,
+                        client=upgraded.binding.host_type or "native",
+                        deadline_monotonic=deadline,
+                    )
+                except PackDeadlineExceeded as exc:
+                    binding = self._mark_pending_pack(
+                        upgraded.binding, reason="latency_budget",
+                    )
+                    extras["pack_skipped_budget"] = True
+                    extras["pack_deadline_stage"] = exc.stage
+                    extras["pack_elapsed_ms"] = round(
+                        (time.monotonic() - t0) * 1000.0, 1,
+                    )
+                    return NativeEventResult(
+                        binding=binding,
+                        session_id=binding.cognitive_session_id,
+                        extras=extras,
+                    )
+                elapsed_ms = (time.monotonic() - t0) * 1000.0
+                if budget > 0 and elapsed_ms > budget:
+                    binding = self._mark_pending_pack(
+                        upgraded.binding, reason="latency_budget",
+                    )
                     extras["pack_skipped_budget"] = True
                     extras["pack_elapsed_ms"] = round(elapsed_ms, 1)
                     return NativeEventResult(
-                        binding=upgraded.binding,
-                        session_id=upgraded.binding.cognitive_session_id,
+                        binding=binding,
+                        session_id=binding.cognitive_session_id,
                         extras=extras,
                     )
-                pack = upgraded.pack
                 extras["emit_pack"] = True
                 return NativeEventResult(
                     binding=upgraded.binding,
@@ -384,21 +425,46 @@ class NativeHostService:
         cwd: Optional[str],
         extras: dict[str, Any],
     ) -> Optional[NativeEventResult]:
-        """Emit a pack prepared after background domain resolve (next turn)."""
+        """Emit a pack deferred from domain resolve / budget / no-injection."""
         meta = dict(binding.metadata or {})
         if not meta.get("pending_context_pack"):
             return None
         from ...config import UNCLASSIFIED_DOMAIN
         if not binding.domain or binding.domain == UNCLASSIFIED_DOMAIN:
             return None
-        pack = request_context_pack(
-            self.store, self.cfg, self.embedder,
-            query=query or "native host session",
-            binding=binding,
-            cwd=cwd,
-            client=binding.host_type or "native",
-        )
+        budget = self._pack_budget_ms("user_message")
+        deadline = time.monotonic() + budget / 1000.0 if budget > 0 else None
+        t0 = time.monotonic()
+        try:
+            pack = request_context_pack(
+                self.store, self.cfg, self.embedder,
+                query=query or "native host session",
+                binding=binding,
+                cwd=cwd,
+                client=binding.host_type or "native",
+                deadline_monotonic=deadline,
+            )
+        except PackDeadlineExceeded as exc:
+            extras["pack_skipped_budget"] = True
+            extras["pack_deadline_stage"] = exc.stage
+            extras["pack_elapsed_ms"] = round((time.monotonic() - t0) * 1000.0, 1)
+            # Keep pending for a later turn.
+            return NativeEventResult(
+                binding=binding,
+                session_id=binding.cognitive_session_id,
+                extras=extras,
+            )
+        elapsed_ms = (time.monotonic() - t0) * 1000.0
+        if budget > 0 and elapsed_ms > budget:
+            extras["pack_skipped_budget"] = True
+            extras["pack_elapsed_ms"] = round(elapsed_ms, 1)
+            return NativeEventResult(
+                binding=binding,
+                session_id=binding.cognitive_session_id,
+                extras=extras,
+            )
         meta.pop("pending_context_pack", None)
+        meta.pop("pending_context_reason", None)
         binding.metadata = meta
         self.store.update_host_session_binding(binding)
         extras.update({
@@ -420,34 +486,53 @@ class NativeHostService:
     ) -> NativeEventResult:
         query = event.text or event.summary or "native host session"
         meta = dict(event.metadata or {})
-        # Capabilities belong on the binding, not every observation artifact.
-        if observe_start:
-            caps = meta.get("host_capabilities")
-            if not caps:
-                # Prefer adapter-supplied capabilities; fall back to defaults
-                # for the declared host_type without importing provider modules
-                # into the generic path beyond the known registry.
-                from .events import CLAUDE_CODE_CAPABILITIES, HostCapabilities
-                if event.host_type == "claude-code":
-                    caps = CLAUDE_CODE_CAPABILITIES.model_dump()
-                else:
-                    caps = HostCapabilities().model_dump()
-                meta["host_capabilities"] = caps
+        # Capabilities belong on the binding. Prefer adapter-supplied; else
+        # adapter-frontier registry (never a provider branch in this module).
+        if observe_start and not meta.get("host_capabilities"):
+            from .adapters.registry import capabilities_for_host
+            meta["host_capabilities"] = capabilities_for_host(
+                event.host_type,
+            ).model_dump()
+        budget_kind = "session_start" if observe_start else "pack_request"
+        budget = self._pack_budget_ms(budget_kind)
+        deadline = time.monotonic() + budget / 1000.0 if budget > 0 else None
         t0 = time.monotonic()
-        started: NativeSessionStart = bind_and_start(
-            self.store, self.cfg, self.embedder,
-            host_type=event.host_type,
-            external_session_id=event.external_session_id,
-            query=query,
-            cwd=event.cwd,
-            domain=event.domain,
-            project=event.project,
-            task_profile=event.task_profile,
-            persona=event.persona or "individual",
-            purpose=event.purpose or "task_execution",
-            audience=event.audience or "self",
-            metadata=meta,
-        )
+        try:
+            started: NativeSessionStart = bind_and_start(
+                self.store, self.cfg, self.embedder,
+                host_type=event.host_type,
+                external_session_id=event.external_session_id,
+                query=query,
+                cwd=event.cwd,
+                domain=event.domain,
+                project=event.project,
+                task_profile=event.task_profile,
+                persona=event.persona or "individual",
+                purpose=event.purpose or "task_execution",
+                audience=event.audience or "self",
+                metadata=meta,
+                deadline_monotonic=deadline,
+            )
+        except PackDeadlineExceeded as exc:
+            # Binding may already exist from a prior open; resolve and mark pending.
+            binding = resolve_active_binding(
+                self.store,
+                host_type=event.host_type,
+                external_session_id=event.external_session_id,
+            )
+            extras: dict[str, Any] = {
+                "pack_skipped_budget": True,
+                "pack_deadline_stage": exc.stage,
+                "pack_elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+            }
+            if binding is not None:
+                binding = self._mark_pending_pack(binding, reason="latency_budget")
+                return NativeEventResult(
+                    binding=binding,
+                    session_id=binding.cognitive_session_id,
+                    extras=extras,
+                )
+            return NativeEventResult(ok=False, error="pack deadline before binding", extras=extras)
         elapsed_ms = (time.monotonic() - t0) * 1000.0
         if observe_start:
             observe_host_event(
@@ -460,23 +545,27 @@ class NativeHostService:
                 event_id=event.event_id or f"session_start:{started.binding.occurrence}",
             )
         pack = started.started.pack
-        extras: dict[str, Any] = {
+        extras = {
             "project_id": started.binding.project_id,
             "domain": started.binding.domain,
             "task_profile": started.binding.task_profile,
             "occurrence": started.binding.occurrence,
             "needs_domain_confirmation": started.started.needs_domain_confirmation,
         }
-        budget = self._pack_budget_ms(
-            "session_start" if observe_start else "pack_request"
+        skipped_deadline = bool(
+            getattr(started.started, "pack_skipped_deadline", False)
         )
-        if budget > 0 and elapsed_ms > budget:
-            # Session/binding persisted; drop the pack to keep the hook snappy.
+        if skipped_deadline or (budget > 0 and elapsed_ms > budget):
+            binding = self._mark_pending_pack(
+                started.binding, reason="latency_budget",
+            )
             extras["pack_skipped_budget"] = True
             extras["pack_elapsed_ms"] = round(elapsed_ms, 1)
+            if skipped_deadline:
+                extras["pack_deadline_stage"] = "session_start"
             return NativeEventResult(
-                binding=started.binding,
-                session_id=started.binding.cognitive_session_id,
+                binding=binding,
+                session_id=binding.cognitive_session_id,
                 extras=extras,
             )
         extras["emit_pack"] = True

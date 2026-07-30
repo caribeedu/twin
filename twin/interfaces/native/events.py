@@ -49,36 +49,60 @@ STRUCTURAL_EVENT_KINDS = frozenset({
 class HostCapabilities(BaseModel):
     """What the host can accept from Twin (provider-agnostic).
 
-    Adapters declare these; the generic native service never branches on
-    provider hook names. Defaults are conservative.
+    Adapters declare these on ``session_start``. Field defaults and
+    ``conservative_default()`` are fail-closed for unknown hosts.
     """
 
     observe_session: bool = True
-    request_context_pack: bool = True
-    display_intervention: bool = True
+    request_context_pack: bool = False
+    display_intervention: bool = False
     block_action: bool = False
     modify_action: bool = False
-    stream_observations: bool = True
+    stream_observations: bool = False
     structured_stdout: bool = True
     supports_session_start: bool = True
-    supports_session_end: bool = True
-    supports_turn_end: bool = True
-    supports_user_message: bool = True
-    supports_tool_events: bool = True
-    supports_context_injection: bool = True
-    # Universal kinds that may carry ``additionalContext`` / pack injection.
-    context_injection_events: list[str] = Field(
-        default_factory=lambda: ["session_start", "user_message"],
-    )
+    supports_session_end: bool = False
+    supports_turn_end: bool = False
+    supports_user_message: bool = False
+    supports_tool_events: bool = False
+    supports_context_injection: bool = False
+    context_injection_events: list[str] = Field(default_factory=list)
     supports_parallel_observation: bool = False
     supports_file_context: bool = False
 
+    @classmethod
+    def conservative_default(cls) -> "HostCapabilities":
+        """Fail-closed profile when a host did not declare capabilities."""
+        return cls()
 
-CLAUDE_CODE_CAPABILITIES = HostCapabilities(
-    supports_file_context=False,
-    supports_tool_events=True,
-    context_injection_events=["session_start", "user_message"],
-)
+    @classmethod
+    def claude_code(cls) -> "HostCapabilities":
+        """Claude Code hook surface — session/turn/user/tool + pack injection."""
+        return cls(
+            observe_session=True,
+            request_context_pack=True,
+            display_intervention=True,
+            stream_observations=True,
+            structured_stdout=True,
+            supports_session_start=True,
+            supports_session_end=True,
+            supports_turn_end=True,
+            supports_user_message=True,
+            supports_tool_events=True,
+            supports_context_injection=True,
+            context_injection_events=["session_start", "user_message"],
+            supports_parallel_observation=False,
+            supports_file_context=False,
+        )
+
+    @classmethod
+    def fake_host(cls) -> "HostCapabilities":
+        """Portable eval host — same injection surface as Claude Code."""
+        return cls.claude_code()
+
+
+# Back-compat alias for adapter imports.
+CLAUDE_CODE_CAPABILITIES = HostCapabilities.claude_code()
 
 
 class HostEvent(BaseModel):
