@@ -1,11 +1,10 @@
-"""Model-backed episode reflection (optional enrichment over the structural
-reflector).
+"""Model-backed episode reflection (hippocampus_consolidate).
 
 Given an :class:`EpisodeBrief`, ask a chat model to name the trajectory the
 phase arc implies (e.g. "intended Kafka, then chose SQS"). The model receives
 only already-derived structure and verbatim member quotes; it returns 0..N
 claims. Every claim still lands as a MemoryCandidate for human review — the
-model never confirms anything, and a failure falls back to structure.
+model never confirms anything. A parse/model failure defers (never fabricates).
 """
 
 from __future__ import annotations
@@ -15,19 +14,41 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # avoid import cycle at module load
     from ..episode_reflect import EpisodeBrief, TrajectoryClaim
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "3"
 SCHEMA_VERSION = "1"
 
-_SYSTEM = (
-    "You summarize the TRAJECTORY of a unit of work across multiple sources. "
-    "You are given an episode's ordered phases (goal → decision → execution → "
-    "outcome) and narrative edges (which decision superseded or motivated "
-    "which). Produce claims that only a cross-source view reveals — e.g. "
-    "'intended approach X, then chose Y' — never restating a single commit. "
-    "Ground every claim in the provided quotes. If the arc shows no meaningful "
-    "trajectory, return an empty list. You never confirm anything; these are "
-    "candidates for human review."
-)
+_SYSTEM = """\
+You summarize the TRAJECTORY of a unit of work across multiple sources.
+You are given an episode's ordered phases (goal → decision → execution →
+outcome) and narrative edges (which decision superseded or motivated which).
+
+Emit a claim ONLY when the cross-source arc reveals something a single
+artifact does not — typically:
+1. a pivot: an earlier approach superseded by a later one
+   (e.g. 'intended Kafka, then chose SQS');
+2. a contradiction across sources;
+3. a goal/decision that closed as a distinct outcome (not merely 'then a
+   commit happened').
+
+Hard negatives — return an empty claims array for these:
+- restating that a pull request was followed by its commit;
+- 'the goal was executed' / 'PR motivated the commit' tautologies;
+- restating a single commit message or PR title with no trajectory;
+- anything atomic extract would already say from one source alone.
+
+Ground every claim in the provided quotes. Prefer zero claims over a
+shallow claim. You never confirm anything; these are candidates for human
+review.
+
+Respond with JSON only, matching the schema. Field names MUST be exactly:
+- claims: array of objects
+- type: decision | belief
+- title, summary: strings
+- evidence_quotes: array of strings (optional)
+- from_phase_key / to_phase_key: phase_key strings from the input (optional)
+- confidence: number in [0,1] (optional)
+Do NOT emit prose or alternate field names.
+"""
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",

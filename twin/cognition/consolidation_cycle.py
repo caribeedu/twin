@@ -3,8 +3,13 @@
 Distinct from session-close consolidation (``sessions._consolidate``): these
 cycles run on a logical window over the store — quality analysis, safe
 automation, temporal belief/goal refresh, closed-session inventory, open
-tasks, review backlog prep, cognitive change report, and (weekly) optional
-judgment *proposals*. They never confirm Memory or Judgment.
+tasks, review backlog prep, cognitive change report, episode cortex
+(sensory→cortex) + episode reflect (both daily and weekly), and (weekly)
+optional judgment *proposals*. They never confirm Memory or Judgment.
+
+``twin meditate`` remains the human orchestrator (optional interactive review
++ prefrontal drafts); daily/weekly automation only runs the non-interactive
+slices.
 
 Apply runs are idempotent per ``(kind, window_start, window_end)``. The durable
 runtime may enqueue these as jobs; this module remains the deterministic core.
@@ -48,6 +53,7 @@ class ConsolidationCycleResult:
     goals_observed: list[dict[str, Any]] = field(default_factory=list)
     judgment_proposal_ids: list[str] = field(default_factory=list)
     reflected_candidate_ids: list[str] = field(default_factory=list)
+    episode_cognition: dict[str, Any] = field(default_factory=dict)
     closed_sessions: list[dict[str, Any]] = field(default_factory=list)
     open_tasks: list[dict[str, Any]] = field(default_factory=list)
     review_prepared: list[dict[str, Any]] = field(default_factory=list)
@@ -305,20 +311,43 @@ def reflect_recent_episodes(
     dry_run: bool = False,
     max_episodes: int = 25,
     scan_limit: int = 500,
+    episode_ids: Optional[list[str]] = None,
 ) -> list[str]:
-    """Reflect episodes with a narrative arc into trajectory MemoryCandidates.
+    """Reflect episodes with a built arc into trajectory MemoryCandidates.
 
-    Only episodes with ≥2 phases and a ``superseded|motivated`` edge are
-    reflected (``reflect_episode`` enforces this too). Candidates only — never
-    confirms. Returns the created candidate memory ids.
+    The hippocampus_consolidate stage runs on episodes whose cortex stage
+    produced a *reflectable* arc (pivot / contradiction / goal→outcome); the
+    reflect model decides whether that arc yields a claim, and defers when no
+    model is available (never fabricates). Candidates only — never confirms.
+
+    When ``episode_ids`` is given (e.g. episodes just touched by cortex), those
+    are tried first; otherwise the store is scanned newest-first up to
+    ``scan_limit``. Returns the created candidate memory ids.
     """
     from .episode_reflect import reflect_episode
 
-    if not hasattr(store, "list_work_episodes"):
+    if not hasattr(store, "list_work_episodes") and not episode_ids:
         return []
     created: list[str] = []
     reflected = 0
-    for ep in store.list_work_episodes(limit=scan_limit):
+    seen: set[str] = set()
+    queue: list[Any] = []
+    if episode_ids:
+        for eid in episode_ids:
+            if not hasattr(store, "get_work_episode"):
+                break
+            ep = store.get_work_episode(eid)
+            if ep is not None:
+                queue.append(ep)
+                seen.add(ep.id)
+    if hasattr(store, "list_work_episodes"):
+        for ep in store.list_work_episodes(limit=scan_limit):
+            if ep.id in seen:
+                continue
+            queue.append(ep)
+            seen.add(ep.id)
+
+    for ep in queue:
         if reflected >= max_episodes:
             break
         status = ep.status.value if hasattr(ep.status, "value") else str(ep.status)
@@ -374,6 +403,52 @@ def build_cognitive_change_report(
     }
 
 
+def run_episode_cortex_pass(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    dry_run: bool = False,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """Daily cortex slice: ``sensory → … → cortex`` (never Memory/Judgment).
+
+    Incremental by default so day-to-day dirty records get phases/edges without
+    a full vault re-score. Defers per-stage when the model is unavailable —
+    never falls back to lexical rules. Dry-run records the stage without
+    calling the model.
+    """
+    from .episode_pipeline import BrainStage, run_episode_cognition
+
+    if dry_run:
+        return {
+            "mode": mode,
+            "until": BrainStage.cortex.value,
+            "dry_run": True,
+            "deferred": [],
+            "episode_ids": [],
+            "notes": ["dry_run skipped episode cortex"],
+        }
+    report = run_episode_cognition(
+        store, cfg, embedder,
+        mode=mode,
+        until=BrainStage.cortex,
+    )
+    deferred = report.deferred_stages()
+    summary = report.to_dict()
+    return {
+        "mode": mode,
+        "until": BrainStage.cortex.value,
+        "dry_run": False,
+        "deferred": deferred,
+        "episode_ids": list(report.episode_ids),
+        "stages": summary.get("stages") or [],
+        "records_scanned": (
+            report.correlation.records_scanned if report.correlation else 0
+        ),
+    }
+
+
 def run_consolidation_cycle(
     store: MemoryStore,
     cfg: Config,
@@ -391,7 +466,10 @@ def run_consolidation_cycle(
 
     Stages:
       analyze → contradictions → safe_automation → temporal_refresh
-      → (weekly) judgment_proposals → done
+      → closed_sessions → open_tasks → review_prepare
+      → episode_cortex (sensory→cortex, incremental)
+      → episode_reflect (daily + weekly; candidates only)
+      → (weekly) judgment_proposals → change_report → done
 
     Apply runs persist a ``ConsolidationRun`` keyed by window; repeats return
     the prior completed result (``duplicated=True``). Concurrent ``running``
@@ -636,15 +714,36 @@ def run_consolidation_cycle(
         )
         result.candidate_stats = candidate_formation_stats(store)
 
-        if kind == "weekly":
-            stage = "episode_reflect"
-            result.stages.append("episode_reflect")
-            if dry_run:
-                result.notes.append("dry_run skipped episode reflection")
-            else:
-                result.reflected_candidate_ids = reflect_recent_episodes(
-                    store, cfg, embedder,
-                )
+        # Keep episode arcs current via sensory→cortex, then reflect
+        # reflectable arcs into MemoryCandidates. Not full meditate — no
+        # interactive review, no prefrontal, never auto-confirm.
+        stage = "episode_cortex"
+        result.stages.append("episode_cortex")
+        result.episode_cognition = run_episode_cortex_pass(
+            store, cfg, embedder, dry_run=dry_run, mode="incremental",
+        )
+        if result.episode_cognition.get("dry_run"):
+            result.notes.append("dry_run skipped episode cortex")
+        elif result.episode_cognition.get("deferred"):
+            result.notes.append(
+                "episode cortex deferred: "
+                + ", ".join(result.episode_cognition["deferred"])
+            )
+
+        stage = "episode_reflect"
+        result.stages.append("episode_reflect")
+        if dry_run:
+            result.notes.append("dry_run skipped episode reflection")
+        else:
+            # Prefer episodes just touched by cortex; fall back to a store scan.
+            touched = list(result.episode_cognition.get("episode_ids") or [])
+            # Daily stays lighter; weekly can scan more arcs.
+            max_eps = 15 if kind == "daily" else 25
+            result.reflected_candidate_ids = reflect_recent_episodes(
+                store, cfg, embedder,
+                episode_ids=touched or None,
+                max_episodes=max_eps,
+            )
 
         if propose_judgment:
             stage = "judgment_proposals"

@@ -56,6 +56,9 @@ def test_daily_cycle_dry_run_no_writes(store, cfg, embedder):
     assert result.dry_run is True
     assert "analyze" in result.stages
     assert "temporal_refresh" in result.stages
+    assert "episode_cortex" in result.stages
+    assert result.episode_cognition.get("dry_run") is True
+    assert "episode_reflect" in result.stages
     assert "judgment_proposals" not in result.stages
     assert store.get_memory(mem.id).needs_review is False
     assert _confirmed_ids(store) == before
@@ -69,6 +72,8 @@ def test_weekly_cycle_includes_judgment_stage(store, cfg, embedder):
     result = run_consolidation_cycle(
         store, cfg, embedder, kind="weekly", dry_run=True,
     )
+    assert "episode_cortex" in result.stages
+    assert "episode_reflect" in result.stages
     assert "judgment_proposals" in result.stages
     assert any(g["project_id"] == project.id for g in result.goals_observed)
     assert any("invariant_ok" in n for n in result.notes)

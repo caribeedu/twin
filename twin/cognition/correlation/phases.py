@@ -1,16 +1,18 @@
-"""Deterministic EpisodePhase assignment.
+"""EpisodePhase assembly from cognitive member roles.
 
-An episode's active members are ordered in time and mapped to an arc of
-phases (goal → decision → execution → outcome). Phases are revisable
-structure derived from evidence — never Memory or Judgment. Assignment is
-heuristic-first (no LLM in this layer); LLM labeling is reserved for later
-reflect enrichment.
+Phases are the ``goal → decision → execution → outcome`` arc of a WorkEpisode.
+Roles are assigned by the **amygdala** cognition stage (an LLM classifier), not
+by lexical rules — this module only does the *structural* work of ordering
+members in time and grouping them into phases from the roles it is handed.
+
+There is no semantic regex here: given a ``roles`` map (``member ref → kind``)
+this module builds and persists phases idempotently. When no roles are provided
+(no model / deferred), no phases are built — correlation never invents an arc.
 """
 
 from __future__ import annotations
 
 import hashlib
-import re
 from typing import Any, Optional
 
 from ...clock import now_iso
@@ -22,65 +24,11 @@ from .models import (
     WorkEpisode,
 )
 
-# external_type substrings → default phase kind. Ordered by specificity; first
-# match wins. Kept conservative — an unmatched type falls back to ``other``.
-_TYPE_KIND: tuple[tuple[str, EpisodePhaseKind], ...] = (
-    ("issue", EpisodePhaseKind.goal),
-    ("discussion", EpisodePhaseKind.goal),
-    ("epic", EpisodePhaseKind.goal),
-    ("story", EpisodePhaseKind.goal),
-    ("review", EpisodePhaseKind.decision),
-    ("pull_request", EpisodePhaseKind.decision),
-    ("pull request", EpisodePhaseKind.decision),
-    ("merge_request", EpisodePhaseKind.decision),
-    ("proposal", EpisodePhaseKind.decision),
-    ("rfc", EpisodePhaseKind.decision),
-    ("commit", EpisodePhaseKind.execution),
-    ("push", EpisodePhaseKind.execution),
-    ("deploy", EpisodePhaseKind.execution),
-    ("build", EpisodePhaseKind.execution),
-    ("release", EpisodePhaseKind.outcome),
-    ("tag", EpisodePhaseKind.outcome),
-    ("ship", EpisodePhaseKind.outcome),
-)
-
-# Content language that promotes a member to an ``outcome`` regardless of type.
-_OUTCOME_RE = re.compile(
-    r"\b(merged|shipped|released|closed|resolved|deployed|done|"
-    r"landed|completed|reverted)\b",
-    re.I,
-)
-# Content language that marks a decision (over its default type).
-_DECISION_RE = re.compile(
-    r"\b(decided|decision|chose|choose|will use|go with|instead|"
-    r"pivot|switch to|adopt)\b",
-    re.I,
-)
-# Language that overturns an earlier decision — forces a new phase boundary so
-# "intended X → chose Y" is not collapsed into a single decision phase.
-_REVERSAL_RE = re.compile(
-    r"\b(instead|revert|reverted|reverting|pivot|pivoted|"
-    r"changed our mind|no longer|abandon|abandoned|"
-    r"switch(?:ed)? to|replace(?:d)? with|supersed)\b",
-    re.I,
-)
-
-
-def _phase_kind_for(external_type: str, content: str) -> EpisodePhaseKind:
-    text = content or ""
-    et = (external_type or "").lower()
-    # Outcome language is the strongest signal (a "merged" commit closes an arc).
-    if _OUTCOME_RE.search(text):
-        return EpisodePhaseKind.outcome
-    for needle, kind in _TYPE_KIND:
-        if needle in et:
-            # A commit/PR whose body reads as a decision is a decision phase.
-            if kind == EpisodePhaseKind.execution and _DECISION_RE.search(text):
-                return EpisodePhaseKind.decision
-            return kind
-    if _DECISION_RE.search(text):
-        return EpisodePhaseKind.decision
-    return EpisodePhaseKind.other
+# Kinds whose contiguous members collapse into a single phase (noise reduction:
+# a run of commits is one execution). Goal / decision / outcome stay per member
+# so a pivot ("intended Kafka → chose SQS") survives as two decision phases —
+# a structural policy over model-assigned roles, not a lexical rule.
+_MERGEABLE_KINDS = frozenset({EpisodePhaseKind.execution, EpisodePhaseKind.other})
 
 
 def _member_ref(link: Any) -> str:
@@ -102,6 +50,13 @@ def _first_line(content: str) -> str:
     return ""
 
 
+def _coerce_kind(value: Any) -> EpisodePhaseKind:
+    try:
+        return EpisodePhaseKind(str(value))
+    except (ValueError, TypeError):
+        return EpisodePhaseKind.other
+
+
 def _ordered_active_links(store, episode_id: str) -> list[tuple[Any, Any]]:
     """Return (link, record) pairs for active links, sorted by occurred_at."""
     pairs: list[tuple[Any, Any, str]] = []
@@ -115,42 +70,67 @@ def _ordered_active_links(store, episode_id: str) -> list[tuple[Any, Any]]:
             rec = store.get_connector_record(lk.connector_record_id)
             if rec is not None:
                 occurred = rec.occurred_at or ""
-        # Tie-break by member ref for stable ordering when times collide.
         pairs.append((lk, rec, occurred))
+    # Tie-break by member ref for stable ordering when times collide.
     pairs.sort(key=lambda t: (t[2] or "~", _member_ref(t[0])))
     return [(lk, rec) for lk, rec, _o in pairs]
 
 
-def compute_phases(store, ep: WorkEpisode) -> list[EpisodePhase]:
-    """Pure computation of phases from active links (no persistence)."""
+def member_briefs(store, ep: WorkEpisode) -> list[dict[str, Any]]:
+    """Structured, evidence-only view of an episode's active members.
+
+    This is the input the amygdala classifier reasons over — external type,
+    time and a short content excerpt. No conclusions, no roles.
+    """
+    briefs: list[dict[str, Any]] = []
+    for lk, rec in _ordered_active_links(store, ep.id):
+        content = getattr(rec, "content", "") or ""
+        briefs.append({
+            "ref": _member_ref(lk),
+            "external_type": lk.external_type or "",
+            "occurred_at": getattr(rec, "occurred_at", "") or "",
+            "excerpt": _first_line(content) or content[:120],
+        })
+    return briefs
+
+
+def build_phases_from_roles(
+    store,
+    ep: WorkEpisode,
+    roles: dict[str, Any],
+    *,
+    brain_stage: str = "amygdala",
+) -> list[EpisodePhase]:
+    """Assemble ordered phases from a model-assigned ``roles`` map.
+
+    ``roles`` maps ``member ref → {"kind": ..., "salience": ...}`` (or bare
+    kind strings). Members with no role default to ``other``. Contiguous
+    mergeable-kind members collapse into one phase; goal / decision / outcome
+    stay per member so pivots and framing survive.
+    """
     pairs = _ordered_active_links(store, ep.id)
     if not pairs:
         return []
 
-    # 1. classify each member
     classified: list[tuple[Any, Any, EpisodePhaseKind, str]] = []
     for lk, rec in pairs:
-        content = getattr(rec, "content", "") or ""
-        kind = _phase_kind_for(lk.external_type or "", content)
+        ref = _member_ref(lk)
+        info = roles.get(ref)
+        kind_val = info.get("kind") if isinstance(info, dict) else info
+        kind = _coerce_kind(kind_val)
         occurred = getattr(rec, "occurred_at", "") or ""
         classified.append((lk, rec, kind, occurred))
 
-    # 2. collapse contiguous same-kind runs into phases
     phases: list[EpisodePhase] = []
     order = 0
     i = 0
     n = len(classified)
     while i < n:
-        j = i
         kind = classified[i][2]
-        while j + 1 < n and classified[j + 1][2] == kind:
-            # A reversal member opens a new phase even within a same-kind run,
-            # so a decision pivot stays visible as two decision phases.
-            nxt = classified[j + 1]
-            nxt_content = getattr(nxt[1], "content", "") or ""
-            if _REVERSAL_RE.search(nxt_content):
-                break
-            j += 1
+        j = i
+        if kind in _MERGEABLE_KINDS:
+            while j + 1 < n and classified[j + 1][2] == kind:
+                j += 1
         run = classified[i:j + 1]
         link_ids = [lk.id for lk, _r, _k, _o in run]
         refs = [_member_ref(lk) for lk, _r, _k, _o in run]
@@ -162,6 +142,13 @@ def compute_phases(store, ep: WorkEpisode) -> list[EpisodePhase]:
             summary = _first_line(getattr(rec, "content", "") or "")
             if summary:
                 break
+        salience = 0.6
+        first_info = roles.get(refs[0]) if refs else None
+        if isinstance(first_info, dict) and first_info.get("salience") is not None:
+            try:
+                salience = float(first_info["salience"])
+            except (TypeError, ValueError):
+                salience = 0.6
         phases.append(EpisodePhase(
             id=_phase_id(ep.id, phase_key),
             episode_id=ep.id,
@@ -175,45 +162,50 @@ def compute_phases(store, ep: WorkEpisode) -> list[EpisodePhase]:
             member_external_refs=refs,
             member_link_ids=link_ids,
             summary=summary,
-            confidence=0.6,
-            provenance={"method": "heuristic", "twin_influenced": False},
+            confidence=round(min(1.0, max(0.1, salience)), 2),
+            provenance={
+                "method": "llm",
+                "twin_influenced": True,
+                "brain_stage": brain_stage,
+            },
         ))
         order += 1
         i = j + 1
     return phases
 
 
-def rebuild_phases(store, ep: WorkEpisode) -> list[EpisodePhase]:
-    """Recompute and persist phases for one episode (idempotent by phase_key).
+def persist_phases(
+    store, ep: WorkEpisode, phases: list[EpisodePhase],
+) -> list[EpisodePhase]:
+    """Idempotently persist phases (stable ids by ``phase_key``).
 
-    Existing phases whose ``phase_key`` no longer appears are removed. Phases
-    that persist keep their id so ``EpisodeEdge`` references (via ``phase_key``)
-    stay valid across rebuilds.
+    Existing phases whose ``phase_key`` no longer appears are removed; those
+    that persist keep their ``created_at`` so edge references stay valid.
     """
     if not hasattr(store, "list_episode_phases"):
-        return []
-    computed = compute_phases(store, ep)
-    computed_by_id = {p.id: p for p in computed}
-
+        return phases
+    computed_by_id = {p.id: p for p in phases}
     existing = {p.id: p for p in store.list_episode_phases(ep.id)}
-    # remove stale
     for pid in list(existing):
         if pid not in computed_by_id:
             store.delete_episode_phase(pid)
-    # upsert current
-    for p in computed:
+    for p in phases:
         if p.id in existing:
             prior = existing[p.id]
-            # keep created_at + any human/LLM provenance from prior
             p.created_at = prior.created_at or p.created_at
-            if prior.provenance.get("method") == "llm":
-                p.provenance = prior.provenance
-                p.summary = prior.summary or p.summary
             p.updated_at = now_iso()
             store.update_episode_phase(p)
         else:
             store.insert_episode_phase(p)
-    return computed
+    return phases
+
+
+def clear_phases(store, ep: WorkEpisode) -> None:
+    """Drop all phases for an episode (deferred / no-model reconciliation)."""
+    if not hasattr(store, "list_episode_phases"):
+        return
+    for p in store.list_episode_phases(ep.id):
+        store.delete_episode_phase(p.id)
 
 
 def phase_by_key(store, episode_id: str, phase_key: str) -> Optional[EpisodePhase]:

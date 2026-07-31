@@ -280,18 +280,9 @@ def _rebuild_episode_from_active_links(store, ep: WorkEpisode) -> WorkEpisode:
         ep.status = EpisodeStatus.closed
     ep.updated_at = now_iso()
     store.update_work_episode(ep)
-    # Derived structure: phases (arc) then narrative edges over those phases.
-    # Fail-open per layer — a store without the phase tables still correlates.
-    try:
-        from .phases import rebuild_phases
-        rebuild_phases(store, ep)
-    except Exception:
-        log.exception("rebuild_phases failed for %s", ep.id)
-    try:
-        from .edges import rebuild_edges
-        rebuild_edges(store, ep)
-    except Exception:
-        log.exception("rebuild_edges failed for %s", ep.id)
+    # Sensory scaffold stops at structural membership. The semantic arc
+    # (phases → narrative edges) is built by the cortex cognition stage
+    # (LLM), not here — correlation never invents an arc from lexical rules.
     return ep
 
 

@@ -1261,10 +1261,23 @@ def cmd_judgment(args) -> None:
     elif cmd == "propose-episode":
         p = propose_from_episode(ws.store, args.episode_id, domain=args.domain)
         if p is None:
-            raise SystemExit(
-                f"episode {args.episode_id} has no confirmed memories to "
-                "generalize (confirm reflected candidates first)"
-            )
+            def pretty_none():
+                ux.print_rule("judgment · propose-episode")
+                ux.print_warn(
+                    f"episode {args.episode_id} has no confirmed trajectory "
+                    "memories to generalize"
+                )
+                ux.print_next([
+                    ("→", f"twin episode reflect {args.episode_id}"),
+                    ("→", "twin review   # confirm reflected candidates first"),
+                ])
+            if _want_json(args):
+                raise SystemExit(
+                    f"episode {args.episode_id} has no confirmed memories to "
+                    "generalize (confirm reflected candidates first)"
+                )
+            pretty_none()
+            raise SystemExit(1)
 
         def pretty():
             ux.print_rule("judgment · propose-episode")
@@ -2701,141 +2714,607 @@ def cmd_native(args) -> None:
         raise SystemExit(1)
 
 
+def _clip(text: object, n: int = 28) -> str:
+    """Truncate long table cells so Rich fold does not wrap IDs across lines."""
+    s = "" if text is None else str(text)
+    return s if len(s) <= n else s[: max(1, n - 1)] + "…"
+
+
+def _stage_status_line(report) -> list[tuple[str, str]]:
+    """KV rows summarizing each brain stage's status + counts."""
+    from ..cognition.episode_pipeline import STAGE_ORDER
+
+    rows: list[tuple[str, str]] = []
+    for st in STAGE_ORDER:
+        outcome = report.stages.get(st.value)
+        if outcome is None:
+            continue
+        counts = ", ".join(f"{k}={v}" for k, v in outcome.counts.items())
+        detail = (outcome.detail or "").strip()
+        val = outcome.status.value
+        parts = [val]
+        if counts:
+            parts.append(counts)
+        if detail and outcome.status.value in ("deferred", "blocked", "error"):
+            parts.append(detail)
+        rows.append((st.value, " · ".join(parts)))
+    return rows
+
+
+def _cognition_next_steps(report) -> list[tuple[str, str]]:
+    """Honest next-steps from deferred/blocked stage details."""
+    details = " ".join(
+        (report.stages[s].detail or "").lower()
+        for s in report.stages
+        if report.stages[s].status.value in ("deferred", "blocked")
+    )
+    nexts: list[tuple[str, str]] = []
+    if any(report.stages[s].status.value == "blocked" for s in report.stages):
+        nexts.append(("→", "set TWIN_EXTRACTOR=auto — heuristic can't reason"))
+        return nexts
+    if "jsondecode" in details or "schema" in details or "error:" in details:
+        nexts.append((
+            "→",
+            "model returned unusable output — re-run twin meditate "
+            "(or try a smaller/stricter chat model via TWIN_LLM_MODEL)",
+        ))
+        return nexts
+    if "unavailable" in details or report.deferred_stages():
+        nexts.append((
+            "→",
+            "twin doctor   # confirm Ollama/chat model loads; then re-run",
+        ))
+    return nexts
+
+
 def cmd_correlate(args) -> None:
-    from ..cognition.correlation import run_correlation_pass
+    from . import ux
+    from ..cognition.episode_pipeline import (
+        STAGE_ORDER,
+        BrainStage,
+        run_episode_cognition,
+    )
 
     ws = Workspace(args.home)
-    report = run_correlation_pass(
-        ws.store,
-        connector_ids=args.connector or None,
-        detect_conflicts=not args.no_conflicts,
-        mode=getattr(args, "mode", "full"),
+    mode = getattr(args, "mode", "full")
+    until = getattr(args, "until", "cortex") or "cortex"
+    try:
+        until_stage = BrainStage(until)
+    except ValueError:
+        raise SystemExit(
+            f"unknown --until stage '{until}'. choose one of: "
+            + ", ".join(s.value for s in STAGE_ORDER
+                        if s != BrainStage.hippocampus_consolidate
+                        and s != BrainStage.prefrontal)
+        )
+    chain = " → ".join(
+        s.value for s in STAGE_ORDER
+        if STAGE_ORDER.index(s) <= STAGE_ORDER.index(until_stage)
     )
-    print(
-        f"scanned={report.records_scanned} "
-        f"identities=+{report.identities_created}/~{report.identities_updated} "
-        f"id_links=+{report.identity_links_created} "
-        f"proj_links=+{report.project_links_created}/~{report.project_links_reused} "
-        f"episodes=+{report.episodes_created}/~{report.episodes_updated}/"
-        f"x{report.episodes_closed} "
-        f"conflicts=+{report.conflicts_created}/~{report.conflicts_reused}/"
-        f"x{report.conflicts_resolved}"
-    )
-    for eid in report.episode_ids:
-        ep = ws.store.get_work_episode(eid)
-        vault = ep.vault_id if ep else "?"
-        print(f"  episode {eid} vault={vault}")
+    with _work_spinner(args, f"correlating ({mode}) · sensory→{until}…"):
+        report = run_episode_cognition(
+            ws.store, ws.cfg, ws.embedder,
+            connector_ids=args.connector or None,
+            detect_conflicts=not args.no_conflicts,
+            mode=mode,
+            until=until_stage,
+        )
+    corr = report.correlation
+    data = dict(report.to_dict())
+    data["records_scanned"] = corr.records_scanned if corr else 0
+
+    def pretty():
+        ux.print_rule(f"correlate · {mode}")
+        ux.print_dim(f"stages: {chain}")
+        ux.print_kv(_stage_status_line(report))
+        if report.episode_ids:
+            rows = []
+            for eid in report.episode_ids[:40]:
+                ep = ws.store.get_work_episode(eid)
+                if ep is None:
+                    continue
+                n_phases = len(ws.store.list_episode_phases(ep.id))
+                n_edges = len(ws.store.list_episode_edges(ep.id))
+                cons = "ready" if n_phases >= 2 else "—"
+                rows.append([
+                    ep.id,
+                    getattr(ep.status, "value", ep.status),
+                    _clip(ep.vault_id or "—", 16),
+                    str(n_phases),
+                    str(n_edges),
+                    cons,
+                    _clip(ep.title or "", 32),
+                ])
+            ux.print_table(
+                ["id", "status", "vault", "ph", "ed", "consolidate", "title"],
+                rows,
+            )
+            if len(report.episode_ids) > 40:
+                ux.print_dim(f"… {len(report.episode_ids) - 40} more episode(s)")
+        elif mode == "incremental" and data["records_scanned"] == 0:
+            ux.print_dim("nothing dirty — incremental pass was a no-op")
+        else:
+            ux.print_warn("no episodes touched this pass")
+
+        nexts = _cognition_next_steps(report)
+        if not nexts:
+            if until_stage != BrainStage.cortex and \
+                    STAGE_ORDER.index(until_stage) < STAGE_ORDER.index(BrainStage.cortex):
+                nexts.append(("→", "twin correlate   # continue to cortex "
+                                   "(phases + edges)"))
+            else:
+                nexts.append(("→", "twin episode list"))
+                nexts.append(("→", "twin meditate    # reflect → review → judgment"))
+        ux.print_next(nexts)
+
+    _emit(args, data, pretty)
+
+
+def cmd_meditate(args) -> None:
+    """Orchestrate the cognition chain up to the human gates.
+
+    sensory → amygdala → basal → hippocampus_bind → cortex →
+    hippocampus_consolidate → [optional review] → prefrontal (drafts only).
+    Never auto-confirms Memory nor auto-approves Judgment.
+    """
+    import sys
+
+    from . import ux
+    from ..cognition.episode_pipeline import BrainStage, run_episode_cognition
+
+    ws = Workspace(args.home)
+    mode = getattr(args, "mode", "full")
+    no_reflect = bool(getattr(args, "no_reflect", False))
+    no_propose = bool(getattr(args, "no_propose", False))
+    dry = bool(getattr(args, "dry_run", False))
+    limit = int(getattr(args, "limit", 50) or 50)
+    want_review = bool(getattr(args, "review", False))
+
+    # Stop the automated pass before prefrontal so a human review can slot in
+    # between consolidation and judgment drafting.
+    stop = BrainStage.cortex if no_reflect else BrainStage.hippocampus_consolidate
+    with _work_spinner(args, f"meditating ({mode}) · sensory→{stop.value}…"):
+        report = run_episode_cognition(
+            ws.store, ws.cfg, ws.embedder,
+            connector_ids=getattr(args, "connector", None) or None,
+            detect_conflicts=not getattr(args, "no_conflicts", False),
+            mode=mode, until=stop, reflect_limit=limit, dry_run=dry,
+        )
+
+    review_ran = False
+    is_tty = getattr(sys.stdin, "isatty", lambda: False)() and not getattr(args, "json", False)
+    if want_review and report.candidate_ids and not dry and is_tty:
+        shim = argparse.Namespace(
+            home=args.home, analyze=False, conflicts=False,
+            project=None, priority=None, json=False,
+        )
+        try:
+            cmd_review(shim)
+            review_ran = True
+        except SystemExit:
+            pass
+
+    # prefrontal: draft judgment proposals from now-confirmed trajectories.
+    proposal_ids: list[str] = []
+    if not no_reflect and not no_propose and not dry:
+        from ..judgment.proposals import propose_from_episode
+
+        for eid in report.episode_ids:
+            try:
+                proposal = propose_from_episode(ws.store, eid)
+            except Exception:
+                continue
+            if proposal is not None:
+                proposal_ids.append(proposal.id)
+        report.proposal_ids = proposal_ids
+        pre = report.stage(BrainStage.prefrontal)
+        from ..cognition.episode_pipeline import StageStatus as _SS
+        pre.status = _SS.ok
+        pre.detail = "drafts from confirmed trajectories"
+        if proposal_ids:
+            pre.counts["proposals"] = len(proposal_ids)
+
+    data = dict(report.to_dict())
+    data["review_ran"] = review_ran
+
+    def pretty():
+        ux.print_rule(f"meditate · {mode}")
+        chain = "sensory → amygdala → basal → hippocampus_bind → cortex"
+        if not no_reflect:
+            chain += " → hippocampus_consolidate"
+        if not no_reflect and not no_propose:
+            chain += " → prefrontal"
+        ux.print_dim(f"stages: {chain}")
+        ux.print_kv(_stage_status_line(report))
+        ux.print_kv([
+            ("episodes", str(len(report.episode_ids))),
+            ("candidates", str(len(report.candidate_ids))),
+            ("proposals", str(len(report.proposal_ids))),
+        ])
+        if report.candidate_ids:
+            ux.print_dim("new trajectory candidate(s): "
+                         + ", ".join(report.candidate_ids[:6])
+                         + (" …" if len(report.candidate_ids) > 6 else ""))
+        if report.proposal_ids:
+            ux.print_dim("judgment draft(s): " + ", ".join(report.proposal_ids[:6]))
+
+        nexts = _cognition_next_steps(report)
+        if not nexts:
+            if report.candidate_ids and not review_ran:
+                nexts.append(("→", "twin review      # confirm trajectory candidates"))
+            if report.proposal_ids:
+                nexts.append(("→", "twin judgment preview <proposal_id>"))
+            if not report.candidate_ids and not report.proposal_ids:
+                nexts.append(("→", "twin episode list"))
+        ux.print_next(nexts)
+
+    _emit(args, data, pretty)
 
 
 def cmd_episode(args) -> None:
+    from . import ux
+
     ws = Workspace(args.home)
-    if args.episode_command == "show":
-        ep = ws.store.get_work_episode(args.episode_id)
+    cmd = args.episode_command
+
+    def _status(ep) -> str:
+        return getattr(ep.status, "value", ep.status)
+
+    def _require(episode_id: str):
+        ep = ws.store.get_work_episode(episode_id)
         if ep is None:
-            raise SystemExit(f"episode {args.episode_id} not found")
-        print(f"{ep.id}  {ep.title}  [{ep.status.value}] conf={ep.confidence:.2f}")
-        print(f"  project={ep.project_id or '—'}  indep={ep.independence_group or '—'}")
-        print(f"  participants={', '.join(ep.participant_actor_ids) or '—'}")
-        for ref in ep.source_refs:
-            print(
-                f"  - {ref.get('external_type')}:{ref.get('external_id')} "
-                f"({ref.get('occurred_at') or '?'})"
-            )
-        for link in ws.store.list_episode_links(ep.id):
-            print(
-                f"  link {link.kind.value} conf={link.confidence:.2f} "
-                f"{link.external_type}:{link.external_id}"
-            )
-        phases = ws.store.list_episode_phases(ep.id)
-        if phases:
-            print("  phases:")
-            for ph in phases:
-                span = f"{ph.started_at or '?'}→{ph.ended_at or '?'}"
+            raise SystemExit(f"episode {episode_id} not found")
+        return ep
+
+    def _reflect_ready(n_phases: int, edges=None) -> bool:
+        # Ready once the cortex stage produced an arc (≥2 phases). The reflect
+        # (hippocampus_consolidate) LLM decides whether that arc yields a claim.
+        return n_phases >= 2
+
+    if cmd == "list":
+        eps = ws.store.list_work_episodes(
+            vault_id=getattr(args, "vault", None),
+            limit=args.limit,
+        )
+        rows = []
+        for ep in eps:
+            phases = ws.store.list_episode_phases(ep.id)
+            edges = ws.store.list_episode_edges(ep.id)
+            ready = _reflect_ready(len(phases), edges)
+            rows.append({
+                "id": ep.id,
+                "status": _status(ep),
+                "vault_id": ep.vault_id or "",
+                "confidence": round(float(ep.confidence or 0), 2),
+                "phases": len(phases),
+                "edges": len(edges),
+                "reflect": "ready" if ready else "—",
+                "refs": len(ep.source_refs or []),
+                "title": ep.title or "",
+                "started_at": ep.started_at or "",
+                "ended_at": ep.ended_at or "",
+            })
+
+        def pretty():
+            ux.print_rule("episode · list")
+            if not rows:
+                ux.print_warn("no episodes — run twin correlate after connector sync")
+                ux.print_next([("→", "twin correlate")])
+                return
+            for r in rows:
                 print(
-                    f"    {ph.order}. [{ph.kind.value}] {span} "
-                    f"{ph.summary[:60]}"
+                    f"  {r['id']}  [{r['status']}]  "
+                    f"ph={r['phases']} ed={r['edges']}  reflect={r['reflect']}"
                 )
-        edges = ws.store.list_episode_edges(ep.id)
-        if edges:
-            print("  edges:")
-            for ed in edges:
-                print(
-                    f"    {ed.relation.value} [{ed.status.value}] "
-                    f"{ed.from_ref.get('id')} → {ed.to_ref.get('id')} "
-                    f"({ed.id})"
+                if r["title"]:
+                    ux.print_dim(f"    {_clip(r['title'], 72)}")
+            ready_n = sum(1 for r in rows if r["reflect"] == "ready")
+            if ready_n:
+                ux.print_dim(f"{ready_n} consolidate-ready (cortex built ≥2 phases)")
+            else:
+                ux.print_dim(
+                    "none consolidate-ready — run twin correlate so the cortex "
+                    "stage (LLM) builds phases; deferred if the model is down"
                 )
-    elif args.episode_command == "phases":
-        ep = ws.store.get_work_episode(args.episode_id)
-        if ep is None:
-            raise SystemExit(f"episode {args.episode_id} not found")
+            ux.print_next([
+                ("→", "twin episode show <id>"),
+                ("→", "twin meditate                # reflect ready episodes"),
+            ])
+
+        _emit(args, {"episodes": rows, "count": len(rows)}, pretty)
+
+    elif cmd == "show":
+        ep = _require(args.episode_id)
         phases = ws.store.list_episode_phases(ep.id)
-        if not phases:
-            print("(no phases — run twin correlate first)")
-        for ph in phases:
-            span = f"{ph.started_at or '?'} → {ph.ended_at or '?'}"
-            method = (ph.provenance or {}).get("method", "heuristic")
-            print(
-                f"{ph.order}. [{ph.kind.value}] {span}  conf={ph.confidence:.2f} "
-                f"({method})"
-            )
-            if ph.summary:
-                print(f"     {ph.summary}")
-            print(f"     members: {', '.join(ph.member_external_refs) or '—'}")
-    elif args.episode_command == "edges":
-        ep = ws.store.get_work_episode(args.episode_id)
-        if ep is None:
-            raise SystemExit(f"episode {args.episode_id} not found")
         edges = ws.store.list_episode_edges(ep.id)
-        if not edges:
-            print("(no edges — run twin correlate first)")
-        for ed in edges:
-            print(
-                f"{ed.id}  {ed.relation.value} [{ed.status.value}] "
-                f"conf={ed.confidence:.2f}"
+        links = ws.store.list_episode_links(ep.id)
+        active_links = [
+            lk for lk in links
+            if getattr(lk.status, "value", lk.status) == "active"
+        ]
+        data = {
+            "id": ep.id,
+            "title": ep.title,
+            "status": _status(ep),
+            "vault_id": ep.vault_id,
+            "project_id": ep.project_id,
+            "confidence": ep.confidence,
+            "correlation_key": ep.correlation_key,
+            "independence_group": ep.independence_group,
+            "started_at": ep.started_at,
+            "ended_at": ep.ended_at,
+            "participants": list(ep.participant_actor_ids or []),
+            "source_refs": list(ep.source_refs or []),
+            "phases": [
+                {
+                    "order": ph.order,
+                    "kind": getattr(ph.kind, "value", ph.kind),
+                    "started_at": ph.started_at,
+                    "ended_at": ph.ended_at,
+                    "summary": ph.summary,
+                    "members": list(ph.member_external_refs or []),
+                }
+                for ph in phases
+            ],
+            "edges": [
+                {
+                    "id": ed.id,
+                    "relation": getattr(ed.relation, "value", ed.relation),
+                    "status": getattr(ed.status, "value", ed.status),
+                    "from": ed.from_ref,
+                    "to": ed.to_ref,
+                    "confidence": ed.confidence,
+                    "evidence_quote": ed.evidence_quote,
+                }
+                for ed in edges
+            ],
+            "active_links": len(active_links),
+        }
+
+        def pretty():
+            ux.print_rule(f"episode · {ep.id}")
+            ux.print_kv([
+                ("title", ep.title or "—"),
+                ("status", _status(ep)),
+                ("vault", ep.vault_id or "—"),
+                ("project", ep.project_id or "—"),
+                ("confidence", f"{ep.confidence:.2f}"),
+                ("span", f"{ep.started_at or '?'} → {ep.ended_at or '?'}"),
+                ("participants",
+                 ", ".join(ep.participant_actor_ids) or "—"),
+                ("active links", str(len(active_links))),
+            ])
+            if phases:
+                ux.print_table(
+                    ["#", "kind", "from", "to", "summary"],
+                    [[
+                        ph.order,
+                        getattr(ph.kind, "value", ph.kind),
+                        (ph.started_at or "?")[:16],
+                        (ph.ended_at or "?")[:16],
+                        _clip(ph.summary or "", 44),
+                    ] for ph in phases],
+                )
+            else:
+                ux.print_warn(
+                    "no phases — the cortex stage (LLM) builds them; "
+                    "run twin correlate (deferred if the model is down)"
+                )
+            if edges:
+                ux.print_table(
+                    ["id", "relation", "status", "from → to"],
+                    [[
+                        ed.id,
+                        getattr(ed.relation, "value", ed.relation),
+                        getattr(ed.status, "value", ed.status),
+                        _clip(
+                            f"{ed.from_ref.get('id')} → {ed.to_ref.get('id')}",
+                            36,
+                        ),
+                    ] for ed in edges],
+                )
+            ready = _reflect_ready(len(phases), edges)
+            nexts = []
+            if ready:
+                nexts.append(("→", f"twin episode reflect {ep.id}"))
+            else:
+                nexts.append((
+                    "→",
+                    "no arc yet — run twin correlate so cortex builds phases",
+                ))
+            if edges:
+                nexts.append(("→", "twin episode confirm-edge <edge_id>  "
+                                   "# survives cortex rebuild"))
+            nexts.append(("→", f"twin episode explain {ep.id}"))
+            ux.print_next(nexts)
+
+        _emit(args, data, pretty)
+
+    elif cmd == "phases":
+        ep = _require(args.episode_id)
+        phases = ws.store.list_episode_phases(ep.id)
+        rows = [
+            {
+                "order": ph.order,
+                "kind": getattr(ph.kind, "value", ph.kind),
+                "started_at": ph.started_at,
+                "ended_at": ph.ended_at,
+                "confidence": ph.confidence,
+                "summary": ph.summary,
+                "members": list(ph.member_external_refs or []),
+                "phase_key": ph.phase_key,
+                "id": ph.id,
+            }
+            for ph in phases
+        ]
+
+        def pretty():
+            ux.print_rule(f"episode phases · {ep.id}")
+            if not rows:
+                ux.print_warn("no phases — run twin correlate first")
+                ux.print_next([("→", "twin correlate")])
+                return
+            for r in rows:
+                ux.print_kv([
+                    (f"#{r['order']} {r['kind']}",
+                     f"{r['started_at'] or '?'} → {r['ended_at'] or '?'}"),
+                    ("summary", r["summary"] or "—"),
+                    ("members", ", ".join(r["members"]) or "—"),
+                ])
+            ux.print_next([
+                ("→", f"twin episode edges {ep.id}"),
+                ("→", f"twin episode reflect {ep.id}"),
+            ])
+
+        _emit(args, {"episode_id": ep.id, "phases": rows, "count": len(rows)},
+              pretty)
+
+    elif cmd == "edges":
+        ep = _require(args.episode_id)
+        edges = ws.store.list_episode_edges(ep.id)
+        rows = [
+            {
+                "id": ed.id,
+                "relation": getattr(ed.relation, "value", ed.relation),
+                "status": getattr(ed.status, "value", ed.status),
+                "from": ed.from_ref.get("id"),
+                "to": ed.to_ref.get("id"),
+                "confidence": ed.confidence,
+                "evidence_quote": ed.evidence_quote,
+            }
+            for ed in edges
+        ]
+
+        def pretty():
+            ux.print_rule(f"episode edges · {ep.id}")
+            if not rows:
+                ux.print_warn("no edges — run twin correlate first")
+                ux.print_next([("→", "twin correlate")])
+                return
+            ux.print_table(
+                ["id", "relation", "status", "conf", "from → to"],
+                [[
+                    r["id"], r["relation"], r["status"],
+                    f"{r['confidence']:.2f}",
+                    _clip(f"{r['from']} → {r['to']}", 36),
+                ] for r in rows],
             )
-            print(
-                f"     {ed.from_ref.get('id')} → {ed.to_ref.get('id')}"
-            )
-            if ed.evidence_quote:
-                print(f"     “{ed.evidence_quote[:100]}”")
-    elif args.episode_command == "edge":
+            for r in rows:
+                if r.get("evidence_quote"):
+                    ux.print_dim(f"  {r['id']}: “{_clip(r['evidence_quote'], 90)}”")
+            nexts = [
+                ("→", "twin episode confirm-edge <edge_id>"),
+                ("→", "twin episode reject-edge <edge_id>"),
+            ]
+            if _reflect_ready(len(ws.store.list_episode_phases(ep.id))):
+                nexts.append(("→", f"twin episode reflect {ep.id}"))
+            ux.print_next(nexts)
+
+        _emit(args, {"episode_id": ep.id, "edges": rows, "count": len(rows)},
+              pretty)
+
+    elif cmd in ("confirm-edge", "reject-edge"):
         from ..cognition.correlation.edges import confirm_edge, reject_edge
-        if args.edge_action == "confirm":
-            ed = confirm_edge(ws.store, args.edge_id)
-        else:
-            ed = reject_edge(ws.store, args.edge_id)
-        print(f"{args.edge_action}ed {ed.id} status={ed.status.value}")
-    elif args.episode_command == "reflect":
+
+        action = "confirm" if cmd == "confirm-edge" else "reject"
+        ed = (confirm_edge if action == "confirm" else reject_edge)(
+            ws.store, args.edge_id,
+        )
+        data = {
+            "id": ed.id,
+            "status": getattr(ed.status, "value", ed.status),
+            "relation": getattr(ed.relation, "value", ed.relation),
+            "episode_id": ed.episode_id,
+        }
+
+        def pretty():
+            ux.print_rule(f"episode · {action}-edge")
+            ux.print_ok(f"{ed.id} → {data['status']}")
+            ux.print_kv([
+                ("relation", data["relation"]),
+                ("episode", ed.episode_id),
+            ])
+            ux.print_next([
+                ("→", f"twin episode edges {ed.episode_id}"),
+                ("→", f"twin episode reflect {ed.episode_id}"),
+            ])
+
+        _emit(args, data, pretty)
+
+    elif cmd == "reflect":
         from ..cognition.episode_reflect import reflect_episode
-        result = reflect_episode(
-            ws.store, ws.cfg, ws.embedder, args.episode_id,
-            dry_run=args.dry_run,
-        )
-        print(
-            f"episode {args.episode_id}: {len(result.claims)} trajectory "
-            f"claim(s) {'(dry-run)' if args.dry_run else ''}"
-        )
-        for claim in result.claims:
-            marker = "+" if claim.get("created") else "~"
-            print(
-                f"  {marker} [{claim.get('type')}] {claim.get('title')} "
-                f"(valid_from={claim.get('valid_from') or '?'})"
+
+        ep = _require(args.episode_id)
+        dry = bool(args.dry_run)
+        with _work_spinner(args, f"reflecting episode {ep.id}…"):
+            result = reflect_episode(
+                ws.store, ws.cfg, ws.embedder, ep.id, dry_run=dry,
             )
-            if claim.get("memory_id"):
-                print(f"      → candidate {claim['memory_id']}")
-        if result.skipped_reason:
-            print(f"  skipped: {result.skipped_reason}")
-    elif args.episode_command == "explain":
-        import json as _json
+        data = {
+            "episode_id": ep.id,
+            "dry_run": dry,
+            "claims": result.claims,
+            "skipped_reason": result.skipped_reason,
+            "count": len(result.claims),
+        }
+
+        def pretty():
+            ux.print_rule(f"hippocampus_consolidate · {ep.id}")
+            if result.skipped_reason and not result.claims:
+                ux.print_warn(result.skipped_reason)
+                low = result.skipped_reason.lower()
+                if "deferred" in low or "unavailable" in low:
+                    ux.print_next([
+                        ("→", "twin interpret   # model unreachable; "
+                              "start Ollama / configure a chat client"),
+                        ("→", f"twin episode reflect {ep.id}   # retry once it's up"),
+                    ])
+                else:
+                    ux.print_next([
+                        ("→", "twin correlate   # run cortex to build the arc"),
+                        ("→", "twin episode list"),
+                    ])
+                return
+            if dry:
+                ux.print_dim("dry-run — nothing persisted")
+            for claim in result.claims:
+                created = claim.get("created")
+                marker = "created" if created else ("dry-run" if dry else "corroborated")
+                ux.print_ok(f"[{claim.get('type')}] {claim.get('title')}")
+                ux.print_kv([
+                    ("valid_from", claim.get("valid_from") or "—"),
+                    ("action", marker),
+                    ("candidate", claim.get("memory_id") or "—"),
+                ])
+            if result.claims and not dry:
+                ux.print_next([
+                    ("→", "twin review"),
+                    ("→", f"twin judgment propose-episode {ep.id}  "
+                          "# after confirming trajectory candidates"),
+                ])
+
+        _emit(args, data, pretty)
+
+    elif cmd == "explain":
         from ..cognition.correlation.explain import explain_episode
-        print(_json.dumps(explain_episode(ws.store, args.episode_id),
-                          indent=2, default=str))
-    else:
-        for ep in ws.store.list_work_episodes(limit=args.limit):
-            print(
-                f"{ep.id}  [{ep.status.value}] conf={ep.confidence:.2f}  "
-                f"{ep.title[:60]}  refs={len(ep.source_refs)}"
+
+        data = explain_episode(ws.store, args.episode_id)
+        if data.get("error"):
+            raise SystemExit(data["error"])
+
+        def pretty():
+            import json as _json
+            ux.print_rule(f"episode explain · {args.episode_id}")
+            ux.print_panel(
+                _json.dumps(data, indent=2, default=str),
+                title="anchors / links / phases / edges",
             )
+
+        _emit(args, data, pretty)
+
+    else:
+        raise SystemExit(f"unknown episode command: {cmd}")
+
 
 
 def cmd_identity(args) -> None:
@@ -3506,11 +3985,18 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser(
         "correlate",
-        help="cross-source pass: identities, project maps, WorkEpisodes, conflicts",
+        help="cognition: sensory scaffold → amygdala → basal → hippocampus_bind "
+             "→ cortex (phases + edges). Needs an interpreting extractor.",
     )
     p.add_argument("--connector", action="append",
                    help="limit to connector instance id (repeatable)")
     p.add_argument("--no-conflicts", action="store_true")
+    p.add_argument(
+        "--until", default="cortex",
+        choices=["sensory", "amygdala", "basal", "hippocampus_bind", "cortex"],
+        help="stop after this brain stage (default: cortex). "
+             "--until sensory = structural scaffold only (debug).",
+    )
     mode_grp = p.add_mutually_exclusive_group()
     mode_grp.add_argument(
         "--full", dest="mode", action="store_const", const="full",
@@ -3521,35 +4007,87 @@ def main(argv: list[str] | None = None) -> None:
         help="only re-correlate records marked dirty since last pass",
     )
     p.set_defaults(func=cmd_correlate, mode="full")
+    _add_json_flag(p)
 
-    p = sub.add_parser("episode", help="WorkEpisode inspection")
+    p = sub.add_parser(
+        "meditate",
+        help="orchestrate the full cognition chain up to the human gates: "
+             "correlate → reflect → (review) → judgment drafts. Never "
+             "auto-confirms Memory or auto-approves Judgment.",
+    )
+    p.add_argument("--connector", action="append",
+                   help="limit to connector instance id (repeatable)")
+    p.add_argument("--no-conflicts", action="store_true")
+    p.add_argument("--no-reflect", action="store_true",
+                   help="stop after cortex (skip hippocampus_consolidate)")
+    p.add_argument("--no-propose", action="store_true",
+                   help="skip prefrontal judgment drafting")
+    p.add_argument("--review", action="store_true",
+                   help="step through the review queue between consolidate and "
+                        "prefrontal (interactive TTY only)")
+    p.add_argument("--limit", type=int, default=50,
+                   help="max episodes to reflect this pass (default: 50)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="reflect without persisting candidates")
+    mmode = p.add_mutually_exclusive_group()
+    mmode.add_argument("--full", dest="mode", action="store_const", const="full",
+                       help="full rebuild (default)")
+    mmode.add_argument("--incremental", dest="mode", action="store_const",
+                       const="incremental",
+                       help="only re-correlate dirty records (day-to-day path)")
+    p.set_defaults(func=cmd_meditate, mode="full")
+    _add_json_flag(p)
+
+    p = sub.add_parser(
+        "episode",
+        help="inspect WorkEpisodes, phases/edges, and reflect trajectory candidates",
+    )
     ep_sub = p.add_subparsers(dest="episode_command", required=True)
-    ep = ep_sub.add_parser("list")
+    ep = ep_sub.add_parser(
+        "list", help="list episodes (run twin correlate first after sync)",
+    )
     ep.add_argument("--limit", type=int, default=50)
+    ep.add_argument("--vault", default=None, help="filter by vault id")
     ep.set_defaults(func=cmd_episode)
-    ep = ep_sub.add_parser("show")
+    ep = ep_sub.add_parser("show", help="episode summary + phases + edges")
     ep.add_argument("episode_id")
     ep.set_defaults(func=cmd_episode)
-    ep = ep_sub.add_parser("phases", help="list the arc phases of an episode")
+    ep = ep_sub.add_parser(
+        "phases", help="goal → decision → execution → outcome arc",
+    )
     ep.add_argument("episode_id")
     ep.set_defaults(func=cmd_episode)
-    ep = ep_sub.add_parser("edges", help="list causal/narrative edges of an episode")
+    ep = ep_sub.add_parser(
+        "edges", help="causal/narrative edges (motivated, superseded, …)",
+    )
     ep.add_argument("episode_id")
     ep.set_defaults(func=cmd_episode)
-    ep = ep_sub.add_parser("edge", help="confirm/reject a narrative edge")
-    ep.add_argument("edge_action", choices=["confirm", "reject"])
+    ep = ep_sub.add_parser(
+        "confirm-edge", help="confirm a narrative edge (survives rebuilds)",
+    )
     ep.add_argument("edge_id")
     ep.set_defaults(func=cmd_episode)
     ep = ep_sub.add_parser(
-        "reflect", help="synthesize trajectory MemoryCandidates from the episode arc",
+        "reject-edge", help="reject a narrative edge (survives rebuilds)",
+    )
+    ep.add_argument("edge_id")
+    ep.set_defaults(func=cmd_episode)
+    ep = ep_sub.add_parser(
+        "reflect",
+        help="synthesize trajectory MemoryCandidates from the episode arc",
     )
     ep.add_argument("episode_id")
-    ep.add_argument("--dry-run", action="store_true",
-                    help="show trajectory claims without persisting candidates")
+    ep.add_argument(
+        "--dry-run", action="store_true",
+        help="show trajectory claims without persisting candidates",
+    )
     ep.set_defaults(func=cmd_episode)
-    ep = ep_sub.add_parser("explain", help="why this episode exists (anchors/links)")
+    ep = ep_sub.add_parser(
+        "explain", help="why this episode exists (anchors / links / phases / edges)",
+    )
     ep.add_argument("episode_id")
     ep.set_defaults(func=cmd_episode)
+    _add_json_flag_tree(p)
 
     p = sub.add_parser("identity", help="external identity resolution")
     id_sub = p.add_subparsers(dest="identity_command", required=True)

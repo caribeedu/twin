@@ -1,9 +1,16 @@
-"""Episode phases, narrative edges, and incremental correlation parity."""
+"""Episode phases + narrative edges built by the cortex cognition stage.
+
+Since v1.3.0 phases/edges are produced by LLM stages, not lexical rules. Tests
+inject deterministic stage overrides (``amygdala`` classify, ``cortex``
+understand) standing in for the model — the golden pivot fixture.
+"""
 
 from __future__ import annotations
 
-from twin.cognition.correlation.edges import confirm_edge, reject_edge
-from twin.cognition.correlation.episodes import correlate_records
+import pytest
+
+from twin.cognition import BrainStage, run_episode_cognition, set_stage_override
+from twin.cognition.correlation.edges import confirm_edge
 from twin.cognition.correlation.explain import explain_episode
 from twin.cognition.correlation.models import (
     EpisodeEdgeRelation,
@@ -19,6 +26,81 @@ from twin.connectors.models import (
     SourceAccount,
     idempotency_key,
 )
+
+_OUTCOME_WORDS = ("merged", "shipped", "released", "closed", "resolved", "landed")
+_PIVOT_WORDS = ("revert", "instead", "switch to", "supersed", "pivot", "abandon")
+
+
+def _classify(members, cfg):
+    """Stand-in amygdala: assign a role per member (simulates the LLM)."""
+    roles = {}
+    for m in members:
+        t = (m.get("external_type") or "").lower()
+        ex = (m.get("excerpt") or "").lower()
+        if any(w in ex for w in _OUTCOME_WORDS):
+            kind = "outcome"
+        elif t in ("issue", "discussion", "epic", "story"):
+            kind = "goal"
+        elif t in ("pull_request", "review", "merge_request", "proposal", "rfc"):
+            kind = "decision"
+        elif t in ("commit", "push", "deploy", "build"):
+            kind = "execution"
+        else:
+            kind = "other"
+        roles[m["ref"]] = {"kind": kind, "salience": 0.6}
+    return roles
+
+
+def _understand(phases, quotes, cfg):
+    """Stand-in cortex: propose narrative edges over the phase arc."""
+    ordered = sorted(phases, key=lambda p: p.get("order", 0))
+    edges = []
+    for a, b in zip(ordered, ordered[1:]):
+        rel = "continues"
+        if a["kind"] in ("goal", "decision") and b["kind"] in ("decision", "execution"):
+            rel = "motivated"
+        edges.append({
+            "from_key": a["phase_key"], "to_key": b["phase_key"],
+            "relation": rel, "confidence": 0.6, "evidence_quote": a.get("summary") or "",
+        })
+    decisions = [p for p in ordered if p["kind"] == "decision"]
+    for earlier, later in zip(decisions, decisions[1:]):
+        text = (later.get("summary") or "") + " " + " ".join(
+            quotes.get(r, "") for r in later.get("members", [])
+        )
+        if any(w in text.lower() for w in _PIVOT_WORDS):
+            edges.append({
+                "from_key": earlier["phase_key"], "to_key": later["phase_key"],
+                "relation": "superseded", "confidence": 0.7,
+                "evidence_quote": later.get("summary") or "",
+            })
+    for p in ordered:
+        if p["kind"] != "outcome":
+            continue
+        for prior in ordered:
+            if prior["order"] < p["order"] and prior["kind"] in ("goal", "decision"):
+                edges.append({
+                    "from_key": prior["phase_key"], "to_key": p["phase_key"],
+                    "relation": "resolved", "confidence": 0.55,
+                    "evidence_quote": p.get("summary") or "",
+                })
+    return edges
+
+
+@pytest.fixture(autouse=True)
+def _pivot_cognition(_reset_interpreter_override):
+    set_stage_override(BrainStage.amygdala, _classify)
+    set_stage_override(BrainStage.cortex, _understand)
+    yield
+    set_stage_override(BrainStage.amygdala, None)
+    set_stage_override(BrainStage.cortex, None)
+
+
+def _cortex(store, cfg, embedder):
+    """Run sensory → cortex over the whole store (builds phases + edges)."""
+    return run_episode_cognition(
+        store, cfg, embedder, mode="full", until=BrainStage.cortex,
+    )
 
 
 def _acct(store, *, vault_id="vault_work_acme", account_id="acct_ph"):
@@ -104,13 +186,13 @@ def _arc(store, acc, inst, lineage="github:acme/atlas#42"):
     return [issue, pr, commit, merge]
 
 
-def test_arc_yields_ordered_phases_single_episode(store):
+def test_arc_yields_ordered_phases_single_episode(store, cfg, embedder):
     acc, inst = _acct(store)
-    recs = _arc(store, acc, inst)
-    eps = correlate_records(store, recs, vault_id=acc.vault_id)
-    assert len(eps) == 1
-    ep = eps[0]
-    phases = store.list_episode_phases(ep.id)
+    _arc(store, acc, inst)
+    report = _cortex(store, cfg, embedder)
+    assert len(report.episode_ids) == 1
+    ep_id = report.episode_ids[0]
+    phases = store.list_episode_phases(ep_id)
     kinds = [p.kind for p in phases]
     # goal (issue) → decision (PR) → … → outcome (merged)
     assert kinds[0] == EpisodePhaseKind.goal
@@ -119,10 +201,12 @@ def test_arc_yields_ordered_phases_single_episode(store):
     # phases are strictly time-ordered
     starts = [p.started_at for p in phases if p.started_at]
     assert starts == sorted(starts)
+    # provenance records the brain stage (no lexical method)
+    assert phases[0].provenance.get("method") == "llm"
+    assert phases[0].provenance.get("brain_stage") == "amygdala"
 
 
-def test_decision_pivot_splits_and_supersedes(store):
-    acc, inst = _acct(store, account_id="acct_pivot")
+def _pivot_records(store, acc, inst):
     lineage = "github:acme/atlas#7"
     issue = _rec(
         id="p_issue", connector_id=inst.id, source_account_id=acc.id,
@@ -150,46 +234,67 @@ def test_decision_pivot_splits_and_supersedes(store):
     )
     for r in (issue, d1, d2):
         store.insert_connector_record(r)
-    eps = correlate_records(store, [issue, d1, d2], vault_id=acc.vault_id)
-    ep = eps[0]
-    phases = store.list_episode_phases(ep.id)
+    return [issue, d1, d2]
+
+
+def test_decision_pivot_splits_and_supersedes(store, cfg, embedder):
+    acc, inst = _acct(store, account_id="acct_pivot")
+    _pivot_records(store, acc, inst)
+    report = _cortex(store, cfg, embedder)
+    ep_id = report.episode_ids[0]
+    phases = store.list_episode_phases(ep_id)
     decisions = [p for p in phases if p.kind == EpisodePhaseKind.decision]
-    # the reversal keeps the two decisions as separate phases
+    # the two decisions stay separate phases (decision is non-mergeable)
     assert len(decisions) == 2
-    edges = store.list_episode_edges(ep.id)
+    edges = store.list_episode_edges(ep_id)
     rels = {e.relation for e in edges}
     assert EpisodeEdgeRelation.superseded in rels
+    assert all(e.provenance.get("brain_stage") == "cortex" for e in edges)
 
 
-def test_edge_confirm_reject_survives_rebuild(store):
+def test_edge_confirm_reject_survives_rebuild(store, cfg, embedder):
     acc, inst = _acct(store, account_id="acct_edge")
-    recs = _arc(store, acc, inst)
-    ep = correlate_records(store, recs, vault_id=acc.vault_id)[0]
-    edges = store.list_episode_edges(ep.id)
+    _arc(store, acc, inst)
+    report = _cortex(store, cfg, embedder)
+    ep_id = report.episode_ids[0]
+    edges = store.list_episode_edges(ep_id)
     assert edges
     target = edges[0]
     confirm_edge(store, target.id)
-    # re-correlate (rebuild) — human decision must persist
-    correlate_records(store, recs, vault_id=acc.vault_id)
+    # re-run cortex — the human decision must persist across rebuild
+    _cortex(store, cfg, embedder)
     again = store.get_episode_edge(target.id)
     assert again is not None
     assert again.status == EpisodeEdgeStatus.confirmed
 
 
-def test_explain_episode_includes_phases_and_edges(store):
+def test_explain_episode_includes_phases_and_edges(store, cfg, embedder):
     acc, inst = _acct(store, account_id="acct_expl")
-    recs = _arc(store, acc, inst)
-    ep = correlate_records(store, recs, vault_id=acc.vault_id)[0]
-    out = explain_episode(store, ep.id)
+    _arc(store, acc, inst)
+    report = _cortex(store, cfg, embedder)
+    out = explain_episode(store, report.episode_ids[0])
     assert out["phases"]
     assert "edges" in out
     assert out["phases"][0]["kind"] == "goal"
 
 
-def test_incremental_matches_full_membership_and_phases(store):
+def test_deferred_without_model_builds_no_arc(store, cfg, embedder):
+    # No stage overrides + echo (no model) → cortex defers, no phases invented.
+    set_stage_override(BrainStage.amygdala, None)
+    set_stage_override(BrainStage.cortex, None)
+    acc, inst = _acct(store, account_id="acct_defer")
+    _arc(store, acc, inst)
+    report = run_episode_cognition(
+        store, cfg, embedder, mode="full", until=BrainStage.cortex,
+    )
+    assert report.stages["amygdala"].status.value == "deferred"
+    for eid in report.episode_ids:
+        assert store.list_episode_phases(eid) == []
+
+
+def test_incremental_matches_full_membership(store, cfg, embedder):
     acc, inst = _acct(store, account_id="acct_inc")
     recs = _arc(store, acc, inst)
-    # dirty index is populated by the commit path; simulate it here
     for r in recs:
         store.mark_correlation_dirty(r.id, vault_id=acc.vault_id, reason="commit")
 
@@ -199,27 +304,19 @@ def test_incremental_matches_full_membership_and_phases(store):
     inc_members = {
         (r["external_type"], r["external_id"]) for r in inc_ep.source_refs
     }
-    inc_phases = [(p.kind.value, p.phase_key) for p in
-                  store.list_episode_phases(inc_ep.id)]
-    # dirty cleared after a successful pass
     assert store.list_correlation_dirty() == []
 
-    # a full pass must agree on membership + phase structure (stable ids)
     run_correlation_pass(store, mode="full")
     full_ep = store.get_work_episode(inc_ep.id)
     full_members = {
         (r["external_type"], r["external_id"]) for r in full_ep.source_refs
     }
-    full_phases = [(p.kind.value, p.phase_key) for p in
-                   store.list_episode_phases(full_ep.id)]
     assert inc_members == full_members
-    assert inc_phases == full_phases
 
 
-def test_incremental_noop_when_clean(store):
+def test_incremental_noop_when_clean(store, cfg, embedder):
     acc, inst = _acct(store, account_id="acct_clean")
     _arc(store, acc, inst)
-    # nothing marked dirty → incremental is a cheap no-op
     report = run_correlation_pass(store, mode="incremental")
     assert report.episodes == 0
     assert report.records_scanned == 0

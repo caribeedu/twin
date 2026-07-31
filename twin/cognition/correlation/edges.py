@@ -1,15 +1,16 @@
 """Causal / narrative edges over episode phases.
 
-Heuristic proposers read the phase arc and member content to propose revisable
-edges (motivated / superseded / resolved / continues / contradicts). Edges are
-proposals — they never write Memory or Judgment and never alone create a
-memory. Human confirm/reject is the only promotion path.
+Edges (motivated / superseded / resolved / continues / contradicts) are
+proposed by the **cortex** cognition stage — an LLM that reads the phase arc
+and member quotes. This module holds the data plumbing: build ``EpisodeEdge``
+objects from model output and persist them idempotently while preserving human
+confirm / reject decisions. There is no lexical rule here; without a model no
+edges are proposed.
 """
 
 from __future__ import annotations
 
 import hashlib
-import re
 from typing import Any, Optional
 
 from ...clock import now_iso
@@ -17,168 +18,104 @@ from .models import (
     EpisodeEdge,
     EpisodeEdgeRelation,
     EpisodeEdgeStatus,
-    EpisodeLinkStatus,
     EpisodePhase,
-    EpisodePhaseKind,
     WorkEpisode,
 )
 
-# Language that signals a later decision overturning an earlier one.
-_REVERSAL_RE = re.compile(
-    r"\b(instead|revert|reverted|reverting|pivot|pivoted|"
-    r"changed our mind|no longer|abandon|abandoned|"
-    r"switch(?:ed)? to|replace(?:d)? with|supersed)\b",
-    re.I,
-)
-_RESOLVE_RE = re.compile(
-    r"\b(closes|closed|fixes|fixed|resolves|resolved|done|merged|shipped)\b",
-    re.I,
-)
 
-
-def _edge_id(episode_id: str, relation: str, from_key: str, to_key: str) -> str:
+def edge_id(episode_id: str, relation: str, from_key: str, to_key: str) -> str:
     digest = hashlib.sha256(
         f"{episode_id}|{relation}|{from_key}|{to_key}".encode("utf-8"),
     ).hexdigest()[:20]
     return f"epedge_{digest}"
 
 
-def _ref(phase: EpisodePhase) -> dict[str, str]:
-    return {"kind": "phase", "id": phase.phase_key}
+def _coerce_relation(value: Any) -> Optional[EpisodeEdgeRelation]:
+    try:
+        return EpisodeEdgeRelation(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
-def _ref_key(ref: dict[str, Any]) -> str:
-    return f"{ref.get('kind')}:{ref.get('id')}"
+def build_edges_from_llm(
+    ep: WorkEpisode,
+    phases: list[EpisodePhase],
+    proposals: list[dict[str, Any]],
+    *,
+    brain_stage: str = "cortex",
+) -> list[EpisodeEdge]:
+    """Turn model edge proposals into ``EpisodeEdge`` objects.
 
-
-def _content_by_ref(store, ep: WorkEpisode) -> dict[str, str]:
-    """Map ``external_type:external_id`` → member content for active links."""
-    out: dict[str, str] = {}
-    if not hasattr(store, "list_episode_links"):
-        return out
-    for lk in store.list_episode_links(ep.id):
-        st = getattr(lk.status, "value", lk.status)
-        if st != EpisodeLinkStatus.active.value:
-            continue
-        content = ""
-        if lk.connector_record_id and hasattr(store, "get_connector_record"):
-            rec = store.get_connector_record(lk.connector_record_id)
-            if rec is not None:
-                content = rec.content or ""
-        out[f"{lk.external_type or ''}:{lk.external_id or ''}"] = content
-    return out
-
-
-def _phase_text(phase: EpisodePhase, content_by_ref: dict[str, str]) -> str:
-    parts = [phase.summary or ""]
-    for ref in phase.member_external_refs:
-        c = content_by_ref.get(ref)
-        if c:
-            parts.append(c)
-    return " ".join(p for p in parts if p)
-
-
-def propose_edges(store, ep: WorkEpisode) -> list[EpisodeEdge]:
-    """Pure proposer — returns edges without persisting."""
-    phases = (
-        store.list_episode_phases(ep.id)
-        if hasattr(store, "list_episode_phases") else []
-    )
-    phases = sorted(phases, key=lambda p: p.order)
-    if len(phases) < 2:
-        return []
-    content_by_ref = _content_by_ref(store, ep)
-
+    Each proposal is ``{"from_key", "to_key", "relation", "confidence",
+    "evidence_quote"}``. Keys must reference existing ``phase_key``s and the
+    relation must be known; anything else is dropped (the model never widens
+    the schema).
+    """
+    valid_keys = {p.phase_key for p in phases}
     out: list[EpisodeEdge] = []
     seen: set[str] = set()
-
-    def _add(rel: EpisodeEdgeRelation, a: EpisodePhase, b: EpisodePhase,
-             conf: float, quote: str) -> None:
-        from_ref, to_ref = _ref(a), _ref(b)
-        eid = _edge_id(ep.id, rel.value, _ref_key(from_ref), _ref_key(to_ref))
+    for pr in proposals:
+        if not isinstance(pr, dict):
+            continue
+        from_key = pr.get("from_key")
+        to_key = pr.get("to_key")
+        if from_key not in valid_keys or to_key not in valid_keys:
+            continue
+        if from_key == to_key:
+            continue
+        relation = _coerce_relation(pr.get("relation"))
+        if relation is None:
+            continue
+        eid = edge_id(ep.id, relation.value, str(from_key), str(to_key))
         if eid in seen:
-            return
+            continue
         seen.add(eid)
+        try:
+            conf = float(pr.get("confidence"))
+        except (TypeError, ValueError):
+            conf = 0.6
         out.append(EpisodeEdge(
             id=eid,
             episode_id=ep.id,
             vault_id=ep.vault_id,
-            from_ref=from_ref,
-            to_ref=to_ref,
-            relation=rel,
+            from_ref={"kind": "phase", "id": from_key},
+            to_ref={"kind": "phase", "id": to_key},
+            relation=relation,
             status=EpisodeEdgeStatus.proposed,
-            confidence=conf,
-            evidence_quote=quote[:280],
-            provenance={"method": "heuristic", "twin_influenced": False},
+            confidence=round(min(1.0, max(0.1, conf)), 2),
+            evidence_quote=(str(pr.get("evidence_quote") or "")[:280]),
+            provenance={
+                "method": "llm",
+                "twin_influenced": True,
+                "brain_stage": brain_stage,
+            },
         ))
-
-    # 1. Sequential arc: each phase continues/motivates the next.
-    for a, b in zip(phases, phases[1:]):
-        text_b = _phase_text(b, content_by_ref)
-        if a.kind in (EpisodePhaseKind.goal, EpisodePhaseKind.decision) and \
-                b.kind in (EpisodePhaseKind.execution, EpisodePhaseKind.decision):
-            _add(EpisodeEdgeRelation.motivated, a, b, 0.6, a.summary or "")
-        else:
-            _add(EpisodeEdgeRelation.continues, a, b, 0.5, a.summary or "")
-        # 2. Resolution: an outcome phase resolves the originating goal/decision.
-        if b.kind == EpisodePhaseKind.outcome or _RESOLVE_RE.search(text_b):
-            for prior in phases:
-                if prior.order < b.order and prior.kind in (
-                    EpisodePhaseKind.goal, EpisodePhaseKind.decision,
-                ):
-                    _add(EpisodeEdgeRelation.resolved, prior, b, 0.55,
-                         b.summary or "")
-
-    # 3. Decision reversal: a later decision phase whose text overturns an
-    #    earlier decision → superseded edge (the heart of "intended X → chose Y").
-    decisions = [p for p in phases if p.kind == EpisodePhaseKind.decision]
-    for earlier, later in zip(decisions, decisions[1:]):
-        later_text = _phase_text(later, content_by_ref)
-        if _REVERSAL_RE.search(later_text):
-            _add(EpisodeEdgeRelation.superseded, earlier, later, 0.7,
-                 later.summary or "")
-
-    # 4. Cross-source conflict findings seed contradicts edges between the
-    #    phases holding the conflicting members.
-    if hasattr(store, "get_findings"):
-        try:
-            findings = store.get_findings(f"episode:{ep.id}", unresolved_only=True)
-        except Exception:
-            findings = []
-        for f in findings:
-            refs = (f.metadata or {}).get("member_refs") or []
-            ph = [p for p in phases if any(r in p.member_external_refs for r in refs)]
-            if len(ph) >= 2:
-                _add(EpisodeEdgeRelation.contradicts, ph[0], ph[1], 0.5,
-                     getattr(f, "reason", "") or "")
-
     return out
 
 
-def rebuild_edges(store, ep: WorkEpisode) -> list[EpisodeEdge]:
-    """Recompute and persist proposed edges (idempotent by deterministic id).
+def persist_edges(
+    store, ep: WorkEpisode, edges: list[EpisodeEdge],
+) -> list[EpisodeEdge]:
+    """Idempotently persist proposed edges, preserving human decisions.
 
-    Human decisions on edges are preserved: an edge the user confirmed or
-    rejected keeps its status even if the heuristic re-proposes it. Proposed
-    edges that no longer arise are removed.
+    An edge the user confirmed or rejected keeps its status even if the model
+    re-proposes (or stops proposing) it. Untouched ``proposed`` edges that are
+    no longer proposed are removed.
     """
     if not hasattr(store, "list_episode_edges"):
-        return []
-    proposed = propose_edges(store, ep)
-    proposed_by_id = {e.id: e for e in proposed}
+        return edges
+    proposed_by_id = {e.id: e for e in edges}
     existing = {e.id: e for e in store.list_episode_edges(ep.id)}
 
     for eid, prior in existing.items():
         status = getattr(prior.status, "value", prior.status)
         if eid not in proposed_by_id and status == EpisodeEdgeStatus.proposed.value:
-            # heuristic no longer proposes it and no human touched it → drop
             store.delete_episode_edge(eid)
 
-    for e in proposed:
+    for e in edges:
         if e.id in existing:
             prior = existing[e.id]
             status = getattr(prior.status, "value", prior.status)
-            # never overwrite a human decision
             if status in (
                 EpisodeEdgeStatus.confirmed.value,
                 EpisodeEdgeStatus.rejected.value,
@@ -189,7 +126,17 @@ def rebuild_edges(store, ep: WorkEpisode) -> list[EpisodeEdge]:
             store.update_episode_edge(e)
         else:
             store.insert_episode_edge(e)
-    return proposed
+    return edges
+
+
+def clear_proposed_edges(store, ep: WorkEpisode) -> None:
+    """Drop model-proposed edges (keep human-confirmed/rejected ones)."""
+    if not hasattr(store, "list_episode_edges"):
+        return
+    for e in store.list_episode_edges(ep.id):
+        status = getattr(e.status, "value", e.status)
+        if status == EpisodeEdgeStatus.proposed.value:
+            store.delete_episode_edge(e.id)
 
 
 def confirm_edge(store, edge_id: str) -> EpisodeEdge:

@@ -420,20 +420,22 @@ Delivered:
 - docs/README polish: `CONNECTION.md` → `INTERFACES.md`, ROADMAP for future majors, CHANGELOG as release history, clearer how-to-use and visuals;
 - package/`__version__` to `1.2.0`.
 
-### v1.3.0 — Correlation depth, episode arc and reflect
+### v1.3.0 — Correlation depth: LLM episode cognition (brain-named stages)
 
-Goal: deepen `WorkEpisode` from a flat cluster into an explainable arc (phases and narrative edges) and let cognition synthesize cross-source trajectory claims as MemoryCandidates — without auto-confirming Memory or Judgment.
+Goal: deepen `WorkEpisode` from a flat cluster into an explainable arc and synthesize cross-source trajectory claims — with the semantics driven by an LLM, not lexical rules, and without auto-confirming Memory or Judgment. Course-corrected mid-cycle: the phase/edge/reflect heuristics were replaced by a cognition pipeline whose stages are named for their brain analogy.
 
 Delivered:
 
-- deterministic `EpisodePhase` arc over active members (`goal → decision → execution → outcome`), rebuilt on every membership change; a decision reversal stays two decision phases instead of collapsing the pivot;
-- revisable `EpisodeEdge`s (`motivated | superseded | resolved | continues | contradicts`) proposed from the phase arc and member language; human `confirm` / `reject` survives rebuilds; edges never alone create Memory;
-- incremental correlation MVP: `correlation_dirty` index (marked on connector commit / tombstone) drives `twin correlate --incremental`; full rebuild (`--full`, default) remains the correctness oracle; parity-tested on fixtures;
-- `twin episode reflect` reads phases and edges and synthesizes trajectory claims (e.g. intended approach X, then chose Y) as MemoryCandidates only (`needs_review=True`, `review_reason=episode_reflect`); `valid_from` tracks the decision phase, not the extract clock; idempotent via formation identity; `twin_influenced` when a model is used; structural offline path or model-backed;
-- weekly consolidation reflects eligible episodes (≥2 phases and a `superseded|motivated` edge) into candidates; the confirm-snapshot invariant still forbids any auto-confirm;
-- `propose_from_episode` / `propose_from_episode_patterns` seed pending `JudgmentProposal`s (`provenance.source=episode_pattern`) from confirmed trajectory memories or confirmed pivots across episodes; complements the weekly demo detector; still preview-token + human `judgment proposal approve`;
-- CLI: `twin episode phases|edges|edge confirm|reject|reflect`, `twin correlate --incremental|--full`, `twin judgment propose-episode`;
-- docs: ROADMAP Correlation depth split into delivered (v1.3.0) and remainder (1.3.x / 1.4); INTERFACES + OPERATIONS cover correlate modes and episode reflect.
+- `twin/cognition/episode_pipeline.py` — a brain-staged cognition chain (`sensory → amygdala → basal → hippocampus_bind → cortex → hippocampus_consolidate → prefrontal`) returning a `CognitionReport` with per-stage `ok | deferred | blocked | skipped` + counts; mirrors the interpreter's deferral so a missing model never falls back to lexical rules and `extractor=heuristic` blocks the semantic stages;
+- LLM stages: `amygdala` classifies member role + salience (`classify_prompt`), `cortex` proposes phases + narrative edges (`understand_prompt`), `hippocampus_consolidate` reflects the arc into trajectory candidates; phases/edges now carry `provenance.method=llm` + `brain_stage`; tests inject deterministic stage overrides (`set_stage_override`) as the golden pivot;
+- removed the semantic regex from `phases.py` / `edges.py` and the `structural_reflector` production fallback — the sensory scaffold keeps only ID-anchor / exact-match structure; phases/edges are built by `cortex`, never during structural correlation;
+- `EpisodePhase` arc (`goal → decision → execution → outcome`) built from model-assigned roles (a decision pivot stays two decision phases); revisable `EpisodeEdge`s (`motivated | superseded | resolved | continues | contradicts`) with human `confirm` / `reject` surviving cortex rebuilds; edges never alone create Memory;
+- incremental correlation: `correlation_dirty` index drives `twin correlate --incremental`; full rebuild (`--full`) remains the correctness oracle; `--until <stage>` stops after any sensory…cortex stage;
+- `twin episode reflect` synthesizes trajectory MemoryCandidates only (`needs_review=True`, `review_reason=episode_reflect`, `brain_stage=hippocampus_consolidate`); `valid_from` tracks the decision phase; idempotent via formation identity; defers when the model is unavailable;
+- `twin meditate` — new orchestrator running the full chain up to the human gates (`correlate → reflect → optional review → judgment drafts`); never auto-confirms Memory nor auto-approves Judgment; flags `--incremental / --no-reflect / --no-propose / --review / --limit / --dry-run / --json`;
+- `propose_from_episode` / `propose_from_episode_patterns` (the `prefrontal` stage) seed pending `JudgmentProposal`s from confirmed trajectory memories; still preview-token + human approval;
+- CLI DX parity: `twin correlate` / `twin meditate` / `twin episode *` show brain-stage status, deferred next-steps, tables and `--json`;
+- docs: ARCHITECTURE Brain analogies → CLI stages table; INTERFACES command↔stage map; OPERATIONS post-backfill flow with `twin meditate` and deferral guidance.
 
 Follow-on (not blocking v1.3.0): multi-factor confidence composition, identity-as-graph / entity resolution, HTTP/MCP episode graph APIs, full load/replay eval suite — see [Correlation depth remainder](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14).
 

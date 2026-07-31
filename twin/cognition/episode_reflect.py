@@ -1,4 +1,4 @@
-"""Episode reflection — trajectory MemoryCandidates from a WorkEpisode arc.
+"""Episode reflection — the hippocampus_consolidate cognition stage.
 
 Atomic ``extract_percept`` sees one source at a time and can only say "Edu
 committed A, then B". Reflection reads a whole :class:`WorkEpisode` — its phase
@@ -6,10 +6,11 @@ arc and narrative edges — and synthesizes *trajectory* claims like "intended
 the Kafka path, then chose SQS". Those land as **MemoryCandidates only**
 (``needs_review=True``); reflection never confirms Memory or Judgment.
 
-This is a cognitive layer (not correlation): correlation proposes the
-structure, reflect interprets it. A deterministic structural reflector runs
-offline; when a real chat model is configured it may be used instead and the
-resulting candidates are marked ``twin_influenced``.
+This is a cognitive layer (not correlation): the cortex stage proposes the
+structure, reflect interprets it with a chat model. When no model is available
+the stage **defers** (like the interpreter) — it never falls back to lexical
+rules and never fabricates a trajectory. Tests inject a deterministic reflector
+via ``set_reflect_override`` or the ``reflector=`` argument.
 """
 
 from __future__ import annotations
@@ -25,13 +26,7 @@ from ..memory.formation import propose_or_corroborate
 from ..memory.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
-from .correlation.models import EpisodeEdgeRelation, EpisodeLinkStatus
-
-# Narrative relations that justify a reflection (a pivot or a motivation arc).
-_NARRATIVE_RELATIONS = frozenset({
-    EpisodeEdgeRelation.superseded.value,
-    EpisodeEdgeRelation.motivated.value,
-})
+from .correlation.models import EpisodeLinkStatus
 
 
 @dataclass
@@ -80,7 +75,7 @@ _OVERRIDE: Optional[ReflectorFn] = None
 
 def set_reflect_override(fn: Optional[ReflectorFn]) -> None:
     """Inject a deterministic reflector (tests/evals). ``None`` restores the
-    default (structural offline / model-backed) selection."""
+    default (model-backed, or defer when no model)."""
     global _OVERRIDE
     _OVERRIDE = fn
 
@@ -156,129 +151,15 @@ def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[Episode
 # -- reflectors -----------------------------------------------------------
 
 
-def _phase_by_key(brief: EpisodeBrief, key: Optional[str]) -> Optional[dict[str, Any]]:
-    for p in brief.phases:
-        if p["phase_key"] == key:
-            return p
-    return None
+def _select_reflector(cfg: Config) -> Optional[ReflectorFn]:
+    """Pick the reflector, or ``None`` when the stage must defer.
 
-
-def _phase_quotes(brief: EpisodeBrief, phase: dict[str, Any]) -> list[str]:
-    out: list[str] = []
-    if phase.get("summary"):
-        out.append(phase["summary"])
-    for ref in phase.get("members", []):
-        q = brief.quotes_by_ref.get(ref)
-        if q and q not in out:
-            out.append(q)
-    return out
-
-
-def _phase_percepts(brief: EpisodeBrief, phase: dict[str, Any]) -> list[str]:
-    out: list[str] = []
-    for ref in phase.get("members", []):
-        pid = brief.percept_by_ref.get(ref)
-        if pid and pid not in out:
-            out.append(pid)
-    return out
-
-
-def structural_reflector(brief: EpisodeBrief, cfg: Config) -> list[TrajectoryClaim]:
-    """Deterministic reflector: read phase arc + edges, emit trajectory claims.
-
-    No LLM, no lexical *classification* of meaning — it templatizes the
-    already-derived structure (which phase superseded which) into a candidate
-    the human reviews.
+    Only a chat model reflects — there is no lexical fallback. An explicit
+    override (tests/CI) wins; ``heuristic`` / ``echo`` / an unreachable model
+    all return ``None`` so the caller defers instead of inventing a trajectory.
     """
-    claims: list[TrajectoryClaim] = []
-    label = brief.title or "this work"
-
-    # 1. Pivots: a superseded edge is the clearest "intended X → chose Y".
-    for e in brief.edges:
-        if e["relation"] != EpisodeEdgeRelation.superseded.value:
-            continue
-        frm = _phase_by_key(brief, e["from_key"])
-        to = _phase_by_key(brief, e["to_key"])
-        if not frm or not to:
-            continue
-        frm_s = frm.get("summary") or "an earlier approach"
-        to_s = to.get("summary") or "a later approach"
-        quotes = _phase_quotes(brief, frm) + _phase_quotes(brief, to)
-        claims.append(TrajectoryClaim(
-            type=MemoryType.decision.value,
-            title=f"Changed course on {label}: {frm_s} → {to_s}"[:200],
-            summary=(
-                f"Looking at {label} as a whole, the initial direction was "
-                f"\"{frm_s}\" ({frm.get('started_at') or '?'}), but it was later "
-                f"reconsidered in favor of \"{to_s}\" ({to.get('started_at') or '?'}). "
-                f"The later decision supersedes the earlier one — a trajectory "
-                f"no single commit shows on its own."
-            ),
-            evidence_quotes=[q for q in quotes if q][:6],
-            valid_from=to.get("started_at") or brief.valid_from,
-            valid_until=brief.valid_until,
-            confidence=0.6,
-            phase_keys=[frm["phase_key"], to["phase_key"]],
-            edge_ids=[e["id"]],
-            percept_ids=list(dict.fromkeys(
-                _phase_percepts(brief, frm) + _phase_percepts(brief, to)
-            )),
-            canonical_claim={
-                "subject": brief.project_id or label,
-                "predicate": "changed_approach_to",
-                "object": to_s[:120],
-            },
-            twin_influenced=False,
-        ))
-
-    if claims:
-        return claims
-
-    # 2. No pivot but a motivated goal→outcome arc still tells a story worth
-    #    surfacing once: "pursued G and it landed as O".
-    if not any(e["relation"] == EpisodeEdgeRelation.motivated.value for e in brief.edges):
-        return claims
-    ordered = sorted(brief.phases, key=lambda p: p["order"])
-    goal = next((p for p in ordered if p["kind"] == "goal"), None)
-    outcome = next((p for p in reversed(ordered) if p["kind"] == "outcome"), None)
-    if not goal or not outcome:
-        return claims
-    goal_s = goal.get("summary") or "a stated goal"
-    out_s = outcome.get("summary") or "an outcome"
-    quotes = _phase_quotes(brief, goal) + _phase_quotes(brief, outcome)
-    claims.append(TrajectoryClaim(
-        type=MemoryType.decision.value,
-        title=f"Followed through on {label}: {goal_s} → {out_s}"[:200],
-        summary=(
-            f"Across {label}, the goal \"{goal_s}\" "
-            f"({goal.get('started_at') or '?'}) was carried through to "
-            f"\"{out_s}\" ({outcome.get('started_at') or '?'})."
-        ),
-        evidence_quotes=[q for q in quotes if q][:6],
-        valid_from=goal.get("started_at") or brief.valid_from,
-        valid_until=outcome.get("ended_at") or brief.valid_until,
-        confidence=0.55,
-        phase_keys=[goal["phase_key"], outcome["phase_key"]],
-        edge_ids=[e["id"] for e in brief.edges
-                  if e["relation"] == EpisodeEdgeRelation.motivated.value],
-        percept_ids=list(dict.fromkeys(
-            _phase_percepts(brief, goal) + _phase_percepts(brief, outcome)
-        )),
-        canonical_claim={
-            "subject": brief.project_id or label,
-            "predicate": "delivered",
-            "object": out_s[:120],
-        },
-        twin_influenced=False,
-    ))
-    return claims
-
-
-def _select_reflector(cfg: Config) -> ReflectorFn:
     if _OVERRIDE is not None:
         return _OVERRIDE
-    # A real chat model may reflect with richer language; otherwise stay
-    # deterministic. Echo / heuristic / unreachable → structural.
     if cfg.extractor in (
         "auto", "ollama", "openai", "openai_compatible",
         "anthropic", "claude", "gemini", "google",
@@ -289,22 +170,19 @@ def _select_reflector(cfg: Config) -> ReflectorFn:
             if client.available():
                 return _make_llm_reflector(client)
         except Exception:
-            pass
-    return structural_reflector
+            return None
+    return None
 
 
 def _make_llm_reflector(client) -> ReflectorFn:
     from .interpreter.reflect_prompt import reflect_with_model
 
     def _reflector(brief: EpisodeBrief, cfg: Config) -> list[TrajectoryClaim]:
-        try:
-            claims = reflect_with_model(client, brief)
-        except Exception:
-            # A model failure must not fabricate — fall back to structure.
-            return structural_reflector(brief, cfg)
+        # A model failure must not fabricate — return no claims (stage defers).
+        claims = reflect_with_model(client, brief)
         for c in claims:
             c.twin_influenced = True
-        return claims or structural_reflector(brief, cfg)
+        return claims
 
     return _reflector
 
@@ -312,10 +190,30 @@ def _make_llm_reflector(client) -> ReflectorFn:
 # -- persistence ----------------------------------------------------------
 
 
-def _has_narrative(brief: EpisodeBrief) -> bool:
+def _has_arc(brief: EpisodeBrief) -> bool:
+    # Cortex produced structure (≥2 phases). Reflectability is a stricter gate.
+    return len(brief.phases) >= 2
+
+
+def _has_reflectable_arc(brief: EpisodeBrief) -> bool:
+    """True only when the arc can yield a *non-tautological* trajectory claim.
+
+    Pure ``goal → execution`` with a single ``motivated`` edge (typical GitHub
+    PR + merge-commit pair) just restates membership — atomic extract already
+    covers that. Reflection waits for a pivot, a contradiction, a resolved
+    decision, or a goal that actually closes as an outcome.
+    """
     if len(brief.phases) < 2:
         return False
-    return any(e["relation"] in _NARRATIVE_RELATIONS for e in brief.edges)
+    kinds = {p.get("kind") for p in brief.phases}
+    rels = {e.get("relation") for e in brief.edges}
+    if rels & {"superseded", "contradicts"}:
+        return True
+    if "decision" in kinds and (rels & {"resolved", "superseded"} or "outcome" in kinds):
+        return True
+    if "goal" in kinds and "outcome" in kinds:
+        return True
+    return False
 
 
 def reflect_episode(
@@ -336,14 +234,26 @@ def reflect_episode(
     brief = build_episode_brief(store, episode_id)
     if brief is None:
         return ReflectResult(episode_id=episode_id, skipped_reason="episode not found")
-    if not _has_narrative(brief):
+    if not _has_arc(brief):
         return ReflectResult(
             episode_id=episode_id,
-            skipped_reason="no narrative arc (needs ≥2 phases and a "
-                           "motivated/superseded edge)",
+            skipped_reason="no arc yet (run cortex: twin correlate)",
+        )
+    if not _has_reflectable_arc(brief):
+        return ReflectResult(
+            episode_id=episode_id,
+            skipped_reason=(
+                "arc is structural only (e.g. PR→commit) — no pivot, "
+                "contradiction, or goal→outcome to reflect"
+            ),
         )
 
     reflector = reflector or _select_reflector(cfg)
+    if reflector is None:
+        return ReflectResult(
+            episode_id=episode_id,
+            skipped_reason="hippocampus_consolidate deferred (model unavailable)",
+        )
     claims = reflector(brief, cfg)
     result = ReflectResult(episode_id=episode_id)
     if not claims:
@@ -372,6 +282,7 @@ def reflect_episode(
             "phase_keys": list(claim.phase_keys),
             "edge_ids": list(claim.edge_ids),
             "source": "episode_reflect",
+            "brain_stage": "hippocampus_consolidate",
             "trajectory": True,
             "twin_influenced": bool(claim.twin_influenced),
         }
@@ -401,7 +312,7 @@ def reflect_episode(
             ),
             extractor_version=ExtractorVersion(
                 extractor="episode_reflect",
-                model="twin" if claim.twin_influenced else "structural",
+                model="twin",
                 prompt_version="1",
                 schema_version="1",
             ),

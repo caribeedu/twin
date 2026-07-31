@@ -456,25 +456,37 @@ Add `--json` to any of them to get machine-readable output for scripting and pip
 | `twin judgment conflicts [--refresh]` | List / refresh conflicts. |
 | `twin judgment explain <trace_id>` | Explain a judgment application trace. |
 
-### Correlation (Episodes)
+### Correlation & Episode cognition
 
-Correlation proposes revisable structure over connector evidence — never Memory or Judgment. See [Correlation depth](ROADMAP.md#correlation-depth-v130-delivered-remainder-13x--14).
+Correlation proposes revisable structure over connector evidence — never Memory or Judgment. Since v1.3.0 the *semantic* work runs as an LLM cognition chain whose stages are named for their brain analogy (see [ARCHITECTURE → Brain analogies](ARCHITECTURE.md#brain-analogies--cli-stages)). A missing model **defers** a stage — it never falls back to lexical rules, and `extractor=heuristic` blocks the semantic stages with a clear message.
+
+| Stage | Brain analogy | CLI surface |
+|---|---|---|
+| `sensory` | encoding substrate | `twin correlate --until sensory` (structural scaffold only) |
+| `amygdala` | salience / role | `twin correlate` (classify member roles) |
+| `basal` | action selection | `twin correlate` (episode lifecycle read) |
+| `hippocampus_bind` | binding | `twin correlate` (membership consolidation) |
+| `cortex` | semantic memory | `twin correlate` (phases + narrative edges) |
+| `hippocampus_consolidate` | consolidation | `twin episode reflect` / `twin meditate` |
+| `prefrontal` | executive control | `twin judgment propose-episode` / `twin meditate` |
 
 | Command | What it does |
 |---|---|
-| `twin correlate [--full\|--incremental]` | Cross-source pass → identities, project maps, WorkEpisodes (phases + edges), conflicts. `--full` (default) rescans all records; `--incremental` re-correlates only records marked dirty since the last pass. |
-| `twin episode list\|show\|explain <id>` | Inspect an episode; `show` lists its phase arc and edges; `explain` dumps anchors/links/phases/edges as JSON. |
-| `twin episode phases <id>` | List the `goal → decision → execution → outcome` arc phases. |
-| `twin episode edges <id>` | List proposed causal/narrative edges (`motivated\|superseded\|resolved\|continues\|contradicts`). |
-| `twin episode edge confirm\|reject <edge_id>` | Human decision on an edge (survives rebuilds). |
-| `twin episode reflect <id> [--dry-run]` | Synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Does **not** replace `twin extract`. |
+| `twin meditate [--full\|--incremental] [--no-reflect] [--no-propose] [--review] [--limit N] [--dry-run]` | **Orchestrator**: runs `sensory…cortex` → `hippocampus_consolidate` (reflect) → optional interactive `review` → `prefrontal` (judgment drafts). Never auto-confirms Memory nor auto-approves Judgment. The post-sync happy path. |
+| `twin correlate [--full\|--incremental] [--until <stage>]` | Runs `sensory → amygdala → basal → hippocampus_bind → cortex` (phases + edges). `--full` (default) rescans all records; `--incremental` re-correlates only dirty records; `--until sensory` stops at the structural scaffold (debug). |
+| `twin episode list [--vault] [--limit]` | List episodes with phase/edge counts and `consolidate=ready` (cortex built ≥2 phases). Empty until `twin correlate` has run. |
+| `twin episode show\|explain <id>` | Summary + phases + edges (`method=llm`, `brain_stage=…`); `explain` is the full anchors/links dump (`--json` for scripts). |
+| `twin episode phases <id>` | List the `goal → decision → execution → outcome` arc phases (built by the `amygdala`/`cortex` stages). |
+| `twin episode edges <id>` | List proposed causal/narrative edges (`motivated\|superseded\|resolved\|continues\|contradicts`) from the `cortex` stage. |
+| `twin episode confirm-edge\|reject-edge <edge_id>` | Human decision on an edge (survives cortex rebuilds). |
+| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Defers if the model is unavailable. Does **not** replace `twin extract`. |
 
 ### Workspace, evals, connectors
 
 | Command | What it does |
 |---|---|
 | `twin workspace tick …` | Parallel-memory observation/interpret tick. |
-| `twin consolidate daily\|weekly [--apply]` | Consolidation cycle (dry-run by default). |
+| `twin consolidate daily\|weekly [--apply]` | Consolidation cycle (dry-run by default). Both include `episode_cortex` (sensory→cortex, incremental) then `episode_reflect` (candidates only). Weekly also drafts judgment proposals. Never auto-confirms. |
 | `twin eval extraction\|retrieval\|golden\|…` | Benchmarks and golden work-loop. |
 | `twin source …` | Show source-trust calibration. |
 | `twin connector …` | Connector setup, sync, health, contract matrices (see `twin connector -h`). |

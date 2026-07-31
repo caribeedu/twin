@@ -21,18 +21,30 @@ from .episode_reflect import (
     reflect_episode,
     set_reflect_override,
 )
+from .episode_pipeline import (
+    BrainStage,
+    CognitionReport,
+    clear_stage_overrides,
+    run_episode_cognition,
+    set_stage_override,
+)
 from .pipeline import ExtractReport, extract_pending, extract_percept
 
 __all__ = [
+    "BrainStage",
+    "CognitionReport",
     "CognitiveAct",
     "ExtractReport",
     "InterpretationResult",
     "InterpretationStatus",
     "InterpretedItem",
     "ReflectResult",
+    "clear_stage_overrides",
     "extract_pending",
     "extract_percept",
     "reflect_episode",
+    "run_episode_cognition",
     "set_interpreter_override",
     "set_reflect_override",
+    "set_stage_override",
 ]

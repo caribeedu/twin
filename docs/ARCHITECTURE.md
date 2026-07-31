@@ -52,6 +52,22 @@ Memory Observer (parallel suggestions)
 
 If a feature blurs these boundaries — e.g. treating raw text as confirmed memory, or bypassing the firewall “for convenience” — it fights the architecture, not just a style preference.
 
+### Brain analogies → CLI stages
+
+Episode cognition (v1.3.0) makes the analogy literal: turning connector records into trajectory understanding is a chain of stages, each named for the region it plays. The `sensory` scaffold is structural (explicit anchors, exact identity/project); every semantic stage is an LLM (or a deterministic test override), and a missing model **defers** the stage rather than falling back to lexical rules. `twin correlate` runs up to `cortex`; `twin meditate` orchestrates the whole chain up to the human gates (`twin review`, `twin judgment approve`).
+
+| # | Stage id (`brain_stage`) | Brain region | Job | Writes | CLI |
+|---|---|---|---|---|---|
+| 0 | `sensory` | encoding substrate | vault / dirty / ID anchors | partitions, membership | `twin correlate --until sensory` |
+| 1 | `amygdala` | Amygdala (salience) | classify member role + salience | phase roles (`proposed`) | `twin correlate` |
+| 2 | `basal` | Basal ganglia | read episode lifecycle | lifecycle (report-only) | `twin correlate` |
+| 3 | `hippocampus_bind` | Hippocampus (binding) | membership consolidation | links | `twin correlate` |
+| 4 | `cortex` | Cortex (semantic) | understand arc: phases + edges | phases/edges (`method=llm`) | `twin correlate` |
+| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | MemoryCandidates | `twin episode reflect` / `twin meditate` |
+| 6 | `prefrontal` | Prefrontal cortex | draft judgment | pending `JudgmentProposal` | `twin judgment propose-episode` / `twin meditate` |
+
+Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin judgment approve` is the executive gate for durable judgment. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
+
 ## Architecture Principles
 
 These principles are the constitution of `twin`. Roadmaps can change, backends can change and interfaces can change, but new features should remain compatible with these rules. When an implementation choice is ambiguous, the preferred option is the one that preserves cognition, autonomy, evidence, safety and portability.

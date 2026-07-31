@@ -34,6 +34,8 @@ def _offline_embedder(monkeypatch):
         (("stats", "--json"), ("percepts", "memories")),
         (("judgment", "list", "--json"), ("items", "count")),
         (("memory", "unsupported", "--json"), ("unsupported", "count")),
+        (("correlate", "--json"), ("mode", "stages", "records_scanned")),
+        (("meditate", "--json"), ("stages", "review_ran", "episode_ids")),
     ],
 )
 def test_json_flag_emits_parseable_json(tmp_path, capsys, argv, keys):
@@ -54,6 +56,20 @@ def test_connector_list_empty_state_guides_next_step(tmp_path, capsys):
     out = _run(tmp_path / "home", capsys, "connector", "list")
     assert "no connectors yet" in out
     assert "twin connector setup" in out
+
+
+def test_correlate_human_shows_brain_stage_chain(tmp_path, capsys):
+    out = _run(tmp_path / "home", capsys, "correlate")
+    assert "correlate ·" in out
+    assert "stages:" in out
+    assert "cortex" in out
+    assert not out.lstrip().startswith("{")
+
+
+def test_meditate_human_is_branded(tmp_path, capsys):
+    out = _run(tmp_path / "home", capsys, "meditate")
+    assert "meditate ·" in out
+    assert not out.lstrip().startswith("{")
 
 
 def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):

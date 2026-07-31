@@ -10,17 +10,19 @@ Product shape in [PRODUCT.md](PRODUCT.md). What shipped in [CHANGELOG.md](CHANGE
 
 Goal: deepen the correlation layer from “clustered evidence” into an explainable, incrementally maintained work-episode model — without turning correlation into Memory or Judgment.
 
-**Slot.** The episode-arc + reflect slice shipped in [v1.3.0](CHANGELOG.md#v130--correlation-depth-episode-arc-and-reflect); the remainder feeds [v2 Extended Brain](#v2--extended-brain) episodic and autobiographical memory. It is not a blocker for cognitive interpretation or parallel consolidation.
+**Slot.** The episode-arc + reflect slice shipped in [v1.3.0](CHANGELOG.md#v130--correlation-depth-llm-episode-cognition-brain-named-stages); the remainder feeds [v2 Extended Brain](#v2--extended-brain) episodic and autobiographical memory. It is not a blocker for cognitive interpretation or parallel consolidation.
 
 Phase 7 established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; project/identity lifecycle; true cross-source conflicts; thin explain CLI.
 
 #### Delivered in v1.3.0
 
-- **Episode phases** — `EpisodePhase` gives each episode a `goal → decision → execution → outcome` arc, rebuilt on membership change; a decision reversal stays visible as two decision phases instead of collapsing the pivot.
-- **Causal / narrative edges** — revisable `EpisodeEdge`s (`motivated | superseded | resolved | continues | contradicts`) proposed from the arc + member language, with human `confirm`/`reject` that survives rebuilds; edges never alone create Memory.
-- **Incremental correlation MVP** — a `correlation_dirty` index (marked from the connector commit/tombstone path) drives `twin correlate --incremental`; full rebuild (`--full`) remains the correctness oracle; parity-tested incremental ≡ batch on fixtures.
-- **`episode reflect` → MemoryCandidates** — the cognitive layer reads phases + edges and synthesizes trajectory claims ("intended X → chose Y") as candidates only (`review_reason=episode_reflect`), `valid_from` tracking the decision phase; CLI + weekly stage; confirm-snapshot invariant unchanged.
-- **Judgment from episode patterns** — `propose_from_episode` / `propose_from_episode_patterns` seed pending `JudgmentProposal`s (`provenance.source=episode_pattern`) from confirmed trajectory memories; human approval only.
+- **LLM episode cognition (brain-named stages)** — the semantic layer runs as `sensory → amygdala → basal → hippocampus_bind → cortex → hippocampus_consolidate → prefrontal` (`episode_pipeline`), each stage an LLM (or a deterministic test override). A missing model **defers** the stage (no lexical fallback); the sensory scaffold keeps only ID-anchor / exact-match structure. See [ARCHITECTURE → Brain analogies → CLI stages](ARCHITECTURE.md#brain-analogies--cli-stages).
+- **Episode phases** — the `amygdala`/`cortex` stages give each episode a `goal → decision → execution → outcome` arc from model-assigned roles; a decision pivot stays two decision phases. Provenance carries `method=llm` + `brain_stage`.
+- **Causal / narrative edges** — the `cortex` stage proposes revisable `EpisodeEdge`s (`motivated | superseded | resolved | continues | contradicts`) with human `confirm`/`reject` that survives rebuilds; edges never alone create Memory.
+- **Incremental correlation MVP** — a `correlation_dirty` index drives `twin correlate --incremental`; full rebuild (`--full`) remains the correctness oracle; `--until <stage>` stops after any sensory…cortex stage.
+- **`episode reflect` → MemoryCandidates** — the `hippocampus_consolidate` stage reads the arc and synthesizes trajectory claims ("intended X → chose Y") as candidates only (`review_reason=episode_reflect`); defers without a model; confirm-snapshot invariant unchanged.
+- **`twin meditate`** — orchestrates the full chain up to the human gates (`correlate → reflect → optional review → prefrontal drafts`); never auto-confirms Memory nor auto-approves Judgment.
+- **Judgment from episode patterns** — the `prefrontal` stage (`propose_from_episode` / `propose_from_episode_patterns`) seeds pending `JudgmentProposal`s from confirmed trajectory memories; human approval only.
 
 #### Remainder (1.3.x / 1.4)
 
