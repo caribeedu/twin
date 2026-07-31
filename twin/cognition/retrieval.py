@@ -27,7 +27,7 @@ from typing import Callable, Optional
 from ..clock import now_iso
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
-from ..memory.models import INACTIVE_STATUSES, MemoryItem
+from ..memory.models import INACTIVE_STATUSES, MemoryItem, MemoryStatus
 from ..memory.search import BlockedHit, SearchHit, SearchResult, search
 from ..memory.store.base import MemoryStore
 
@@ -113,6 +113,7 @@ def retrieve(
     project_id: Optional[str] = None,
     limit: int = 20,
     include_candidates: bool = False,
+    include_rejected: bool = False,
     reranker: Optional[Reranker] = None,
 ) -> RetrievalResult:
     stages: dict[str, int] = {}
@@ -120,7 +121,8 @@ def retrieve(
     # 1-2. lexical + vector candidate generation (deterministic baseline)
     base = search(store, embedder, query, target_domain=target_domain,
                   firewall=firewall, limit=max(limit * 2, 20),
-                  include_candidates=include_candidates)
+                  include_candidates=include_candidates,
+                  include_rejected=include_rejected)
     hits = list(base.hits)
     blocked = list(base.blocked)
     stages["candidates"] = len(hits)
@@ -129,7 +131,11 @@ def retrieve(
     as_of = now_iso()
     for exp in _graph_expand(store, hits, limit=10):
         mem = exp.memory
-        if not include_candidates and mem.status.value != "confirmed":
+        st = mem.status.value
+        if st in INACTIVE_STATUSES:
+            if not (include_rejected and st == MemoryStatus.rejected.value):
+                continue
+        elif not include_candidates and st != MemoryStatus.confirmed.value:
             continue
         if firewall is not None:
             verdict = firewall.evaluate(mem, target_domain, as_of=as_of)

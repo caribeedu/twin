@@ -23,6 +23,7 @@ from .models import (
     EpisodePhaseStatus,
     WorkEpisode,
 )
+from .text import rich_excerpt
 
 # Kinds whose contiguous members collapse into a single phase (noise reduction:
 # a run of commits is one execution). Goal / decision / outcome stay per member
@@ -80,7 +81,8 @@ def member_briefs(store, ep: WorkEpisode) -> list[dict[str, Any]]:
     """Structured, evidence-only view of an episode's active members.
 
     This is the input the amygdala classifier reasons over — external type,
-    time and a short content excerpt. No conclusions, no roles.
+    time and a denser content excerpt (title + body, not headline alone).
+    No conclusions, no roles.
     """
     briefs: list[dict[str, Any]] = []
     for lk, rec in _ordered_active_links(store, ep.id):
@@ -89,7 +91,7 @@ def member_briefs(store, ep: WorkEpisode) -> list[dict[str, Any]]:
             "ref": _member_ref(lk),
             "external_type": lk.external_type or "",
             "occurred_at": getattr(rec, "occurred_at", "") or "",
-            "excerpt": _first_line(content) or content[:120],
+            "excerpt": rich_excerpt(content) or _first_line(content) or content[:120],
         })
     return briefs
 

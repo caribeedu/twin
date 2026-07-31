@@ -9,7 +9,7 @@ from typing import Optional
 from ..clock import now_iso
 from ..judgment.firewall import Firewall
 from .embeddings import Embedder
-from .models import INACTIVE_STATUSES, MemoryItem
+from .models import INACTIVE_STATUSES, MemoryItem, MemoryStatus
 from .store.base import MemoryStore
 
 FTS_WEIGHT = 0.55
@@ -55,6 +55,7 @@ def search(
     type_: Optional[str] = None,
     limit: int = 10,
     include_candidates: bool = True,
+    include_rejected: bool = False,
     domain_affinity: Optional[str] = None,
 ) -> SearchResult:
     fts_scores = store.fts_search(query, limit=100)
@@ -82,10 +83,15 @@ def search(
         memory = store.get_memory(mem_id)
         if memory is None:
             continue
-        if memory.status.value in INACTIVE_STATUSES:
-            continue
-        if not include_candidates and memory.status.value != "confirmed":
-            continue
+        st = memory.status.value
+        if st in INACTIVE_STATUSES:
+            # Reflect/consolidation may want rejected as *negative* context;
+            # other inactive statuses stay out of default search.
+            if not (include_rejected and st == MemoryStatus.rejected.value):
+                continue
+        if not include_candidates and st != MemoryStatus.confirmed.value:
+            if not (include_rejected and st == MemoryStatus.rejected.value):
+                continue
         if type_ and memory.type.value != type_:
             continue
 
@@ -112,6 +118,8 @@ def search(
             why_parts.append("entity match")
         if same_domain:
             why_parts.append("same-domain")
+        if st == MemoryStatus.rejected.value:
+            why_parts.append("rejected")
         hits.append(SearchHit(memory=memory, score=round(score, 4), why=", ".join(why_parts) or "weak match"))
 
     hits.sort(key=lambda h: h.score, reverse=True)

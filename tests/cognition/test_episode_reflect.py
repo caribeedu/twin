@@ -233,8 +233,8 @@ def test_reflect_skips_episode_without_arc(store, cfg, embedder):
     assert result.skipped_reason
 
 
-def test_reflect_skips_structural_pr_commit_pair(store, cfg, embedder):
-    """PR → commit with only a motivated edge is membership noise, not trajectory."""
+def test_reflect_near_duplicate_arc_still_asks_model(store, cfg, embedder):
+    """≥2 phases always reach the reflector — the model may return no claims."""
     acc, inst = _acct(store, account_id="acct_prpair")
     lineage = "github:acme/atlas#99"
     pr = _rec(
@@ -258,9 +258,187 @@ def test_reflect_skips_structural_pr_commit_pair(store, cfg, embedder):
     report = run_episode_cognition(
         store, cfg, embedder, mode="full", until=BrainStage.cortex,
     )
-    result = reflect_episode(store, cfg, embedder, report.episode_ids[0])
+    seen = {"called": False}
+
+    def _empty(brief_in, _cfg):
+        seen["called"] = True
+        assert len(brief_in.phases) >= 2
+        return []
+
+    result = reflect_episode(
+        store, cfg, embedder, report.episode_ids[0], reflector=_empty,
+    )
+    assert seen["called"] is True
     assert result.claims == []
-    assert "structural only" in result.skipped_reason
+    assert "no trajectory claims" in result.skipped_reason
+
+
+def test_reflect_allows_divergent_pr_commit_pair(store, cfg, embedder):
+    """PR framing A + commit landing on B can yield a durable stance."""
+    acc, inst = _acct(store, account_id="acct_diverge")
+    lineage = "github:acme/atlas#42"
+    pr = _rec(
+        id="prd", connector_id=inst.id, source_account_id=acc.id,
+        external_type="pull_request", external_id="acme/atlas!42",
+        content=(
+            "GitHub pull request acme/atlas!42: Implement parallel memory spine.\n"
+            "state: MERGED\n"
+            "Add workspace ticks and daily consolidation without confirming Memory."
+        ),
+        occurred_at="2026-07-01T09:00:00Z",
+        ownership={"vault_id": acc.vault_id},
+        source_metadata={"lineage_root": lineage, "repo": "acme/atlas"},
+    )
+    commit = _rec(
+        id="cd", connector_id=inst.id, source_account_id=acc.id,
+        external_type="commit", external_id="def999",
+        content=(
+            "Commit def999 in acme/atlas by Edu:\n"
+            "Address PR blockers: retrieval score and operational idempotency.\n"
+            "Tighten tests and persist consolidation window runs."
+        ),
+        occurred_at="2026-07-02T09:00:00Z",
+        ownership={"vault_id": acc.vault_id},
+        source_metadata={"lineage_root": lineage, "repo": "acme/atlas"},
+    )
+    for r in (pr, commit):
+        store.insert_connector_record(r)
+    report = run_episode_cognition(
+        store, cfg, embedder, mode="full", until=BrainStage.cortex,
+    )
+    ep_id = report.episode_ids[0]
+    brief = build_episode_brief(store, ep_id)
+    assert brief is not None
+    assert any("idempotency" in q for q in brief.quotes_by_ref.values())
+    assert any("workspace ticks" in q for q in brief.quotes_by_ref.values())
+
+    def _fake(brief_in, _cfg):
+        assert brief_in.related_memories is not None
+        return [TrajectoryClaim(
+            type="constraint",
+            domain="technical",
+            title="Merge gates before spine expansion",
+            summary=(
+                "Edu requires retrieval-score accuracy and operational "
+                "idempotency before expanding the parallel memory spine."
+            ),
+            valid_from="2026-07-02T09:00:00Z",
+            twin_influenced=True,
+        )]
+
+    result = reflect_episode(store, cfg, embedder, ep_id, reflector=_fake)
+    assert result.claims, result.skipped_reason
+    mem = store.get_memory(result.claims[0]["memory_id"])
+    assert mem is not None
+    assert mem.type == MemoryType.constraint
+    assert "idempotency" in mem.summary
+
+
+def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
+    """Consolidate retrieves confirmed/candidate/rejected neighbors."""
+    from twin import ids
+    from twin.cognition.episode_reflect import gather_related_memories
+    from twin.memory.models import MemoryItem
+
+    acc, inst = _acct(store, account_id="acct_rel")
+    ep = _pivot_episode(store, cfg, embedder, acc, inst)
+
+    confirmed = MemoryItem(
+        id=ids.memory_id(), type="preference",
+        title="Prefers managed queues",
+        summary="Edu prefers SQS over self-hosted Kafka for ops cost.",
+        domain="technical", confidence=0.9, status="confirmed",
+    )
+    rejected = MemoryItem(
+        id=ids.memory_id(), type="decision",
+        title="Keep Kafka forever",
+        summary="Rejected: keep self-hosted Kafka as the queue.",
+        domain="technical", confidence=0.5, status="rejected",
+    )
+    for mem in (confirmed, rejected):
+        store.insert_memory(mem)
+        store.store_embedding(
+            mem.id, "memory", embedder.name,
+            embedder.embed(f"{mem.title}\n{mem.summary}"),
+        )
+
+    brief = build_episode_brief(store, ep.id)
+    assert brief is not None
+    related = gather_related_memories(store, embedder, brief, limit=10)
+    ids_hit = {r["id"] for r in related}
+    assert confirmed.id in ids_hit
+    assert rejected.id in ids_hit
+    statuses = {r["id"]: r["status"] for r in related}
+    assert statuses[rejected.id] == "rejected"
+
+    seen: dict = {}
+
+    def _fake(brief_in, _cfg):
+        seen["related"] = list(brief_in.related_memories)
+        return [TrajectoryClaim(
+            type="preference",
+            domain="technical",
+            title="Managed queues over self-hosted",
+            summary="Chose SQS; rejected keeping Kafka forever.",
+            related_memory_ids=[rejected.id],
+            twin_influenced=True,
+        )]
+
+    result = reflect_episode(store, cfg, embedder, ep.id, reflector=_fake)
+    assert result.claims, result.skipped_reason
+    assert any(r["id"] == rejected.id for r in seen["related"])
+    mem = store.get_memory(result.claims[0]["memory_id"])
+    assert mem.payload.get("related_memory_ids") == [rejected.id]
+
+
+def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
+    """Open-session observe notes surface before vault neighbors."""
+    from twin.cognition.episode_reflect import gather_related_memories
+    from twin.cognition.sessions import observe_session, start_session
+
+    acc, inst = _acct(store, account_id="acct_sesart")
+    ep = _pivot_episode(store, cfg, embedder, acc, inst)
+    started = start_session(
+        store, cfg, embedder,
+        query="Kafka vs SQS queue choice",
+        domain="technical",
+        task_profile="architecture",
+    )
+    observe_session(store, started.session.id, {
+        "kind": "decision",
+        "note": "Prefer SQS over Kafka for ops cost on this queue work",
+        "ref": "dogfood-intent",
+    })
+
+    brief = build_episode_brief(store, ep.id)
+    assert brief is not None
+    related = gather_related_memories(
+        store, embedder, brief, limit=12, session_id=started.session.id,
+    )
+    arts = [r for r in related if r["status"] == "session_artifact"]
+    assert arts, related
+    assert "Prefer SQS" in arts[0]["summary"]
+    assert related[0]["status"] == "session_artifact"
+
+    seen: dict = {}
+
+    def _fake(brief_in, _cfg):
+        seen["related"] = list(brief_in.related_memories)
+        return [TrajectoryClaim(
+            type="preference",
+            domain="technical",
+            title="Prefer managed SQS",
+            summary="Open-session intent: SQS over Kafka for ops cost.",
+            related_memory_ids=[arts[0]["id"]],
+            twin_influenced=True,
+        )]
+
+    result = reflect_episode(
+        store, cfg, embedder, ep.id,
+        reflector=_fake, session_id=started.session.id,
+    )
+    assert result.claims, result.skipped_reason
+    assert any(r["status"] == "session_artifact" for r in seen["related"])
 
 
 def test_reflect_dry_run_persists_nothing(store, cfg, embedder):

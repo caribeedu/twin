@@ -24,9 +24,11 @@ from ..config import Config
 from ..memory.embeddings import Embedder
 from ..memory.formation import propose_or_corroborate
 from ..memory.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
+from ..memory.search import search
 from ..memory.store.base import MemoryStore
 from ..sensory.percept import Percept
 from .correlation.models import EpisodeLinkStatus
+from .correlation.text import rich_excerpt
 
 
 @dataclass
@@ -40,6 +42,7 @@ class EpisodeBrief:
     edges: list[dict[str, Any]] = field(default_factory=list)
     quotes_by_ref: dict[str, str] = field(default_factory=dict)
     percept_by_ref: dict[str, str] = field(default_factory=dict)
+    related_memories: list[dict[str, Any]] = field(default_factory=list)
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
 
@@ -48,9 +51,11 @@ class EpisodeBrief:
 class TrajectoryClaim:
     """A synthesized cross-source claim (0..N per episode)."""
     type: str = MemoryType.decision.value
+    domain: str = "technical"
     title: str = ""
     summary: str = ""
     evidence_quotes: list[str] = field(default_factory=list)
+    related_memory_ids: list[str] = field(default_factory=list)
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     confidence: float = 0.6
@@ -83,14 +88,6 @@ def set_reflect_override(fn: Optional[ReflectorFn]) -> None:
 # -- brief construction ---------------------------------------------------
 
 
-def _first_line(content: str) -> str:
-    for line in (content or "").splitlines():
-        line = line.lstrip("# ").strip()
-        if line:
-            return line[:160]
-    return ""
-
-
 def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[EpisodeBrief]:
     ep = store.get_work_episode(episode_id)
     if ep is None:
@@ -108,7 +105,8 @@ def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[Episode
         if lk.connector_record_id and hasattr(store, "get_connector_record"):
             rec = store.get_connector_record(lk.connector_record_id)
             if rec is not None:
-                quotes_by_ref[ref] = _first_line(rec.content or "") or (rec.content or "")[:160]
+                content = rec.content or ""
+                quotes_by_ref[ref] = rich_excerpt(content) or content[:200]
                 if getattr(rec, "percept_id", None):
                     percept_by_ref[ref] = rec.percept_id
 
@@ -146,6 +144,139 @@ def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[Episode
         valid_from=ep.started_at,
         valid_until=ep.ended_at,
     )
+
+
+# -- related-memory retrieval ---------------------------------------------
+
+
+def _reflect_search_query(brief: EpisodeBrief) -> str:
+    parts = [brief.title]
+    for p in sorted(brief.phases, key=lambda x: x.get("order", 0)):
+        if p.get("summary"):
+            parts.append(str(p["summary"]))
+    for q in list(brief.quotes_by_ref.values())[:8]:
+        parts.append(q[:160])
+    return " ".join(parts)[:900]
+
+
+_SESSION_ARTIFACT_KINDS = frozenset({
+    "decision", "note", "preference", "constraint", "intent", "belief",
+})
+
+
+def gather_session_artifacts(
+    store: MemoryStore,
+    brief: EpisodeBrief,
+    *,
+    limit: int = 8,
+    session_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Live session observe notes as soft context for consolidate.
+
+    Closed-session intent only becomes Memory after ``session_complete``
+    extraction. Open-session artifacts bridge that gap so reflect can link
+    chat/Cursor intent to a PR/commit episode without waiting for close.
+    """
+    if not hasattr(store, "list_sessions") and not hasattr(store, "get_session"):
+        return []
+    sessions = []
+    if session_id and hasattr(store, "get_session"):
+        ses = store.get_session(session_id)
+        if ses is not None:
+            sessions = [ses]
+    elif hasattr(store, "list_sessions"):
+        try:
+            sessions = list(store.list_sessions(status="active", limit=20))
+        except TypeError:
+            sessions = [
+                s for s in store.list_sessions(limit=20)
+                if getattr(getattr(s, "status", None), "value", s.status) == "active"
+            ]
+    out: list[dict[str, Any]] = []
+    for ses in sessions:
+        sid = ses.id
+        ses_project = getattr(ses, "project_id", None)
+        if brief.project_id and ses_project and ses_project != brief.project_id:
+            continue
+        domain = getattr(ses, "domain", None) or "technical"
+        arts = list(getattr(ses, "artifacts", None) or [])
+        for art in arts:
+            if not isinstance(art, dict):
+                continue
+            kind = str(art.get("kind") or "").lower().strip()
+            if kind not in _SESSION_ARTIFACT_KINDS:
+                continue
+            note = str(art.get("note") or "").strip()
+            if not note:
+                continue
+            at = str(art.get("at") or "")
+            out.append({
+                "id": f"sesart:{sid}:{at}:{kind}",
+                "type": kind,
+                "domain": domain,
+                "status": "session_artifact",
+                "title": f"[{kind}] open session",
+                "summary": note[:240],
+                "score": 0.55,
+                "why": "active session artifact",
+                "ref": art.get("ref"),
+                "session_id": sid,
+            })
+    # Prefer newest notes (artifacts append chronologically).
+    if len(out) > limit:
+        out = out[-limit:]
+    return out
+
+
+def gather_related_memories(
+    store: MemoryStore,
+    embedder: Embedder,
+    brief: EpisodeBrief,
+    *,
+    limit: int = 12,
+    session_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Confirmed + candidate + rejected neighbors, plus open-session artifacts.
+
+    Same-episode reflections are excluded so prior meta claims cannot reinforce
+    themselves. No Domain Firewall here — this is internal cognition writing
+    candidates, not a consumer pack.
+    """
+    session_hits = gather_session_artifacts(
+        store, brief, limit=min(8, limit), session_id=session_id,
+    )
+    mem_budget = max(limit - len(session_hits), 4)
+    query = _reflect_search_query(brief).strip()
+    mem_hits: list[dict[str, Any]] = []
+    if query:
+        result = search(
+            store, embedder, query,
+            target_domain="technical",
+            firewall=None,
+            include_candidates=True,
+            include_rejected=True,
+            limit=max(mem_budget * 2, 24),
+        )
+        for hit in result.hits:
+            mem = hit.memory
+            payload = mem.payload or {}
+            if payload.get("episode_id") == brief.episode_id:
+                continue
+            mem_hits.append({
+                "id": mem.id,
+                "type": mem.type.value if hasattr(mem.type, "value") else str(mem.type),
+                "domain": mem.domain,
+                "status": mem.status.value if hasattr(mem.status, "value") else str(mem.status),
+                "title": mem.title,
+                "summary": (mem.summary or "")[:240],
+                "score": hit.score,
+                "why": hit.why,
+            })
+            if len(mem_hits) >= mem_budget:
+                break
+    # Session intent first — the model should see live dogfood notes before
+    # older vault neighbors that often dominate lexical search.
+    return session_hits + mem_hits
 
 
 # -- reflectors -----------------------------------------------------------
@@ -191,29 +322,8 @@ def _make_llm_reflector(client) -> ReflectorFn:
 
 
 def _has_arc(brief: EpisodeBrief) -> bool:
-    # Cortex produced structure (≥2 phases). Reflectability is a stricter gate.
+    """Cortex produced structure (≥2 phases) — enough to ask the model."""
     return len(brief.phases) >= 2
-
-
-def _has_reflectable_arc(brief: EpisodeBrief) -> bool:
-    """True only when the arc can yield a *non-tautological* trajectory claim.
-
-    Pure ``goal → execution`` with a single ``motivated`` edge (typical GitHub
-    PR + merge-commit pair) just restates membership — atomic extract already
-    covers that. Reflection waits for a pivot, a contradiction, a resolved
-    decision, or a goal that actually closes as an outcome.
-    """
-    if len(brief.phases) < 2:
-        return False
-    kinds = {p.get("kind") for p in brief.phases}
-    rels = {e.get("relation") for e in brief.edges}
-    if rels & {"superseded", "contradicts"}:
-        return True
-    if "decision" in kinds and (rels & {"resolved", "superseded"} or "outcome" in kinds):
-        return True
-    if "goal" in kinds and "outcome" in kinds:
-        return True
-    return False
 
 
 def reflect_episode(
@@ -224,12 +334,14 @@ def reflect_episode(
     *,
     dry_run: bool = False,
     reflector: Optional[ReflectorFn] = None,
+    session_id: Optional[str] = None,
 ) -> ReflectResult:
     """Synthesize trajectory MemoryCandidates from one episode's arc.
 
     Emits candidates only (``needs_review=True``, ``review_reason=episode_reflect``).
     Idempotent through formation identity: re-reflecting corroborates rather
-    than duplicating. Never confirms Memory or Judgment.
+    than duplicating. Never confirms Memory or Judgment. Whether the arc
+    yields a claim is the model's job — there is no lexical pre-filter.
     """
     brief = build_episode_brief(store, episode_id)
     if brief is None:
@@ -239,14 +351,10 @@ def reflect_episode(
             episode_id=episode_id,
             skipped_reason="no arc yet (run cortex: twin correlate)",
         )
-    if not _has_reflectable_arc(brief):
-        return ReflectResult(
-            episode_id=episode_id,
-            skipped_reason=(
-                "arc is structural only (e.g. PR→commit) — no pivot, "
-                "contradiction, or goal→outcome to reflect"
-            ),
-        )
+
+    brief.related_memories = gather_related_memories(
+        store, embedder, brief, session_id=session_id,
+    )
 
     reflector = reflector or _select_reflector(cfg)
     if reflector is None:
@@ -263,6 +371,7 @@ def reflect_episode(
     for claim in claims:
         row: dict[str, Any] = {
             "type": claim.type,
+            "domain": claim.domain,
             "title": claim.title,
             "summary": claim.summary,
             "valid_from": claim.valid_from,
@@ -281,6 +390,7 @@ def reflect_episode(
             "episode_id": brief.episode_id,
             "phase_keys": list(claim.phase_keys),
             "edge_ids": list(claim.edge_ids),
+            "related_memory_ids": list(claim.related_memory_ids),
             "source": "episode_reflect",
             "brain_stage": "hippocampus_consolidate",
             "trajectory": True,
@@ -293,15 +403,22 @@ def reflect_episode(
         evidence_quote = (
             claim.evidence_quotes[0] if claim.evidence_quotes else claim.summary
         )
+        # Trajectory claims are durable stances — do not pin valid_until to the
+        # episode end (that collapses into temporal_gate and hides them).
+        valid_until = claim.valid_until
+        if valid_until and claim.valid_from and valid_until <= claim.valid_from:
+            valid_until = None
+        elif valid_until and brief.valid_until and valid_until == brief.valid_until:
+            valid_until = None
         mem = MemoryItem(
             id=ids.memory_id(),
             type=mem_type,
             title=claim.title,
             summary=claim.summary,
-            domain="technical",
+            domain=claim.domain or "technical",
             confidence=claim.confidence,
             valid_from=claim.valid_from,
-            valid_until=claim.valid_until,
+            valid_until=valid_until,
             payload=payload,
             needs_review=True,
             review_reason="episode_reflect",
@@ -313,7 +430,7 @@ def reflect_episode(
             extractor_version=ExtractorVersion(
                 extractor="episode_reflect",
                 model="twin",
-                prompt_version="1",
+                prompt_version="6",
                 schema_version="1",
             ),
         )

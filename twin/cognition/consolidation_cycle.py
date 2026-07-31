@@ -316,9 +316,9 @@ def reflect_recent_episodes(
     """Reflect episodes with a built arc into trajectory MemoryCandidates.
 
     The hippocampus_consolidate stage runs on episodes whose cortex stage
-    produced a *reflectable* arc (pivot / contradiction / goal→outcome); the
-    reflect model decides whether that arc yields a claim, and defers when no
-    model is available (never fabricates). Candidates only — never confirms.
+    produced an arc (≥2 phases); the reflect model decides whether that arc
+    yields a claim, and defers when no model is available (never fabricates).
+    Candidates only — never confirms.
 
     When ``episode_ids`` is given (e.g. episodes just touched by cortex), those
     are tried first; otherwise the store is scanned newest-first up to
