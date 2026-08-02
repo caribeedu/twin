@@ -20,9 +20,9 @@
   <a href="#purpose">Purpose</a> ·
   <a href="#the-problem">The Problem</a> ·
   <a href="#the-current-landscape">Landscape</a> ·
+  <a href="#demonstration">Demonstration</a> ·
   <a href="#current-findings">Findings</a> ·
   <a href="#what-twin-is-trying-to-prove">Hypotheses</a> ·
-  <a href="#concrete-example">Example</a> ·
   <a href="#where-to-aim">Where to Aim</a> ·
   <a href="#research-objective">Research</a> ·
   <a href="#product-objective">Product</a><br/>
@@ -46,17 +46,12 @@ systems.
 It is not another chatbot, another agent framework, another RAG pipeline
 or another knowledge graph.
 
-Its objective is broader:
+Its perspective is broader:
 
 > **Build a persistent, governed and model-independent cognitive layer that transforms distributed observations into reusable understanding.**
 
 That understanding should survive changes in models, interfaces,
 providers and applications.
-
-This README defines that destination. It is not a release plan or a
-description of the current implementation. Near-term increments live in
-[docs/PRODUCT.md](docs/PRODUCT.md) and [docs/ROADMAP.md](docs/ROADMAP.md);
-deeper architecture and interfaces live under [Docs](#docs).
 
 ## The Problem
 
@@ -138,6 +133,85 @@ Governed Context
 Any Authorized Intelligence
 ```
 
+## Demonstration
+
+The following demonstration shows one of Twin's current research findings operating in a real-world scenario.
+
+> **The objective is not to retrieve related artifacts. The objective is to synthesize reusable computational understanding.**
+
+<!-- VIDEO_PLACEHOLDER -->
+
+### The Situation
+
+A product owner states in Slack that the product cannot be released without **Feature A**.
+
+Later:
+
+- a Pull Request implementing Feature A is opened;
+- the Pull Request is merged;
+- a Slack message announces that the feature has been merged.
+
+None of these artifacts explicitly reference each other.
+
+The Slack conversation never identifies the Pull Request.
+
+The Pull Request never states that it resolves the Slack discussion.
+
+### The Experiment
+
+A completely new Claude conversation is started.
+
+Claude has:
+
+- no custom memory;
+- no project-specific rules;
+- no prior knowledge about the Dogwalker project;
+- no manually written prompt describing the repository;
+- no local files containing project information;
+
+The only integration available is:
+
+- Twin's MCP server;
+- Twin's automatic context injection hooks.
+
+When asked about the Dogwalker project, Claude explains the situation as a coherent narrative rather than retrieving isolated observations.
+
+Instead of describing individual Slack messages or Pull Requests, it understands that:
+
+- John identified Feature A as a launch blocker;
+- Edu implemented the feature;
+- the implementation resolved the blocker;
+- the project state evolved as a consequence.
+
+No manual reconstruction of the timeline is required.
+
+### Why This Matters
+
+This demonstration illustrates one of Twin's central hypotheses.
+
+The value is not that an LLM receives more context.
+
+The value is that it receives **better context**.
+
+From the perspective of a traditional retrieval system, these are simply independent observations. And Twin never presented the downstream LLM with isolated observations. Instead, Twin had already correlated the evidence, reflected on it and synthesized reusable computational understanding.
+
+**Twin therefore provides a coherent understanding of the situation rather than a collection of related artifacts.**
+
+The downstream model spends fewer tokens reconstructing history and more tokens reasoning about the user's actual question.
+
+This is the behavior Twin ultimately aims to generalize across conversations, repositories, documents, meetings, emails and every other authorized source of perception.
+
+### The Scenario
+
+The demonstration uses a public software project; [`caribeedu/dogwalker`](https://github.com/caribeedu/dogwalker).
+
+- Source systems:
+  - Slack
+  - GitHub
+- Reasoning model: **Claude Sonnet 4.6**
+
+Approximately **1.7 million tokens** tokens were invested in ingesting and understanding formation; correlating commits, pull requests and conversations. The total processing cost for the experiment was approximately **US$10**.
+
 ## Current Findings
 
 Twin is an active engineering research and product project.
@@ -177,30 +251,6 @@ Twin is guided by the following hypotheses:
 8. **Inferred knowledge remains falsifiable.**
 
 These hypotheses should be validated through reproducible experiments and benchmarks.
-
-## Concrete Example
-
-Suppose the following events occur:
-
-- In Slack, John states that the product cannot launch without Feature A.
-- In GitHub, Edu opens and merges PR #15 implementing Feature A.
-- Back in Slack, Edu says that the feature has been merged.
-
-No message explicitly links to the pull request.
-
-No pull request description explicitly states that it resolves John's request.
-
-A retrieval system may return the three items.
-
-Twin should instead synthesize:
-
-> John requested Feature A because the launch was blocked. Edu
-> implemented it in PR #15. After the merge, the launch blocker was
-> removed.
-
-The objective is reusable understanding — not a collection of matching
-records. What Twin means by *understanding* and *situation models* is
-defined in [docs/COGNITION.md](docs/COGNITION.md).
 
 ## Where to Aim
 
@@ -455,13 +505,9 @@ outcomes — see [docs/IDENTITY.md](docs/IDENTITY.md#how-twin-should-be-spoken-a
 
 ## Final Objective
 
-> **Every authorized AI should understand the user better tomorrow than
-> it did today, regardless of which AI the user chooses.**
+Twin aims to build a persistent cognitive substrate that progressively transforms distributed observations into computational understanding, while preserving privacy, ownership, portability and human authority.
 
-Twin aims to make that possible without requiring the user to surrender
-privacy, ownership, portability or control — and without collapsing a
-durable cognitive counterpart into any single model, product or
-impersonation.
+It should remain independent of any single model, interface or provider, allowing any authorized intelligence to understand the user's world with greater continuity over time.
 
 ## Docs
 
