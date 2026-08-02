@@ -5,11 +5,6 @@ connectors, runtime and scripting.
 
 Global flag: `--home` sets Twin home (default `~/.twin` or `$TWIN_HOME`).
 
-Surface map: [INTERFACES.md](INTERFACES.md). Local HTTP API:
-[REST.md](REST.md). Native behavior (not just commands):
-[NATIVE.md](NATIVE.md). Connector concepts:
-[INTERFACES.md — Connectors](INTERFACES.md#connectors).
-
 Add `--json` to any command for machine-readable output (mirrors `twin pack --json`). Machine protocol surfaces stay on their own transport: `twin native event` ([Native](NATIVE.md)), `twin mcp` ([MCP](MCP.md)), and `twin serve` ([REST](REST.md)).
 
 ## Setup & doctors
@@ -224,7 +219,7 @@ Empty roots leave the instance `awaiting_configuration` until roots are set.
 
 ## Runtime
 
-Durable background workers (`twin runtime` / `twin-runtime`) for jobs that must not block Claude Code hooks or the interactive CLI. Handlers call the same cognitive core as MCP/CLI/API — this is not an autonomous agent. Day-2 ops notes in [OPERATIONS.md](OPERATIONS.md).
+Durable background workers (`twin runtime` / `twin-runtime`) for jobs that must not block Claude Code hooks or the interactive CLI. Handlers call the same cognitive core as MCP/CLI/API — this is not an autonomous agent. When to run the worker and how it fits operating loops in [OPERATIONS.md](OPERATIONS.md).
 
 With Claude Code native hooks, keep a runtime process running so deferred domain resolve and SessionEnd consolidation are processed:
 

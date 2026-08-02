@@ -543,8 +543,8 @@ concepts without hiding them.
 | **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
 | **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — pipeline, data model, threat model |
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
-| **[SETUP.md](docs/SETUP.md)** | Install, providers, config, tests |
-| **[OPERATIONS.md](docs/OPERATIONS.md)** | Runtime, backup, incidents |
+| **[SETUP.md](docs/SETUP.md)** | Install, first-run wizard, providers, config, tests |
+| **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, meditate, native, review, recovery |
 
 ## License
 

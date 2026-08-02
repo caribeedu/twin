@@ -13,11 +13,6 @@ surface everywhere else. **CLI** and the local **API** are the same core
 with different transport. **Connectors** ingest external sources — they
 are not client sessions.
 
-Identity: [IDENTITY.md](IDENTITY.md). Architecture:
-[ARCHITECTURE.md](ARCHITECTURE.md). Cognition:
-[COGNITION.md](COGNITION.md). Destination: [README](../README.md).
-Install: [SETUP.md](SETUP.md). Ops: [OPERATIONS.md](OPERATIONS.md).
-
 ## Surfaces
 
 | Surface | Doc | Role | Prefer when |
@@ -64,7 +59,7 @@ Connectors are **source adapters**, not LLM clients. They pull GitHub, Slack, ma
 
 Connectors are how Twin **obtains** ongoing evidence from professional systems. Each adapter fetches and normalizes into the same Artifact-to-Percept path as `twin ingest`. They do **not** confirm Memory or Judgment — you still run `twin extract` and `twin review`.
 
-Ownership (`--source-owner`) and vault labels keep employer and personal data separable. Day-2 ops (due list, DLQ, backup) in [OPERATIONS.md](OPERATIONS.md).
+Ownership (`--source-owner`) and vault labels keep employer and personal data separable. End-to-end operating loops (sync, backfill, DLQ, backup) in [OPERATIONS.md](OPERATIONS.md).
 
 ### What each connector extracts
 
