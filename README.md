@@ -29,7 +29,8 @@
   <a href="#runtime-philosophy">Runtime</a> ·
   <a href="#what-twin-is-not">What Twin Is Not</a> ·
   <a href="#direction">Direction</a> ·
-  <a href="#evidence-over-ideology">Evidence</a> ·
+  <a href="#relationship-to-similar-projects">Similar Projects</a> ·
+  <a href="#evidence-over-ideology">Tecnology</a> ·
   <a href="#success-criteria">Success</a> ·
   <a href="#final-objective">Final Objective</a> ·
   <a href="#docs">Docs</a> ·
@@ -387,6 +388,23 @@ The long-term direction is a persistent cognitive substrate capable of supportin
 > Every future capability should emerge from strengthening this loop rather than bypassing it.
 
 Pipeline detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Planned work in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Relationship to Similar Projects
+
+Twin shares ideas with several existing projects and research directions. It does not attempt to replace them, nor does it claim that they solve the wrong problems.
+
+Instead, Twin investigates a different layer of the cognitive pipeline: the formation, revision and reuse of computational understanding.
+
+Memory, retrieval, knowledge graphs, context engineering and agents are all treated as valuable implementation techniques rather than the final product.
+
+| Project | Primary focus | How Twin differs |
+|---|---|---|
+| **OpenViking** | Context management, long-term memory infrastructure and efficient context delivery for AI systems. | Twin focuses on forming reusable understanding before context is assembled. Context becomes an output of cognition rather than the primary objective. |
+| **Hermes** | Persistent memory, autonomous agents and long-running task execution. | Twin treats agents as consumers of computational understanding. Its primary focus is understanding formation, reflection, judgment and governed cognition. |
+| **GBrain** | Personal knowledge graphs that continuously organize entities and relationships. | Twin goes beyond organizing knowledge by synthesizing situation models, causal relationships, reusable understanding and explicit judgment from distributed observations. |
+| **LifeOS** | Personal organization of goals, notes, routines and life management. | Twin is not a productivity or life-management system. It aims to build a persistent cognitive substrate that any authorized intelligence can consult while preserving continuity, governance and human authority. |
+
+These projects solve valuable and complementary problems.
 
 ## Evidence Over Ideology
 

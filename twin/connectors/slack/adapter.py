@@ -299,6 +299,14 @@ class SlackConnector:
                     and norm.channel_kind_from_meta(cached) != "unknown"):
                 # Non-expired verified metadata may bridge a transient outage.
                 return cached
+            # Keep transient provider failures as degraded/retryable — do not
+            # collapse rate_limit/network/provider_error into unauthorized.
+            if exc.failure_class in (
+                FailureClass.rate_limit,
+                FailureClass.network,
+                FailureClass.provider_error,
+            ):
+                raise
             raise ConnectorError(
                 f"cannot refresh metadata for channel {channel_id}: "
                 f"{exc.failure_class.value}; refusing stale authorization",
