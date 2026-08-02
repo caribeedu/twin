@@ -31,7 +31,7 @@ Workers claim durable jobs, including:
 | `backfill_partition` | Scheduler / `twin connector backfill --run` (historical; not continuous sync) |
 | `reembed_memory` | Manual enqueue |
 
-Full CLI table and payload examples in [INTERFACES.md](INTERFACES.md#runtime).
+Full CLI table and payload examples in [CLI.md](CLI.md#runtime).
 
 ```bash
 # inspect / recover one job

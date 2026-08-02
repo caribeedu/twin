@@ -253,7 +253,7 @@ mandatory evidence > sourceless memory
 exportability > lock-in
 ```
 
-Continue in [PRODUCT.md](PRODUCT.md) for domain rules · [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md) for versions · [INTERFACES.md](INTERFACES.md) for MCP / CLI / API · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
+Continue in [PRODUCT.md](PRODUCT.md) for domain rules · [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md) for versions · [INTERFACES.md](INTERFACES.md) ([Native](NATIVE.md) / [MCP](MCP.md) / [CLI](CLI.md) / [REST](REST.md)) · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
 
 ## Stack and technical decisions
 
@@ -320,7 +320,7 @@ Search must answer not only "what looks semantically similar?", but "what is rel
 
 ### Native where possible, MCP everywhere
 
-The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference in [INTERFACES.md](INTERFACES.md#clients).
+The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference in [INTERFACES.md](INTERFACES.md#clients) · [NATIVE.md](NATIVE.md) · [MCP.md](MCP.md).
 
 ## Data model
 
@@ -557,7 +557,7 @@ compact suggestion for the main AI
 
 The consumer domain is never guessed from the text: it is the frozen domain of the open session or an explicit argument. With no such domain the firewall target is `unclassified` and the suggestion comes back empty — ambiguity yields *less* context, never another domain's memories.
 
-Opening a session scope on the request path (`resolve_context_domain`) is a retrieval vote across confirmed memories only — no local LLM in the hot path. When the vote is inconclusive the session stays `unclassified` until a background `session_domain_resolve` job (multi-message evidence) or an explicit client/MCP domain freezes it. Native hosts: Claude's **Stop** is end-of-turn (observe only); **SessionEnd** closes the binding and enqueues background `session_complete` for the `session_summary` Percept (see [INTERFACES.md](INTERFACES.md); requires `twin-runtime`).
+Opening a session scope on the request path (`resolve_context_domain`) is a retrieval vote across confirmed memories only — no local LLM in the hot path. When the vote is inconclusive the session stays `unclassified` until a background `session_domain_resolve` job (multi-message evidence) or an explicit client/MCP domain freezes it. Native hosts: Claude's **Stop** is end-of-turn (observe only); **SessionEnd** closes the binding and enqueues background `session_complete` for the `session_summary` Percept (see [NATIVE.md](NATIVE.md); requires `twin-runtime`).
 
 This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
 

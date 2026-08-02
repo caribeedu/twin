@@ -188,7 +188,7 @@ Connectors pull sources into Twin **incrementally** (artifacts, then percepts, t
 | **Fireflies** | Meeting manifests, speaker-labeled transcript chunks, provider summaries — not audio/video |
 | **Local folder** | Watched roots of text notes (Markdown/txt/…): document chunks on change; binaries stay metadata-only |
 
-Ownership and vaults keep personal vs work data separable. Auth, config, discovery helpers and webhooks in **[connectors](docs/INTERFACES.md#connectors)**. Day-2 ops in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Ownership and vaults keep personal vs work data separable. What connectors pull in **[INTERFACES → Connectors](docs/INTERFACES.md#connectors)**; CLI setup in **[CLI → Connectors](docs/CLI.md#connectors)**. Day-2 ops in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ---
 
@@ -233,7 +233,7 @@ twin pack "retry strategy for Atlas webhooks" --domain technical
 twin setup mcp cursor          # or: claude-code | claude-desktop
 ```
 
-Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Full interfaces with per-client setup in [docs/INTERFACES.md](docs/INTERFACES.md).
+Restart / reload MCP. Twin should appear as a local server running `twin mcp`. Per-client setup in [docs/MCP.md](docs/MCP.md); surfaces overview in [docs/INTERFACES.md](docs/INTERFACES.md).
 
 ### 4. See a first result
 
@@ -263,7 +263,7 @@ This README is the **overview**: problem, solution, architecture sketch and quic
 | **[docs/ROADMAP.md](docs/ROADMAP.md)** | Planned work — correlation depth, next major versions |
 | **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered — v0.1 through nowadays |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — principles, pipeline, data model, observer, threat model |
-| **[docs/INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — Native, MCP, CLI, API, connectors |
+| **[docs/INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — hub for [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) and connectors |
 | **[docs/SETUP.md](docs/SETUP.md)** | How you install Twin — providers, config, tests |
 | **[docs/OPERATIONS.md](docs/OPERATIONS.md)** | How you operate Twin — runtime, backup, incidents |
 
