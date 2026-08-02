@@ -30,7 +30,7 @@
   <a href="#what-twin-is-not">What Twin Is Not</a> ·
   <a href="#direction">Direction</a> ·
   <a href="#relationship-to-similar-projects">Similar Projects</a> ·
-  <a href="#evidence-over-ideology">Tecnology</a> ·
+  <a href="#evidence-over-ideology">Evidence</a> ·
   <a href="#success-criteria">Success</a> ·
   <a href="#final-objective">Final Objective</a> ·
   <a href="#docs">Docs</a> ·
