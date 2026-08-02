@@ -29,6 +29,7 @@
   <a href="#runtime-philosophy">Runtime</a> ·
   <a href="#what-twin-is-not">What Twin Is Not</a> ·
   <a href="#direction">Direction</a> ·
+  <a href="#relationship-to-similar-projects">Similar Projects</a> ·
   <a href="#evidence-over-ideology">Evidence</a> ·
   <a href="#success-criteria">Success</a> ·
   <a href="#final-objective">Final Objective</a> ·
@@ -116,9 +117,13 @@ It treats them as components of a broader cognitive process.
 ```text
 Observation
     ↓
+Percept
+    ↓
 Correlation
     ↓
 Situation Formation
+    ↓
+Memory
     ↓
 Understanding
     ↓
@@ -151,7 +156,7 @@ Current experiments suggest that:
 - Reflection can improve understanding quality before durable memory is created;
 - Explicit judgment appears more stable when modeled independently from factual memory;
 - Frontier reasoning models currently produce substantially better understanding quality than contemporary local models for complex cognitive tasks;
-- Exposing evidence, confidence and processing cost makes cognitive behavior significantly more inspectable than opaque memory systems.
+- Exposing evidence, confidence and processing cost makes cognitive behavior significantly more inspectable than opaque memory systems;
 
 These findings remain subject to revision.
 
@@ -220,9 +225,7 @@ Beyond what happened, the long-term system should represent:
   domain and audience;
 - which actions may be suggested, prepared or executed.
 
-Models may propose interpretations, memories and revisions. Identity-
-level claims, durable judgment and delegated authority require
-proportionate evidence, transparency and human control.
+Models may propose interpretations, memories and revisions. Identity-level claims, durable judgment and delegated authority require proportionate evidence, transparency and human control.
 
 ## Research Objective
 
@@ -244,7 +247,7 @@ Answering that question requires combining software engineering with insights fr
 - causal reasoning;
 - temporal reasoning;
 - memory consolidation;
-- reflection and judgment.
+- reflection and judgment;
 
 These disciplines are treated as sources of engineering hypotheses that
 can be validated through implementation, benchmarks and experimentation.
@@ -283,7 +286,7 @@ It should provide:
 - transparent processing costs;
 - model independence;
 - exportability;
-- human authority over durable conclusions and any delegated agency.
+- human authority over durable conclusions and any delegated agency;
 
 Users should always be able to inspect:
 
@@ -292,7 +295,7 @@ Users should always be able to inspect:
 - which evidence supports it;
 - what it cost to compute;
 - how confident the system is;
-- what may be corrected, exported or removed.
+- what may be corrected, exported or removed;
 
 Install and first use: [docs/SETUP.md](docs/SETUP.md). Product shape: [docs/PRODUCT.md](docs/PRODUCT.md).
 
@@ -315,7 +318,7 @@ Twin therefore adopts a pragmatic position:
 - use cloud reasoning where it demonstrably improves cognition;
 - expose every processing stage;
 - expose the computational cost of every cognitive layer;
-- allow components to be replaced as local models improve.
+- allow components to be replaced as local models improve;
 
 The objective is not to maximize cloud usage.
 
@@ -335,7 +338,7 @@ Twin should not become:
 - an autonomous actor that silently changes the user's values;
 - a chatbot that impersonates the owner;
 - a system that hides reasoning costs;
-- a collection of cognitive terminology without measurable behavior.
+- a collection of cognitive terminology without measurable behavior;
 
 ## Direction
 
@@ -369,7 +372,7 @@ Current implementations already demonstrate capabilities such as:
 - longitudinal understanding;
 - explicit reflection;
 - judgment formation;
-- cross-domain governance.
+- cross-domain governance;
 
 The next stage is to improve the quality, scalability and explainability of these capabilities through:
 
@@ -378,13 +381,30 @@ The next stage is to improve the quality, scalability and explainability of thes
 - higher-quality understanding synthesis;
 - quantitative benchmark coverage;
 - lower cognitive and computational cost;
-- progressively greater local execution as model capabilities mature.
+- progressively greater local execution as model capabilities mature;
 
 The long-term direction is a persistent cognitive substrate capable of supporting any authorized intelligence while preserving continuity, evidence, privacy, governance and human authority.
 
 > Every future capability should emerge from strengthening this loop rather than bypassing it.
 
 Pipeline detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Planned work in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Relationship to Similar Projects
+
+Twin shares ideas with several existing projects and research directions. It does not attempt to replace them, nor does it claim that they solve the wrong problems.
+
+Instead, Twin investigates a different layer of the cognitive pipeline: the formation, revision and reuse of computational understanding.
+
+Memory, retrieval, knowledge graphs, context engineering and agents are all treated as valuable implementation techniques rather than the final product.
+
+| Project | Primary focus | How Twin differs |
+|---|---|---|
+| **OpenViking** | Context management, long-term memory infrastructure and efficient context delivery for AI systems. | Twin focuses on forming reusable understanding before context is assembled. Context becomes an output of cognition rather than the primary objective. |
+| **Hermes** | Persistent memory, autonomous agents and long-running task execution. | Twin treats agents as consumers of computational understanding. Its primary focus is understanding formation, reflection, judgment and governed cognition. |
+| **GBrain** | Personal knowledge graphs that continuously organize entities and relationships. | Twin goes beyond organizing knowledge by synthesizing situation models, causal relationships, reusable understanding and explicit judgment from distributed observations. |
+| **LifeOS** | Personal organization of goals, notes, routines and life management. | Twin is not a productivity or life-management system. It aims to build a persistent cognitive substrate that any authorized intelligence can consult while preserving continuity, governance and human authority. |
+
+These projects solve valuable and complementary problems.
 
 ## Evidence Over Ideology
 
