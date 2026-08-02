@@ -1,14 +1,15 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
-**Interfaces:** [Overview](INTERFACES.md) · [Native](NATIVE.md) · [MCP](MCP.md) · [CLI](CLI.md) · [REST](REST.md)
-
 # MCP
 
-**Source of truth for:** the universal tool surface — packs, search, sessions, review, judgment, connector ops over stdio.
+This document explains the universal tool surface — packs, search,
+sessions, review, judgment and connector ops over stdio.
 
-> **MCP everywhere.** Use it when the host has no native surface, and alongside [native](NATIVE.md) for mid-conversation tools.
+> **MCP everywhere.** Use it when the host has no native surface, and
+> alongside [native](NATIVE.md) for mid-conversation tools.
 
-Overview in [INTERFACES.md](INTERFACES.md). Host lifecycle in [NATIVE.md](NATIVE.md).
+Surface map: [INTERFACES.md](INTERFACES.md). Host lifecycle:
+[NATIVE.md](NATIVE.md). Governed context and privacy-before-reasoning:
+[GLOSSARY.md](GLOSSARY.md) ·
+[IDENTITY.md](IDENTITY.md#design-principles).
 
 MCP is the **universal** client interface: any MCP host can pull packs, search, run sessions and call tools — including session notes / observe / complete. Use it when the host has no native surface, and **alongside** native on Claude Code for mid-conversation tools. The client starts `twin mcp` locally; nothing is required to leave the machine.
 

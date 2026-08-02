@@ -1,10 +1,15 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Architecture
 
-**Source of truth for:** how Twin works — brain analogies, architecture principles, stack, data model, pipeline, privacy, review, judgment, observer and threat model.
+This document explains how Twin works — brain analogies, architecture
+principles, stack, data model, pipeline, privacy, review, judgment,
+observer and threat model.
 
-Product shape and the **complete roadmap** live in [ROADMAP.md](ROADMAP.md); what shipped is in [CHANGELOG.md](CHANGELOG.md). Product definition in [PRODUCT.md](PRODUCT.md). Interfaces in [INTERFACES.md](INTERFACES.md). Why the shape exists in [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch in [README](../README.md#how-it-works).
+Durable principles: [IDENTITY.md](IDENTITY.md#design-principles).
+Cognitive concepts: [COGNITION.md](COGNITION.md) ·
+[GLOSSARY.md](GLOSSARY.md). Academic inspirations (appendix):
+[FOUNDATIONS.md](FOUNDATIONS.md). Product: [PRODUCT.md](PRODUCT.md).
+Interfaces: [INTERFACES.md](INTERFACES.md). Direction loop:
+[README — Direction](../README.md#direction).
 
 ## Brain analogies
 

@@ -1,14 +1,14 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
-**Interfaces:** [Overview](INTERFACES.md) · [Native](NATIVE.md) · [MCP](MCP.md) · [CLI](CLI.md) · [REST](REST.md)
-
 # CLI
 
-**Source of truth for:** the `twin` terminal surface — ingest, review, connectors, runtime, scripting.
+This document explains the `twin` terminal surface — ingest, review,
+connectors, runtime and scripting.
 
 Global flag: `--home` sets Twin home (default `~/.twin` or `$TWIN_HOME`).
 
-Overview in [INTERFACES.md](INTERFACES.md). Local HTTP API in [REST.md](REST.md).
+Surface map: [INTERFACES.md](INTERFACES.md). Local HTTP API:
+[REST.md](REST.md). Native behavior (not just commands):
+[NATIVE.md](NATIVE.md). Connector concepts:
+[INTERFACES.md — Connectors](INTERFACES.md#connectors).
 
 Add `--json` to any command for machine-readable output (mirrors `twin pack --json`). Machine protocol surfaces stay on their own transport: `twin native event` ([Native](NATIVE.md)), `twin mcp` ([MCP](MCP.md)), and `twin serve` ([REST](REST.md)).
 

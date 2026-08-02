@@ -1,16 +1,15 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
-**Interfaces:** [Overview](INTERFACES.md) · [Native](NATIVE.md) · [MCP](MCP.md) · [CLI](CLI.md) · [REST](REST.md)
-
 # REST / local API
 
-**Source of truth for:** the local HTTP API and review workbench (`twin serve`).
+This document explains the local HTTP API and review workbench
+(`twin serve`).
 
-`twin serve` mounts a minimal review workbench, a JSON API and interactive docs (OpenAPI/Swagger via FastAPI when the `api` extra is installed).
+`twin serve` mounts a minimal review workbench, a JSON API and
+interactive docs (OpenAPI/Swagger via FastAPI when the `api` extra is
+installed). Base: `http://127.0.0.1:8765` (unless configured otherwise).
 
-Base: `http://127.0.0.1:8765` (unless configured otherwise).
-
-Overview in [INTERFACES.md](INTERFACES.md). Equivalent CLI in [CLI.md](CLI.md).
+Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
+[CLI.md](CLI.md). Architecture of review / packs:
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Ingest & extract
 

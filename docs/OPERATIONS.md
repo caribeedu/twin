@@ -1,10 +1,11 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Operations
 
-**Source of truth for:** day-2 operation — cognitive runtime, health, connectors, backup, release gates and incidents.
+This document explains day-2 operation — cognitive runtime, health,
+connectors, backup, release gates and incidents.
 
-Install and providers live in [SETUP.md](SETUP.md). How to use in [README](../README.md#how-to-use).
+Install and providers: [SETUP.md](SETUP.md). Interfaces and connector
+concepts: [INTERFACES.md](INTERFACES.md) · [CLI.md](CLI.md#connectors).
+Destination: [README](../README.md).
 
 ## Start cognitive runtime
 

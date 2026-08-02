@@ -1,10 +1,17 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Product
 
-**Source of truth for:** what Twin delivers — memory / judgment / action layers, domain separation, initial concept shape, related projects and success criteria.
+This document explains what Twin delivers — memory / judgment / action
+layers, domain separation, initial concept shape, related projects and
+success criteria.
 
-Twin is a personal, local-first cognitive layer: structured memory, evolving judgment, domain firewall and interoperable access (MCP / CLI / API) so tools can reason with your context without becoming a chat replacement. Architecture principles and brain analogies live in [ARCHITECTURE.md](ARCHITECTURE.md). Delivered releases in [CHANGELOG.md](CHANGELOG.md). Future versions in [ROADMAP.md](ROADMAP.md). Overview in [README](../README.md).
+It does not redefine identity ([IDENTITY.md](IDENTITY.md)) or cognitive
+concepts ([COGNITION.md](COGNITION.md)). Twin is a personal, local-first
+cognitive layer so authorized tools can reason with governed context
+without becoming a chat replacement. Product vs research tracks:
+[IDENTITY.md](IDENTITY.md#core-claim-and-value-proposition).
+Architecture: [ARCHITECTURE.md](ARCHITECTURE.md). Releases:
+[CHANGELOG.md](CHANGELOG.md). Roadmap: [ROADMAP.md](ROADMAP.md).
+Destination: [README](../README.md).
 
 ## Central concept: memory is not enough
 

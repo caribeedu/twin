@@ -1,16 +1,22 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
-**Interfaces:** [Overview](INTERFACES.md) · [Native](NATIVE.md) · [MCP](MCP.md) · [CLI](CLI.md) · [REST](REST.md)
-
 # Interfaces
 
-**Source of truth for:** how tools talk to Twin — Native, MCP, CLI, local API and connectors.
+This document explains how tools talk to Twin — Native, MCP, CLI, local
+API and connectors. Shared concepts and surface map live here; command
+and tool detail live in the per-surface docs.
 
 > **Native where possible. MCP everywhere. One cognitive core.**
 
-Twin is infrastructure, not a chat app. LLM-powered **clients** (Cursor, Claude Code, Claude Desktop, …) pull memory and safe context packs from one local core. Prefer **native** when the host can embed Twin in its session lifecycle; use **MCP** as the universal tool surface everywhere else (including mid-conversation pulls). **CLI** and the local **API** are the same core with different transport. **Connectors** are separate: they ingest external sources (GitHub, Slack, …), not client sessions.
+Twin is infrastructure, not a chat app. LLM-powered **clients** pull
+governed context from one local core. Prefer **native** when the host can
+embed Twin in its session lifecycle; use **MCP** as the universal tool
+surface everywhere else. **CLI** and the local **API** are the same core
+with different transport. **Connectors** ingest external sources — they
+are not client sessions.
 
-Identity and principles in [README](../README.md) and [ARCHITECTURE.md](ARCHITECTURE.md). Install and models in [SETUP.md](SETUP.md). Day-2 ops in [OPERATIONS.md](OPERATIONS.md).
+Identity: [IDENTITY.md](IDENTITY.md). Architecture:
+[ARCHITECTURE.md](ARCHITECTURE.md). Cognition:
+[COGNITION.md](COGNITION.md). Destination: [README](../README.md).
+Install: [SETUP.md](SETUP.md). Ops: [OPERATIONS.md](OPERATIONS.md).
 
 ## Surfaces
 

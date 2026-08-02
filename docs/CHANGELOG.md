@@ -1,10 +1,9 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Changelog
 
-**Source of truth for:** what each released version delivered.
+This document explains what each released version delivered.
 
-Product definition in [PRODUCT.md](PRODUCT.md). Future work in [ROADMAP.md](ROADMAP.md). Overview in [README](../README.md).
+Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
+[ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
 ### v0.1 — Local Technical Memory
 

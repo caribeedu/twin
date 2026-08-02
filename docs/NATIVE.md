@@ -1,14 +1,13 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
-**Interfaces:** [Overview](INTERFACES.md) · [Native](NATIVE.md) · [MCP](MCP.md) · [CLI](CLI.md) · [REST](REST.md)
-
 # Native
 
-**Source of truth for:** host-lifecycle binding — Claude Code hooks today; app-server-style surfaces later.
+This document explains host-lifecycle binding — Claude Code hooks today;
+app-server-style surfaces later.
 
 > Prefer **native** when the host can embed Twin in its session lifecycle.
 
-Overview and shared concepts in [INTERFACES.md](INTERFACES.md). Universal tools in [MCP.md](MCP.md).
+Shared surface map: [INTERFACES.md](INTERFACES.md). Universal tools:
+[MCP.md](MCP.md). CLI commands: [CLI.md — Native](CLI.md#native).
+Identity (model-independent continuity): [IDENTITY.md](IDENTITY.md).
 
 Native integration binds the **host application** to Twin’s cognitive sessions without a parallel memory store. Today the shipped proof is **Claude Code hooks**. Deeper host embedding (for example app-server style surfaces) should follow the same rules: one core, fail-open, no silent Memory/Judgment confirmation.
 

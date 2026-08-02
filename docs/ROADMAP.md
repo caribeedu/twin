@@ -1,10 +1,11 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Roadmap
 
-**Source of truth for:** planned work — deferred correlation depth and next major versions.
+This document explains planned work — deferred correlation depth and next
+major versions.
 
-Product shape in [PRODUCT.md](PRODUCT.md). What shipped in [CHANGELOG.md](CHANGELOG.md).
+It is not the research program ([RESEARCH.md](RESEARCH.md)). Product
+shape: [PRODUCT.md](PRODUCT.md). What shipped: [CHANGELOG.md](CHANGELOG.md).
+Destination: [README](../README.md).
 
 ## Correlation depth (v1.3.0 delivered; remainder 1.3.x / 1.4)
 

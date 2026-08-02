@@ -1,10 +1,13 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Foundations
 
-**Source of truth for:** why Twin exists — philosophy and academic inspirations (Extended Mind, 4E, memory systems, GWT, ACT-R, …).
+This document is an **appendix**: philosophy and academic inspirations
+(Extended Mind, 4E, memory systems, GWT, ACT-R, …) treated as design
+inspiration, not implementation claims. Prefer
+[IDENTITY.md](IDENTITY.md) and [COGNITION.md](COGNITION.md) for what Twin
+is and how understanding works.
 
-This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built in [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers in [PRODUCT.md](PRODUCT.md). Versions in [CHANGELOG.md](CHANGELOG.md) / [ROADMAP.md](ROADMAP.md). Short narrative in [README](../README.md).
+How Twin is built: [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers:
+[PRODUCT.md](PRODUCT.md). Destination narrative: [README](../README.md).
 
 ## Academic and conceptual foundations
 
