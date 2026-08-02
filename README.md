@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/quickstart-setup-7c3aed?style=for-the-badge" alt="Setup"></a>
+  <a href="https://pypi.org/project/twin-cognition/"><img src="https://img.shields.io/pypi/v/twin-cognition?style=for-the-badge&logo=pypi&logoColor=white&label=twin-cognition" alt="PyPI"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
@@ -20,9 +21,9 @@
   <a href="#purpose">Purpose</a> ·
   <a href="#the-problem">The Problem</a> ·
   <a href="#the-current-landscape">Landscape</a> ·
-  <a href="#current-findings">Findings</a> ·
   <a href="#what-twin-is-trying-to-prove">Hypotheses</a> ·
-  <a href="#concrete-example">Example</a> ·
+  <a href="#demonstration">Demonstration</a> ·
+  <a href="#current-findings">Findings</a> ·
   <a href="#where-to-aim">Where to Aim</a> ·
   <a href="#research-objective">Research</a> ·
   <a href="#product-objective">Product</a><br/>
@@ -33,6 +34,7 @@
   <a href="#evidence-over-ideology">Evidence</a> ·
   <a href="#success-criteria">Success</a> ·
   <a href="#final-objective">Final Objective</a> ·
+  <a href="#install">Install</a> ·
   <a href="#docs">Docs</a> ·
   <a href="#license">License</a>
 </p>
@@ -46,17 +48,12 @@ systems.
 It is not another chatbot, another agent framework, another RAG pipeline
 or another knowledge graph.
 
-Its objective is broader:
+Its proposal is broader:
 
 > **Build a persistent, governed and model-independent cognitive layer that transforms distributed observations into reusable understanding.**
 
 That understanding should survive changes in models, interfaces,
 providers and applications.
-
-This README defines that destination. It is not a release plan or a
-description of the current implementation. Near-term increments live in
-[docs/PRODUCT.md](docs/PRODUCT.md) and [docs/ROADMAP.md](docs/ROADMAP.md);
-deeper architecture and interfaces live under [Docs](#docs).
 
 ## The Problem
 
@@ -138,6 +135,100 @@ Governed Context
 Any Authorized Intelligence
 ```
 
+## What Twin Is Trying to Prove
+
+Twin is guided by the following hypotheses:
+
+1. **Understanding is more valuable than isolated retrieval.**
+2. **Distributed observations can form coherent situation models.**
+3. **Reflection should precede durable memory.**
+4. **Judgment should evolve separately from factual memory.**
+5. **Cognitive continuity depends more on reusable understanding than on context-window size.**
+6. **A person's cognitive substrate should remain portable across models and vendors.**
+7. **Governance must be applied before sensitive context reaches the reasoning model.**
+8. **Inferred knowledge remains falsifiable.**
+
+These hypotheses should be validated through reproducible experiments and benchmarks.
+
+## Demonstration
+
+The following demonstration shows Twin operating in a real-world scenario.
+
+> **The objective is not to retrieve related artifacts. The objective is to synthesize reusable computational understanding.**
+
+https://github.com/user-attachments/assets/9472cfdb-954a-4ed0-96a2-5e498147d92b
+
+### The Situation
+
+A product owner states in Slack that the product cannot be released without **Feature A**.
+
+Later:
+
+- a Pull Request implementing Feature A is opened;
+- the Pull Request is merged;
+- a Slack message announces that the feature has been merged.
+
+None of these artifacts explicitly reference each other.
+
+The Slack conversation never identifies the Pull Request.
+
+The Pull Request never states that it resolves the Slack discussion.
+
+### The Experiment
+
+A completely new Claude conversation is started.
+
+Claude has:
+
+- no custom memory;
+- no project-specific rules;
+- no prior knowledge about the Dogwalker project;
+- no manually written prompt describing the repository;
+- no local files containing project information;
+
+The only integration available is:
+
+- Twin's MCP server;
+- Twin's automatic context injection hooks.
+
+When asked about the Dogwalker project, Claude explains the situation as a coherent narrative rather than retrieving isolated observations.
+
+Instead of describing individual Slack messages or Pull Requests, it understands that:
+
+- John identified Feature A as a launch blocker;
+- Edu implemented the feature;
+- the implementation resolved the blocker;
+- the project state evolved as a consequence.
+
+No manual reconstruction of the timeline is required.
+
+### Why This Matters
+
+This demonstration illustrates one of Twin's central hypotheses.
+
+The value is not that an LLM receives more context.
+
+The value is that it receives **better context**.
+
+From the perspective of a traditional retrieval system, these are simply independent observations. And Twin never presented the downstream LLM with isolated observations. Instead, Twin had already correlated the evidence, reflected on it and synthesized reusable computational understanding.
+
+**Twin therefore provides a coherent understanding of the situation rather than a collection of related artifacts.**
+
+The downstream model spends fewer tokens reconstructing history and more tokens reasoning about the user's actual question.
+
+This is the behavior Twin ultimately aims to generalize across conversations, repositories, documents, meetings, emails and every other authorized source of perception.
+
+### The Scenario
+
+The demonstration uses a public software project; [`caribeedu/dogwalker`](https://github.com/caribeedu/dogwalker).
+
+- Source systems:
+  - Slack
+  - GitHub
+- Reasoning model: **Claude Sonnet 4.6**
+
+Approximately **1.7 million tokens** tokens were invested in ingesting and understanding formation; correlating commits, pull requests and conversations. The total processing cost for the experiment was approximately **US$10**.
+
 ## Current Findings
 
 Twin is an active engineering research and product project.
@@ -162,45 +253,6 @@ These findings remain subject to revision.
 
 Twin intentionally treats every architectural decision as provisional until
 supported by broader experimentation and reproducible benchmarks.
-
-## What Twin Is Trying to Prove
-
-Twin is guided by the following hypotheses:
-
-1. **Understanding is more valuable than isolated retrieval.**
-2. **Distributed observations can form coherent situation models.**
-3. **Reflection should precede durable memory.**
-4. **Judgment should evolve separately from factual memory.**
-5. **Cognitive continuity depends more on reusable understanding than on context-window size.**
-6. **A person's cognitive substrate should remain portable across models and vendors.**
-7. **Governance must be applied before sensitive context reaches the reasoning model.**
-8. **Inferred knowledge remains falsifiable.**
-
-These hypotheses should be validated through reproducible experiments and benchmarks.
-
-## Concrete Example
-
-Suppose the following events occur:
-
-- In Slack, John states that the product cannot launch without Feature A.
-- In GitHub, Edu opens and merges PR #15 implementing Feature A.
-- Back in Slack, Edu says that the feature has been merged.
-
-No message explicitly links to the pull request.
-
-No pull request description explicitly states that it resolves John's request.
-
-A retrieval system may return the three items.
-
-Twin should instead synthesize:
-
-> John requested Feature A because the launch was blocked. Edu
-> implemented it in PR #15. After the merge, the launch blocker was
-> removed.
-
-The objective is reusable understanding — not a collection of matching
-records. What Twin means by *understanding* and *situation models* is
-defined in [docs/COGNITION.md](docs/COGNITION.md).
 
 ## Where to Aim
 
@@ -455,18 +507,32 @@ outcomes — see [docs/IDENTITY.md](docs/IDENTITY.md#how-twin-should-be-spoken-a
 
 ## Final Objective
 
-> **Every authorized AI should understand the user better tomorrow than
-> it did today, regardless of which AI the user chooses.**
+Twin aims to build a persistent cognitive substrate that progressively transforms distributed observations into computational understanding, while preserving privacy, ownership, portability and human authority.
 
-Twin aims to make that possible without requiring the user to surrender
-privacy, ownership, portability or control — and without collapsing a
-durable cognitive counterpart into any single model, product or
-impersonation.
+It should remain independent of any single model, interface or provider, allowing any authorized intelligence to understand the user's world with greater continuity over time.
 
 ## Docs
 
 This README is the public destination statement. Deeper docs expand
 concepts without hiding them.
+
+### Product, architecture & ops
+
+| Doc | Source of truth for |
+|---|---|
+| **[SETUP.md](docs/SETUP.md)** | Install, first-run wizard, providers, config, tests |
+| **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, meditate, native, review, recovery |
+| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — pipeline, data model, threat model |
+| **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
+| **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
+| **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
+| **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
+
+### Research & evaluation
+
+| Doc | Source of truth for |
+|---|---|
+| **[RESEARCH.md](docs/RESEARCH.md)** | Hypotheses, method, scenario benchmarks, open directions |
 
 ### Destination & framing
 
@@ -481,24 +547,6 @@ concepts without hiding them.
 |---|---|
 | **[COGNITION.md](docs/COGNITION.md)** | Understanding and Situation Models — bridge from percepts to reusable interpretation |
 | **[FOUNDATIONS.md](docs/FOUNDATIONS.md)** | Appendix — academic roots (Extended Mind, 4E, …); inspiration, not claims |
-
-### Research & evaluation
-
-| Doc | Source of truth for |
-|---|---|
-| **[RESEARCH.md](docs/RESEARCH.md)** | Hypotheses, method, scenario benchmarks, open directions |
-
-### Product, architecture & ops
-
-| Doc | Source of truth for |
-|---|---|
-| **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
-| **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
-| **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
-| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — pipeline, data model, threat model |
-| **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
-| **[SETUP.md](docs/SETUP.md)** | Install, providers, config, tests |
-| **[OPERATIONS.md](docs/OPERATIONS.md)** | Runtime, backup, incidents |
 
 ## License
 

@@ -1,0 +1,144 @@
+# Release — tag vX.Y.Z → build wheel/sdist → smoke → GitHub Release → TestPyPI → PyPI
+#
+# Prerequisites (one-time, Trusted Publishing):
+#   1. GitHub Environments: `testpypi` and `pypi` (optional reviewers on `pypi`)
+#   2. Pending publishers on TestPyPI + PyPI for project `twin-cognition`,
+#      owner `caribeedu`, repo `twin`, workflow `release.yml`, matching env names
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-release:
+    name: build, smoke, GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check tag matches project.version
+        id: meta
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [[ "$TAG" != "$VERSION" ]]; then
+              echo "::error::tag v$TAG does not match project.version $VERSION"
+              exit 1
+            fi
+          fi
+          echo "Building twin-cognition==$VERSION"
+
+      - name: Install build tooling
+        run: pip install build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Smoke install wheel
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/twin-smoke
+          /tmp/twin-smoke/bin/pip install dist/twin_cognition-*.whl
+          /tmp/twin-smoke/bin/twin --help
+          /tmp/twin-smoke/bin/python -c "import twin; assert twin.__version__ == '${{ steps.meta.outputs.version }}'"
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import os
+          version = os.environ["VERSION"]
+          text = Path("docs/CHANGELOG.md").read_text(encoding="utf-8")
+          lines = text.splitlines()
+          start = None
+          for i, line in enumerate(lines):
+              if line.startswith(f"### v{version}"):
+                  start = i
+                  break
+          if start is None:
+              body = f"Release v{version}. See docs/CHANGELOG.md."
+          else:
+              end = len(lines)
+              for j in range(start + 1, len(lines)):
+                  if lines[j].startswith("### v") or lines[j].strip() == "---":
+                      end = j
+                      break
+              body = "\n".join(lines[start:end]).strip() + "\n"
+          Path("release_notes.md").write_text(body, encoding="utf-8")
+          PY
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: release_notes.md
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-testpypi:
+    name: publish TestPyPI
+    needs: build-release
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+
+  publish-pypi:
+    name: publish PyPI
+    needs: [build-release, publish-testpypi]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

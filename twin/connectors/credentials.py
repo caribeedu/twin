@@ -71,7 +71,7 @@ def _build_fernet(key_path: Path):
     except ImportError as exc:  # fail closed — never degrade to obfuscation
         raise CredentialBackendUnavailable(
             "credential encryption backend unavailable: the 'cryptography' "
-            "package is not installed. Install it (pip install \"twin[crypto]\") "
+            "package is not installed. Install it (pip install \"twin-cognition[crypto]\") "
             "or use an OS keyring; twin will not store connector credentials "
             "without real encryption."
         ) from exc

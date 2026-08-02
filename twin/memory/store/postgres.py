@@ -5,7 +5,7 @@
 - Native full-text search (tsvector generated column + GIN index, 'simple'
  config so pt-BR and English coexist without stemming surprises).
 
-Requires ``pip install "twin[postgres]"`` (psycopg 3).
+Requires ``pip install "twin-cognition[postgres]"`` (psycopg 3).
 """
 
 from __future__ import annotations

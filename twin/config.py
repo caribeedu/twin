@@ -106,7 +106,7 @@ class Config:
 
     # -- privacy -------------------------------------------------------------
     # when set, percept content + evidence quotes are encrypted at rest
-    # (requires: pip install "twin[crypto]")
+    # (requires: pip install "twin-cognition[crypto]")
     encryption_key: str = field(default_factory=lambda: _env("TWIN_ENCRYPTION_KEY", ""))
     # sources with trust below this always send their memories to review
     low_trust_threshold: float = 0.65

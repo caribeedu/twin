@@ -67,5 +67,5 @@ def build_codec(passphrase: str, home: Path) -> ContentCodec:
     except ImportError as exc:
         raise RuntimeError(
             "TWIN_ENCRYPTION_KEY is set but the 'cryptography' package is not "
-            "installed. Run: pip install 'twin[crypto]'"
+            "installed. Run: pip install 'twin-cognition[crypto]'"
         ) from exc

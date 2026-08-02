@@ -115,7 +115,7 @@ counts, graph size or document volume
 - Decision reversal after new evidence
 - Multiple unrelated conversations forming one situation
 
-Related narrative: [README — Concrete Example](../README.md#concrete-example)
+Related narrative: [README — Demonstration](../README.md#demonstration)
 · [COGNITION.md](COGNITION.md#example).
 
 ### Compare against

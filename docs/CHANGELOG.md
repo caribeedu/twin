@@ -446,6 +446,18 @@ Delivered:
 
 Follow-on (not blocking v1.3.0): multi-factor confidence composition, identity-as-graph / entity resolution, HTTP/MCP episode graph APIs, full load/replay eval suite — see [Correlation depth remainder](ROADMAP.md#correlation-depth-remainder).
 
+### v1.4.0 — First public packaging release
+
+Goal: ship Twin as an installable public package (`twin-cognition` on PyPI) with a tag-driven GitHub Release pipeline, pip-first setup docs, and minimal community hygiene — without changing the import or CLI surface (`import twin`, `twin` / `twin-runtime`).
+
+Delivered:
+
+- distribution renamed to **`twin-cognition`** (PyPI/wheel); package/`__version__` aligned to **`1.4.0`**; author metadata Edu Caribé; urls, keywords and classifiers for PyPI;
+- `.github/workflows/release.yml` — on tag `v*.*.*`: build sdist/wheel, smoke-install the wheel, publish GitHub Release assets, then Trusted Publishing to TestPyPI and PyPI (environments `testpypi` / `pypi`);
+- SETUP and README install path: `pip install "twin-cognition[…]"` primary; editable install under “Development from source”;
+- CONTRIBUTING, SECURITY, issue templates and PR template for public contribution flow;
+- post-v1.3.0 product/docs polish included in this line: SETUP/OPERATIONS rewrite around the Rich `twin init` wizard and end-to-end ops; README demonstration video and Similar Projects; Slack connector keeps rate-limit/network errors as `degraded` (not `unauthorized`); ARCHITECTURE sequence diagrams for ACC, connector→pack and native sessions.
+
 ---
 
 Next: [ROADMAP.md](ROADMAP.md) · [PRODUCT.md](PRODUCT.md).

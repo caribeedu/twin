@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup and operations docs
+    url: https://github.com/caribeedu/twin/blob/main/docs/SETUP.md
+    about: Install, first-run wizard, and operating Twin after install.
+  - name: Security report
+    url: https://github.com/caribeedu/twin/blob/main/SECURITY.md
+    about: Report a vulnerability privately — do not file a public issue.

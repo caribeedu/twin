@@ -54,7 +54,7 @@ Understanding:
 
 This understanding can later produce memories, decisions and governed
 context packs — without forcing every consumer to re-read the raw
-artifacts. Same narrative: [README — Concrete Example](../README.md#concrete-example).
+artifacts. Same narrative: [README — Demonstration](../README.md#demonstration).
 
 ---
 
