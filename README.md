@@ -139,7 +139,7 @@ The following demonstration shows one of Twin's current research findings operat
 
 > **The objective is not to retrieve related artifacts. The objective is to synthesize reusable computational understanding.**
 
-<!-- VIDEO_PLACEHOLDER -->
+https://github.com/user-attachments/assets/9472cfdb-954a-4ed0-96a2-5e498147d92b
 
 ### The Situation
 
