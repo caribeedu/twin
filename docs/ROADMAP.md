@@ -1,43 +1,39 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Roadmap
 
-**Source of truth for:** planned work — deferred correlation depth and next major versions.
+This document explains planned work — open correlation-depth gaps and next
+major versions.
 
-Product shape in [PRODUCT.md](PRODUCT.md). What shipped in [CHANGELOG.md](CHANGELOG.md).
+It is not the research program ([RESEARCH.md](RESEARCH.md)). Product
+shape: [PRODUCT.md](PRODUCT.md). What shipped: [CHANGELOG.md](CHANGELOG.md).
+Destination: [README](../README.md).
 
-## Correlation depth (planned vX — after Phase 7)
+## Correlation depth (remainder)
 
-Goal: deepen the correlation layer from “clustered evidence” into an explainable, incrementally maintained work-episode model — without turning correlation into Memory or Judgment.
+Goal: deepen the correlation layer from clustered evidence into an
+explainable, incrementally maintained work-episode model — without turning
+correlation into Memory or Judgment.
 
-**Slot.** Later `v0.x` or v2, naturally before or alongside [v0.8 Parallel Memory](CHANGELOG.md#v08--parallel-memory-and-consolidation), and feeding [v2 Extended Brain](#v2--extended-brain) episodic and autobiographical memory. It is not a blocker for cognitive interpretation or parallel consolidation.
+What already shipped (episode arc, LLM cognition stages, reflect,
+`twin meditate`, soft-fuse, review resolve surfaces) is recorded in
+[CHANGELOG.md](CHANGELOG.md). Runtime contract:
+[ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
+This section tracks only what remains.
 
-Phase 7 correctly established: connectors capture evidence; correlation proposes revisable structure (`WorkEpisode`, `IdentityLink`, `ProjectLink`, `ReviewFinding`); vault partition; idempotent keys; membership reconciliation; project/identity lifecycle; true cross-source conflicts; thin explain CLI. What remains is the deeper path.
+The remainder feeds [v2 Extended Brain](#v2-extended-brain) episodic and
+autobiographical memory. It is not a blocker for cognitive interpretation
+or parallel consolidation.
 
-#### Accepted debt (what Phase 7 still is)
+#### Open gaps
 
-- **WorkEpisode = one cluster.** An episode is still a correlated set of `ConnectorRecord`s, not a structured arc (goal, decision, execution, outcome). PR + Slack + meeting + deploy collapse into one node.
-- **Confidence ≈ link type (+ rebuild max).** Episode/link confidence still follows anchor kind / max active link; not source diversity × independence × source trust as a composed score.
-- **IdentityLink is pairwise.** Email/candidate edges + confirm/unconfirm/reject exist; there is no first-class identity graph that consolidates GitHub ↔ email ↔ Slack ↔ meeting ↔ calendar into one Entity-facing structure.
-- **No causality inside an episode.** Membership says “same episode,” not “A caused B / B motivated C / C resolved D.”
-- **Correlation is a batch pass.** `run_correlation_pass()` rescans records; there is no incremental path driven only by new/changed/tombstoned records.
-- **Explainability is CLI-first.** Anchors/links/findings are inspectable via `episode explain` / `identity why` / `project explain`; no HTTP/MCP graph API yet.
-- **Eval / load gaps.** Missing: full rebuild replay, incremental-only passes, multi-vault / multi-org stress, large ConnectorRecord volumes.
+1. **Multi-factor confidence** — compose link strength × source diversity × independence-group count × evidence quality / source trust beyond a single rebuild-max heuristic.
+2. **Identity as a small graph** — keep conservative auto-propose rules; let confirmed `IdentityLink`s form a vault-scoped graph that Entity resolution can consume later.
+3. **Explainability as broader product surface** — `twin episode graph`; stable HTTP/MCP metadata for anchors, merge vs contextual edges, independence groups, finding_key claim set, vault partition.
+4. **Hardening tests / evals** — full rebuild replay; incremental ≡ batch under load; multi-vault / multi-org isolation; large ConnectorRecord volumes.
 
-#### Path forward
+#### Non-goals
 
-1. **Episode phases** — `WorkEpisode`, then `EpisodePhase`, then `Evidence` (or equivalent) so the system can answer when a decision changed and when a plan became execution, without splitting every phase into a separate episode by default.
-2. **Multi-factor confidence** — compose link strength × source diversity × independence-group count × evidence quality / source trust beyond today’s rebuild max.
-3. **Identity as a small graph** — keep conservative auto-propose rules; let confirmed `IdentityLink`s form a vault-scoped graph that Entity resolution can consume later.
-4. **Causal / narrative edges (optional layer)** — after membership is stable, propose revisable “motivated / resolved / superseded” links between sources or phases; never auto-write Judgment.
-5. **Incremental correlation** — index dirty records / tombstones; update only affected partitions and episodes; keep full rebuild as the correctness oracle.
-6. **Explainability as broader product surface** — `twin episode graph`; stable HTTP/MCP metadata for anchors, merge vs contextual edges, independence groups, finding_key claim set, vault partition.
-7. **Hardening tests / evals** — rebuild ≡ replay; incremental ≡ batch; multi-vault isolation under load; large ConnectorRecord volumes.
-
-#### Non-goals for that vX
-
-- Auto-confirm Memory, Judgment, or Entity from correlation.
-- Cross-vault merge without an explicit, audited cross-domain action (Phase 7 invariant stays).
+- Auto-confirm Memory, Judgment, or Entity from correlation (reflect emits candidates; proposals need human approval).
+- Cross-vault merge without an explicit, audited cross-domain action.
 - Forming episodes from temporal proximity alone.
 
 ## Future major versions
@@ -48,7 +44,7 @@ Expand the stable cognitive substrate beyond professional and technical memory i
 
 Deepen the cognitive model with:
 
-- robust episodic memory and autobiographical timelines, building on WorkEpisode phases, causality edges and explainability from [Correlation depth](#correlation-depth-planned-vx--after-phase-7);
+- robust episodic memory and autobiographical timelines, building on WorkEpisode phases, causality edges and explainability from [Correlation depth](#correlation-depth-remainder);
 - consolidated semantic memory;
 - procedural memory and learned workflows;
 - goals, routines and hierarchical plans;
@@ -79,7 +75,11 @@ Reduce the distance between thought and the external cognitive layer through:
 - hands-free memory queries;
 - a conversational interface that complements rather than replaces existing tools.
 
-The Extended Brain must preserve the same architectural boundaries established before v1: sensors capture evidence, the cognitive layer interprets meaning, deterministic governance controls use, and no personal-domain or voice path may bypass authorization, provenance or human control.
+The Extended Brain must preserve the architectural boundaries in
+[ARCHITECTURE.md](ARCHITECTURE.md) and [IDENTITY.md](IDENTITY.md): sensors
+capture evidence, the cognitive layer interprets meaning, deterministic
+governance controls use, and no personal-domain or voice path may bypass
+authorization, provenance or human control.
 
 ### v3 — Cognitive Automation
 
@@ -119,7 +119,6 @@ Prepare the cognitive substrate for physical agents:
 - object and environment models;
 - interfaces with embedded systems;
 - strict embodiment-specific safety and action permissions.
-
 
 ---
 

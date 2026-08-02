@@ -166,19 +166,21 @@ class ObserverReading:
 def _deep_read(store: MemoryStore, cfg: Config, text: str,
                seed: ObserverReading, client=None) -> ObserverReading:
     from .llm import get_chat_client
+    from .llm.usage import usage_context
 
     projects = store.list_projects()
     chat = get_chat_client(cfg, client=client, timeout=60)
     try:
-        data = chat.complete_json(
-            system=_DEEP_PROMPT.format(
-                profiles=", ".join(PROFILES),
-                projects=", ".join(p.name for p in projects) or "none",
-            ),
-            user=text,
-            schema=_DEEP_SCHEMA,
-            temperature=0.0,
-        )
+        with usage_context(stage="observe", role="llm"):
+            data = chat.complete_json(
+                system=_DEEP_PROMPT.format(
+                    profiles=", ".join(PROFILES),
+                    projects=", ".join(p.name for p in projects) or "none",
+                ),
+                user=text,
+                schema=_DEEP_SCHEMA,
+                temperature=0.0,
+            )
     finally:
         closer = getattr(chat, "close", None)
         if callable(closer) and client is None:

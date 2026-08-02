@@ -1,10 +1,13 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Foundations
 
-**Source of truth for:** why Twin exists — philosophy and academic inspirations (Extended Mind, 4E, memory systems, GWT, ACT-R, …).
+This document is an **appendix**: philosophy and academic inspirations
+(Extended Mind, 4E, memory systems, GWT, ACT-R, …) treated as design
+inspiration, not implementation claims. Prefer
+[IDENTITY.md](IDENTITY.md) and [COGNITION.md](COGNITION.md) for what Twin
+is and how understanding works.
 
-This document answers *why the shape of Twin is the way it is*. It deliberately mixes philosophy, cognitive science and neuroscience as **design inspiration**, not as implementation claims. How Twin is built in [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers in [PRODUCT.md](PRODUCT.md). Versions in [CHANGELOG.md](CHANGELOG.md) / [ROADMAP.md](ROADMAP.md). Short narrative in [README](../README.md).
+How Twin is built: [ARCHITECTURE.md](ARCHITECTURE.md). What it delivers:
+[PRODUCT.md](PRODUCT.md). Destination narrative: [README](../README.md).
 
 ## Academic and conceptual foundations
 
@@ -45,7 +48,7 @@ This line matters because the project does not treat thinking as something isola
 
 Cognitive psychology and neuroscience distinguish episodic, semantic, procedural and working memory, plus executive control. Twin mirrors those separations in software (events vs graph vs procedures vs context packs vs firewall/judgment).
 
-The **engineering mapping** (brain region to Twin component, and how it wires through the pipeline) lives in [Brain analogies](ARCHITECTURE.md#brain-analogies). The subsections below stay with the academic / conceptual motivation.
+The **engineering mapping** (brain region to Twin component, and how it wires through the pipeline) lives in [Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages). The subsections below stay with the academic / conceptual motivation.
 
 ### Hippocampus, consolidation and temporality
 
@@ -92,7 +95,7 @@ This is different from a factual memory. It is a decision model.
 
 ### Amygdala, salience and risk
 
-The amygdala and limbic circuits are associated with emotional salience, fear, risk, reward and affective relevance. In a future version, `twin` should represent something analogous to **salience**:
+The amygdala and limbic circuits are associated with emotional salience, fear, risk, reward and affective relevance. Twin represents something analogous to **salience**:
 
 - is this urgent?
 - is this emotionally sensitive?
@@ -100,7 +103,7 @@ The amygdala and limbic circuits are associated with emotional salience, fear, r
 - is this important for future decisions?
 - should this become a memory or be discarded?
 
-In the initial concepts, this function partially shows up as `sensitivity`, `confidence`, `needs_review` and `review_reason`.
+In the runtime this shows up as `sensitivity`, `confidence`, `needs_review`, `review_reason`, and the `amygdala` episode stage (member role + salience) — see [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
 
 ### Basal ganglia and action selection
 
@@ -114,7 +117,7 @@ selection of a possible action
 draft / reminder / suggestion / automation with approval
 ```
 
-The initial concepts deliberately does not execute autonomous actions. Before acting, the system needs to learn to remember, filter and judge.
+Twin deliberately does not execute autonomous actions by default. Before acting, the system needs to remember, filter and judge.
 
 ### Global Workspace Theory — Bernard Baars, Stanislas Dehaene
 

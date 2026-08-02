@@ -150,6 +150,24 @@ class OutlookConnector:
             }
         return out
 
+    def backfill_floor(self) -> Optional[str]:
+        """Earliest date worth backfilling: the oldest message across configured
+        folders. Avoids planning years of empty month partitions (the planner's
+        blind default is 10 years). Best-effort — None keeps the caller's
+        default."""
+        earliest: Optional[str] = None
+        for fid in self.folders:
+            try:
+                oldest = self.client.oldest_received(fid)
+            except ConnectorError:
+                continue
+            if not oldest:
+                continue
+            day = str(oldest)[:10]  # ISO8601 → YYYY-MM-DD
+            if earliest is None or day < earliest:
+                earliest = day
+        return earliest
+
     def validate_credentials(self) -> ConnectorHealth:
         if not self.secret:
             return ConnectorHealth(status=HealthStatus.unauthorized,

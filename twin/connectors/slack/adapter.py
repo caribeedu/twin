@@ -52,15 +52,43 @@ DEFAULT_MAX_PAGES = 10
 DEFAULT_CHANNEL_METADATA_TTL_SECONDS = 3600
 
 
+def _base_stream(stream: str) -> str:
+    """Strip a backfill namespace ``backfill:{job}:{partition}:{base}`` down to
+    the provider-native base stream. Continuous streams pass through unchanged.
+
+    The historical time window travels via the SyncExecutionContext, not the
+    stream name, so only the base ``channel:{id}`` is parsed here."""
+    if stream.startswith("backfill:"):
+        parts = stream.split(":", 3)   # backfill : job : partition : base
+        if len(parts) != 4 or not parts[1] or not parts[2] or not parts[3]:
+            raise ConnectorError(
+                f"unknown backfill stream layout: {stream!r}",
+                failure_class=FailureClass.schema_change,
+            )
+        return parts[3]
+    return stream
+
+
 def _parse_stream(stream: str) -> str:
-    """'channel:{id}' → channel id."""
-    parts = stream.split(":", 1)
+    """'channel:{id}' (optionally backfill-namespaced) → channel id."""
+    parts = _base_stream(stream).split(":", 1)
     if len(parts) != 2 or parts[0] != "channel" or not parts[1]:
         raise ConnectorError(
             f"unknown slack stream layout: {stream!r}",
             failure_class=FailureClass.schema_change,
         )
     return parts[1]
+
+
+def _created_to_iso(created: Any) -> Optional[str]:
+    """Slack channel ``created`` unix seconds → ``YYYY-MM-DD`` (UTC)."""
+    try:
+        ts = float(created)
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _ts_minus_seconds(ts: str, seconds: int) -> str:
@@ -119,6 +147,19 @@ class SlackConnector:
         self._threads_awaiting_hint_ack: dict[str, list[dict[str, Any]]] = {}
         # Channels refreshed via conversations.info during this adapter life
         self._channel_meta_fresh: set[str] = set()
+        # user_id → display label (users.info cache for this adapter life)
+        self._user_labels: dict[str, str] = {}
+
+    def _in_backfill(self) -> bool:
+        """True while replaying a historical backfill partition.
+
+        Backfill must NOT mutate ``ConnectorInstance.configuration`` — the
+        runtime snapshots config before the partition and raises an invariant
+        violation if it changes (see ``run_backfill_partition``). ``team_id``
+        and ``channel_metadata`` are continuous-sync caches, so during backfill
+        we keep them in-memory for this run but skip persisting them."""
+        ctx = getattr(self, "_execution_context", None)
+        return bool(ctx and getattr(ctx, "mode", None) == "backfill")
 
     def attach_sync_hints(self, store) -> None:
         """Optional framework hook: read CAS-guarded sync-state hints."""
@@ -186,7 +227,7 @@ class SlackConnector:
 
     def _persist_channel_meta(self, channel_id: str, meta: dict[str, Any]) -> None:
         self._channel_meta[channel_id] = meta
-        if self._store is None:
+        if self._store is None or self._in_backfill():
             return
         cfg = dict(self.instance.configuration or {})
         stored = dict(cfg.get("channel_metadata") or {})
@@ -221,7 +262,7 @@ class SlackConnector:
                 human_action_required=True,
             )
         self.team_id = str(tid)
-        if self._store is not None:
+        if self._store is not None and not self._in_backfill():
             cfg = dict(self.instance.configuration or {})
             if cfg.get("team_id") != self.team_id:
                 cfg["team_id"] = self.team_id
@@ -347,13 +388,47 @@ class SlackConnector:
         known = {c["id"]: c for c in self.list_channels() if c.get("id")}
         for cid in self.channels:
             meta = known.get(cid) or {"id": cid}
+            created = meta.get("created")
             out[f"channel:{cid}"] = {
                 "name": meta.get("name"),
                 "is_private": meta.get("is_private"),
                 "channel_kind": meta.get("channel_kind") or self._channel_kind(cid),
                 "num_members": meta.get("num_members"),
+                "created": created,
+                "created_iso": _created_to_iso(created),
             }
         return out
+
+    def _channel_created(self, channel_id: str) -> Optional[float]:
+        """Channel-creation unix ts, from cached metadata or a single
+        ``conversations.info`` fetch. Best-effort: None if unknowable."""
+        meta = self._channel_meta.get(channel_id)
+        if not meta or meta.get("created") is None:
+            try:
+                info = self.client.conversations_info(channel_id)
+            except ConnectorError:
+                info = None
+            if info:
+                self._channel_meta[channel_id] = info
+                meta = info
+        try:
+            return float(meta.get("created")) if meta else None
+        except (TypeError, ValueError):
+            return None
+
+    def backfill_floor(self) -> Optional[str]:
+        """Earliest date worth backfilling: the oldest channel-creation date
+        across configured channels. A channel cannot hold messages before it
+        existed, so anchoring here avoids planning years of empty month
+        partitions (the planner's blind default is 10 years). Best-effort —
+        returns None (caller keeps its default) if no dates are discoverable."""
+        earliest: Optional[float] = None
+        for cid in self.channels:
+            created = self._channel_created(cid)
+            if created is None:
+                continue
+            earliest = created if earliest is None else min(earliest, created)
+        return _created_to_iso(earliest)
 
     def validate_credentials(self) -> ConnectorHealth:
         if not self.secret:
@@ -689,6 +764,73 @@ class SlackConnector:
             deleted=deleted,
         )
 
+    def _ensure_team_id(self) -> None:
+        if self.team_id:
+            return
+        try:
+            identity = self.client.auth_test()
+            tid = (identity or {}).get("team_id")
+            if tid:
+                self.team_id = tid
+        except Exception:
+            return
+
+    def _user_label(self, user_id: Optional[str]) -> Optional[str]:
+        """Resolve a Slack user id to a display name (cached)."""
+        if not user_id or not str(user_id).startswith("U"):
+            return None
+        uid = str(user_id)
+        if uid in self._user_labels:
+            return self._user_labels[uid]
+        try:
+            info = self.client.users_info(uid)
+        except Exception:
+            info = None
+        label = norm.display_label_for_user(info or {})
+        if label:
+            self._user_labels[uid] = label
+            self._remember_identity(uid, label)
+        return label
+
+    def _remember_identity(self, user_id: str, label: str) -> None:
+        """Best-effort: stamp display_name onto the external identity row."""
+        store = self._store
+        if store is None:
+            return
+        try:
+            from ...cognition.correlation.identity import upsert_external_identity
+            from .normalize import actor_id as _actor_id
+
+            self._ensure_team_id()
+            aid = _actor_id(self.team_id, user_id)
+            if not aid:
+                return
+            upsert_external_identity(
+                store,
+                actor_id=aid,
+                source_account_id=self.account.id,
+                vault_id=self.account.vault_id,
+                source_owner=getattr(self.account.source_owner, "value",
+                                     str(self.account.source_owner or "")),
+                display_name=label,
+                mapping_signals=["slack_users_info"],
+            )
+        except Exception:
+            return
+
+    def _labels_for_message(self, message: dict[str, Any]) -> dict[str, str]:
+        labels: dict[str, str] = {}
+        uids: set[str] = set()
+        if message.get("user"):
+            uids.add(str(message["user"]))
+        for m in norm._MENTION.finditer(message.get("text") or ""):
+            uids.add(m.group(1))
+        for uid in uids:
+            label = self._user_label(uid)
+            if label:
+                labels[uid] = label
+        return labels
+
     def normalize(self, raw_item: RawConnectorItem) -> list[ConnectorRecord]:
         payload = raw_item.payload or {}
         channel = payload.get("channel")
@@ -706,15 +848,20 @@ class SlackConnector:
         team_id = payload.get("team_id") or self.team_id
         if kind == "channel":
             rec = norm.record_from_channel(cid, aid, obj, team_id=team_id)
-        elif kind == "message":
+        elif kind in ("message", "thread_reply"):
+            self._ensure_team_id()
+            meta = self._channel_meta.get(channel) or {}
+            channel_label = meta.get("name")
+            if channel_label:
+                channel_label = f"#{channel_label}"
+            labels = self._labels_for_message(obj)
+            author = obj.get("user")
             rec = norm.record_from_message(
                 cid, aid, channel, obj, channel_kind=channel_kind,
-                is_reply=False, team_id=team_id,
-            )
-        elif kind == "thread_reply":
-            rec = norm.record_from_message(
-                cid, aid, channel, obj, channel_kind=channel_kind,
-                is_reply=True, team_id=team_id,
+                is_reply=(kind == "thread_reply"), team_id=team_id,
+                author_label=labels.get(str(author)) if author else None,
+                channel_label=channel_label,
+                user_labels=labels,
             )
         else:
             raise ConnectorError(

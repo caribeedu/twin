@@ -6,9 +6,15 @@ import json
 from typing import Any
 
 from .models import (
+    EpisodeEdge,
+    EpisodeEdgeRelation,
+    EpisodeEdgeStatus,
     EpisodeLink,
     EpisodeLinkKind,
     EpisodeLinkStatus,
+    EpisodePhase,
+    EpisodePhaseKind,
+    EpisodePhaseStatus,
     EpisodeStatus,
     ExternalIdentity,
     IdentityLink,
@@ -124,3 +130,53 @@ def row_to_episode_link(row: Any, decrypt=None) -> EpisodeLink:
     if decrypt:
         payload = decrypt(payload)
     return _load(EpisodeLink, payload)
+
+
+def episode_phase_to_row(phase: EpisodePhase) -> dict[str, Any]:
+    return {
+        "id": phase.id,
+        "episode_id": phase.episode_id,
+        "vault_id": phase.vault_id or "",
+        "phase_key": phase.phase_key or "",
+        "kind": (
+            phase.kind.value if isinstance(phase.kind, EpisodePhaseKind)
+            else phase.kind
+        ),
+        "status": (
+            phase.status.value if isinstance(phase.status, EpisodePhaseStatus)
+            else phase.status
+        ),
+        "ordinal": phase.order,
+        "payload": _dump(phase),
+    }
+
+
+def row_to_episode_phase(row: Any, decrypt=None) -> EpisodePhase:
+    payload = row["payload"]
+    if decrypt:
+        payload = decrypt(payload)
+    return _load(EpisodePhase, payload)
+
+
+def episode_edge_to_row(edge: EpisodeEdge) -> dict[str, Any]:
+    return {
+        "id": edge.id,
+        "episode_id": edge.episode_id,
+        "vault_id": edge.vault_id or "",
+        "relation": (
+            edge.relation.value if isinstance(edge.relation, EpisodeEdgeRelation)
+            else edge.relation
+        ),
+        "status": (
+            edge.status.value if isinstance(edge.status, EpisodeEdgeStatus)
+            else edge.status
+        ),
+        "payload": _dump(edge),
+    }
+
+
+def row_to_episode_edge(row: Any, decrypt=None) -> EpisodeEdge:
+    payload = row["payload"]
+    if decrypt:
+        payload = decrypt(payload)
+    return _load(EpisodeEdge, payload)

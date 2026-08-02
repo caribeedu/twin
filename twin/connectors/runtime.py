@@ -144,10 +144,33 @@ def _confidentiality(account: SourceAccount) -> dict[str, Any]:
     }
 
 
+def _resolve_record_project(store, record: ConnectorRecord) -> Optional[str]:
+    """Best-effort project id for a record via its project links.
+
+    Only returns an id when the match is strong (exact repo / confirmed link);
+    never invents a project. Failures degrade to ``None`` so ingestion is never
+    blocked by correlation wiring.
+    """
+    try:
+        from ..cognition.correlation.projects import resolve_project_for_record
+
+        project_id, _ = resolve_project_for_record(store, record)
+        return project_id
+    except Exception:
+        return None
+
+
 def build_percept(
     account: SourceAccount, instance: ConnectorInstance, record: ConnectorRecord,
+    *, project_id: Optional[str] = None,
 ) -> Percept:
-    """Seal ownership/vault/source lineage into the Percept metadata."""
+    """Seal ownership/vault/source lineage into the Percept metadata.
+
+    ``project_id`` (resolved from the connector's project links) is stamped on
+    the percept so every extracted memory inherits it — the shared key that lets
+    cross-sense correlation bridge, e.g., a Slack request and the GitHub PR that
+    resolves it.
+    """
     ownership = record.ownership or _ownership(account, instance)
     conf = record.confidentiality or _confidentiality(account)
     metadata = {
@@ -193,6 +216,7 @@ def build_percept(
         source_trust=float(conf.get("source_trust", account.source_trust)),
         source_scope=conf.get("source_scope", account.source_scope),
         source_confidentiality=conf.get("source_confidentiality", account.confidentiality),
+        project_id=project_id,
     )
 
 
@@ -368,6 +392,19 @@ def _persist_partial(store, batch: ConnectorBatch, staged: _Staged) -> None:
         store.update_connector_batch(batch)
 
 
+def _mark_correlation_dirty(store, account: SourceAccount, rec: ConnectorRecord,
+                            *, reason: str) -> None:
+    """Thin, fail-open hook: flag a committed record for incremental
+    correlation. A store without the correlation mixin still commits."""
+    marker = getattr(store, "mark_correlation_dirty", None)
+    if marker is None:
+        return
+    try:
+        marker(rec.id, vault_id=account.vault_id or "", reason=reason)
+    except Exception:
+        pass
+
+
 def persist_committed_record(
     store, account: SourceAccount, instance: ConnectorInstance,
     rec: ConnectorRecord, batch: ConnectorBatch, *, emit_percepts: bool,
@@ -377,6 +414,7 @@ def persist_committed_record(
     if rec.deleted:
         rec.percept_id = None
         store.insert_connector_record(rec)
+        _mark_correlation_dirty(store, account, rec, reason="tombstone")
         return
     quar = screen_record(store, rec)
     if quar is not None:
@@ -386,8 +424,12 @@ def persist_committed_record(
         batch.quarantined_count += 1
         return
     store.insert_connector_record(rec)
+    _mark_correlation_dirty(store, account, rec, reason="commit")
     if emit_percepts:
-        percept = build_percept(account, instance, rec)
+        percept = build_percept(
+            account, instance, rec,
+            project_id=_resolve_record_project(store, rec),
+        )
         pid = store.insert_percept(percept)
         if pid is not None:
             rec.percept_id = pid

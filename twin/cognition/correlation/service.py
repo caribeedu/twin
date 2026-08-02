@@ -42,13 +42,34 @@ def run_correlation_pass(
     connector_ids: Optional[list[str]] = None,
     limit: int = 2000,
     detect_conflicts: bool = True,
+    mode: str = "full",
 ) -> CorrelationReport:
     """Scan connector records → identities, project maps, episodes, conflicts.
 
     Partitioned by vault. Idempotent and reconciles membership. Does not write
     Memory or Judgment.
+
+    ``mode="full"`` (default) is the correctness oracle: it rescans every
+    connector record. ``mode="incremental"`` only re-correlates records marked
+    dirty since the last pass (via the ``correlation_dirty`` index), expanded to
+    the affected connector instances so their vault partitions stay consistent;
+    the dirty index is cleared on success. Falls back to a full pass when the
+    store has no dirty index.
     """
     report = CorrelationReport()
+    dirty_ids: set[str] = set()
+    if mode == "incremental" and hasattr(store, "list_correlation_dirty"):
+        dirty_ids = {
+            d["connector_record_id"] for d in store.list_correlation_dirty()
+        }
+        if not dirty_ids:
+            # Nothing changed — a no-op incremental pass is correct and cheap.
+            return report
+        # Restrict the scan to connector instances that own a dirty record so
+        # each affected vault partition is re-correlated as a whole (episodes
+        # need sibling members, not just the changed row).
+        connector_ids = _connectors_for_records(store, dirty_ids) or connector_ids
+
     records: list[Any] = []
     if connector_ids:
         for cid in connector_ids:
@@ -167,7 +188,24 @@ def run_correlation_pass(
     report.project_links = report.project_links_created + report.project_links_reused
     report.episodes = len(all_episodes)
     report.conflicts = report.conflicts_created + report.conflicts_reused
+
+    # Incremental bookkeeping: the dirty rows we just re-correlated are clean.
+    if dirty_ids and hasattr(store, "clear_correlation_dirty"):
+        store.clear_correlation_dirty(list(dirty_ids))
     return report
+
+
+def _connectors_for_records(store, record_ids: set[str]) -> list[str]:
+    """Map dirty connector-record ids → their connector instance ids."""
+    if not hasattr(store, "get_connector_record"):
+        return []
+    cids: list[str] = []
+    for rid in record_ids:
+        rec = store.get_connector_record(rid)
+        cid = getattr(rec, "connector_id", None) if rec is not None else None
+        if cid and cid not in cids:
+            cids.append(cid)
+    return cids
 
 
 def independence_group_for_record(record: Any) -> str:

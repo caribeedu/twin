@@ -19,6 +19,7 @@ from typing import Any, Optional
 from ..mail import mime as mail_mime
 from ..mail import normalize as mail_norm
 from ..mail import sync_state as ss
+from ..mail.backfill import discover_earliest_month
 from ..mail.classification import classify_message
 from ..mail.membership import (
     active_memberships,
@@ -176,6 +177,28 @@ class GmailConnector:
                 "messages_total": meta.get("messages_total"),
             }
         return out
+
+    def _has_message_before(self, day: "date") -> bool:
+        """Any message in a configured label older than the first day of month
+        ``day``? Gmail's ``before:`` accepts epoch seconds."""
+        cut = int(datetime(day.year, day.month, 1,
+                           tzinfo=timezone.utc).timestamp())
+        for lid in self.labels:
+            msgs, _ = self.client.list_messages(
+                label_ids=[lid], query=f"before:{cut}", max_results=1)
+            if msgs:
+                return True
+        return False
+
+    def backfill_floor(self) -> Optional[str]:
+        """Earliest date worth backfilling. Gmail exposes no ascending order or
+        mailbox-creation timestamp, so we binary-search ``before:`` probes for
+        the oldest message month instead of the planner's blind 10-year default.
+        Best-effort — None keeps the caller's default."""
+        try:
+            return discover_earliest_month(self._has_message_before)
+        except ConnectorError:
+            return None
 
     def validate_credentials(self) -> ConnectorHealth:
         if not self.secret:

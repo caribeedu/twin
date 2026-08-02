@@ -455,6 +455,25 @@ def doctor_connector_checks(store, home: Path) -> list[dict[str, str]]:
         "status": due_status,
         "detail": due_detail,
     })
+
+    # Ambient feed = the Analysis Context Compiler's food. A cognition pass can
+    # only correlate/reflect over data the connectors actually pulled in, so a
+    # lagging feed silently starves reflect + the pattern pass. Frame it that
+    # way so the fix is "keep the feed running", not "the model is weak".
+    if overdue:
+        feed_status = "warn"
+        feed_detail = (
+            f"{overdue} connector(s) past schedule — analysis compiles on "
+            "stale data; run `twin runtime start` for continuous sync + consolidate"
+        )
+    else:
+        feed_status = "ok"
+        feed_detail = "connectors fresh — analysis has current data to compile"
+    checks.append({
+        "name": "acc:feed",
+        "status": feed_status,
+        "detail": feed_detail,
+    })
     return checks
 
 

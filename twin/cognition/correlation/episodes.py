@@ -8,10 +8,13 @@ reconciled so removed/tombstoned members leave active membership.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional
 
 from ...clock import now_iso
+
+log = logging.getLogger(__name__)
 from .independence import evidence_directness_for, independence_group_for
 from .models import (
     EpisodeLink,
@@ -24,6 +27,12 @@ from .partition import qualify_anchor, vault_for_record
 from .projects import resolve_project_for_record
 
 EPISODE_MERGE_CONFIDENCE = 0.75
+
+# Soft-fuse (cross-sense): stricter than ACC scoring. Never fuse on
+# project+time alone — requires distinctive lexical overlap.
+SOFT_FUSE_WINDOW_DAYS = 7
+SOFT_FUSE_MIN_SHARED_TOKENS = 2
+SOFT_FUSE_MIN_LEX_RATIO = 0.15
 
 # Anchors that may union components (episode identity).
 _MERGE_KINDS = frozenset({
@@ -41,7 +50,25 @@ _REPO_PR = re.compile(
     r"github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)",
     re.I,
 )
-_LABELED_NUM = re.compile(r"\b(?:PR|pr|issue|Issue)\s*#(\d+)\b")
+# High-precision PR/issue references that tie a commit to its pull request.
+# Covers the forms Git/GitHub actually produce so a merged PR and its landing
+# commit end up in the same episode component:
+#   - "PR #8" / "issue #8"            (explicit label)
+#   - "Merge pull request #8 from …"  (default merge-commit subject)
+#   - "… fix the thing (#8)"          (default squash-merge subject suffix)
+#   - "closes/fixes/resolves #8"      (closing keywords)
+_LABELED_NUM = re.compile(
+    r"\b(?:"
+    r"prs?|issues?|"
+    r"pull\s+request|"
+    r"close[sd]?|closed|"
+    r"fix(?:e[sd])?|"
+    r"resolve[sd]?"
+    r")\s*#(\d+)\b",
+    re.I,
+)
+# The GitHub squash-merge default appends "(#N)" to the commit subject.
+_SQUASH_NUM = re.compile(r"\(#(\d+)\)")
 
 _ANCHOR_PRIORITY = (
     "lineage", "calendar_event_id", "iCalUID", "fingerprint", "thread",
@@ -49,17 +76,24 @@ _ANCHOR_PRIORITY = (
 
 
 def extract_github_refs(text: str, *, default_repo: Optional[str] = None) -> list[str]:
-    """Return lineage-root style keys like ``github:org/repo#42``."""
+    """Return lineage-root style keys like ``github:org/repo#42``.
+
+    Recognizes full ``github.com/org/repo/pull/N`` URLs plus the labelled,
+    merge-commit, squash-merge and closing-keyword forms that reference a PR in
+    the record's own repo (``default_repo``). This is what links a landing
+    commit to its PR so the pair forms a two-phase episode.
+    """
     out: list[str] = []
     for m in _REPO_PR.finditer(text or ""):
         key = f"github:{m.group(1)}#{m.group(2)}"
         if key not in out:
             out.append(key)
     if default_repo:
-        for m in _LABELED_NUM.finditer(text or ""):
-            key = f"github:{default_repo}#{m.group(1)}"
-            if key not in out:
-                out.append(key)
+        for pattern in (_LABELED_NUM, _SQUASH_NUM):
+            for m in pattern.finditer(text or ""):
+                key = f"github:{default_repo}#{m.group(1)}"
+                if key not in out:
+                    out.append(key)
     return out
 
 
@@ -155,6 +189,25 @@ def _record_anchors(
             EpisodeLinkKind.thread, 0.80, False,
         ))
 
+    # Authoritative PR ↔ landing-commit link: a merged PR's ``merge_commit_sha``
+    # equals the sha of the commit record (its ``external_id``). Both sides emit
+    # the same ``commit_sha`` anchor, so they fuse structurally — no dependence
+    # on commit-message conventions. (Two records with the same sha, e.g. the
+    # same commit seen by two connector instances, also dedupe here.)
+    merge_sha = sm.get("merge_commit_sha")
+    if merge_sha:
+        out.append((
+            "commit_sha", _q("commit_sha", str(merge_sha)),
+            EpisodeLinkKind.explicit, 0.95, True,
+        ))
+    if provider == "github" and getattr(record, "external_type", "") == "commit":
+        sha = getattr(record, "external_id", "") or ""
+        if sha:
+            out.append((
+                "commit_sha", _q("commit_sha", str(sha)),
+                EpisodeLinkKind.derived, 0.9, True,
+            ))
+
     content = getattr(record, "content", "") or ""
     repo = sm.get("repo")
     for ref in extract_github_refs(content, default_repo=repo):
@@ -187,6 +240,243 @@ def _source_ref(record: Any, *, vault_id: str) -> dict[str, Any]:
         "independence_group": independence_group_for(meta),
         "directness": evidence_directness_for(meta),
     }
+
+
+_PR_LINEAGE = re.compile(r"github:[\w.-]+/[\w.-]+#\d+")
+
+
+def _has_pr_lineage_merge(
+    member_ids: set[str],
+    anchors_by_record: dict[str, list],
+) -> bool:
+    """True when a component carries a merge-grade ``github:org/repo#N`` anchor.
+
+    A lone ``Merge pull request #N`` commit must open an episode even before the
+    ``pull_request`` API object has been synced.
+    """
+    for rid in member_ids:
+        for atype, qkey, _k, _c, is_merge in anchors_by_record.get(rid, []):
+            if atype == "lineage" and is_merge and _PR_LINEAGE.search(qkey or ""):
+                return True
+    return False
+
+
+def _soft_fuse_cross_sense(
+    store,
+    record_by_id: dict[str, Any],
+    clusters: list[set[str]],
+    *,
+    vault_id: str,
+) -> list[set[str]]:
+    """Conservatively union Slack↔GitHub components that share project + topic.
+
+    Never unions two distinct GitHub merge components. Orphan records (not yet
+    in a cluster) participate as singleton candidates so a Slack request can
+    join a PR episode opened by a merge-commit.
+    """
+    from .. import sense_lenses
+    from .text import normalize_for_compare
+
+    stop = frozenset(
+        "the a an and or of to in on for with from into is are was were be "
+        "this that it its as at by we i you he she they them our your will "
+        "would should could can may not no do does did have has had but if "
+        "then so about slack message channel by commit merge pull request "
+        "github state merged closed feat fix docs what needs order enter "
+        "version launched implemented".split()
+    )
+
+    def _tokens(text: str) -> set[str]:
+        raw = normalize_for_compare(text or "")
+        out: set[str] = set()
+        for t in raw.split():
+            if len(t) < 3 or t in stop:
+                continue
+            # Drop Slack/GitHub opaque ids and short shas — they inflate
+            # denominators and never help topic matching.
+            if t.startswith(("c0", "u0", "w0", "t0")) and any(ch.isdigit() for ch in t):
+                continue
+            if len(t) >= 7 and all(c in "0123456789abcdef" for c in t):
+                continue
+            out.add(t)
+        return out
+
+    def _sense(rec: Any) -> str:
+        return sense_lenses.sense_for_record(rec)
+
+    def _project(rec: Any) -> Optional[str]:
+        pid, _ = resolve_project_for_record(store, rec)
+        return pid
+
+    def _when(rec: Any) -> Optional[str]:
+        return getattr(rec, "occurred_at", None)
+
+    def _parse(ts: Optional[str]):
+        if not ts:
+            return None
+        try:
+            from datetime import datetime, timezone
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(
+                timezone.utc
+            )
+        except Exception:
+            return None
+
+    clustered: set[str] = set()
+    for c in clusters:
+        clustered |= c
+    components: list[set[str]] = [set(c) for c in clusters if c]
+    for rid in record_by_id:
+        if rid not in clustered:
+            components.append({rid})
+
+    if len(components) < 2:
+        return [c for c in components if len(c) >= 2] or clusters
+
+    # Precompute per-component summaries
+    meta: list[dict[str, Any]] = []
+    for comp in components:
+        recs = [record_by_id[r] for r in comp if r in record_by_id]
+        senses = {_sense(r) for r in recs}
+        projects = {p for p in (_project(r) for r in recs) if p}
+        tokens: set[str] = set()
+        times = []
+        for r in recs:
+            tokens |= _tokens(getattr(r, "content", "") or "")
+            t = _parse(_when(r))
+            if t is not None:
+                times.append(t)
+        # github_refs in slack metadata count as explicit preference
+        gh_refs: set[str] = set()
+        for r in recs:
+            sm = getattr(r, "source_metadata", None) or {}
+            for ref in sm.get("github_refs") or []:
+                if isinstance(ref, dict) and ref.get("repo") and ref.get("number"):
+                    gh_refs.add(f"{ref['repo']}#{ref['number']}")
+                elif isinstance(ref, str):
+                    gh_refs.add(ref)
+        has_pr = any(
+            getattr(r, "external_type", "") == "pull_request"
+            or (
+                getattr(r, "external_type", "") == "commit"
+                and "pull request #" in (getattr(r, "content", "") or "").lower()
+            )
+            for r in recs
+        )
+        meta.append({
+            "senses": senses,
+            "projects": projects,
+            "tokens": tokens,
+            "t_min": min(times) if times else None,
+            "t_max": max(times) if times else None,
+            "gh_refs": gh_refs,
+            "has_github": "github" in senses,
+            "has_slack": "slack" in senses,
+            "has_pr": has_pr,
+        })
+
+    from datetime import timedelta
+    window = timedelta(days=SOFT_FUSE_WINDOW_DAYS)
+
+    def _pair_ok(si: int, gi: int) -> tuple[bool, float]:
+        """Return (matches, score) for attaching slack component → github."""
+        a, b = meta[si], meta[gi]
+        if not (a["projects"] & b["projects"]):
+            return False, 0.0
+        if a["t_min"] is None or b["t_min"] is None:
+            return False, 0.0
+        earlier_end = min(a["t_max"], b["t_max"])
+        later_start = max(a["t_min"], b["t_min"])
+        if later_start - earlier_end > window:
+            return False, 0.0
+        shared = a["tokens"] & b["tokens"]
+        explicit = False
+        for ref in a["gh_refs"]:
+            num = ref.split("#")[-1] if "#" in ref else ""
+            if num and any(
+                num in (getattr(record_by_id[r], "external_id", "") or "")
+                for r in components[gi]
+            ):
+                explicit = True
+                break
+        ratio = len(shared) / max(1, min(len(a["tokens"]), len(b["tokens"])))
+        if not explicit and (
+            len(shared) < SOFT_FUSE_MIN_SHARED_TOKENS
+            or ratio < SOFT_FUSE_MIN_LEX_RATIO
+        ):
+            return False, 0.0
+        # Prefer explicit PR refs, denser lexical overlap, then temporal
+        # proximity (request ↔ merge) so a follow-up harden PR does not beat
+        # the PR that landed minutes before the Slack ask.
+        a_mid = a["t_min"] + (a["t_max"] - a["t_min"]) / 2
+        b_mid = b["t_min"] + (b["t_max"] - b["t_min"]) / 2
+        hours_apart = abs((a_mid - b_mid).total_seconds()) / 3600.0
+        score = (
+            (10.0 if explicit else 0.0)
+            + len(shared)
+            + ratio
+            + 3.0 / (1.0 + hours_apart)
+        )
+        return True, score
+
+    # Attach each Slack-only component to exactly one best GitHub target.
+    # Never union two GitHub merge components through a Slack hub.
+    sl_idxs = [
+        i for i, m in enumerate(meta)
+        if m["has_slack"] and not m["has_github"]
+    ]
+    # Only attach onto components that already represent a PR (record or
+    # merge-commit). Random historical commits that happen to share words
+    # like "presets" must not steal the Slack request.
+    gh_idxs = [
+        i for i, m in enumerate(meta)
+        if m["has_github"] and not m["has_slack"] and m["has_pr"]
+    ]
+    attach: dict[int, int] = {}  # slack_idx → github_idx
+    for si in sl_idxs:
+        best: Optional[tuple[float, int]] = None
+        for gi in gh_idxs:
+            ok, score = _pair_ok(si, gi)
+            if not ok:
+                continue
+            # Prefer components that contain a pull_request record.
+            if any(
+                getattr(record_by_id[r], "external_type", "") == "pull_request"
+                for r in components[gi]
+            ):
+                score += 2.0
+            if best is None or score > best[0]:
+                best = (score, gi)
+        if best is not None:
+            attach[si] = best[1]
+
+    fused: dict[int, set[str]] = {}
+    claimed_slack: set[int] = set()
+    for gi in gh_idxs:
+        bucket = set(components[gi])
+        for si, target in attach.items():
+            if target == gi:
+                bucket |= components[si]
+                claimed_slack.add(si)
+        fused[gi] = bucket
+    # Slack that didn't attach stays as its own component (usually dropped
+    # unless multi-member); preserve mixed components already in input.
+    for i, comp in enumerate(components):
+        if i in gh_idxs or i in claimed_slack:
+            continue
+        if meta[i]["has_slack"] and meta[i]["has_github"]:
+            fused[i] = set(comp)
+        elif len(comp) >= 2:
+            fused[i] = set(comp)
+
+    out = [c for c in fused.values() if len(c) >= 2]
+    # Keep explicit singletons that were passed in (e.g. PR-lineage merge
+    # commits) when they were not absorbed into a multi-member fuse.
+    absorbed: set[str] = set().union(*out) if out else set()
+    for c in clusters:
+        if len(c) == 1 and c.isdisjoint(absorbed):
+            out.append(set(c))
+    return out or clusters
 
 
 def _correlation_key(vault_id: str, anchors: list[tuple[str, str, EpisodeLinkKind, float, bool]]) -> str:
@@ -277,6 +567,9 @@ def _rebuild_episode_from_active_links(store, ep: WorkEpisode) -> WorkEpisode:
         ep.status = EpisodeStatus.closed
     ep.updated_at = now_iso()
     store.update_work_episode(ep)
+    # Sensory scaffold stops at structural membership. The semantic arc
+    # (phases → narrative edges) is built by the cortex cognition stage
+    # (LLM), not here — correlation never invents an arc from lexical rules.
     return ep
 
 
@@ -292,24 +585,25 @@ def _find_existing_episode(
     store, *, vault_id: str, correlation_key: str,
     anchors: list[tuple[str, str, EpisodeLinkKind, float, bool]],
 ) -> Optional[WorkEpisode]:
+    """Resolve an existing episode by its canonical correlation key only.
+
+    Looking up by *any* secondary anchor is unsafe after soft-fuse / re-runs:
+    an episode can accumulate stale anchors from a prior over-merge, and a
+    later cluster that shares one of those anchors would steal membership
+    (wiping the real members via ``_sync_membership``).
+    """
     if hasattr(store, "find_work_episode_by_correlation_key"):
         ep = store.find_work_episode_by_correlation_key(vault_id, correlation_key)
         if ep:
             return ep
-    for atype, qkey, _k, _c, _m in anchors:
-        if hasattr(store, "find_work_episode_by_anchor"):
-            ep = store.find_work_episode_by_anchor(vault_id, atype, qkey)
-            if ep:
-                return ep
-    # Legacy lineage lookup scoped by vault
-    for atype, qkey, _k, _c, _m in anchors:
-        if atype == "lineage" and hasattr(store, "find_work_episode_by_lineage"):
-            # qkey is vault:lineage:provider?:value — extract bare lineage for legacy
-            bare = qkey.split("lineage:", 1)[-1]
-            # strip optional provider prefix if present as account-less form
-            ep = store.find_work_episode_by_lineage(bare, vault_id=vault_id)
-            if ep:
-                return ep
+    # Legacy: only when the correlation key itself is a lineage key.
+    if ":lineage:" in (correlation_key or "") and hasattr(
+        store, "find_work_episode_by_lineage"
+    ):
+        bare = correlation_key.split("lineage:", 1)[-1]
+        ep = store.find_work_episode_by_lineage(bare, vault_id=vault_id)
+        if ep:
+            return ep
     return None
 
 
@@ -525,12 +819,27 @@ def correlate_records(
             continue  # already attached
         clusters.append(set(group))
 
+    # A merge-commit referencing PR #N opens an episode even without the
+    # pull_request record (soft-fuse can then attach Slack into it).
+    clustered_ids: set[str] = set().union(*clusters) if clusters else set()
+    for rid in record_by_id:
+        if rid in clustered_ids:
+            continue
+        if _has_pr_lineage_merge({rid}, anchors_by_record):
+            clusters.append({rid})
+            clustered_ids.add(rid)
+
+    clusters = _soft_fuse_cross_sense(
+        store, record_by_id, clusters, vault_id=vault_id,
+    )
+
     episodes: list[WorkEpisode] = []
     touched_episode_ids: set[str] = set()
 
     for member_ids in clusters:
         members = [record_by_id[r] for r in member_ids if r in record_by_id]
-        if len(members) < 2 and not create_singletons:
+        allow_singleton = _has_pr_lineage_merge(member_ids, anchors_by_record)
+        if len(members) < 2 and not create_singletons and not allow_singleton:
             continue
 
         # Collect anchors across members
@@ -540,7 +849,7 @@ def correlate_records(
 
         merge_anchors = [a for a in all_anchors if a[4]]
         conf = max((c for _t, _q, _k, c, m in all_anchors if m or _t == "fingerprint"), default=0.0)
-        if conf < min_confidence and not create_singletons:
+        if conf < min_confidence and not create_singletons and not allow_singleton:
             # Allow fingerprint-only candidate clusters at 0.85
             if not any(a[0] == "fingerprint" for a in all_anchors):
                 continue
@@ -576,6 +885,14 @@ def correlate_records(
             primary_indep = f"lineage:{bare}"
 
         title = _episode_title(members)
+        from .. import sense_lenses
+        senses = sorted({sense_lenses.sense_for_record(r) for r in members})
+        cross_sense = len(senses) >= 2
+        meta_base = {
+            "link_kinds": sorted({k.value for _t, _q, k, _c, _m in all_anchors}),
+            "senses": senses,
+            "cross_sense_soft_fuse": cross_sense,
+        }
         if existing is None:
             ep = WorkEpisode(
                 vault_id=vault_id,
@@ -585,9 +902,7 @@ def correlate_records(
                 status=status,
                 independence_group=primary_indep,
                 confidence=conf,
-                metadata={
-                    "link_kinds": sorted({k.value for _t, _q, k, _c, _m in all_anchors}),
-                },
+                metadata=meta_base,
             )
             store.insert_work_episode(ep)
         else:
@@ -604,6 +919,7 @@ def correlate_records(
                 ep.status = EpisodeStatus.active
             if ep.status == EpisodeStatus.closed and members:
                 ep.status = status
+            ep.metadata = {**(ep.metadata or {}), **meta_base}
             ep.updated_at = now_iso()
             store.update_work_episode(ep)
 

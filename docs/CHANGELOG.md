@@ -1,10 +1,9 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Changelog
 
-**Source of truth for:** what each released version delivered.
+This document explains what each released version delivered.
 
-Product definition in [PRODUCT.md](PRODUCT.md). Future work in [ROADMAP.md](ROADMAP.md). Overview in [README](../README.md).
+Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
+[ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
 ### v0.1 — Local Technical Memory
 
@@ -193,7 +192,7 @@ Phase 7 — Cross-source cognition:
 - CLI: `twin correlate`, `twin episode list|show|explain`, `twin identity list|links|confirm|unconfirm|reject|why`, `twin project link|links|confirm|reject|historical|explain`;
 - `tests/cognition/correlation/test_service.py`, `tests/cognition/correlation/test_lifecycle.py`, and eval `cross_source_work_episode`.
 
-Still deferred to **[Correlation depth](ROADMAP.md#correlation-depth-planned-vx--after-phase-7)** (planned vX — not a Phase 10 blocker): episode phases, full multi-factor confidence, identity graphs + Entity resolution, intra-episode causality, incremental correlation, HTTP/MCP explain APIs, scale/replay evals.
+Still deferred to **[Correlation depth](ROADMAP.md#correlation-depth-remainder)** (remainder in 1.3.x / 1.4 — not a Phase 10 blocker): multi-factor confidence, identity graphs + Entity resolution, HTTP/MCP explain APIs, scale/replay evals.
 
 Phase 8 — Native proof:
 
@@ -226,7 +225,7 @@ Phase 10 — Final Review:
 - documents §94 out-of-scope and §95 thesis alongside the matrix payload;
 - eval `connector_completion`.
 
-v0.6 is complete when `twin connector completion` reports `ok: true` and the connector/correlation/native suites remain green. [Correlation depth](ROADMAP.md#correlation-depth-planned-vx--after-phase-7) (episode phases, multi-factor confidence, identity graphs, causality, incremental correlation, HTTP/MCP explain, scale evals) stays deferred to later `vX` — not a Phase 10 blocker.
+v0.6 is complete when `twin connector completion` reports `ok: true` and the connector/correlation/native suites remain green. [Correlation depth](ROADMAP.md#correlation-depth-remainder) remainder (multi-factor confidence, identity graphs, HTTP/MCP explain, scale evals) stays deferred to 1.3.x / 1.4 — not a Phase 10 blocker.
 
 ### v0.7 — Cognitive Interpretation
 
@@ -249,7 +248,7 @@ Delivered:
 
 ### v0.8 — Parallel Memory and Consolidation
 
-Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model. Natural consumer of [Correlation depth](ROADMAP.md#correlation-depth-planned-vx--after-phase-7): incremental correlation and episode-phase updates should feed consolidation without full rescans.
+Goal: move from an on-demand observer toward a continuously updated extended-memory process inspired by the Global Workspace model. Natural consumer of [Correlation depth](ROADMAP.md#correlation-depth-remainder): incremental correlation and episode-phase updates feed consolidation without full rescans.
 
 Delivered:
 
@@ -419,6 +418,33 @@ Delivered:
 - drop versioned completion gates and phase folklore (`twin eval v1-completion` / connector completion matrices → behavior tests and `twin connector contract` / production-ready report);
 - docs/README polish: `CONNECTION.md` → `INTERFACES.md`, ROADMAP for future majors, CHANGELOG as release history, clearer how-to-use and visuals;
 - package/`__version__` to `1.2.0`.
+
+### v1.3.0 — Correlation depth: LLM episode cognition (brain-named stages)
+
+Goal: deepen `WorkEpisode` from a flat cluster into an explainable, multi-sense arc and synthesize cross-source trajectory claims — with semantics driven by an LLM (not lexical rules), human gates before Memory/Judgment, and clearer review/docs surfaces so people can act on what the pipeline proposes. Course-corrected mid-cycle: phase/edge/reflect heuristics were replaced by a cognition pipeline whose stages are named for their brain analogy.
+
+Delivered:
+
+- `twin/cognition/episode_pipeline.py` — brain-staged cognition chain (`sensory → amygdala → basal → hippocampus_bind → cortex → hippocampus_consolidate → prefrontal`) returning a `CognitionReport` with per-stage `ok | deferred | blocked | skipped` + counts; mirrors the interpreter's deferral so a missing model never falls back to lexical rules and `extractor=heuristic` blocks the semantic stages;
+- LLM stages: `amygdala` classifies member role + salience (`classify_prompt`), `cortex` proposes phases + narrative edges (`understand_prompt`), `hippocampus_consolidate` reflects the arc into trajectory candidates; phases/edges carry `provenance.method=llm` + `brain_stage`; tests inject deterministic stage overrides (`set_stage_override`) as the golden pivot;
+- removed the semantic regex from `phases.py` / `edges.py` and the `structural_reflector` production fallback — the sensory scaffold keeps only ID-anchor / exact-match structure; phases/edges are built by `cortex`, never during structural correlation;
+- `EpisodePhase` arc (`goal → decision → execution → outcome`) built from model-assigned roles (a decision pivot stays two decision phases); revisable `EpisodeEdge`s (`motivated | superseded | resolved | continues | contradicts`) with human `confirm` / `reject` surviving cortex rebuilds; edges never alone create Memory;
+- incremental correlation: `correlation_dirty` index drives `twin correlate --incremental`; full rebuild (`--full`) remains the correctness oracle; `--until <stage>` stops after any sensory…cortex stage;
+- cross-sense soft-fuse links Slack↔GitHub request→PR trajectories when distinctive lexical overlap exists inside a time window (never fuse on project+time alone); ACC diversify keeps multi-source evidence from crowding out a single sense;
+- `twin episode reflect` synthesizes trajectory MemoryCandidates only (`needs_review=True`, `review_reason=episode_reflect`, `brain_stage=hippocampus_consolidate`); `valid_from` tracks the decision phase; idempotent via formation identity; defers when the model is unavailable;
+- reflect brief pulls related confirmed/candidate/rejected memories plus open-session artifacts; durable-vs-meta judgment is left to the model once an arc exists (lexical claim gates dropped);
+- Analysis Context Compiler (`analysis_dossier`) + per-source sense lenses compile the reflect/pattern brief; altitude scoring and near-duplicate condensation keep survivors at the right abstraction level;
+- Slack `@user` / `#channel` humanized at normalize time via connector metadata and `external_identities` (`actor_labels`) so evidence quotes stay readable;
+- `twin meditate` orchestrates the full chain up to the human gates (`correlate → reflect → optional review → judgment drafts`); never auto-confirms Memory nor auto-approves Judgment; flags `--incremental / --no-reflect / --no-propose / --review / --limit / --dry-run / --json`;
+- daily/weekly consolidation runs cortex + reflect up to those same human gates; `pattern_reflect` night pass mines vault/project windows for durable preference/procedure/constraint candidates (still never auto-confirms);
+- `propose_from_episode` / `propose_from_episode_patterns` (the `prefrontal` stage) seed pending `JudgmentProposal`s from confirmed trajectory memories; still preview-token + human approval;
+- LLM usage ledger (`twin usage`) records stage/role tokens, latency and estimated cost for hot-path and analysis completions without breaking the model path;
+- Review resolve workbench: findings/resolve HTTP APIs and a reshaped `twin serve` UI so merge, conflict, dismiss and related decisions are outcome-focused per issue;
+- Memories UI: altitude/status filters plus Sources / Based-in provenance accordions so people can inspect where a memory came from;
+- CLI DX parity: `twin correlate` / `twin meditate` / `twin episode *` show brain-stage status, deferred next-steps, tables and `--json`;
+- docs: destination README rewritten around understanding as the unit of value; framing consolidated into `IDENTITY` / `COGNITION` / `RESEARCH` / `GLOSSARY` (`OBJECTIVE` removed; `FOUNDATIONS` demoted to appendix); `INTERFACES` split into hub + `NATIVE` / `MCP` / `CLI` / `REST`; ARCHITECTURE brain→CLI stage map and OPERATIONS post-backfill/`twin meditate` guidance updated; marketing asset set trimmed to the banner.
+
+Follow-on (not blocking v1.3.0): multi-factor confidence composition, identity-as-graph / entity resolution, HTTP/MCP episode graph APIs, full load/replay eval suite — see [Correlation depth remainder](ROADMAP.md#correlation-depth-remainder).
 
 ---
 

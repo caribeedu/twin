@@ -1,10 +1,12 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Setup
 
-**Source of truth for:** how you install Twin — packages, model providers, configuration and tests.
+This document explains how you install Twin — packages, model providers,
+configuration and tests.
 
-For the shortest path to a first result, start at the [README - How to use](../README.md#how-to-use). Interfaces in [INTERFACES.md](INTERFACES.md). Day-2 ops (runtime, backup, incidents) in [OPERATIONS.md](OPERATIONS.md).
+Destination and why Twin exists: [README](../README.md). Interfaces:
+[INTERFACES.md](INTERFACES.md). Day-2 ops (runtime, backup, incidents):
+[OPERATIONS.md](OPERATIONS.md). Runtime philosophy (local vs cloud):
+[README — Runtime Philosophy](../README.md#runtime-philosophy).
 
 ## Installation
 
@@ -70,19 +72,10 @@ Local open models via Ollama are the recommended default (`twin init` steers you
 python -m pytest
 ```
 
-Expected coverage:
-
-- PII;
-- ingestion;
-- extraction;
-- dedupe;
-- firewall;
-- search;
-- context pack;
-- observer;
-- API;
-- MCP.
+Suites live under `tests/` (cognition, connectors, interfaces, privacy,
+judgment, memory, evals, …). Prefer `python -m pytest` over maintaining a
+hand-curated feature checklist here.
 
 ---
 
-How to use in [README.md](../README.md#how-to-use). Day-2 ops in [OPERATIONS.md](OPERATIONS.md). Interfaces in [INTERFACES.md](INTERFACES.md).
+Destination in [README.md](../README.md). Day-2 ops in [OPERATIONS.md](OPERATIONS.md). Interfaces in [INTERFACES.md](INTERFACES.md).

@@ -201,6 +201,23 @@ def parse_model_json(content: str) -> dict[str, Any]:
     raise json.JSONDecodeError("no JSON object in model content", raw, 0)
 
 
+def _http_error(provider: str, resp) -> RuntimeError:
+    """A verbose HTTP error that carries the provider's own error body.
+
+    A bare ``raise_for_status()`` says only "404 Not Found"; the response body
+    usually names the real cause (e.g. an invalid model id or a bad key), which
+    is exactly what a caller needs to fix an analysis-model misconfiguration.
+    """
+    snippet = ""
+    try:
+        snippet = (resp.text or "")[:400].replace("\n", " ").strip()
+    except Exception:
+        pass
+    code = getattr(resp, "status_code", "?")
+    return RuntimeError(f"{provider} HTTP {code}: {snippet}" if snippet
+                        else f"{provider} HTTP {code}")
+
+
 def _close_client(owns: bool, client) -> None:
     if owns and client is not None:
         try:
@@ -231,6 +248,10 @@ class OllamaChatClient:
         schema: dict[str, Any],
         temperature: float = 0.1,
     ) -> dict[str, Any]:
+        import time as _time
+
+        from .usage import emit_usage
+
         payload = {
             "model": self.model,
             "stream": False,
@@ -242,14 +263,23 @@ class OllamaChatClient:
                 {"role": "user", "content": user},
             ],
         }
-        resp = self._client.post("/api/chat", json=payload)
-        resp.raise_for_status()
-        body = resp.json()
-        message = body.get("message") or {}
-        content = message.get("content") or ""
-        if not content.strip() and isinstance(message.get("thinking"), str):
-            content = message.get("thinking") or ""
-        return parse_model_json(content)
+        _t0 = _time.perf_counter()
+        try:
+            resp = self._client.post("/api/chat", json=payload)
+            if resp.status_code >= 400:
+                raise _http_error(self.name, resp)
+            body = resp.json()
+            message = body.get("message") or {}
+            content = message.get("content") or ""
+            if not content.strip() and isinstance(message.get("thinking"), str):
+                content = message.get("thinking") or ""
+            result = parse_model_json(content)
+            emit_usage(kind="ollama", model=self.model, body=body, started=_t0)
+            return result
+        except Exception as exc:
+            emit_usage(kind="ollama", model=self.model, body=None,
+                       started=_t0, ok=False, extra={"error": str(exc)[:200]})
+            raise
 
     def close(self) -> None:
         _close_client(self._owns, self._client)
@@ -324,13 +354,20 @@ class OpenAICompatChatClient:
             {"type": "json_object"},
             None,  # plain prompt fallback
         ]
+        import time as _time
+
+        from .usage import emit_usage
+
         last_exc: Exception | None = None
         path = (
             "/chat/completions"
             if self.base_url.rstrip("/").endswith("/v1")
             else "/v1/chat/completions"
         )
+        _t0 = _time.perf_counter()
+        _requests = 0
         for fmt in attempts:
+            _requests += 1
             if fmt is None:
                 payload = {
                     "model": self.model,
@@ -378,23 +415,38 @@ class OpenAICompatChatClient:
             try:
                 resp = self._client.post(path, json=payload)
                 if resp.status_code >= 400 and fmt is not None:
-                    last_exc = RuntimeError(
-                        f"openai_compatible rejected format={fmt.get('type')}: "
-                        f"{resp.status_code}"
+                    last_exc = _http_error(
+                        f"{self.name} (format={fmt.get('type')})", resp,
                     )
                     continue
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    raise _http_error(self.name, resp)
                 body = resp.json()
                 content = (
                     ((body.get("choices") or [{}])[0].get("message") or {}).get("content")
                     or ""
                 )
-                return parse_model_json(content)
+                result = parse_model_json(content)
+                emit_usage(
+                    kind="openai_compatible", model=self.model, body=body,
+                    started=_t0, requests=_requests,
+                )
+                return result
             except Exception as exc:
                 last_exc = exc
                 if fmt is not None:
                     continue
+                emit_usage(
+                    kind="openai_compatible", model=self.model, body=None,
+                    started=_t0, requests=_requests, ok=False,
+                    extra={"error": str(exc)[:200]},
+                )
                 raise
+        emit_usage(
+            kind="openai_compatible", model=self.model, body=None,
+            started=_t0, requests=_requests, ok=False,
+            extra={"error": str(last_exc)[:200] if last_exc else "unknown"},
+        )
         if last_exc:
             raise last_exc
         raise RuntimeError("openai_compatible chat failed")
@@ -451,6 +503,11 @@ class AnthropicChatClient:
         schema: dict[str, Any],
         temperature: float = 0.1,
     ) -> dict[str, Any]:
+        import time as _time
+
+        from .usage import emit_usage
+
+        _t0 = _time.perf_counter()
         # Prefer tool-use structured output; fall back to JSON-in-text.
         tool_payload = {
             "model": self.model,
@@ -469,39 +526,53 @@ class AnthropicChatClient:
             }],
             "tool_choice": {"type": "tool", "name": "twin_response"},
         }
-        resp = self._client.post("/v1/messages", json=tool_payload)
-        if resp.status_code < 400:
+        try:
+            resp = self._client.post("/v1/messages", json=tool_payload)
+            if resp.status_code < 400:
+                body = resp.json()
+                for block in body.get("content") or []:
+                    if block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
+                        emit_usage(kind="anthropic", model=self.model,
+                                   body=body, started=_t0)
+                        return block["input"]
+                # Unexpected shape — try text blocks
+                texts = [
+                    b.get("text", "") for b in (body.get("content") or [])
+                    if b.get("type") == "text"
+                ]
+                if texts:
+                    result = parse_model_json("\n".join(texts))
+                    emit_usage(kind="anthropic", model=self.model,
+                               body=body, started=_t0)
+                    return result
+
+            # Fallback: plain JSON instruction
+            plain = {
+                "model": self.model,
+                "max_tokens": 8192,
+                "temperature": temperature,
+                "system": system + "\nRespond with a single JSON object only, no markdown.",
+                "messages": [{
+                    "role": "user",
+                    "content": user + "\n\nJSON schema:\n" + json.dumps(schema)[:4000],
+                }],
+            }
+            resp = self._client.post("/v1/messages", json=plain)
+            if resp.status_code >= 400:
+                raise _http_error(self.name, resp)
             body = resp.json()
-            for block in body.get("content") or []:
-                if block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
-                    return block["input"]
-            # Unexpected shape — try text blocks
             texts = [
                 b.get("text", "") for b in (body.get("content") or [])
                 if b.get("type") == "text"
             ]
-            if texts:
-                return parse_model_json("\n".join(texts))
-
-        # Fallback: plain JSON instruction
-        plain = {
-            "model": self.model,
-            "max_tokens": 8192,
-            "temperature": temperature,
-            "system": system + "\nRespond with a single JSON object only, no markdown.",
-            "messages": [{
-                "role": "user",
-                "content": user + "\n\nJSON schema:\n" + json.dumps(schema)[:4000],
-            }],
-        }
-        resp = self._client.post("/v1/messages", json=plain)
-        resp.raise_for_status()
-        body = resp.json()
-        texts = [
-            b.get("text", "") for b in (body.get("content") or [])
-            if b.get("type") == "text"
-        ]
-        return parse_model_json("\n".join(texts))
+            result = parse_model_json("\n".join(texts))
+            emit_usage(kind="anthropic", model=self.model, body=body,
+                       started=_t0, requests=2)
+            return result
+        except Exception as exc:
+            emit_usage(kind="anthropic", model=self.model, body=None,
+                       started=_t0, ok=False, extra={"error": str(exc)[:200]})
+            raise
 
     def close(self) -> None:
         _close_client(self._owns, self._client)
@@ -572,19 +643,32 @@ class GeminiChatClient:
                 "responseMimeType": "application/json",
             },
         }
-        resp = self._client.post(
-            self._path("generateContent"),
-            params={"key": self.api_key},
-            json=payload,
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        parts = (
-            ((body.get("candidates") or [{}])[0].get("content") or {}).get("parts")
-            or []
-        )
-        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
-        return parse_model_json(text)
+        import time as _time
+
+        from .usage import emit_usage
+
+        _t0 = _time.perf_counter()
+        try:
+            resp = self._client.post(
+                self._path("generateContent"),
+                params={"key": self.api_key},
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                raise _http_error(self.name, resp)
+            body = resp.json()
+            parts = (
+                ((body.get("candidates") or [{}])[0].get("content") or {}).get("parts")
+                or []
+            )
+            text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+            result = parse_model_json(text)
+            emit_usage(kind="gemini", model=self.model, body=body, started=_t0)
+            return result
+        except Exception as exc:
+            emit_usage(kind="gemini", model=self.model, body=None,
+                       started=_t0, ok=False, extra={"error": str(exc)[:200]})
+            raise
 
     def close(self) -> None:
         _close_client(self._owns, self._client)

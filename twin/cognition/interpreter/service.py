@@ -97,7 +97,8 @@ class InterpretationRuntime:
             self.mode = "echo"
             self.available = True
         else:
-            # auto / ollama / openai_compatible — all use the chat client
+            # auto / ollama / openai_compatible — all use the single configured
+            # chat client (TWIN_LLM_*).
             self.mode = "llm"
             self._chat = get_chat_client(cfg)
             # one health check for the batch, not one per Percept
@@ -118,9 +119,11 @@ class InterpretationRuntime:
             return _deferred("cognitive interpreter unavailable (model unreachable)",
                              failure_class="unavailable")
         try:
-            return ollama_interpreter.interpret(
-                percept, masked_text, chat=self._chat,
-            )
+            from ..llm.usage import usage_context
+            with usage_context(stage="interpret", role="llm"):
+                return ollama_interpreter.interpret(
+                    percept, masked_text, chat=self._chat,
+                )
         except Exception as exc:
             status, fclass = _classify_exception(exc)
             if fclass == "unavailable":

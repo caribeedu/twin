@@ -26,7 +26,7 @@ from ..memory.models import (
 )
 from ..memory.store.base import MemoryStore
 
-ANALYZER_VERSION = "quality-v2"
+ANALYZER_VERSION = "quality-v3"
 
 # Per-embedder similarity thresholds (hash is lexical-ish, not semantic).
 SIMILARITY_THRESHOLDS: dict[str, dict[str, float]] = {
@@ -42,6 +42,19 @@ SENSITIVITY_WEIGHT = {
     "restricted": 1.0,
 }
 SCOPE_TOKENS = ("development", "production", "dev", "prod", "local", "staging", "test")
+
+# Altitude = consolidation height (not review urgency). Higher = more distilled.
+#   ground    — atomic extract / low-level fact
+#   linked    — typed durable claim without a multi-source arc
+#   distilled — trajectory / cross-sense synthesis from reflect
+#   stance    — governing constraint/decision/preference worth keeping as policy
+ALTITUDE_ORDER = ("ground", "linked", "distilled", "stance")
+ALTITUDE_QUALITY_BONUS = {
+    "ground": 0.0,
+    "linked": 0.12,
+    "distilled": 0.28,
+    "stance": 0.40,
+}
 
 
 def _thresholds(embedder: Embedder) -> dict[str, float]:
@@ -109,6 +122,32 @@ def discover_neighbors(
         if other:
             out.append((other, score, reason))
     return out
+
+
+def memory_altitude(mem: MemoryItem) -> str:
+    """Consolidation height of a memory — higher means more distilled value."""
+    payload = mem.payload or {}
+    mem_type = getattr(mem.type, "value", mem.type)
+    trajectory = bool(payload.get("trajectory") or payload.get("source") == "episode_reflect")
+    cross = bool(payload.get("cross_sense_refs") or payload.get("cross_sense"))
+    if not cross and isinstance(payload.get("phase_keys"), list):
+        # Multi-phase reflect claims are already above ground.
+        cross = len(payload.get("phase_keys") or []) >= 2
+    governing = mem_type in ("constraint", "decision", "preference", "belief")
+    if trajectory and governing and (cross or mem_type == "constraint"):
+        return "stance"
+    if trajectory:
+        return "distilled"
+    if governing or mem_type in ("procedure", "relationship"):
+        return "linked"
+    return "ground"
+
+
+def altitude_rank(altitude: str) -> int:
+    try:
+        return ALTITUDE_ORDER.index(altitude)
+    except ValueError:
+        return 0
 
 
 def _specificity(mem: MemoryItem) -> float:
@@ -490,6 +529,7 @@ def analyze_memory(
         impact = "high"
         requires_human = True
 
+    altitude = memory_altitude(mem)
     priority = review_priority(
         mem.model_copy(update={"impact": impact, "quality_flags": flags}),
         contradiction_risk=contradiction_risk,
@@ -497,11 +537,17 @@ def analyze_memory(
         future_reuse=1.0 if "high_future_reuse" in flags else 0.3,
         possible_supersedence=possible_supersedence,
     )
+    # quality_score = how distilled/useful the memory is (altitude-aware).
+    # review_priority = how urgently a human should look (risk-aware).
     quality = round(
-        0.35 * spec
-        + 0.35 * (1.0 if evidence else 0.2)
-        + 0.15 * mem.confidence
-        + 0.15 * (1.0 - contradiction_risk),
+        min(
+            1.0,
+            0.30 * spec
+            + 0.25 * (1.0 if evidence else 0.2)
+            + 0.15 * mem.confidence
+            + 0.10 * (1.0 - contradiction_risk)
+            + ALTITUDE_QUALITY_BONUS.get(altitude, 0.0),
+        ),
         3,
     )
 
@@ -518,15 +564,19 @@ def analyze_memory(
         requires_human_review=requires_human or mem.needs_review,
         quality_flags=sorted(set(flags)),
         neighbors=[n.id for n, _, _ in neighbors],
+        altitude=altitude,
     )
 
     if persist:
+        payload = dict(mem.payload or {})
+        payload["altitude"] = altitude
         store.update_memory(
             mem.id,
             review_priority=priority,
             quality_score=quality,
             quality_flags=report.quality_flags,
             impact=impact,
+            payload=payload,
             needs_review=report.requires_human_review or mem.needs_review,
             review_reason=mem.review_reason or (findings[0].reason if findings else None),
             last_reconciled_at=ts,

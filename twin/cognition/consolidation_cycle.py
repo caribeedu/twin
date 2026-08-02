@@ -3,8 +3,13 @@
 Distinct from session-close consolidation (``sessions._consolidate``): these
 cycles run on a logical window over the store — quality analysis, safe
 automation, temporal belief/goal refresh, closed-session inventory, open
-tasks, review backlog prep, cognitive change report, and (weekly) optional
-judgment *proposals*. They never confirm Memory or Judgment.
+tasks, review backlog prep, cognitive change report, episode cortex
+(sensory→cortex) + episode reflect (both daily and weekly), and (weekly)
+optional judgment *proposals*. They never confirm Memory or Judgment.
+
+``twin meditate`` remains the human orchestrator (optional interactive review
++ prefrontal drafts); daily/weekly automation only runs the non-interactive
+slices.
 
 Apply runs are idempotent per ``(kind, window_start, window_end)``. The durable
 runtime may enqueue these as jobs; this module remains the deterministic core.
@@ -47,6 +52,9 @@ class ConsolidationCycleResult:
     temporal_updates: list[dict[str, Any]] = field(default_factory=list)
     goals_observed: list[dict[str, Any]] = field(default_factory=list)
     judgment_proposal_ids: list[str] = field(default_factory=list)
+    reflected_candidate_ids: list[str] = field(default_factory=list)
+    pattern_candidate_ids: list[str] = field(default_factory=list)
+    episode_cognition: dict[str, Any] = field(default_factory=dict)
     closed_sessions: list[dict[str, Any]] = field(default_factory=list)
     open_tasks: list[dict[str, Any]] = field(default_factory=list)
     review_prepared: list[dict[str, Any]] = field(default_factory=list)
@@ -296,6 +304,132 @@ def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[s
     }
 
 
+def reflect_recent_episodes(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    dry_run: bool = False,
+    max_episodes: int = 25,
+    scan_limit: int = 500,
+    episode_ids: Optional[list[str]] = None,
+) -> list[str]:
+    """Reflect episodes with a built arc into trajectory MemoryCandidates.
+
+    The hippocampus_consolidate stage runs on episodes whose cortex stage
+    produced an arc (≥2 phases); the reflect model decides whether that arc
+    yields a claim, and defers when no model is available (never fabricates).
+    Candidates only — never confirms.
+
+    When ``episode_ids`` is given (e.g. episodes just touched by cortex), those
+    are tried first; otherwise the store is scanned newest-first up to
+    ``scan_limit``. Returns the created candidate memory ids.
+    """
+    from .episode_reflect import reflect_episode
+
+    if not hasattr(store, "list_work_episodes") and not episode_ids:
+        return []
+    created: list[str] = []
+    reflected = 0
+    seen: set[str] = set()
+    queue: list[Any] = []
+    if episode_ids:
+        for eid in episode_ids:
+            if not hasattr(store, "get_work_episode"):
+                break
+            ep = store.get_work_episode(eid)
+            if ep is not None:
+                queue.append(ep)
+                seen.add(ep.id)
+    if hasattr(store, "list_work_episodes"):
+        for ep in store.list_work_episodes(limit=scan_limit):
+            if ep.id in seen:
+                continue
+            queue.append(ep)
+            seen.add(ep.id)
+
+    for ep in queue:
+        if reflected >= max_episodes:
+            break
+        status = ep.status.value if hasattr(ep.status, "value") else str(ep.status)
+        if status not in ("active", "candidate", "closed"):
+            continue
+        try:
+            result = reflect_episode(
+                store, cfg, embedder, ep.id, dry_run=dry_run,
+            )
+        except Exception:
+            continue
+        if result.skipped_reason and not result.claims:
+            continue
+        reflected += 1
+        for claim in result.claims:
+            if claim.get("memory_id") and claim.get("created"):
+                created.append(claim["memory_id"])
+    return created
+
+
+def run_pattern_reflect_pass(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    window_start: str,
+    window_end: str,
+    dry_run: bool = False,
+    max_windows: int = 6,
+) -> list[str]:
+    """Nightly "dream" pass: mine each (vault, project) window for durable
+    patterns (preferences / procedures / constraints) via the Analysis Context
+    Compiler. Candidates only — never confirms. Defers when no model.
+
+    The window is derived from the consolidation window; project scoping keeps
+    each pass focused and one un-scoped pass per vault catches cross-project
+    habits. Each pass is isolated so one failure never breaks the cycle.
+    """
+    if dry_run or not hasattr(store, "list_work_episodes"):
+        return []
+    from .pattern_reflect import pattern_reflect
+
+    time_from = f"{window_start}T00:00:00Z"
+    time_until = f"{window_end}T23:59:59Z"
+
+    # Distinct (vault, project) targets from recent episodes; plus one
+    # whole-vault pass to catch patterns that cross projects.
+    pairs: list[tuple[str, Optional[str]]] = []
+    seen: set[tuple[str, Optional[str]]] = set()
+    vaults: list[str] = []
+    for ep in store.list_work_episodes(limit=200):
+        vault = ep.vault_id or "vault_unknown"
+        if vault not in vaults:
+            vaults.append(vault)
+        key = (vault, ep.project_id)
+        if ep.project_id and key not in seen:
+            seen.add(key)
+            pairs.append(key)
+    for vault in vaults:
+        key = (vault, None)
+        if key not in seen:
+            seen.add(key)
+            pairs.append(key)
+
+    created: list[str] = []
+    for vault_id, project_id in pairs[:max_windows]:
+        try:
+            res = pattern_reflect(
+                store, cfg, embedder,
+                vault_id=vault_id, project_id=project_id,
+                time_from=time_from, time_until=time_until,
+                title=f"{window_start}..{window_end}",
+            )
+        except Exception:
+            continue
+        for claim in res.claims:
+            if claim.get("memory_id") and claim.get("created"):
+                created.append(claim["memory_id"])
+    return created
+
+
 def build_cognitive_change_report(
     store: MemoryStore,
     *,
@@ -331,6 +465,52 @@ def build_cognitive_change_report(
     }
 
 
+def run_episode_cortex_pass(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    dry_run: bool = False,
+    mode: str = "incremental",
+) -> dict[str, Any]:
+    """Daily cortex slice: ``sensory → … → cortex`` (never Memory/Judgment).
+
+    Incremental by default so day-to-day dirty records get phases/edges without
+    a full vault re-score. Defers per-stage when the model is unavailable —
+    never falls back to lexical rules. Dry-run records the stage without
+    calling the model.
+    """
+    from .episode_pipeline import BrainStage, run_episode_cognition
+
+    if dry_run:
+        return {
+            "mode": mode,
+            "until": BrainStage.cortex.value,
+            "dry_run": True,
+            "deferred": [],
+            "episode_ids": [],
+            "notes": ["dry_run skipped episode cortex"],
+        }
+    report = run_episode_cognition(
+        store, cfg, embedder,
+        mode=mode,
+        until=BrainStage.cortex,
+    )
+    deferred = report.deferred_stages()
+    summary = report.to_dict()
+    return {
+        "mode": mode,
+        "until": BrainStage.cortex.value,
+        "dry_run": False,
+        "deferred": deferred,
+        "episode_ids": list(report.episode_ids),
+        "stages": summary.get("stages") or [],
+        "records_scanned": (
+            report.correlation.records_scanned if report.correlation else 0
+        ),
+    }
+
+
 def run_consolidation_cycle(
     store: MemoryStore,
     cfg: Config,
@@ -348,7 +528,10 @@ def run_consolidation_cycle(
 
     Stages:
       analyze → contradictions → safe_automation → temporal_refresh
-      → (weekly) judgment_proposals → done
+      → closed_sessions → open_tasks → review_prepare
+      → episode_cortex (sensory→cortex, incremental)
+      → episode_reflect (daily + weekly; candidates only)
+      → (weekly) judgment_proposals → change_report → done
 
     Apply runs persist a ``ConsolidationRun`` keyed by window; repeats return
     the prior completed result (``duplicated=True``). Concurrent ``running``
@@ -593,10 +776,57 @@ def run_consolidation_cycle(
         )
         result.candidate_stats = candidate_formation_stats(store)
 
+        # Keep episode arcs current via sensory→cortex, then reflect
+        # reflectable arcs into MemoryCandidates. Not full meditate — no
+        # interactive review, no prefrontal, never auto-confirm.
+        stage = "episode_cortex"
+        result.stages.append("episode_cortex")
+        result.episode_cognition = run_episode_cortex_pass(
+            store, cfg, embedder, dry_run=dry_run, mode="incremental",
+        )
+        if result.episode_cognition.get("dry_run"):
+            result.notes.append("dry_run skipped episode cortex")
+        elif result.episode_cognition.get("deferred"):
+            result.notes.append(
+                "episode cortex deferred: "
+                + ", ".join(result.episode_cognition["deferred"])
+            )
+
+        stage = "episode_reflect"
+        result.stages.append("episode_reflect")
+        if dry_run:
+            result.notes.append("dry_run skipped episode reflection")
+        else:
+            # Prefer episodes just touched by cortex; fall back to a store scan.
+            touched = list(result.episode_cognition.get("episode_ids") or [])
+            # Daily stays lighter; weekly can scan more arcs.
+            max_eps = 15 if kind == "daily" else 25
+            result.reflected_candidate_ids = reflect_recent_episodes(
+                store, cfg, embedder,
+                episode_ids=touched or None,
+                max_episodes=max_eps,
+            )
+
+        # Nightly pattern pass: mine the window for durable habits/preferences
+        # across senses (multi-domain, not only code). Weekly reaches wider.
+        stage = "pattern_reflect"
+        result.stages.append("pattern_reflect")
+        if dry_run:
+            result.notes.append("dry_run skipped pattern reflection")
+        else:
+            result.pattern_candidate_ids = run_pattern_reflect_pass(
+                store, cfg, embedder,
+                window_start=window_start, window_end=window_end,
+                max_windows=6 if kind == "daily" else 12,
+            )
+
         if propose_judgment:
             stage = "judgment_proposals"
             result.stages.append("judgment_proposals")
-            from ..judgment.proposals import propose_from_pattern
+            from ..judgment.proposals import (
+                propose_from_episode_patterns,
+                propose_from_pattern,
+            )
             detector = "simplicity_cluster_demo"
             if dry_run:
                 result.notes.append("dry_run skipped judgment proposals")
@@ -604,11 +834,19 @@ def run_consolidation_cycle(
                 existing = _existing_window_proposals(
                     store, window_key=window_key, detector=detector,
                 )
-                if existing:
-                    result.judgment_proposal_ids = existing
+                episode_detector = "episode_pattern"
+                existing_ep = _existing_window_proposals(
+                    store, window_key=window_key, detector=episode_detector,
+                )
+                if existing or existing_ep:
+                    result.judgment_proposal_ids = existing + existing_ep
                     result.notes.append("reused judgment proposals for window")
                 else:
-                    proposals = propose_from_pattern(store, domain="technical")
+                    proposals = list(propose_from_pattern(store, domain="technical"))
+                    # Complement the demo detector with episode-arc patterns.
+                    proposals += list(
+                        propose_from_episode_patterns(store, domain="technical")
+                    )
                     for p in proposals:
                         meta = dict(getattr(p, "metadata", None) or {})
                         meta["consolidation_window"] = window_key

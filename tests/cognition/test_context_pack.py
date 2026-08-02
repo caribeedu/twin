@@ -237,6 +237,37 @@ def test_inactive_statuses_excluded_from_search(store, embedder):
     assert dead.id not in ids_hit
 
 
+def test_include_rejected_surfaces_rejected(store, embedder):
+    from twin import ids
+    from twin.memory.models import MemoryItem
+
+    live = MemoryItem(
+        id=ids.memory_id(), type="decision", title="Use SQS",
+        summary="Chose SQS for the queue.", domain="technical",
+        confidence=0.9, status="confirmed",
+    )
+    rejected = MemoryItem(
+        id=ids.memory_id(), type="decision", title="Keep Kafka",
+        summary="Rejected keeping Kafka for the queue.", domain="technical",
+        confidence=0.4, status="rejected",
+    )
+    for mem in (live, rejected):
+        store.insert_memory(mem)
+        store.store_embedding(
+            mem.id, "memory", embedder.name,
+            embedder.embed(f"{mem.title}\n{mem.summary}"),
+        )
+    default = search(store, embedder, "queue Kafka SQS", include_candidates=False)
+    assert rejected.id not in {h.memory.id for h in default.hits}
+    with_rej = search(
+        store, embedder, "queue Kafka SQS",
+        include_candidates=False, include_rejected=True,
+    )
+    ids_hit = {h.memory.id for h in with_rej.hits}
+    assert rejected.id in ids_hit
+    assert any("rejected" in h.why for h in with_rej.hits if h.memory.id == rejected.id)
+
+
 def test_pack_modes_and_injection_screen(store, cfg, embedder):
     from twin import ids
     from twin.memory.models import MemoryItem

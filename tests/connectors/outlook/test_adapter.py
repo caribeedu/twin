@@ -60,6 +60,22 @@ def test_empty_folders_await_configuration(store, creds, outlook):
     assert result.health.value == "awaiting_configuration"
 
 
+def test_backfill_floor_anchors_at_oldest_message(store, creds, outlook):
+    """Backfill starts at the oldest message date, not the planner's blind
+    10-year default (which yields many empty month partitions)."""
+    from twin.connectors import create_backfill_job
+
+    outlook.add_message("m_new", conversation_id="c1", subject="new", body="hi",
+                        received="2025-06-10T09:00:00Z")
+    outlook.add_message("m_old", conversation_id="c2", subject="old", body="hi",
+                        received="2019-02-03T08:00:00Z")
+    _acc, inst = _mk(store, creds)
+    job = create_backfill_job(store, creds, inst.id)
+
+    assert job.range_start == "2019-02-03"
+    assert job.progress["partitions"][0]["partition_key"] == "2019-02"
+
+
 def test_sync_ingests_message_with_thread(store, creds, outlook):
     outlook.add_message(
         "om1", conversation_id="conv1",

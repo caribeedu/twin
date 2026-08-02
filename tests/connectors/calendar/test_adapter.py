@@ -56,6 +56,19 @@ def _mk(store, creds, *, calendars=(CAL,), secret=TOKEN, extra=None):
     return acc, inst
 
 
+def test_parse_stream_continuous_and_backfill():
+    from twin.connectors.calendar.adapter import _parse_stream
+    from twin.connectors.protocol import ConnectorError
+
+    assert _parse_stream("calendar:primary") == "primary"
+    assert _parse_stream(
+        "backfill:backfill_x:2016-09:calendar:primary") == "primary"
+    with pytest.raises(ConnectorError):
+        _parse_stream("bogus:primary")
+    with pytest.raises(ConnectorError):
+        _parse_stream("backfill:job:2016-09:bogus:primary")
+
+
 def test_empty_calendars_await_configuration(store, creds, calendar):
     _acc, inst = _mk(store, creds, calendars=())
     result = sync_connector(store, creds, inst.id)

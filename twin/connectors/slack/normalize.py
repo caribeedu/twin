@@ -212,11 +212,61 @@ def record_from_channel(connector_id: str, account_id: str,
     )
 
 
+_MENTION = re.compile(r"<@(U[A-Z0-9]+)(?:\|([^>]+))?>")
+
+
+def display_label_for_user(user_obj: dict[str, Any]) -> Optional[str]:
+    """Pick the most human Slack label from a ``users.info`` payload."""
+    if not isinstance(user_obj, dict):
+        return None
+    profile = user_obj.get("profile") or {}
+    for candidate in (
+        profile.get("display_name"),
+        profile.get("real_name"),
+        user_obj.get("real_name"),
+        user_obj.get("name"),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _as_at(label: str) -> str:
+    text = str(label or "").strip()
+    if not text:
+        return text
+    return text if text.startswith("@") else f"@{text}"
+
+
+def rewrite_mentions(text: str, labels: dict[str, str]) -> str:
+    """Replace ``<@U…>`` / bare user ids with ``@Name`` when known."""
+    if not text:
+        return text
+
+    def _sub(m: re.Match) -> str:
+        uid, pipe = m.group(1), m.group(2)
+        if pipe:
+            return _as_at(pipe)
+        label = labels.get(uid)
+        return _as_at(label) if label else m.group(0)
+
+    out = _MENTION.sub(_sub, text)
+    # Also rewrite bare U… tokens that Slack puts in our own headers.
+    for uid, label in sorted(labels.items(), key=lambda kv: -len(kv[0])):
+        if uid and label and uid in out:
+            out = out.replace(uid, _as_at(label))
+    return out
+
+
 def record_from_message(connector_id: str, account_id: str, channel: str,
                         message: dict[str, Any], *,
                         channel_kind: Optional[str] = None,
                         is_reply: bool = False,
-                        team_id: Optional[str] = None) -> ConnectorRecord:
+                        team_id: Optional[str] = None,
+                        author_label: Optional[str] = None,
+                        channel_label: Optional[str] = None,
+                        user_labels: Optional[dict[str, str]] = None) -> ConnectorRecord:
     ts = str(message.get("ts") or "0")
     thread_ts = str(message.get("thread_ts") or ts)
     tkey = thread_key(team_id, channel, thread_ts)
@@ -225,16 +275,33 @@ def record_from_message(connector_id: str, account_id: str, channel: str,
     if not actor and message.get("bot_id"):
         actor = bot_actor_id(team_id, message["bot_id"])
     ext_type = "thread_reply" if is_reply else "message"
-    header = (f"Slack {'reply' if is_reply else 'message'} in {channel}"
-              f" by {user or '?'}")
+    labels = dict(user_labels or {})
+    if user and author_label:
+        labels.setdefault(str(user), author_label)
+    # Source text always uses @user / #channel — never bare Slack ids.
+    if author_label:
+        who = _as_at(author_label)
+    else:
+        who = user or "?"
+    if channel_label:
+        where = (
+            channel_label if str(channel_label).startswith("#")
+            else f"#{channel_label}"
+        )
+    else:
+        where = channel
+    header = (f"Slack {'reply' if is_reply else 'message'} in {where}"
+              f" by {who}")
     body = _clip(message.get("text"))
     if message.get("subtype") == "message_deleted" or message.get("deleted"):
         body = body or "[deleted]"
+    body = rewrite_mentions(body, labels)
+    header = rewrite_mentions(header, labels)
     file_refs = _file_artifact_refs(message)
     artifact_refs = (
         [{"kind": ext_type, "channel": channel, "ts": ts}] + file_refs
     )
-    return _record(
+    rec = _record(
         connector_id=connector_id, account_id=account_id,
         external_type=ext_type,
         external_id=f"{channel}:{ts}",
@@ -246,6 +313,13 @@ def record_from_message(connector_id: str, account_id: str, channel: str,
         lineage_root=tkey, channel_kind=channel_kind, team_id=team_id,
         artifact_refs=artifact_refs,
     )
+    if author_label:
+        rec.source_metadata["author_name"] = author_label
+    if channel_label:
+        rec.source_metadata["channel_name"] = channel_label
+    if labels:
+        rec.source_metadata["user_labels"] = labels
+    return rec
 
 
 def _ts_to_iso(ts: str) -> Optional[str]:

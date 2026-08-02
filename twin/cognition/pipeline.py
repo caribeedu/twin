@@ -303,7 +303,8 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
     own_runtime = runtime is None
     if own_runtime:
         runtime = interp_service.InterpretationRuntime(cfg)
-    masked_text, findings = mask(percept.content)
+    from .actor_labels import humanize_actor_text
+    masked_text, findings = mask(humanize_actor_text(store, percept, percept.content))
     report.pii_findings = len(findings)
     try:
         result = runtime.interpret(percept, masked_text)

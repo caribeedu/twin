@@ -81,6 +81,30 @@ def test_project_link_lifecycle_historical_not_attachable(store):
     assert resolved.status == ProjectLinkStatus.historical
 
 
+def test_slack_message_record_resolves_channel_project(store):
+    """A slack message record (external_type='message') must resolve its channel
+    container so slack percepts inherit the project id — the key that bridges a
+    slack request and the GitHub PR that resolves it."""
+    proj = ensure_project(store, "Dogwalker", repos=["caribeedu/dogwalker"])
+    link_project(
+        store, project_id=proj.id,
+        external_type="slack_channel", external_id="C0BM8DT14S2",
+        confirmed=True,
+    )
+    rec = _rec(
+        external_type="message", external_id="C0BM8DT14S2:1720000000.0001",
+        source_metadata={
+            "channel": "C0BM8DT14S2", "ts": "1720000000.0001",
+            "author_kind": "human", "team_id": "T0AAA",
+        },
+        project_hint="C0BM8DT14S2",
+    )
+    project_id, resolved = resolve_project_for_record(store, rec)
+    assert project_id == proj.id
+    assert resolved is not None
+    assert resolved.external_type == "slack_channel"
+
+
 def test_project_link_rejected_not_attachable(store):
     proj = ensure_project(store, "Atlas", repos=["acme/atlas"])
     link = link_project(

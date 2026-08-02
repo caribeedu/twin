@@ -304,6 +304,8 @@ class QualityReport(BaseModel):
     requires_human_review: bool = False
     quality_flags: list[str] = Field(default_factory=list)
     neighbors: list[str] = Field(default_factory=list)
+    # ground | linked | distilled | stance — consolidation height
+    altitude: str = "ground"
 
 
 class Artifact(BaseModel):

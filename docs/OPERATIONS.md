@@ -1,10 +1,11 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Operations
 
-**Source of truth for:** day-2 operation — cognitive runtime, health, connectors, backup, release gates and incidents.
+This document explains day-2 operation — cognitive runtime, health,
+connectors, backup, release gates and incidents.
 
-Install and providers live in [SETUP.md](SETUP.md). How to use in [README](../README.md#how-to-use).
+Install and providers: [SETUP.md](SETUP.md). Interfaces and connector
+concepts: [INTERFACES.md](INTERFACES.md) · [CLI.md](CLI.md#connectors).
+Destination: [README](../README.md).
 
 ## Start cognitive runtime
 
@@ -31,7 +32,7 @@ Workers claim durable jobs, including:
 | `backfill_partition` | Scheduler / `twin connector backfill --run` (historical; not continuous sync) |
 | `reembed_memory` | Manual enqueue |
 
-Full CLI table and payload examples in [INTERFACES.md](INTERFACES.md#runtime).
+Full CLI table and payload examples in [CLI.md](CLI.md#runtime).
 
 ```bash
 # inspect / recover one job
@@ -98,6 +99,45 @@ twin review
 ```
 
 **Default:** humans confirm Memory; Judgment always stays human-gated. Do not automate confirmation of Judgment. Opt-in `twin extract -A` (auto-confirm new *memory* candidates) is for trusted demos or tightly scoped pipelines only — not the recommended day-one path. See [INTERFACES.md](INTERFACES.md).
+
+## Correlation & Episode cognition
+
+Episode cognition is the brain-staged chain documented in [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages). It requires an **interpreting** extractor (`TWIN_EXTRACTOR=auto` / `ollama` / a cloud chat client). When the model is unreachable, interpreting stages **defer** — they never invent an arc from lexical rules; `extractor=heuristic` blocks those stages outright.
+
+The happy path after connector sync / backfill (and usually after `twin extract` + review of atomic candidates) is a single orchestrator command:
+
+```bash
+twin meditate                          # sensory…cortex → reflect → (review?) → judgment drafts
+twin meditate --review                 # step through the candidate review inline (TTY)
+twin review                            # confirm/reject reflected trajectory candidates
+twin judgment preview <proposal_id>    # inspect a prefrontal draft before approve
+```
+
+Or run it stage by stage:
+
+```bash
+twin correlate                         # sensory → amygdala → basal → hippocampus_bind → cortex
+twin episode list                      # pick an id (consolidate=ready = cortex built ≥2 phases)
+twin episode show <id>                 # summary + phases + edges (method=llm, brain_stage=…)
+twin episode confirm-edge <edge_id>    # optional; survives cortex rebuilds
+twin episode reflect <id>              # hippocampus_consolidate → trajectory MemoryCandidates
+twin episode reflect <id> --dry-run    # preview claims without persisting
+twin review                            # confirm/reject reflected candidates
+twin judgment propose-episode <id>     # only after trajectory memories are confirmed
+```
+
+Day-to-day after the first full pass:
+
+```bash
+twin meditate --incremental            # or: twin correlate --incremental
+twin correlate --until sensory         # debug: structural scaffold only (no model needed)
+```
+
+- **`--full` vs `--incremental`:** run `--full` as the periodic correctness oracle and after schema/logic changes; use `--incremental` for routine, cheap passes (it re-correlates only the vault partitions of records the connector commit/tombstone path marked dirty, then clears the dirty index). Both **daily** and **weekly** consolidation run `episode_cortex` (sensory→cortex, incremental) then `episode_reflect` (candidates only; gate skips structural PR→commit). Weekly additionally drafts judgment proposals. `twin meditate` stays the human path (optional review + judgment drafts).
+- **Deferred stages:** if `twin correlate`/`twin meditate`/`twin consolidate daily` reports cortex deferred, the chat model was unreachable — start Ollama (or configure the client), then re-run. Existing phases/edges from a prior successful pass are kept, not wiped.
+- **Approved atomic memories ≠ episode reflect.** Backfill + review confirms *extract* candidates. Episodes need `twin correlate` first; `reflect` (`hippocampus_consolidate`) then adds *trajectory* candidates ("intended X → chose Y") for another `twin review` pass. Neither path auto-confirms Memory or Judgment.
+- **`reflect` readiness:** an episode is consolidate-ready once the `cortex` stage built ≥2 phases; the reflect model then decides whether the arc yields a trajectory claim (or none). `twin meditate` never auto-confirms Memory nor auto-approves Judgment.
+- **`reflect` does not replace `extract`.** Promote a confirmed trajectory into a pending Judgment proposal with `twin judgment propose-episode <id>` (`prefrontal` stage; human approval only).
 
 ## Release gate
 

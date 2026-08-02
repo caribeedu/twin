@@ -398,10 +398,18 @@ def backfill_preview(
             "watermark": (ckpt.cursor or {}).get("watermark") if ckpt else None,
             "estimate": estimates.get(stream),
         })
+    resolved_since = config.get("backfill_since")
+    if resolved_since is None:
+        floor_fn = getattr(adapter, "backfill_floor", None)
+        if callable(floor_fn):
+            try:
+                resolved_since = floor_fn()
+            except Exception:
+                resolved_since = None
     partitions = []
-    if instance.connector_type in ("gmail", "outlook", "email"):
+    if instance.connector_type in ("gmail", "outlook", "email", "slack"):
         partitions = plan_year_month_partitions(
-            range_start=config.get("backfill_since"),
+            range_start=resolved_since,
             range_end=config.get("backfill_until"),
         )
     existing = [
@@ -418,6 +426,7 @@ def backfill_preview(
         "source_owner": account.source_owner.value,
         "vault_id": account.vault_id,
         "backfill_since": config.get("backfill_since"),
+        "backfill_floor": resolved_since,
         "backfill_until": config.get("backfill_until"),
         "ingestion_policy": config.get("ingestion_policy"),
         "streams": stream_rows,
@@ -449,6 +458,16 @@ def create_backfill_job(
     adapter, instance, account = _load_adapter(store, credentials, connector_id)
     config = dict(instance.configuration or {})
     since = range_start or config.get("backfill_since")
+    if since is None:
+        # No explicit floor — let the adapter suggest one from provider signals
+        # (e.g. Slack channel-creation dates) instead of the planner's blind
+        # 10-year default, which produces years of empty month partitions.
+        floor_fn = getattr(adapter, "backfill_floor", None)
+        if callable(floor_fn):
+            try:
+                since = floor_fn()
+            except Exception:
+                since = None
     until = range_end or config.get("backfill_until")
     plan_streams = getattr(adapter, "plan_streams", None)
     streams = ((plan_streams(account) if callable(plan_streams) else None)
@@ -478,6 +497,27 @@ def create_backfill_job(
     return job
 
 
+def cancel_backfill_job(store, job_id: str) -> "BackfillJob":
+    """Cancel a planned/running/paused/failed BackfillJob so a fresh one can be
+    created (e.g. to re-anchor its partition floor). Completed and already
+    cancelled jobs are returned unchanged. Uses CAS on ``version`` to avoid
+    racing a worker mid-partition."""
+    from .models import BackfillJobStatus
+
+    job = store.get_backfill_job(job_id)
+    if job is None:
+        raise ValueError(f"backfill job {job_id} not found")
+    if job.status in (BackfillJobStatus.completed, BackfillJobStatus.cancelled):
+        return job
+    expected = job.version
+    job.status = BackfillJobStatus.cancelled
+    job.completed_at = now_iso()
+    if not store.cas_backfill_job(job, expected):
+        raise ValueError(
+            f"backfill job {job_id} changed concurrently — retry cancel")
+    return job
+
+
 def run_backfill_partition(
     store, credentials: CredentialStore, job_id: str, *,
     emit_percepts: bool = True,
@@ -496,8 +536,10 @@ def run_backfill_partition(
 
     from .mail.backfill import (
         apply_partition_claim,
+        base_stream_resolved,
         has_live_partition_claim,
         incomplete_base_streams,
+        max_stream_attempts,
         next_runnable_partition,
         record_stream_results,
         release_partition_claim,
@@ -629,36 +671,45 @@ def run_backfill_partition(
         claim_token=claim_token,
     )
 
-    streams_ok = bool(result.streams) and all(
-        (s.skipped and s.skipped != "backfill_claim_lost")
-        or (s.committed and s.done)
-        for s in result.streams
-    )
-    # Also require previously-completed streams remain completed.
+    # Partition-level truth (not just this attempt's streams): a base is
+    # "resolved" when it completed *or* gave up terminally after N failures.
     part_after = next(
         (p for p in (job.progress or {}).get("partitions") or []
          if p.get("partition_key") == part["partition_key"]),
         {},
     )
-    all_bases_done = all(
-        (part_after.get("streams") or {}).get(b) == "completed"
-        for b in (job.streams or [])
+    bases = list(job.streams or [])
+    stream_status = part_after.get("streams") or {}
+    all_bases_resolved = bool(bases) and all(
+        base_stream_resolved(part_after, b) for b in bases
     )
+    failed_bases = [b for b in bases if stream_status.get(b) == "failed_terminal"]
     any_continuation = any(
         s.committed and not s.done and not s.skipped for s in result.streams
     )
-    if result.ok and streams_ok and all_bases_done:
-        status = "completed"
+    if result.ok and all_bases_resolved and not any_continuation:
+        # Complete — cleanly, or *degraded* if some streams gave up terminally.
+        degraded = bool(failed_bases)
+        extra: dict[str, Any] = {}
+        if degraded:
+            extra["degraded"] = True
+            extra["failed_streams"] = failed_bases
+            extra["last_error"] = (
+                "streams gave up after "
+                f"{max_stream_attempts()} attempts: "
+                + ", ".join(failed_bases)
+            )
+        status = "completed_degraded" if degraded else "completed"
         job.progress = release_partition_claim(
             job.progress, part["partition_key"],
-            status="completed", claim_token=claim_token,
+            status="completed", claim_token=claim_token, **extra,
         )
         if next_runnable_partition(job.progress) is None:
             job.status = BackfillJobStatus.completed
             job.completed_at = now_iso()
         else:
             job.status = BackfillJobStatus.running
-    elif result.ok and (any_continuation or not all_bases_done):
+    elif result.ok and (any_continuation or not all_bases_resolved):
         status = "continuation_pending"
         job.progress = release_partition_claim(
             job.progress, part["partition_key"],

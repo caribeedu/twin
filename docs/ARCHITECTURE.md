@@ -1,10 +1,15 @@
-[← README](../README.md) · [FOUNDATIONS](FOUNDATIONS.md) · [PRODUCT](PRODUCT.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [INTERFACES](INTERFACES.md) · [SETUP](SETUP.md) · [OPERATIONS](OPERATIONS.md)
-
 # Architecture
 
-**Source of truth for:** how Twin works — brain analogies, architecture principles, stack, data model, pipeline, privacy, review, judgment, observer and threat model.
+This document explains how Twin works — brain analogies, architecture
+principles, stack, data model, pipeline, privacy, review, judgment,
+observer and threat model.
 
-Product shape and the **complete roadmap** live in [ROADMAP.md](ROADMAP.md); what shipped is in [CHANGELOG.md](CHANGELOG.md). Product definition in [PRODUCT.md](PRODUCT.md). Interfaces in [INTERFACES.md](INTERFACES.md). Why the shape exists in [FOUNDATIONS.md](FOUNDATIONS.md). Overview sketch in [README](../README.md#how-it-works).
+Durable principles: [IDENTITY.md](IDENTITY.md#design-principles).
+Cognitive concepts: [COGNITION.md](COGNITION.md) ·
+[GLOSSARY.md](GLOSSARY.md). Academic inspirations (appendix):
+[FOUNDATIONS.md](FOUNDATIONS.md). Product: [PRODUCT.md](PRODUCT.md).
+Interfaces: [INTERFACES.md](INTERFACES.md). Direction loop:
+[README — Direction](../README.md#direction).
 
 ## Brain analogies
 
@@ -39,20 +44,193 @@ How that shows up in the pipeline:
 ```text
 Artifact / connector feed
         ↓  (hippocampus-like encoding)
-Percept → candidate Memory
-        ↓  (cortical consolidation)
-Graph + evidence + embeddings (indexes only)
+Percept
+        ↓  (correlation / situation structure)
+WorkEpisode arc (phases + narrative edges) — revisable, not Memory
+        ↓  (cortical consolidation + human review)
+MemoryCandidate → confirmed Memory + evidence + embeddings (indexes only)
         ↓  (prefrontal / amygdala-like gates)
 Firewall + sensitivity + judgment
         ↓  (working memory)
-Safe context pack → MCP / CLI / API
+Safe context pack → Native / MCP / CLI / API
         ↕  (global workspace)
 Memory Observer (parallel suggestions)
 ```
 
 If a feature blurs these boundaries — e.g. treating raw text as confirmed memory, or bypassing the firewall “for convenience” — it fights the architecture, not just a style preference.
 
+### Brain analogies and CLI stages
+
+Episode cognition makes the analogy operational: turning connector records into trajectory understanding is a chain of stages, each named for the region it plays. The `sensory` scaffold and `hippocampus_bind` are structural (explicit anchors, exact identity/project, membership); `basal` is report-only lifecycle. Stages that *interpret* (`amygdala`, `cortex` edges/phases, `hippocampus_consolidate` reflect) use an LLM (or a deterministic test override) and **defer** when the model is missing — they never invent an arc from lexical rules. `extractor=heuristic` blocks those semantic stages. `twin correlate` runs up to `cortex`; `twin meditate` orchestrates the whole chain up to the human gates (`twin review`, `twin judgment approve`).
+
+| # | Stage id (`brain_stage`) | Brain region | Job | Writes | CLI |
+|---|---|---|---|---|---|
+| 0 | `sensory` | encoding substrate | vault / dirty / ID anchors | partitions, membership | `twin correlate --until sensory` |
+| 1 | `amygdala` | Amygdala (salience) | classify member role + salience | phase roles (`proposed`) | `twin correlate` |
+| 2 | `basal` | Basal ganglia | read episode lifecycle | lifecycle (report-only) | `twin correlate` |
+| 3 | `hippocampus_bind` | Hippocampus (binding) | membership consolidation | links | `twin correlate` |
+| 4 | `cortex` | Cortex (semantic) | understand arc: phases + edges | phases/edges (`method=llm`) | `twin correlate` |
+| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | MemoryCandidates | `twin episode reflect` / `twin meditate` |
+| 6 | `prefrontal` | Prefrontal cortex | draft judgment | pending `JudgmentProposal` | `twin judgment propose-episode` / `twin meditate` |
+
+Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin judgment approve` is the executive gate for durable judgment. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
+
+## Runtime sequences
+
+These sequence diagrams show how Twin turns distributed work into reusable
+understanding — and how that understanding re-enters authorized tools.
+They are contracts of intent, not an inventory of every module.
+
+### From Connector to Context Pack
+
+End-to-end path from an external system to a pack an authorized client can
+consume. Extraction creates **atomic** candidates; meditation builds
+**situations** (`WorkEpisode`) and may reflect **trajectory** candidates;
+packs only use what privacy and review allow.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ext as External system<br/>(GitHub / Slack / …)
+    participant Conn as Connector + normalize
+    participant PII as PII / quarantine
+    participant Store as MemoryStore
+    participant ExtLLM as Extract interpreter
+    participant Corr as Correlate<br/>(sensory→cortex)
+    participant ACC as ACC + reflect
+    participant Human as Human gates
+    participant Pack as Pack assembly
+    participant FW as Domain Firewall
+    participant Client as Native / MCP / CLI / API
+
+    Ext->>Conn: sync / webhook / backfill
+    Conn->>PII: ConnectorRecord (+ humanized actors)
+    PII->>Store: Artifact / record (vault-partitioned)
+    Conn->>Store: Percept (normalized observation)
+    Note over Store: Percept ≠ Memory.<br/>Evidence is preserved for audit.
+
+    Client->>ExtLLM: twin extract
+    ExtLLM->>Store: read pending percepts
+    ExtLLM->>PII: mask before any cloud LLM
+    ExtLLM->>Store: atomic MemoryCandidates + evidence
+    ExtLLM->>Human: selective review queue
+
+    Client->>Corr: twin meditate / correlate
+    Corr->>Store: WorkEpisode membership, phases, edges
+    Note over Corr: Structural scaffold never invents an arc.<br/>Semantic stages defer without a model.
+    Corr->>ACC: consolidate-ready episodes
+    ACC->>Store: trajectory MemoryCandidates
+    ACC->>Human: review (+ optional judgment drafts)
+
+    Human->>Store: confirm / reject / merge / resolve
+    Note over Human,Store: Only confirmed memories<br/>are pack-eligible by default.
+
+    Client->>Pack: pack / session_start / get_context_pack
+    Pack->>Store: hybrid search (FTS + vectors + graph)
+    Pack->>FW: privacy + domain + persona before content
+    FW-->>Pack: allow / redact / deny
+    Pack->>Pack: judgment slice + budget + dedupe
+    Pack-->>Client: Safe context pack
+    Note over Client: Understanding enters the tool<br/>without re-briefing the user.
+```
+
+### Native Session — Inject & Absorb
+
+Native binding is how a host gets continuity **into** a chat and returns what happened **out** as evidence — without a parallel memory store and without auto-confirming Memory or Judgment.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Host as Host (Claude Code)
+    participant Native as twin native event
+    participant Bind as HostSessionBinding
+    participant Sess as CognitiveSession
+    participant Vote as Domain search-vote
+    participant Pack as Pack assembly + Firewall
+    participant Runtime as twin-runtime
+    participant Store as MemoryStore
+    participant ExtLLM as Extract
+
+    Host->>Native: SessionStart (hook)
+    Native->>Bind: open / resume binding
+    Native->>Sess: start CognitiveSession
+    alt domain already known
+        Native->>Pack: assemble pack (hot-path deadline)
+        Pack->>Store: retrieve + govern
+        Pack-->>Native: context pack
+        Native-->>Host: additionalContext (inject)
+    else unclassified (no prompt text yet)
+        Native-->>Host: bind only (empty pack)
+    end
+
+    Host->>Native: UserPromptSubmit
+    Native->>Sess: observe user_message
+    alt search-vote names a domain
+        Native->>Vote: upgrade domain once
+        Native->>Pack: emit pack
+        Pack-->>Host: additionalContext (inject)
+    else still inconclusive
+        Native->>Runtime: enqueue session_domain_resolve
+        Native-->>Host: return fast (no mid-turn push)
+        Runtime->>Vote: background multi-message classify
+        Runtime->>Bind: freeze domain + pending_context_pack
+        Note over Host,Bind: Next injection-capable turn<br/>emits the deferred pack
+    end
+
+    Host->>Native: PostToolUse / Stop (turn_completed)
+    Native->>Sess: observe tools + turn<br/>(Stop does not close binding)
+
+    Host->>Native: SessionEnd
+    Native->>Bind: close binding immediately
+    Native->>Runtime: enqueue session_complete
+    Native-->>Host: ok (fail-open if configured)
+    Runtime->>Sess: fold dialogue + deliberate notes
+    Runtime->>Store: session_summary Percept
+    Runtime->>ExtLLM: extract → MemoryCandidates
+    ExtLLM->>Store: candidates for human review
+    Note over Host,Store: Inject governed understanding at the start;<br/>absorb the session as evidence at the end.<br/>Humans still confirm durable Memory / Judgment.
+```
+
+Reference: Claude Code hooks
+
+
+### Analysis Context Compiler (ACC)
+
+Reflect and pattern passes must **judge**, not discover the corpus. The ACC
+is a deterministic compiler: it builds a budgeted, cross-sense
+`AnalysisDossier` (primary evidence, soft neighbors, related memories,
+per-sense lenses) and only then calls the analysis LLM. No LLM runs inside
+the compile itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Meditate / reflect / pattern
+    participant ACC as ACC compiler
+    participant Store as MemoryStore + connectors
+    participant Retr as Hybrid retrieve
+    participant Lens as Sense lenses
+    participant LLM as Analysis LLM
+    participant Review as Human review
+
+    Orch->>ACC: compile dossier (episode or time window)
+    ACC->>Store: load focus members (Slack, GitHub, mail, …)
+    ACC->>Store: soft cross-sense neighbors<br/>(project / time / actor / lexical)
+    Note over ACC: Diversify senses so one connector<br/>cannot crowd out the others
+    ACC->>Retr: related confirmed / candidate / rejected<br/>+ open-session artifacts
+    Retr-->>ACC: graph-expanded neighborhood
+    ACC->>Lens: attach per-sense checklists<br/>(what to look for in github vs slack vs …)
+    ACC->>ACC: tier + budget (L0 abstract → L2 full)
+    ACC-->>Orch: AnalysisDossier (deterministic)
+    Orch->>LLM: judge dossier → trajectory / pattern claims
+    LLM-->>Orch: claims with evidence refs
+    Orch->>Store: MemoryCandidates only<br/>(needs_review, never auto-confirm)
+    Orch->>Review: twin review / judgment gates
+    Note over Orch,Review: Model proposes understanding<br/>humans constitute Memory and Judgment
+```
+
 ## Architecture Principles
+
 
 These principles are the constitution of `twin`. Roadmaps can change, backends can change and interfaces can change, but new features should remain compatible with these rules. When an implementation choice is ambiguous, the preferred option is the one that preserves cognition, autonomy, evidence, safety and portability.
 
@@ -93,8 +271,11 @@ Artifact
 Percept
 (normalized observation)
     ↓
+Correlation / Situation Model
+(WorkEpisode arc — revisable structure, not Memory)
+    ↓
 Memory
-(consolidated knowledge with evidence and temporal validity)
+(consolidated knowledge with evidence and temporal validity; candidates until review)
     ↓
 Judgment
 (how future decisions change)
@@ -103,7 +284,7 @@ Action
 (suggestion, draft, reminder, automation or silence)
 ```
 
-An artifact is a source object. A percept is what the system notices from that artifact. A memory is a durable structured claim extracted from one or more percepts. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
+An artifact is a source object. A percept is what the system notices from that artifact. Correlation proposes revisable situation structure (work episode and related links) without confirming Memory. A memory is a durable structured claim extracted from one or more percepts or reflected from an episode arc. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
 
 Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a percept to action without evidence, firewall and judgment, it is unsafe.
 
@@ -129,7 +310,7 @@ This principle does not mean all evidence must be exposed to every tool. Evidenc
 
 Memories should carry temporal validity through dates, conditions, supersedence or review triggers. A newer memory may replace or narrow an older one without deleting history. The system should preserve what used to be true while making clear what is true now.
 
-This protects the user from stale personalization. A tool that remembers the user well in 2026 but keeps applying 2023 preferences without context is not intelligent; it is outdated with confidence.
+This protects the user from stale personalization. A tool that remembers the user well today but keeps applying years-old preferences without context is not intelligent; it is outdated with confidence.
 
 ### Sessions are units of cognition
 
@@ -237,7 +418,7 @@ mandatory evidence > sourceless memory
 exportability > lock-in
 ```
 
-Continue in [PRODUCT.md](PRODUCT.md) for domain rules · [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md) for versions · [INTERFACES.md](INTERFACES.md) for MCP / CLI / API · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
+Continue in [PRODUCT.md](PRODUCT.md) for domain rules · [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md) for versions · [INTERFACES.md](INTERFACES.md) ([Native](NATIVE.md) / [MCP](MCP.md) / [CLI](CLI.md) / [REST](REST.md)) · [FOUNDATIONS.md](FOUNDATIONS.md) for academic roots.
 
 ## Stack and technical decisions
 
@@ -255,26 +436,17 @@ Backup = copy the folder.
 
 Full export = `twin export`.
 
-### SQLite as a light graph
+### Storage behind MemoryStore
 
-The initial concepts uses SQLite with tables for:
+Canonical memory lives behind a single interface (`MemoryStore`).
+**PostgreSQL + pgvector** is the primary backend (server-side vector
+search, tsvector/GIN for full-text, JSONB). **SQLite** remains the
+zero-config backend for local/dev use. The logical model includes
+sources, memories, evidence, entities, relations, embeddings,
+firewall logs and full-text indexes — regardless of backend.
 
-- sources;
-- memories;
-- evidence;
-- entities;
-- memory_entities;
-- relations;
-- embeddings;
-- firewall_log;
-- FTS5.
-
-That choice avoids heavy infrastructure too early. Today the storage lives
-behind a single interface (`MemoryStore`): **PostgreSQL + pgvector is the
-primary backend** (server-side vector search, tsvector/GIN for full-text,
-JSONB) and SQLite remains the zero-config backend for dev/tests.
-Neo4j, FalkorDB or Graphiti may come later, but the canonical memory must
-remain exportable.
+Alternative graph stores (Neo4j, FalkorDB, Graphiti, …) may replace the
+engine later, but the canonical memory must remain exportable.
 
 ### Vectors as index, not as memory
 
@@ -304,7 +476,7 @@ Search must answer not only "what looks semantically similar?", but "what is rel
 
 ### Native where possible, MCP everywhere
 
-The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference in [INTERFACES.md](INTERFACES.md#clients).
+The project must not depend on its own UI. Prefer **native** when a client can bind session lifecycle to Twin. **MCP** remains the universal tool surface for every MCP host — and complements native mid-task. CLI and local API expose the same cognitive core. Full reference in [INTERFACES.md](INTERFACES.md#clients) · [NATIVE.md](NATIVE.md) · [MCP.md](MCP.md).
 
 ## Data model
 
@@ -363,23 +535,24 @@ Memories must have temporal validity.
 Example:
 
 ```text
-2025: works at Acme Corp
-2026: works at Globex
+year N:   works at Acme Corp
+year N+1: works at Globex
 ```
 
 Both can be true, but not simultaneously.
 
-Desired future:
+Temporal contracts already in the model:
 
-- `supersedes`;
-- `contradicts`;
-- `deprecated_by`;
-- automatic `valid_until`;
-- belief timeline.
+- `supersedes` / `contradicts` relations (human-gated lifecycle ops);
+- `valid_from` / `valid_until` windows on memories;
+- status transitions (`deprecated`, `stale`, `unsupported`, …).
+
+Still open: richer automatic validity inference and a full belief timeline.
 
 ## Ingestion and extraction pipeline
 
-Flow:
+End-to-end runtime (connectors → extract → meditate → pack) is in
+[Runtime sequences](#runtime-sequences). The short ingest spine:
 
 ```text
 raw source
@@ -388,7 +561,7 @@ normalization
         ↓
 PII filter
         ↓
-local LLM extraction (Ollama) or heuristic
+interpret (chat LLM) or defer — never silent lexical “understanding”
         ↓
 schema normalization
         ↓
@@ -399,25 +572,19 @@ review classification
 graph + evidence + embedding
 ```
 
-initial concept sources:
 
-- markdown;
-- `.txt` transcripts;
-- Fireflies/Meetily-style `.json` meetings;
-- Slack `.json` exports;
-- technical documents.
+Professional / technical sources (connectors and file ingest):
 
-Future sources:
+- GitHub, Slack, Gmail, Outlook, calendar;
+- Fireflies / Meetily-style meetings;
+- local folders, markdown, transcripts and technical documents.
 
-- Gmail;
-- Outlook;
-- WhatsApp;
-- calendar;
-- social networks;
-- personal notes;
-- local screen/voice;
-- wearables;
-- robotics/home automation.
+Explicitly out of product scope for intimate or continuous capture (see
+[PRODUCT.md](PRODUCT.md)):
+
+- personal WhatsApp and social networks;
+- continuous screen / voice capture;
+- wearables and home robotics as default sensors.
 
 ## PII and privacy
 
@@ -425,7 +592,7 @@ The project assumes that leaking personal data can cause real harm.
 
 Before any cloud LLM, text must go through PII masking.
 
-Classes covered today:
+PII classes the local filter handles:
 
 - emails;
 - phone numbers;
@@ -462,7 +629,7 @@ A memory goes to review when:
 
 - confidence < threshold;
 - sensitivity is `private` or `restricted`;
-- domain is outside the initial concept;
+- domain is outside the active product boundary;
 - type is judgment-adjacent (`belief`, `procedure`);
 - the memory seems to update/contradict another;
 - there is partial duplication;
@@ -501,7 +668,7 @@ principles:
 
 technical_preferences:
   - avoid overengineering
-  - prefer a simple stack for an initial concept
+  - prefer a simple stack until complexity is justified
   - evaluate lock-in before adopting a tool
   - canonical data in an open, exportable format
 
@@ -541,7 +708,7 @@ compact suggestion for the main AI
 
 The consumer domain is never guessed from the text: it is the frozen domain of the open session or an explicit argument. With no such domain the firewall target is `unclassified` and the suggestion comes back empty — ambiguity yields *less* context, never another domain's memories.
 
-Opening a session scope on the request path (`resolve_context_domain`) is a retrieval vote across confirmed memories only — no local LLM in the hot path. When the vote is inconclusive the session stays `unclassified` until a background `session_domain_resolve` job (multi-message evidence) or an explicit client/MCP domain freezes it. Native hosts: Claude's **Stop** is end-of-turn (observe only); **SessionEnd** closes the binding and enqueues background `session_complete` for the `session_summary` Percept (see [INTERFACES.md](INTERFACES.md); requires `twin-runtime`).
+Opening a session scope on the request path (`resolve_context_domain`) is a retrieval vote across confirmed memories only — no local LLM in the hot path. When the vote is inconclusive the session stays `unclassified` until a background `session_domain_resolve` job (multi-message evidence) or an explicit client/MCP domain freezes it. Native hosts: Claude's **Stop** is end-of-turn (observe only); **SessionEnd** closes the binding and enqueues background `session_complete` for the `session_summary` Percept (see [NATIVE.md](NATIVE.md); requires `twin-runtime`).
 
 This is inspired by Global Workspace Theory: many modules operate in parallel, but only some information enters the global workspace.
 
@@ -606,12 +773,13 @@ The most dangerous operational risk. Mitigations:
 
 ### Overengineering
 
-The risk of trying to build the whole brain before the being able to handle it. Mitigation:
+The risk of trying to build the whole brain before the substrate can
+govern it. Mitigation:
 
-- start with technical work;
-- avoid WhatsApp/intimate life at the beginning;
+- keep the product boundary on technical / professional work first;
+- keep intimate domains out of default ingestion;
 - do not build a chat of its own;
-- use MCP;
+- prefer Native / MCP over a parallel product surface;
 - measure real usefulness.
 
 ### Vendor dependency

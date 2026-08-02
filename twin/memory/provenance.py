@@ -120,6 +120,204 @@ def memory_provenance(store: MemoryStore, memory_id: str) -> dict[str, Any]:
     }
 
 
+_SENSOR_LABELS = {
+    "github": "GitHub",
+    "slack": "Slack",
+    "git": "Git",
+    "document": "Document",
+    "meeting": "Meeting",
+    "mail": "Mail",
+    "email": "Email",
+    "episode": "Episode",
+    "episode_reflect": "Episode reflection",
+    "pattern": "Pattern",
+    "workspace": "Workspace",
+    "unknown": "Unknown",
+}
+
+_KIND_LABELS = {
+    "pull_request": "pull request",
+    "commit": "commit",
+    "message": "message",
+    "thread_reply": "reply",
+    "issue": "issue",
+    "channel": "channel",
+    "episode": "episode",
+    "episode_reflection": "reflection",
+}
+
+# Synthetic cognition sensors — show at most once, and only when there is no
+# concrete connector artifact to display instead.
+_SYNTHETIC_SENSORS = frozenset({"episode_reflect", "episode", "pattern", "workspace"})
+
+
+def _friendly_sensor(sensor: str) -> str:
+    return _SENSOR_LABELS.get(sensor, sensor.replace("_", " ").strip().title() or "Source")
+
+
+def _friendly_kind(kind: str) -> str:
+    if not kind:
+        return ""
+    return _KIND_LABELS.get(kind, kind.replace("_", " ").strip())
+
+
+def _source_ref_label(sensor: str, ext_type: str, ext_id: str, sm: dict[str, Any]) -> str:
+    """Human label for a provenance chip — never a bare implementation id."""
+    sensor_label = _friendly_sensor(sensor)
+    if sensor in _SYNTHETIC_SENSORS and not ext_id and not ext_type:
+        return sensor_label
+    bits: list[str] = [sensor_label]
+    kind = _friendly_kind(ext_type)
+    if kind:
+        bits.append(kind)
+    if ext_id:
+        short = ext_id if len(ext_id) <= 40 else ext_id.split("/")[-1]
+        bits.append(short)
+    else:
+        channel = sm.get("channel_name") or sm.get("channel")
+        if channel:
+            bits.append(str(channel))
+    return " · ".join(bits)
+
+
+def memory_source_summary(store: MemoryStore, memory_id: str) -> dict[str, Any]:
+    """Compact 'where did this come from?' for UI cards and list endpoints.
+
+    Returns sensors (slack/github/…), concrete artifact refs, and a short
+    human label suitable for a tag — without the full provenance dump.
+    """
+    evidence = store.get_evidence(memory_id) if hasattr(store, "get_evidence") else []
+    sensors: list[str] = []
+    refs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    seen_labels: set[str] = set()
+    for ev in evidence:
+        p = store.get_percept(ev.percept_id) if getattr(ev, "percept_id", None) else None
+        if p is None:
+            continue
+        sensor = p.source_sensor or "unknown"
+        meta = p.metadata or {}
+        sm = meta.get("source_metadata") or {}
+        if not isinstance(sm, dict):
+            sm = {}
+        ext_type = str(meta.get("external_type") or "")
+        ext_id = str(meta.get("external_id") or "")
+        # Collapse many reflection percepts into one synthetic chip.
+        if sensor in _SYNTHETIC_SENSORS and not ext_id:
+            key = (sensor, "")
+        else:
+            key = (ext_type, ext_id or p.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        if sensor not in sensors:
+            sensors.append(sensor)
+        label = _source_ref_label(sensor, ext_type, ext_id, sm)
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        refs.append({
+            "sensor": sensor,
+            "kind": ext_type or None,
+            "id": ext_id or None,
+            "url": sm.get("html_url") or sm.get("permalink") or sm.get("url"),
+            "author": sm.get("author_name"),
+            "channel": sm.get("channel_name") or sm.get("channel"),
+            "label": label,
+            "occurred_at": p.occurred_at,
+        })
+    # Prefer concrete connector chips; keep a single reflection chip only when
+    # it is the sole origin (no GitHub/Slack artifact alongside).
+    concrete = [r for r in refs if r.get("sensor") not in _SYNTHETIC_SENSORS]
+    synthetic = [r for r in refs if r.get("sensor") in _SYNTHETIC_SENSORS]
+    if concrete:
+        refs = concrete
+        sensors = [s for s in sensors if s not in _SYNTHETIC_SENSORS]
+    elif synthetic:
+        refs = synthetic[:1]
+        sensors = [refs[0]["sensor"]]
+    # Fallback: episode / pattern origin when evidence is still empty
+    if not sensors:
+        mem = store.get_memory(memory_id)
+        payload = (mem.payload or {}) if mem else {}
+        if payload.get("episode_id"):
+            sensors = ["episode"]
+            refs.append({
+                "sensor": "episode", "kind": "episode",
+                "id": payload["episode_id"],
+                "label": "Episode",
+            })
+        elif payload.get("pattern_window_key"):
+            sensors = ["pattern"]
+            refs.append({
+                "sensor": "pattern", "kind": "pattern",
+                "id": payload["pattern_window_key"],
+                "label": "Pattern window",
+            })
+        elif payload.get("source") == "episode_reflect":
+            sensors = ["episode_reflect"]
+            refs.append({
+                "sensor": "episode_reflect", "kind": "episode_reflection",
+                "id": None,
+                "label": "Episode reflection",
+            })
+    friendly_sensors = [_friendly_sensor(s) for s in sensors]
+    return {
+        "sensors": sensors,
+        "refs": refs[:6],
+        "label": " + ".join(friendly_sensors) if friendly_sensors else "Unknown",
+    }
+
+
+def memory_source_keys(store: MemoryStore, memory: Any) -> set[str]:
+    """Distinct *independent sources* backing one memory.
+
+    The unit of independence is the evidence ``independence_group`` (e.g.
+    ``episode:<id>`` for everything read out of one episode, ``xsense:slack:…``
+    for a cross-sense neighbor, ``lineage:github:…`` for a connector record).
+    Two evidences from the same episode collapse to one source; a Slack symptom
+    attached alongside a GitHub fix is a second, genuinely independent source.
+
+    Falls back to the memory's own origin (episode / pattern window / id) only
+    when no evidence groups are recorded.
+    """
+    mem = memory if hasattr(memory, "payload") else store.get_memory(memory)
+    if mem is None:
+        return set()
+    keys: set[str] = set()
+    evidence = store.get_evidence(mem.id) if hasattr(store, "get_evidence") else []
+    for e in evidence:
+        group = getattr(e, "independence_group", None)
+        if group:
+            keys.add(str(group))
+        elif getattr(e, "percept_id", None):
+            keys.add(f"pct:{e.percept_id}")
+    if keys:
+        return keys
+    payload = mem.payload or {}
+    if payload.get("episode_id"):
+        return {f"episode:{payload['episode_id']}"}
+    if payload.get("pattern_window_key"):
+        return {f"pattern:{payload['pattern_window_key']}"}
+    return {f"mem:{mem.id}"}
+
+
+def count_independent_sources(store: MemoryStore, memories: Any) -> int:
+    """Number of distinct independent sources across a set of memories/ids.
+
+    This is the honest "support" behind a claim: N memories that all trace back
+    to a single episode count as **one** source, while agreement across senses
+    (Slack + GitHub) or across episodes counts as many.
+    """
+    groups: set[str] = set()
+    materialized = list(memories)
+    for m in materialized:
+        groups |= memory_source_keys(store, m)
+    if groups:
+        return len(groups)
+    return 1 if materialized else 0
+
+
 def attach_corroborating_evidence(
     store: MemoryStore,
     memory_id: str,

@@ -60,6 +60,22 @@ def _records_by_type(store, connector_id):
     return out
 
 
+# -- backfill floor (oldest-content anchor) ----------------------------------------
+
+
+def test_backfill_floor_anchors_at_oldest_repo(store, creds, gh):
+    """Backfill starts at the oldest repo-creation date, not the planner's blind
+    10-year default (which yields many empty month partitions)."""
+    from twin.connectors import create_backfill_job
+
+    gh.add_repo("acme/legacy", created_at="2012-03-15T00:00:00Z")
+    _acc, inst = _mk(store, creds, repos=(REPO, "acme/legacy"))
+    job = create_backfill_job(store, creds, inst.id)
+
+    assert job.range_start == "2012-03-15"
+    assert job.progress["partitions"][0]["partition_key"] == "2012-03"
+
+
 # -- streams, lineage and trust ---------------------------------------------------
 
 
