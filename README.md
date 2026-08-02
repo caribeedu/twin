@@ -116,9 +116,13 @@ It treats them as components of a broader cognitive process.
 ```text
 Observation
     ↓
+Percept
+    ↓
 Correlation
     ↓
 Situation Formation
+    ↓
+Memory
     ↓
 Understanding
     ↓
@@ -151,7 +155,7 @@ Current experiments suggest that:
 - Reflection can improve understanding quality before durable memory is created;
 - Explicit judgment appears more stable when modeled independently from factual memory;
 - Frontier reasoning models currently produce substantially better understanding quality than contemporary local models for complex cognitive tasks;
-- Exposing evidence, confidence and processing cost makes cognitive behavior significantly more inspectable than opaque memory systems.
+- Exposing evidence, confidence and processing cost makes cognitive behavior significantly more inspectable than opaque memory systems;
 
 These findings remain subject to revision.
 
@@ -220,9 +224,7 @@ Beyond what happened, the long-term system should represent:
   domain and audience;
 - which actions may be suggested, prepared or executed.
 
-Models may propose interpretations, memories and revisions. Identity-
-level claims, durable judgment and delegated authority require
-proportionate evidence, transparency and human control.
+Models may propose interpretations, memories and revisions. Identity-level claims, durable judgment and delegated authority require proportionate evidence, transparency and human control.
 
 ## Research Objective
 
@@ -244,7 +246,7 @@ Answering that question requires combining software engineering with insights fr
 - causal reasoning;
 - temporal reasoning;
 - memory consolidation;
-- reflection and judgment.
+- reflection and judgment;
 
 These disciplines are treated as sources of engineering hypotheses that
 can be validated through implementation, benchmarks and experimentation.
@@ -283,7 +285,7 @@ It should provide:
 - transparent processing costs;
 - model independence;
 - exportability;
-- human authority over durable conclusions and any delegated agency.
+- human authority over durable conclusions and any delegated agency;
 
 Users should always be able to inspect:
 
@@ -292,7 +294,7 @@ Users should always be able to inspect:
 - which evidence supports it;
 - what it cost to compute;
 - how confident the system is;
-- what may be corrected, exported or removed.
+- what may be corrected, exported or removed;
 
 Install and first use: [docs/SETUP.md](docs/SETUP.md). Product shape: [docs/PRODUCT.md](docs/PRODUCT.md).
 
@@ -315,7 +317,7 @@ Twin therefore adopts a pragmatic position:
 - use cloud reasoning where it demonstrably improves cognition;
 - expose every processing stage;
 - expose the computational cost of every cognitive layer;
-- allow components to be replaced as local models improve.
+- allow components to be replaced as local models improve;
 
 The objective is not to maximize cloud usage.
 
@@ -335,7 +337,7 @@ Twin should not become:
 - an autonomous actor that silently changes the user's values;
 - a chatbot that impersonates the owner;
 - a system that hides reasoning costs;
-- a collection of cognitive terminology without measurable behavior.
+- a collection of cognitive terminology without measurable behavior;
 
 ## Direction
 
@@ -369,7 +371,7 @@ Current implementations already demonstrate capabilities such as:
 - longitudinal understanding;
 - explicit reflection;
 - judgment formation;
-- cross-domain governance.
+- cross-domain governance;
 
 The next stage is to improve the quality, scalability and explainability of these capabilities through:
 
@@ -378,7 +380,7 @@ The next stage is to improve the quality, scalability and explainability of thes
 - higher-quality understanding synthesis;
 - quantitative benchmark coverage;
 - lower cognitive and computational cost;
-- progressively greater local execution as model capabilities mature.
+- progressively greater local execution as model capabilities mature;
 
 The long-term direction is a persistent cognitive substrate capable of supporting any authorized intelligence while preserving continuity, evidence, privacy, governance and human authority.
 
