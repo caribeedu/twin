@@ -44,22 +44,24 @@ How that shows up in the pipeline:
 ```text
 Artifact / connector feed
         ↓  (hippocampus-like encoding)
-Percept → candidate Memory
-        ↓  (cortical consolidation)
-Graph + evidence + embeddings (indexes only)
+Percept
+        ↓  (correlation / situation structure)
+WorkEpisode arc (phases + narrative edges) — revisable, not Memory
+        ↓  (cortical consolidation + human review)
+MemoryCandidate → confirmed Memory + evidence + embeddings (indexes only)
         ↓  (prefrontal / amygdala-like gates)
 Firewall + sensitivity + judgment
         ↓  (working memory)
-Safe context pack → MCP / CLI / API
+Safe context pack → Native / MCP / CLI / API
         ↕  (global workspace)
 Memory Observer (parallel suggestions)
 ```
 
 If a feature blurs these boundaries — e.g. treating raw text as confirmed memory, or bypassing the firewall “for convenience” — it fights the architecture, not just a style preference.
 
-### Brain analogies → CLI stages
+### Brain analogies and CLI stages
 
-Episode cognition (v1.3.0) makes the analogy literal: turning connector records into trajectory understanding is a chain of stages, each named for the region it plays. The `sensory` scaffold is structural (explicit anchors, exact identity/project); every semantic stage is an LLM (or a deterministic test override), and a missing model **defers** the stage rather than falling back to lexical rules. `twin correlate` runs up to `cortex`; `twin meditate` orchestrates the whole chain up to the human gates (`twin review`, `twin judgment approve`).
+Episode cognition makes the analogy operational: turning connector records into trajectory understanding is a chain of stages, each named for the region it plays. The `sensory` scaffold and `hippocampus_bind` are structural (explicit anchors, exact identity/project, membership); `basal` is report-only lifecycle. Stages that *interpret* (`amygdala`, `cortex` edges/phases, `hippocampus_consolidate` reflect) use an LLM (or a deterministic test override) and **defer** when the model is missing — they never invent an arc from lexical rules. `extractor=heuristic` blocks those semantic stages. `twin correlate` runs up to `cortex`; `twin meditate` orchestrates the whole chain up to the human gates (`twin review`, `twin judgment approve`).
 
 | # | Stage id (`brain_stage`) | Brain region | Job | Writes | CLI |
 |---|---|---|---|---|---|
@@ -114,8 +116,11 @@ Artifact
 Percept
 (normalized observation)
     ↓
+Correlation / Situation Model
+(WorkEpisode arc — revisable structure, not Memory)
+    ↓
 Memory
-(consolidated knowledge with evidence and temporal validity)
+(consolidated knowledge with evidence and temporal validity; candidates until review)
     ↓
 Judgment
 (how future decisions change)
@@ -124,7 +129,7 @@ Action
 (suggestion, draft, reminder, automation or silence)
 ```
 
-An artifact is a source object. A percept is what the system notices from that artifact. A memory is a durable structured claim extracted from one or more percepts. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
+An artifact is a source object. A percept is what the system notices from that artifact. Correlation proposes revisable situation structure (work episode and related links) without confirming Memory. A memory is a durable structured claim extracted from one or more percepts or reflected from an episode arc. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
 
 Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a percept to action without evidence, firewall and judgment, it is unsafe.
 
@@ -150,7 +155,7 @@ This principle does not mean all evidence must be exposed to every tool. Evidenc
 
 Memories should carry temporal validity through dates, conditions, supersedence or review triggers. A newer memory may replace or narrow an older one without deleting history. The system should preserve what used to be true while making clear what is true now.
 
-This protects the user from stale personalization. A tool that remembers the user well in 2026 but keeps applying 2023 preferences without context is not intelligent; it is outdated with confidence.
+This protects the user from stale personalization. A tool that remembers the user well today but keeps applying years-old preferences without context is not intelligent; it is outdated with confidence.
 
 ### Sessions are units of cognition
 
@@ -276,26 +281,17 @@ Backup = copy the folder.
 
 Full export = `twin export`.
 
-### SQLite as a light graph
+### Storage behind MemoryStore
 
-The initial concepts uses SQLite with tables for:
+Canonical memory lives behind a single interface (`MemoryStore`).
+**PostgreSQL + pgvector** is the primary backend (server-side vector
+search, tsvector/GIN for full-text, JSONB). **SQLite** remains the
+zero-config backend for local/dev use. The logical model includes
+sources, memories, evidence, entities, relations, embeddings,
+firewall logs and full-text indexes — regardless of backend.
 
-- sources;
-- memories;
-- evidence;
-- entities;
-- memory_entities;
-- relations;
-- embeddings;
-- firewall_log;
-- FTS5.
-
-That choice avoids heavy infrastructure too early. Today the storage lives
-behind a single interface (`MemoryStore`): **PostgreSQL + pgvector is the
-primary backend** (server-side vector search, tsvector/GIN for full-text,
-JSONB) and SQLite remains the zero-config backend for dev/tests.
-Neo4j, FalkorDB or Graphiti may come later, but the canonical memory must
-remain exportable.
+Alternative graph stores (Neo4j, FalkorDB, Graphiti, …) may replace the
+engine later, but the canonical memory must remain exportable.
 
 ### Vectors as index, not as memory
 
@@ -384,19 +380,19 @@ Memories must have temporal validity.
 Example:
 
 ```text
-2025: works at Acme Corp
-2026: works at Globex
+year N:   works at Acme Corp
+year N+1: works at Globex
 ```
 
 Both can be true, but not simultaneously.
 
-Desired future:
+Temporal contracts already in the model:
 
-- `supersedes`;
-- `contradicts`;
-- `deprecated_by`;
-- automatic `valid_until`;
-- belief timeline.
+- `supersedes` / `contradicts` relations (human-gated lifecycle ops);
+- `valid_from` / `valid_until` windows on memories;
+- status transitions (`deprecated`, `stale`, `unsupported`, …).
+
+Still open: richer automatic validity inference and a full belief timeline.
 
 ## Ingestion and extraction pipeline
 
@@ -420,25 +416,18 @@ review classification
 graph + evidence + embedding
 ```
 
-initial concept sources:
+Professional / technical sources (connectors and file ingest):
 
-- markdown;
-- `.txt` transcripts;
-- Fireflies/Meetily-style `.json` meetings;
-- Slack `.json` exports;
-- technical documents.
+- GitHub, Slack, Gmail, Outlook, calendar;
+- Fireflies / Meetily-style meetings;
+- local folders, markdown, transcripts and technical documents.
 
-Future sources:
+Explicitly out of product scope for intimate or continuous capture (see
+[PRODUCT.md](PRODUCT.md)):
 
-- Gmail;
-- Outlook;
-- WhatsApp;
-- calendar;
-- social networks;
-- personal notes;
-- local screen/voice;
-- wearables;
-- robotics/home automation.
+- personal WhatsApp and social networks;
+- continuous screen / voice capture;
+- wearables and home robotics as default sensors.
 
 ## PII and privacy
 
@@ -446,7 +435,7 @@ The project assumes that leaking personal data can cause real harm.
 
 Before any cloud LLM, text must go through PII masking.
 
-Classes covered today:
+PII classes the local filter handles:
 
 - emails;
 - phone numbers;
@@ -483,7 +472,7 @@ A memory goes to review when:
 
 - confidence < threshold;
 - sensitivity is `private` or `restricted`;
-- domain is outside the initial concept;
+- domain is outside the active product boundary;
 - type is judgment-adjacent (`belief`, `procedure`);
 - the memory seems to update/contradict another;
 - there is partial duplication;
@@ -522,7 +511,7 @@ principles:
 
 technical_preferences:
   - avoid overengineering
-  - prefer a simple stack for an initial concept
+  - prefer a simple stack until complexity is justified
   - evaluate lock-in before adopting a tool
   - canonical data in an open, exportable format
 
@@ -627,12 +616,13 @@ The most dangerous operational risk. Mitigations:
 
 ### Overengineering
 
-The risk of trying to build the whole brain before the being able to handle it. Mitigation:
+The risk of trying to build the whole brain before the substrate can
+govern it. Mitigation:
 
-- start with technical work;
-- avoid WhatsApp/intimate life at the beginning;
+- keep the product boundary on technical / professional work first;
+- keep intimate domains out of default ingestion;
 - do not build a chat of its own;
-- use MCP;
+- prefer Native / MCP over a parallel product surface;
 - measure real usefulness.
 
 ### Vendor dependency

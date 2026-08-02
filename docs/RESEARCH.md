@@ -64,7 +64,7 @@ understanding.
 
 ## Hypotheses
 
-### Hypothesis 1 — Understanding is more valuable than retrieval
+### Hypothesis 1 - Understanding is more valuable than retrieval
 
 Distributed observations can be synthesized into reusable understanding
 that is more useful than retrieving isolated documents.
@@ -72,25 +72,25 @@ that is more useful than retrieving isolated documents.
 Signals: better answers with fewer injected tokens, less repeated
 explanation, higher factual consistency, better task completion.
 
-### Hypothesis 2 — Situation Models are the correct cognitive primitive
+### Hypothesis 2 - Situation Models are the correct cognitive primitive
 
 The primary unit of long-term cognition should not be the document or
 the message. It should be a [Situation Model](COGNITION.md#situation-models).
 
-### Hypothesis 3 — Reflection should precede durable memory
+### Hypothesis 3 - Reflection should precede durable memory
 
 Raw observations should be correlated, interpreted and reflected upon
 before becoming durable memory — less noise, better abstraction, easier
 correction, higher trust
 ([IDENTITY.md](IDENTITY.md#design-principles)).
 
-### Hypothesis 4 — Judgment evolves independently from factual memory
+### Hypothesis 4 - Judgment evolves independently from factual memory
 
 Facts answer *what happened*. Judgment answers *how similar situations
 should be evaluated in the future*. Twin should model both independently
 ([GLOSSARY.md](GLOSSARY.md)).
 
-### Hypothesis 5 — Continuity depends more on understanding than context size
+### Hypothesis 5 - Continuity depends more on understanding than context size
 
 Larger context windows alone do not create continuity. Reusable
 understanding accumulated over time should outperform simply injecting
@@ -127,7 +127,7 @@ Related narrative: [README — Concrete Example](../README.md#concrete-example)
 - Future Twin versions
 
 Measure whether a coherent understanding is produced — not whether
-documents are retrieved ([IDENTITY.md](IDENTITY.md#positioning--not-these-categories)).
+documents are retrieved ([IDENTITY.md](IDENTITY.md#positioning-not-these-categories)).
 
 ---
 

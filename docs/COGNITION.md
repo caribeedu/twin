@@ -63,8 +63,11 @@ artifacts. Same narrative: [README — Concrete Example](../README.md#concrete-e
 Humans rarely remember isolated messages. They remember situations.
 
 Twin adopts **Situation Models** as the primary abstraction for forming
-understanding — before durable memory is written. Hypothesis under test:
-[RESEARCH.md](RESEARCH.md#hypothesis-2--situation-models-are-the-correct-cognitive-primitive).
+understanding — before durable memory is written. In the runtime the
+closest revisable carrier is the `WorkEpisode` arc (phases + narrative
+edges) — see [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
+Hypothesis under test:
+[RESEARCH.md](RESEARCH.md#hypothesis-2-situation-models-are-the-correct-cognitive-primitive).
 
 ### Components
 

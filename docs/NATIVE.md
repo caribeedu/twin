@@ -1,7 +1,8 @@
 # Native
 
-This document explains host-lifecycle binding — Claude Code hooks today;
-app-server-style surfaces later.
+This document explains host-lifecycle binding. The reference native host
+is Claude Code hooks; other hosts should follow the same lifecycle
+contract (including later app-server-style surfaces).
 
 > Prefer **native** when the host can embed Twin in its session lifecycle.
 
@@ -9,7 +10,7 @@ Shared surface map: [INTERFACES.md](INTERFACES.md). Universal tools:
 [MCP.md](MCP.md). CLI commands: [CLI.md — Native](CLI.md#native).
 Identity (model-independent continuity): [IDENTITY.md](IDENTITY.md).
 
-Native integration binds the **host application** to Twin’s cognitive sessions without a parallel memory store. Today the shipped proof is **Claude Code hooks**. Deeper host embedding (for example app-server style surfaces) should follow the same rules: one core, fail-open, no silent Memory/Judgment confirmation.
+Native integration binds the **host application** to Twin’s cognitive sessions without a parallel memory store. **Reference host: Claude Code hooks.** Deeper host embedding should follow the same rules: one core, fail-open, no silent Memory/Judgment confirmation.
 
 This is **not** a connector. Connectors ingest external systems (repos, Slack, …). Native binds the IDE/agent session you are already in. Both can create Percepts, but through different paths.
 

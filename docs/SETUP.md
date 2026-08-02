@@ -72,18 +72,9 @@ Local open models via Ollama are the recommended default (`twin init` steers you
 python -m pytest
 ```
 
-Expected coverage:
-
-- PII;
-- ingestion;
-- extraction;
-- dedupe;
-- firewall;
-- search;
-- context pack;
-- observer;
-- API;
-- MCP.
+Suites live under `tests/` (cognition, connectors, interfaces, privacy,
+judgment, memory, evals, …). Prefer `python -m pytest` over maintaining a
+hand-curated feature checklist here.
 
 ---
 

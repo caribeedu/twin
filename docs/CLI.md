@@ -73,7 +73,7 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 
 ## Correlation & Episode cognition
 
-Correlation proposes revisable structure over connector evidence — never Memory or Judgment. Since v1.3.0 the *semantic* work runs as an LLM cognition chain whose stages are named for their brain analogy (see [ARCHITECTURE → Brain analogies](ARCHITECTURE.md#brain-analogies--cli-stages)). A missing model **defers** a stage — it never falls back to lexical rules, and `extractor=heuristic` blocks the semantic stages with a clear message.
+Correlation proposes revisable structure over connector evidence — never Memory or Judgment. Semantic episode cognition runs as an LLM chain whose stages are named for their brain analogy (see [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages)). A missing model **defers** an interpreting stage — it never falls back to lexical rules, and `extractor=heuristic` blocks those stages with a clear message.
 
 | Stage | Brain analogy | CLI surface |
 |---|---|---|
@@ -107,7 +107,7 @@ Host-lifecycle commands for Claude Code hooks. Behavior and profiles in [NATIVE.
 | `twin native bindings` | List `HostSessionBinding`s |
 | `twin native event` | Ingest a host event (JSON or `--stdin`; hooks use `--fail-open`) |
 
-MCP status tools for the same bindings: `native_bindings`, `native_session_status` — see [MCP.md](MCP.md#connectors--meta) (native tools listed under Connectors & meta).
+MCP status tools for the same bindings: `native_bindings`, `native_session_status` — see [MCP.md](MCP.md#connectors-and-meta) (native tools listed under Connectors and meta).
 
 ## Connectors
 
@@ -132,7 +132,7 @@ Source-adapter CLI. What each connector pulls (and does not) lives in [INTERFACE
 | `twin connector production-ready` | Report which real adapters close the production-ready contract. |
 | `twin connector contract` | Print adapter contract matrix (evidence pointers into pytest). |
 
-MCP mirrors (capability-gated; mutating tools need confirm): `connector_list`, `connector_status`, `connector_health_all`, `connector_sync`, `connector_backfill_preview`, `connector_dead_letters` — see [MCP → Connectors & meta](MCP.md#connectors--meta). HTTP webhooks: [REST](REST.md).
+MCP mirrors (capability-gated; mutating tools need confirm): `connector_list`, `connector_status`, `connector_health_all`, `connector_sync`, `connector_backfill_preview`, `connector_dead_letters` — see [MCP → Connectors and meta](MCP.md#connectors-and-meta). HTTP webhooks: [REST](REST.md).
 
 ### GitHub
 
@@ -207,7 +207,8 @@ Empty roots leave the instance `awaiting_configuration` until roots are set.
 
 | Step | Command |
 |---|---|
-| Extract candidates | `twin extract` |
+| Extract atomic candidates | `twin extract` |
+| Episode cognition (happy path) | `twin meditate` (or `twin correlate` then `twin episode reflect`) |
 | Human review | `twin review` |
 | Scheduler | `twin connector due` then `twin connector sync-due` |
 

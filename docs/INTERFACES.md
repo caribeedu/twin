@@ -22,7 +22,7 @@ Install: [SETUP.md](SETUP.md). Ops: [OPERATIONS.md](OPERATIONS.md).
 
 | Surface | Doc | Role | Prefer when |
 |---|---|---|---|
-| **Native** | [NATIVE.md](NATIVE.md) | Host lifecycle binds to Twin sessions; packs on session start; observations; summary percept on session end | The host offers a native surface (Claude Code hooks today; app-server-style later) |
+| **Native** | [NATIVE.md](NATIVE.md) | Host lifecycle binds to Twin sessions; packs on session start; observations; summary percept on session end | The host offers a native surface (reference: Claude Code hooks; same contract for later hosts) |
 | **MCP** | [MCP.md](MCP.md) | Universal tools: packs, search, sessions, review, judgment, connector ops | Every MCP client; also alongside native for mid-task tools |
 | **CLI** | [CLI.md](CLI.md) | Ingest, review, connector ops, scripting | Humans and automation outside an IDE |
 | **Local API / REST** | [REST.md](REST.md) | HTTP + review workbench | Browsers and local integrations |
@@ -80,7 +80,7 @@ Every connector uses an **allowlist** (repos, channels, labels, folders, calenda
 | **Fireflies** | `fireflies` | Meeting **manifest**, speaker-labeled **transcript chunks**, optional provider **summary** | Audio / video bytes; signed media URLs (flags only that media existed) | Chunks never split mid-utterance. Summary marked derived. Still extract + human review; PII policies apply. |
 | **Local folder** | `folder` | Watched roots: text docs (default `md` / `txt` / `rst`, …) as manifest + revision **chunks**; deletes as tombstones | Binary file bodies; absolute paths in the cognitive payload | Content-hash skips unchanged files. Oversized / unsupported files stay metadata-only. No auth — path access is the trust boundary. |
 
-Connectors reference in [CLI.md → Connectors](CLI.md#connectors). MCP tools in [MCP.md → Connectors & meta](MCP.md#connectors--meta). HTTP webhooks in [REST.md](REST.md).
+Connectors reference in [CLI.md → Connectors](CLI.md#connectors). MCP tools in [MCP.md → Connectors and meta](MCP.md#connectors--meta). HTTP webhooks in [REST.md](REST.md).
 
 ---
 

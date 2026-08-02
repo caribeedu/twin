@@ -1,8 +1,8 @@
 # Product
 
 This document explains what Twin delivers — memory / judgment / action
-layers, domain separation, initial concept shape, related projects and
-success criteria.
+layers, domain separation, product shape, related projects and success
+criteria.
 
 It does not redefine identity ([IDENTITY.md](IDENTITY.md)) or cognitive
 concepts ([COGNITION.md](COGNITION.md)). Twin is a personal, local-first
@@ -55,7 +55,7 @@ Action answers:
 - should I block a memory?
 - should I ask for explicit confirmation?
 
-The initial concept focuses mainly on memory + firewall + initial judgment. Autonomous action is left for future versions.
+The product boundary focuses mainly on memory + firewall + judgment. Autonomous action stays out of scope until later majors ([ROADMAP.md](ROADMAP.md)).
 
 ## Domain separation
 
@@ -97,56 +97,49 @@ rules:
 
 The rule must not be "retrieve everything and trust the LLM". The correct approach is to block before the main LLM ever receives the content.
 
-## initial concept architecture
+## Initial concept shape
 
-The current initial concept proves one thing:
+The core delivery loop:
 
-> It is possible to drastically reduce context re-explanation in technical work, without leaking domains, using structured memory, a light temporal graph, vectors, FTS and MCP.
-
-Architecture:
+> Reduce context re-explanation in technical work, without leaking domains, using structured memory, revisable episode structure, a temporal graph, vectors, FTS and Native/MCP/CLI/API surfaces.
 
 ```text
-sources (docs, meetings, Slack)
+sources (connectors + files: docs, meetings, Slack, GitHub, mail, …)
         │  ingestion + normalization
         ▼
 PII filter ──────────────► nothing sensitive leaves for the cloud unmasked
-        │  extraction (local LLM via Ollama or heuristic)
+        │  extract and/or correlate → reflect
         ▼
-candidate memories ──► dedupe ──► selective review queue
+candidates (atomic + trajectory) ──► selective review
         │  human approval when needed
         ▼
-store (Postgres+pgvector primary | SQLite dev): memories + entities + relations + evidence + embeddings + FTS
+store (Postgres+pgvector primary | SQLite local): memories + entities + relations + evidence + embeddings + FTS
         │
         ▼
 hybrid search ──► Domain Firewall ──► compact context pack
         │                                    ▲
         ▼                                    │
-MCP / API / CLI                    judgment store (DB) + YAML bootstrap/export
+Native / MCP / CLI / API           judgment store (DB) + YAML bootstrap/export
 ```
 
-## Initial scope
+## Product boundary
 
-Includes:
+In scope:
 
-- technical/professional memory;
-- technical docs;
-- meetings;
-- technical Slack;
-- decisions;
-- tasks;
-- preferences;
-- light graph;
-- hybrid search;
-- MCP;
-- selective review;
-- initial judgment.
+- technical / professional memory;
+- connectors and file ingest for work sources (docs, meetings, Slack, GitHub, mail, calendar, …);
+- decisions, tasks, preferences;
+- WorkEpisode correlation and trajectory candidates;
+- temporal graph + hybrid search;
+- Native / MCP / CLI / local API;
+- selective review and evolving judgment.
 
-Deliberately does not include:
+Explicitly out of scope:
 
 - personal WhatsApp;
 - social networks;
-- health/family/relationship as sources;
-- continuous voice;
+- health / family / relationship as default sources;
+- continuous voice or screen capture;
 - autonomous automations;
 - robotics;
 - its own chat;
@@ -177,19 +170,19 @@ Relevant for local meeting capture, transcription and privacy. Can feed the epis
 
 Useful source of already-existing transcripts. Good for retrospective ingestion, as long as it is filtered for PII and confidentiality.
 
-### Slack MCP / Slack connectors
+### Slack connectors
 
-Source of decisions, blockers, team context and commitments. High value, high leakage risk. Must come in with strict domain and policies.
+Source of decisions, blockers, team context and commitments. High value, high leakage risk — ownership, vault partition and domain policies are mandatory.
 
 ### Screenpipe
 
-Inspiration for continuous local capture of screen/audio/context. Not an initial concept priority, but relevant for the multimodal version.
+Inspiration for continuous local capture of screen/audio/context. Outside the current product boundary; relevant for a later multimodal layer.
 
 ## Success metrics
 
-### Concept
+### Product
 
-The concept is successful if it:
+The product is successful if it:
 
 - identifies and catalogues real decisions from docs and meetings;
 - distinguishes decisions from proposals, questions, hypotheses and rejected alternatives;

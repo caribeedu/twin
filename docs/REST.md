@@ -3,77 +3,35 @@
 This document explains the local HTTP API and review workbench
 (`twin serve`).
 
-`twin serve` mounts a minimal review workbench, a JSON API and
-interactive docs (OpenAPI/Swagger via FastAPI when the `api` extra is
-installed). Base: `http://127.0.0.1:8765` (unless configured otherwise).
+`twin serve` mounts a review workbench, a JSON API and interactive docs
+(OpenAPI/Swagger via FastAPI when the `api` extra is installed). Base:
+`http://127.0.0.1:8765` (unless configured otherwise).
+
+**Source of truth for paths and schemas:** the OpenAPI surface exposed by
+`twin serve`. The tables below are a durable map of *domains*, not an
+exhaustive inventory — prefer OpenAPI when wiring a client.
 
 Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
 [CLI.md](CLI.md). Architecture of review / packs:
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Ingest & extract
+## Domains
 
-| Method | Path | What it does |
+| Domain | Typical prefixes | Role |
 |---|---|---|
-| `POST` | `/api/ingest` | Ingest artifacts / paths into percepts. |
-| `POST` | `/api/extract` | Run extraction on pending percepts. |
-| `GET` | `/api/percepts` | List/inspect percepts. |
-| `GET` | `/api/artifacts/{id}` | Fetch an artifact record. |
+| Ingest & extract | `/api/ingest`, `/api/extract`, `/api/percepts`, `/api/artifacts` | Artifact → percept → extraction |
+| Memories & review | `/api/memories`, `/api/review` | List, provenance, quality, resolve (merge/conflict/…), batches |
+| Search & packs | `/api/search`, `/api/context_pack`, `/api/observer` | Hybrid retrieval and firewall-filtered packs |
+| Sessions & runtime | `/api/sessions`, `/api/attention`, `/api/runtime`, `/api/health` | Cognitive sessions, attention, worker health |
+| Connectors | `/api/connectors`, `/api/webhooks` | Connector ops and inbound webhooks |
+| Judgment | `/api/judgment` | Items, proposals, simulate, conflicts |
+| Sovereignty | `/api/export`, `/api/backup`, `/api/restore` | Export / backup / restore |
+| Evals & metrics | `/api/evals`, `/api/metrics` | Harnesses and operational metrics |
 
-## Memories & review
-
-| Method | Path | What it does |
-|---|---|---|
-| `GET` | `/api/memories` | List / filter memories. |
-| `POST` | `/api/memories/{id}/review` | Submit a review decision. |
-| `POST` | `/api/memories/{id}/promote` | Propose promotion into judgment. |
-| `POST` | `/api/memories/{id}/supersede/{old_id}` | Supersede relation. |
-| `POST` | `/api/memories/{id}/contradict/{other_id}` | Contradiction relation. |
-| `GET` | `/api/memories/{id}/neighbors` | Neighborhood for review. |
-| `GET` | `/api/memories/{id}/quality` | Quality report. |
-| `GET` | `/api/memories/{id}/provenance` | Provenance chain. |
-| `POST` | `/api/memories/{id}/split` | Split memory. |
-| `POST` | `/api/memories/{id}/archive` | Archive memory. |
-| `POST` | `/api/memories/merge` | Merge memories. |
-| `GET` | `/api/review/queue` | Review queue. |
-| `GET`/`POST` | `/api/review/batches` | Review batches. |
-
-## Search, packs, observer
-
-| Method | Path | What it does |
-|---|---|---|
-| `GET`/`POST` | `/api/search` | Hybrid search. |
-| `POST` | `/api/context_pack` | Safe context pack (firewall applied). |
-| `POST` | `/api/observer` | Memory observer over current text. |
-
-## Judgment
-
-| Method | Path | What it does |
-|---|---|---|
-| `GET` | `/api/judgment` | Judgment overview. |
-| `GET` | `/api/judgment/items` | Judgment items. |
-| `GET` | `/api/judgment/versions` | Version history. |
-| `GET`/`POST` | `/api/judgment/proposals` | List / create proposals. |
-| `POST` | `/api/judgment/proposals/generate` | Generate proposals from signals. |
-| `POST` | `/api/judgment/proposals/{id}/preview` | Preview + token. |
-| `POST` | `/api/judgment/proposals/{id}/approve` | Approve (token + confirm). |
-| `POST` | `/api/judgment/proposals/{id}/reject` | Reject. |
-| `POST` | `/api/judgment/import` | Import YAML bootstrap into store. |
-| `POST` | `/api/judgment/applicable` | Applicable pack for a context. |
-| `POST` | `/api/judgment/simulate` | Simulate application. |
-| `GET` | `/api/judgment/conflicts` | Conflicts. |
-
-## Evals, metrics, export
-
-| Method | Path | What it does |
-|---|---|---|
-| `POST` | `/api/evals/extraction` | Run extraction eval. |
-| `POST` | `/api/evals/retrieval` | Run retrieval eval. |
-| `GET` | `/api/metrics` | Store / connector metrics. |
-| `GET`/`POST` | `/api/export` | Export portable data. |
+Review resolve actions (merge, contradict, supersede, dismiss, …) go
+through memory/finding endpoints on the workbench — see OpenAPI and the
+UI under `twin serve`.
 
 ---
 
----
-
-Quickstart narrative in [README.md](../README.md). Install/config in [SETUP.md](SETUP.md). Ops in [OPERATIONS.md](OPERATIONS.md).
+Install/config in [SETUP.md](SETUP.md). Ops in [OPERATIONS.md](OPERATIONS.md).

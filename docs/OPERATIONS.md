@@ -102,7 +102,7 @@ twin review
 
 ## Correlation & Episode cognition
 
-Episode cognition is an LLM chain of brain-named stages (`sensory → amygdala → basal → hippocampus_bind → cortex → hippocampus_consolidate → prefrontal`; see [ARCHITECTURE → Brain analogies → CLI stages](ARCHITECTURE.md#brain-analogies--cli-stages)). It requires an **interpreting** extractor (`TWIN_EXTRACTOR=auto` / `ollama` / a cloud chat client). When the model is unreachable each stage **defers** — it never invents an arc from lexical rules; `extractor=heuristic` blocks the semantic stages outright.
+Episode cognition is the brain-staged chain documented in [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages). It requires an **interpreting** extractor (`TWIN_EXTRACTOR=auto` / `ollama` / a cloud chat client). When the model is unreachable, interpreting stages **defer** — they never invent an arc from lexical rules; `extractor=heuristic` blocks those stages outright.
 
 The happy path after connector sync / backfill (and usually after `twin extract` + review of atomic candidates) is a single orchestrator command:
 

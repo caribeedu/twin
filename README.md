@@ -3,8 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Every AI should understand you better tomorrow than it did today — regardless of which AI you use.</strong><br/><br/>
-  A persistent cognitive layer that transforms distributed observations into reusable understanding.
+  <strong>Every AI should understand you better tomorrow than it did today — regardless of which AI you use.</strong>
 </p>
 
 <p align="center">
