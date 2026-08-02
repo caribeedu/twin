@@ -31,6 +31,13 @@ from .correlation.models import EpisodeLinkStatus
 from .correlation.text import rich_excerpt
 
 
+def _one_line(exc: BaseException, *, limit: int = 240) -> str:
+    """A single-line, bounded rendering of an exception for skip reasons."""
+    msg = str(exc).strip() or exc.__class__.__name__
+    msg = " ".join(msg.split())
+    return msg[:limit]
+
+
 @dataclass
 class EpisodeBrief:
     """Structured input to a reflector — evidence, not conclusions."""
@@ -43,6 +50,9 @@ class EpisodeBrief:
     quotes_by_ref: dict[str, str] = field(default_factory=dict)
     percept_by_ref: dict[str, str] = field(default_factory=dict)
     related_memories: list[dict[str, Any]] = field(default_factory=list)
+    # Rich cross-sense context compiled by the Analysis Context Compiler.
+    # Optional so a compile failure degrades to the structural brief.
+    dossier: Optional[Any] = None
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
 
@@ -62,6 +72,10 @@ class TrajectoryClaim:
     phase_keys: list[str] = field(default_factory=list)
     edge_ids: list[str] = field(default_factory=list)
     percept_ids: list[str] = field(default_factory=list)
+    # Cross-sense evidence refs the model *explicitly* connected (e.g. a Slack
+    # symptom for a GitHub fix). Validated against the dossier before any is
+    # attached as independent corroborating evidence — never inferred here.
+    cross_sense_refs: list[str] = field(default_factory=list)
     canonical_claim: Optional[dict[str, Any]] = None
     twin_influenced: bool = False
 
@@ -74,6 +88,12 @@ class ReflectResult:
 
 
 ReflectorFn = Callable[[EpisodeBrief, Config], list[TrajectoryClaim]]
+
+# Char budget for the dossier fed to the reflect model. Kept conservative so a
+# local model's context window is not overflowed (which returns empty content
+# and forces the stage to defer). A stronger/cloud "analysis" model can afford
+# the larger default compile budget; this cap is the safe hot-path value.
+REFLECT_DOSSIER_BUDGET_CHARS = 12_000
 
 _OVERRIDE: Optional[ReflectorFn] = None
 
@@ -95,8 +115,12 @@ def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[Episode
     if not hasattr(store, "list_episode_phases"):
         return None
 
+    from .actor_labels import humanize_record_text, rewrite_labels, labels_for_record
+
     quotes_by_ref: dict[str, str] = {}
     percept_by_ref: dict[str, str] = {}
+    user_labels: dict[str, str] = {}
+    channel_labels: dict[str, str] = {}
     for lk in store.list_episode_links(episode_id):
         st = getattr(lk.status, "value", lk.status)
         if st != EpisodeLinkStatus.active.value:
@@ -105,31 +129,44 @@ def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[Episode
         if lk.connector_record_id and hasattr(store, "get_connector_record"):
             rec = store.get_connector_record(lk.connector_record_id)
             if rec is not None:
-                content = rec.content or ""
+                content = humanize_record_text(store, rec, rec.content or "")
                 quotes_by_ref[ref] = rich_excerpt(content) or content[:200]
                 if getattr(rec, "percept_id", None):
                     percept_by_ref[ref] = rec.percept_id
+                u, c = labels_for_record(store, rec)
+                user_labels.update(u)
+                channel_labels.update(c)
 
     phases = []
     for p in store.list_episode_phases(episode_id):
+        summary = p.summary or ""
+        if summary and (user_labels or channel_labels):
+            summary = rewrite_labels(
+                summary, user_labels=user_labels, channel_labels=channel_labels,
+            )
         phases.append({
             "phase_key": p.phase_key,
             "kind": getattr(p.kind, "value", p.kind),
             "order": p.order,
             "started_at": p.started_at,
             "ended_at": p.ended_at,
-            "summary": p.summary,
+            "summary": summary,
             "members": list(p.member_external_refs or []),
         })
     edges = []
     for e in store.list_episode_edges(episode_id):
+        quote = e.evidence_quote or ""
+        if quote and (user_labels or channel_labels):
+            quote = rewrite_labels(
+                quote, user_labels=user_labels, channel_labels=channel_labels,
+            )
         edges.append({
             "id": e.id,
             "relation": getattr(e.relation, "value", e.relation),
             "status": getattr(e.status, "value", e.status),
             "from_key": e.from_ref.get("id"),
             "to_key": e.to_ref.get("id"),
-            "evidence_quote": e.evidence_quote,
+            "evidence_quote": quote,
         })
 
     return EpisodeBrief(
@@ -291,12 +328,14 @@ def _select_reflector(cfg: Config) -> Optional[ReflectorFn]:
     """
     if _OVERRIDE is not None:
         return _OVERRIDE
+    from .llm import get_chat_client
+
+    # Reflect runs on the single configured chat model (TWIN_LLM_*).
     if cfg.extractor in (
         "auto", "ollama", "openai", "openai_compatible",
         "anthropic", "claude", "gemini", "google",
     ):
         try:
-            from .llm import get_chat_client
             client = get_chat_client(cfg)
             if client.available():
                 return _make_llm_reflector(client)
@@ -307,10 +346,16 @@ def _select_reflector(cfg: Config) -> Optional[ReflectorFn]:
 
 def _make_llm_reflector(client) -> ReflectorFn:
     from .interpreter.reflect_prompt import reflect_with_model
+    from .llm.usage import usage_context
 
     def _reflector(brief: EpisodeBrief, cfg: Config) -> list[TrajectoryClaim]:
-        # A model failure must not fabricate — return no claims (stage defers).
-        claims = reflect_with_model(client, brief)
+        # A model / parse failure must not fabricate. It also must not crash the
+        # CLI — but it must not vanish silently either: the exception carries the
+        # real reason (bad model id, auth, context overflow) which the caller
+        # turns into a visible ``skipped_reason``. reflect_episode is responsible
+        # for degrading gracefully; here we surface the cause.
+        with usage_context(stage="reflect", role="llm"):
+            claims = reflect_with_model(client, brief)
         for c in claims:
             c.twin_influenced = True
         return claims
@@ -352,9 +397,32 @@ def reflect_episode(
             skipped_reason="no arc yet (run cortex: twin correlate)",
         )
 
-    brief.related_memories = gather_related_memories(
-        store, embedder, brief, session_id=session_id,
-    )
+    # Analysis Context Compiler: budgeted primary + soft cross-sense + retrieve
+    # related. Falls back to the shallow gatherer only if the compile fails.
+    dossier = None
+    try:
+        from .analysis_dossier import DEFAULT_BUDGET_CHARS, compile_episode_dossier
+
+        # Local open models often choke on the full dossier; cloud providers
+        # get the full ACC budget. Same TWIN_LLM_* client either way.
+        budget = (
+            DEFAULT_BUDGET_CHARS
+            if cfg.llm_provider_kind != "ollama"
+            else REFLECT_DOSSIER_BUDGET_CHARS
+        )
+        dossier = compile_episode_dossier(
+            store, embedder, episode_id, session_id=session_id,
+            budget_chars=budget,
+        )
+    except Exception:
+        dossier = None
+    if dossier is not None:
+        brief.dossier = dossier
+        brief.related_memories = list(dossier.related_memories)
+    else:
+        brief.related_memories = gather_related_memories(
+            store, embedder, brief, session_id=session_id,
+        )
 
     reflector = reflector or _select_reflector(cfg)
     if reflector is None:
@@ -362,10 +430,18 @@ def reflect_episode(
             episode_id=episode_id,
             skipped_reason="hippocampus_consolidate deferred (model unavailable)",
         )
-    claims = reflector(brief, cfg)
+    try:
+        claims = reflector(brief, cfg)
+    except Exception as exc:
+        # Degrade gracefully but keep the cause visible — the response body from
+        # the provider (e.g. an unknown analysis model id) lands here.
+        return ReflectResult(
+            episode_id=episode_id,
+            skipped_reason=f"reflect model failed: {_one_line(exc)}",
+        )
     result = ReflectResult(episode_id=episode_id)
     if not claims:
-        result.skipped_reason = "reflector produced no trajectory claims"
+        result.skipped_reason = "reflector returned no claims (model saw the arc but proposed nothing)"
         return result
 
     for claim in claims:
@@ -430,7 +506,7 @@ def reflect_episode(
             extractor_version=ExtractorVersion(
                 extractor="episode_reflect",
                 model="twin",
-                prompt_version="6",
+                prompt_version="8",
                 schema_version="1",
             ),
         )
@@ -444,12 +520,25 @@ def reflect_episode(
         )
         # Additional corroborating evidence spanning the other sources.
         if action == "created":
-            _attach_extra_evidence(store, mem.id, claim, primary_pid)
+            _attach_extra_evidence(
+                store, mem.id, claim, primary_pid, episode_id=brief.episode_id,
+            )
+            # Genuine cross-sense corroboration: the model *cited* a neighbor in
+            # another sense (e.g. a Slack symptom for this GitHub fix). Attach it
+            # with its own independence group so it counts as a real second
+            # source — this is what turns "Slack+GitHub agree" into corroboration.
+            _attach_cross_sense_evidence(store, mem.id, claim, brief)
             try:
                 store.store_embedding(
                     mem.id, "memory", embedder.name,
                     embedder.embed(f"{claim.title}\n{claim.summary}"),
                 )
+            except Exception:
+                pass
+            # Near-dup / conflict flags for review (same analyzer as extract).
+            try:
+                from .quality import analyze_memory
+                analyze_memory(store, embedder, mem.id, persist=True)
             except Exception:
                 pass
         row["created"] = action == "created"
@@ -500,6 +589,7 @@ def _ensure_reflection_percept(
 
 def _attach_extra_evidence(
     store: MemoryStore, memory_id: str, claim: TrajectoryClaim, primary_pid: str,
+    *, episode_id: str,
 ) -> None:
     from ..memory.provenance import attach_corroborating_evidence
 
@@ -512,11 +602,55 @@ def _attach_extra_evidence(
             continue
         quote = quotes[i] if i < len(quotes) else claim.summary
         try:
+            # All member percepts of this episode are the SAME source — one
+            # independence group — so intra-episode corroboration never inflates
+            # the independent-source count (fixes "2 supports from 1 episode").
             attach_corroborating_evidence(
                 store, memory_id, pid, quote,
-                independence_group=f"episode:{claim.canonical_claim}",
+                independence_group=f"episode:{episode_id}",
                 source_trust=0.7, bump_confidence=False,
             )
         except Exception:
             pass
         seen_pid.add(pid)
+
+
+def _attach_cross_sense_evidence(
+    store: MemoryStore, memory_id: str, claim: TrajectoryClaim, brief: EpisodeBrief,
+) -> None:
+    """Attach model-cited cross-sense neighbors as independent evidence.
+
+    Each cited ref maps to a dossier cross-sense blob → its connector record →
+    percept. Grounded only when that percept exists (FK safety). The independence
+    group is the neighbor's own sense/record, distinct from the episode, so a
+    Slack symptom backing a GitHub fix counts as a genuine second source.
+    """
+    if not claim.cross_sense_refs:
+        return
+    dossier = getattr(brief, "dossier", None)
+    if dossier is None:
+        return
+    from ..memory.provenance import attach_corroborating_evidence
+
+    by_ref = {b.ref: b for b in getattr(dossier, "cross_sense", [])}
+    for ref in claim.cross_sense_refs:
+        blob = by_ref.get(ref)
+        if blob is None or not getattr(blob, "record_id", None):
+            continue
+        rec = (
+            store.get_connector_record(blob.record_id)
+            if hasattr(store, "get_connector_record") else None
+        )
+        pid = getattr(rec, "percept_id", None) if rec is not None else None
+        if not pid or (
+            hasattr(store, "get_percept") and store.get_percept(pid) is None
+        ):
+            continue
+        try:
+            attach_corroborating_evidence(
+                store, memory_id, pid, (blob.text or claim.summary)[:400],
+                independence_group=f"xsense:{blob.sense}:{blob.record_id}",
+                source_trust=0.6, bump_confidence=True,
+            )
+        except Exception:
+            pass

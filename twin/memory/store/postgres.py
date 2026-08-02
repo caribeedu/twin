@@ -1089,7 +1089,7 @@ class PostgresStore(
 
     def update_memory(self, memory_id: str, **fields: Any) -> None:
         allowed = {
-            "title", "summary", "domain", "persona", "sensitivity", "confidence",
+            "type", "title", "summary", "domain", "persona", "sensitivity", "confidence",
             "status", "valid_from", "valid_until", "needs_review", "review_reason",
             "payload", "project_id", "review_priority", "quality_score", "quality_flags",
             "impact", "reviewed_at", "review_batch_id", "canonical_claim",

@@ -46,6 +46,23 @@ from .scanner import (
 STREAM_PREFIX = "folder"
 
 
+def _base_stream(stream: str) -> str:
+    """Strip a backfill namespace ``backfill:{job}:{partition}:{base}`` down to
+    the provider-native base stream. Continuous streams pass through unchanged.
+
+    The historical scan window travels via the SyncExecutionContext, not the
+    stream name, so only the base ``folder:{id}`` is parsed here."""
+    if stream.startswith("backfill:"):
+        parts = stream.split(":", 3)   # backfill : job : partition : base
+        if len(parts) != 4 or not parts[1] or not parts[2] or not parts[3]:
+            raise ConnectorError(
+                f"unknown backfill stream layout: {stream!r}",
+                failure_class=FailureClass.schema_change,
+            )
+        return parts[3]
+    return stream
+
+
 @register_adapter
 class FolderConnector:
     connector_type = "folder"
@@ -193,7 +210,7 @@ class FolderConnector:
         )
 
     def _parse_stream(self, stream: str) -> str:
-        parts = stream.split(":", 1)
+        parts = _base_stream(stream).split(":", 1)
         if len(parts) != 2 or parts[0] != STREAM_PREFIX or not parts[1]:
             raise ConnectorError(
                 f"unknown folder stream layout: {stream!r}",

@@ -12,11 +12,34 @@ Partition claims use CAS on ``BackfillJob.version`` plus a fencing
 
 from __future__ import annotations
 
+import os
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 CLAIM_TTL_SECONDS = 600
+
+# A single stream (e.g. one inaccessible Slack channel) must never wedge the
+# whole partition. After this many consecutive non-committing attempts a stream
+# is marked ``failed_terminal`` so the partition can complete *degraded* instead
+# of re-enqueuing forever. Override with ``TWIN_BACKFILL_MAX_STREAM_ATTEMPTS``.
+_DEFAULT_MAX_STREAM_ATTEMPTS = 5
+
+
+def max_stream_attempts() -> int:
+    raw = os.environ.get("TWIN_BACKFILL_MAX_STREAM_ATTEMPTS")
+    if raw:
+        try:
+            n = int(raw)
+            if n >= 1:
+                return n
+        except ValueError:
+            pass
+    return _DEFAULT_MAX_STREAM_ATTEMPTS
+
+
+# Statuses that mean "this base stream will not run again for this partition".
+_RESOLVED_STREAM_STATUSES = ("completed", "failed_terminal")
 
 
 def _parse_date(value: Optional[str]) -> Optional[date]:
@@ -73,6 +96,46 @@ def plan_year_month_partitions(
         else:
             m += 1
     return partitions
+
+
+def discover_earliest_month(
+    exists_before,
+    *,
+    max_years_back: int = 40,
+    today: Optional[date] = None,
+) -> Optional[str]:
+    """Binary-search the earliest month that holds content.
+
+    ``exists_before(d: date) -> bool`` must answer "is there any content
+    strictly before the first day of month ``d``?" and be monotonic (False for
+    old cutoffs, True once the cutoff passes the oldest item). Returns the first
+    day of the earliest content month as ``YYYY-MM-DD``, or None when there is
+    no content (or it cannot be determined). Costs ~log2(max_years_back*12)
+    probes — a cheap alternative to paginating a whole mailbox for providers
+    (Gmail) that expose no ascending order or creation timestamp."""
+    today = today or datetime.now(timezone.utc).date()
+
+    def _idx(y: int, m: int) -> int:
+        return y * 12 + (m - 1)
+
+    def _month(i: int) -> date:
+        return date(i // 12, i % 12 + 1, 1)
+
+    hi = _idx(today.year, today.month) + 1  # exclusive: "before next month" = all
+    if not exists_before(_month(hi)):
+        return None  # no content at all
+    lo = _idx(max(1970, today.year - max_years_back), today.month)
+    if exists_before(_month(lo)):
+        return _month(lo).isoformat()  # content older than the search floor
+    # Invariant: exists_before(lo) False, exists_before(hi) True. Narrow to the
+    # boundary; the oldest content lives in the month just below it.
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if exists_before(_month(mid)):
+            hi = mid
+        else:
+            lo = mid
+    return _month(lo).isoformat()
 
 
 def _claim_expired(part: dict[str, Any], *, now: Optional[datetime] = None) -> bool:
@@ -234,17 +297,37 @@ def claim_is_held(
 def incomplete_base_streams(
     part: dict[str, Any], base_streams: list[str],
 ) -> list[str]:
-    """Skip base streams already completed for this partition."""
+    """Base streams still worth running: not completed and not terminally failed.
+
+    A ``failed_terminal`` stream is skipped so a single broken source (e.g. an
+    inaccessible channel) never re-runs and never blocks partition completion.
+    """
     done = (part.get("streams") or {})
-    return [s for s in base_streams if done.get(s) != "completed"]
+    return [
+        s for s in base_streams
+        if done.get(s) not in _RESOLVED_STREAM_STATUSES
+    ]
+
+
+def base_stream_resolved(part: dict[str, Any], base: str) -> bool:
+    """True when a base stream is completed or terminally failed."""
+    return (part.get("streams") or {}).get(base) in _RESOLVED_STREAM_STATUSES
 
 
 def record_stream_results(
     progress: dict[str, Any], partition_key: str,
     stream_results: list[tuple[str, bool, bool]],
-    *, claim_token: int,
+    *, claim_token: int, max_attempts: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Update per-base-stream status from ``(base_stream, committed, done)``."""
+    """Update per-base-stream status from ``(base_stream, committed, done)``.
+
+    Tracks consecutive non-committing attempts per base stream. Once a stream
+    reaches ``max_attempts`` failures without progress it is marked
+    ``failed_terminal`` (a resolved state) so the partition can finish degraded
+    rather than looping forever. Any commit (even a mid-pagination one) resets
+    that stream's failure counter, since it is still making progress.
+    """
+    cap = max_attempts if max_attempts is not None else max_stream_attempts()
     out = dict(progress or {})
     parts = []
     for part in out.get("partitions") or []:
@@ -254,14 +337,25 @@ def record_stream_results(
                 parts.append(row)
                 continue
             streams = dict(row.get("streams") or {})
+            attempts = dict(row.get("stream_attempts") or {})
             for base, committed, done in stream_results:
                 if committed and done:
                     streams[base] = "completed"
+                    attempts.pop(base, None)
                 elif committed and not done:
                     streams[base] = "continuation_pending"
-                elif not committed:
-                    streams[base] = streams.get(base) or "failed"
+                    attempts.pop(base, None)
+                elif streams.get(base) == "completed":
+                    # Already finished; a transient empty result never regresses.
+                    continue
+                else:
+                    n = int(attempts.get(base, 0)) + 1
+                    attempts[base] = n
+                    streams[base] = (
+                        "failed_terminal" if n >= cap else "failed"
+                    )
             row["streams"] = streams
+            row["stream_attempts"] = attempts
         parts.append(row)
     out["partitions"] = parts
     return out

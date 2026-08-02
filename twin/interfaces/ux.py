@@ -490,6 +490,24 @@ def watch_backfill_job(
             f"backfill complete · {out['completed_partitions']}/"
             f"{out['total_partitions']} partitions"
         )
+        degraded = [
+            p for p in (progress.get("partitions") or [])
+            if p.get("degraded")
+        ]
+        if degraded:
+            failed_streams = sorted({
+                s for p in degraded for s in (p.get("failed_streams") or [])
+            })
+            out["degraded_partitions"] = len(degraded)
+            out["failed_streams"] = failed_streams
+            print_warn(
+                f"{len(degraded)} partition(s) completed degraded — "
+                f"gave up on stream(s): {', '.join(failed_streams) or 'unknown'}"
+            )
+            print_dim(
+                "these sources kept failing (e.g. bot not in channel / no "
+                "access). Fix access and re-run backfill to fill the gap."
+            )
     elif status == "failed":
         print_err(f"backfill failed · {(job.last_error if job else None) or 'see job status'}")
     elif status == "cancelled":

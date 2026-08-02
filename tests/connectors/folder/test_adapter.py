@@ -34,6 +34,33 @@ def _mk(store, creds, roots, *, extra=None):
     return acc, inst
 
 
+def test_base_stream_strips_backfill_namespace():
+    from twin.connectors.folder.adapter import _base_stream
+
+    assert _base_stream("folder:eng-docs") == "folder:eng-docs"
+    assert _base_stream(
+        "backfill:backfill_x:2016-09:folder:eng-docs") == "folder:eng-docs"
+    with pytest.raises(ConnectorError):
+        _base_stream("backfill:onlyjob")  # too few parts to be a partition
+
+
+def test_parse_stream_accepts_backfill_namespace(store, creds, tmp_path):
+    root = tmp_path / "shared"
+    root.mkdir()
+    _acc, inst = _mk(store, creds, roots=[{
+        "id": "eng-docs", "label": "eng-docs", "path": str(root),
+    }])
+    from twin.connectors.folder.adapter import FolderConnector
+
+    account = store.get_source_account(inst.account_id)
+    adapter = FolderConnector(inst, account, None)
+    assert adapter._parse_stream("folder:eng-docs") == "eng-docs"
+    assert adapter._parse_stream(
+        "backfill:backfill_x:2016-09:folder:eng-docs") == "eng-docs"
+    with pytest.raises(ConnectorError):
+        adapter._parse_stream("bogus:eng-docs")
+
+
 def test_empty_roots_await_configuration(store, creds):
     _acc, inst = _mk(store, creds, roots=[])
     result = sync_connector(store, creds, inst.id)

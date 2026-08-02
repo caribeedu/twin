@@ -94,6 +94,7 @@ from .runtime import (
 from .service import (
     add_connector_instance,
     backfill_preview,
+    cancel_backfill_job,
     create_backfill_job,
     discard_dead_letter,
     pause_connector,
@@ -172,6 +173,7 @@ __all__ = [
     "compute_connector_metrics",
     "connector_health",
     "contract_matrix",
+    "cancel_backfill_job",
     "create_backfill_job",
     "default_vault_for",
     "discard_dead_letter",

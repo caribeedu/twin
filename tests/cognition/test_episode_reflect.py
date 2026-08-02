@@ -270,7 +270,41 @@ def test_reflect_near_duplicate_arc_still_asks_model(store, cfg, embedder):
     )
     assert seen["called"] is True
     assert result.claims == []
-    assert "no trajectory claims" in result.skipped_reason
+    assert "no claims" in result.skipped_reason
+
+
+def test_reflect_surfaces_model_failure_reason(store, cfg, embedder):
+    """A raising reflector (bad model id, transport, overflow) must not vanish:
+    the cause is surfaced in ``skipped_reason`` and never crashes the caller."""
+    acc, inst = _acct(store, account_id="acct_fail")
+    lineage = "github:acme/atlas#7"
+    pr = _rec(
+        id="prf", connector_id=inst.id, source_account_id=acc.id,
+        external_type="pull_request", external_id="acme/atlas!7",
+        content="GitHub pull request acme/atlas!7: harden retry path.",
+        source_metadata={"repo": "acme/atlas", "lineage_root": lineage},
+    )
+    commit = _rec(
+        id="cmf", connector_id=inst.id, source_account_id=acc.id,
+        external_type="commit", external_id="deadbeef7",
+        content="Merge pull request #7 from acme/retry\n\nharden retry path",
+        source_metadata={"repo": "acme/atlas"},
+    )
+    for r in (pr, commit):
+        store.insert_connector_record(r)
+    report = run_episode_cognition(
+        store, cfg, embedder, mode="full", until=BrainStage.cortex,
+    )
+
+    def _boom(_brief, _cfg):
+        raise RuntimeError("anthropic HTTP 404: model: claude-opus-4-8 not found")
+
+    result = reflect_episode(
+        store, cfg, embedder, report.episode_ids[0], reflector=_boom,
+    )
+    assert result.claims == []
+    assert "reflect model failed" in result.skipped_reason
+    assert "claude-opus-4-8" in result.skipped_reason
 
 
 def test_reflect_allows_divergent_pr_commit_pair(store, cfg, embedder):
@@ -439,6 +473,29 @@ def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
     )
     assert result.claims, result.skipped_reason
     assert any(r["status"] == "session_artifact" for r in seen["related"])
+
+
+def test_llm_reflector_defers_on_model_error(store, cfg, embedder):
+    """An overflowing/garbled model reply must defer, never crash the caller.
+
+    Reproduces the CLI traceback where ``complete_json`` raised JSONDecodeError
+    on empty model content and propagated out of ``twin episode reflect``.
+    """
+    import json
+
+    from twin.cognition.episode_reflect import _make_llm_reflector
+
+    acc, inst = _acct(store, account_id="acct_boom")
+    ep = _pivot_episode(store, cfg, embedder, acc, inst)
+
+    class _Boom:
+        def complete_json(self, **_kwargs):
+            raise json.JSONDecodeError("no JSON object in model content", "", 0)
+
+    reflector = _make_llm_reflector(_Boom())
+    result = reflect_episode(store, cfg, embedder, ep.id, reflector=reflector)
+    assert result.claims == []
+    assert result.skipped_reason  # deferred, not raised
 
 
 def test_reflect_dry_run_persists_nothing(store, cfg, embedder):

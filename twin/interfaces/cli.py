@@ -278,8 +278,8 @@ def cmd_extract(args) -> None:
 
     auto = bool(getattr(args, "auto_approve", False))
     ux.print_dim(
-        f"{len(pending)} percept(s) · model={ws.cfg.ollama_model} · "
-        f"url={ws.cfg.ollama_url}"
+        f"{len(pending)} percept(s) · model={ws.cfg.resolved_llm_model} · "
+        f"provider={ws.cfg.normalized_llm_provider}"
         + (" · auto-approve ON" if auto else "")
     )
 
@@ -1119,6 +1119,151 @@ def cmd_promote(args) -> None:
     _emit(args, {"memory_id": mem.id, "section": section}, pretty)
 
 
+def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
+    """Human-readable judgment-proposal preview (replaces the raw JSON dump).
+
+    Surfaces the proposed judgment as a headline statement + calibrated
+    strength/confidence bars, its scope/exceptions, the evidence balance, and
+    the exact approve/reject/defer commands (with the preview token wired in).
+    """
+    from . import ux
+
+    item = preview.get("final_item") or {}
+    proposal = preview.get("proposal") or {}
+    action = str(proposal.get("action") or "create")
+    kind = str(item.get("kind") or "?")
+    stability = str(item.get("stability") or "evolving")
+    durable = bool(preview.get("durable"))
+
+    ux.print_rule(f"judgment preview · {proposal_id}")
+
+    badges = f"[bold magenta]{action}[/] · [bold]{kind}[/]"
+    if durable:
+        badges += "  ·  [yellow]DURABLE — needs constitutional confirm[/]"
+    ux.print_dim(badges)
+    ux.print_panel(item.get("statement") or "(no statement)", title="statement")
+    if item.get("description"):
+        ux.print_dim(item["description"])
+
+    def _f(v) -> float:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    meta = [
+        ("kind", kind),
+        ("domain", str(item.get("domain") or "—")),
+        ("persona", str(item.get("persona") or "—")),
+        ("stability", stability),
+        ("strength", ux.score_bar(_f(item.get("strength")))),
+        ("confidence", ux.score_bar(_f(item.get("confidence")))),
+    ]
+    if item.get("lean") is not None:
+        lean = _f(item.get("lean"))
+        side = "→ B" if lean > 0 else ("A ←" if lean < 0 else "balanced")
+        meta.append(("lean", f"{lean:+.2f} ({side})"))
+    if item.get("valid_until"):
+        meta.append(("valid_until", str(item.get("valid_until"))))
+    ux.print_kv(meta)
+
+    scope = item.get("scope") or {}
+    scope_rows = [
+        (k, ", ".join(str(x) for x in v))
+        for k, v in scope.items() if v
+    ]
+    if item.get("tradeoff"):
+        scope_rows.append(("tradeoff", str(item["tradeoff"])))
+    if scope_rows:
+        ux.print_rule("context & scope")
+        ux.print_kv(scope_rows)
+
+    exceptions = item.get("exceptions") or []
+    if exceptions:
+        ux.print_rule("exceptions")
+        ux.print_table(
+            ["condition", "effect", "value", "reason"],
+            [[
+                e.get("condition") or e.get("id") or "—",
+                str(e.get("effect") or ""),
+                f"{_f(e.get('value')):.2f}",
+                (e.get("reason") or "")[:48],
+            ] for e in exceptions],
+        )
+
+    ux.print_rule("evidence")
+    signed = preview.get("signed_payload") or {}
+    metadata = proposal.get("metadata") or {}
+    mem_count = (
+        signed.get("memory_count")
+        if signed.get("memory_count") is not None
+        else len(proposal.get("supporting_memory_ids") or [])
+    )
+    independent = (
+        signed.get("independent_sources")
+        if signed.get("independent_sources") is not None
+        else metadata.get("independent_sources")
+    )
+    # support_count now *is* the independent-source count; keep both visible so
+    # "2 memories · 1 independent source" reads honestly.
+    support = proposal.get("support_count")
+    if support is None:
+        support = independent if independent is not None else mem_count
+    contra = proposal.get("contradiction_count") or len(
+        proposal.get("contradicting_memory_ids") or []
+    )
+    if independent is not None:
+        support_line = f"{independent} independent source(s) · {mem_count} memories"
+    else:
+        support_line = str(support)
+    ev = [
+        ("supporting", support_line),
+        ("contradicting", str(contra)),
+        ("proposal conf", f"{_f(proposal.get('confidence')):.2f}"),
+    ]
+    prov = item.get("provenance") or {}
+    if prov.get("source"):
+        ev.append(("source", str(prov.get("source"))))
+    if prov.get("twin_influenced"):
+        ev.append(("twin_influenced", "yes (discounted)"))
+    if metadata.get("detector"):
+        ev.append(("detector", str(metadata.get("detector"))))
+    ux.print_kv(ev)
+    if independent is not None and independent <= 1 and mem_count > 1:
+        ux.print_warn(
+            "all supporting memories trace to a single source — confidence is "
+            "discounted; corroboration from another sense would strengthen it"
+        )
+    # Prefer titled rows over opaque ids; show which independent source each came from.
+    supporting = signed.get("supporting") or []
+    if supporting:
+        ux.print_table(
+            ["memory", "title", "sources"],
+            [[
+                str(s.get("id") or "—"),
+                (str(s.get("title") or "")[:56]),
+                ", ".join(s.get("independent_sources") or [])[:40] or "—",
+            ] for s in supporting[:8]],
+        )
+    else:
+        mem_ids = list(prov.get("memory_ids") or proposal.get("supporting_memory_ids") or [])
+        if mem_ids:
+            ux.print_dim("from memories: " + ", ".join(mem_ids[:8])
+                         + (" …" if len(mem_ids) > 8 else ""))
+    if proposal.get("reason"):
+        ux.print_panel(str(proposal["reason"]), title="why this proposal")
+
+    token = preview.get("preview_token") or ""
+    approve = f"twin judgment approve {proposal_id} --token {token}"
+    if durable or stability == "constitutional":
+        approve += " --constitutional"
+    ux.print_next([
+        ("→", approve),
+        ("→", f'twin judgment reject {proposal_id} --reason "…"'),
+        ("→", f"twin judgment defer {proposal_id}"),
+    ])
+
+
 def cmd_judgment(args) -> None:
     from . import ux
     from ..judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
@@ -1288,13 +1433,12 @@ def cmd_judgment(args) -> None:
         _emit(args, {"id": p.id, "reason": p.reason, "episode_id": args.episode_id},
               pretty)
     elif cmd == "preview":
-        text = preview_proposal(ws.store, args.proposal_id)
+        preview = preview_proposal(ws.store, args.proposal_id)
 
         def pretty():
-            ux.print_rule(f"judgment preview · {args.proposal_id}")
-            ux.print_panel(str(text), title="preview")
+            _render_judgment_preview(preview, args.proposal_id)
 
-        _emit(args, {"preview": text}, pretty)
+        _emit(args, {"preview": preview}, pretty)
     elif cmd == "approve":
         result = approve_proposal(
             ws.store, args.proposal_id, preview_token=args.token,
@@ -1897,6 +2041,24 @@ def cmd_connector(args) -> None:
             return
         if not args.connector_id:
             raise SystemExit("connector_id required")
+        if getattr(args, "cancel", False):
+            if not args.job_id:
+                raise SystemExit("--cancel requires --job-id")
+            from ..connectors import cancel_backfill_job
+            job = cancel_backfill_job(ws.store, args.job_id)
+            data = {"job": job.id, "status": job.status.value}
+
+            def pretty():
+                ux.print_rule("backfill · cancel")
+                ux.print_kv([("job", job.id), ("status", job.status.value)])
+                ux.print_ok("backfill job cancelled")
+                ux.print_next([
+                    ("→", f"twin connector backfill {args.connector_id} --preview"),
+                    ("→", f"twin connector backfill {args.connector_id} --create"),
+                ])
+
+            _emit(args, data, pretty)
+            return
         if getattr(args, "create", False):
             from ..connectors import create_backfill_job
             job = create_backfill_job(ws.store, creds, args.connector_id)
@@ -3263,7 +3425,13 @@ def cmd_episode(args) -> None:
             if result.skipped_reason and not result.claims:
                 ux.print_warn(result.skipped_reason)
                 low = result.skipped_reason.lower()
-                if "deferred" in low or "unavailable" in low:
+                if "model failed" in low:
+                    ux.print_next([
+                        ("→", "twin doctor      # check the analysis model / key / endpoint"),
+                        ("→", "twin usage       # the failed call is logged (ok=false)"),
+                        ("→", f"twin episode reflect {ep.id}   # retry after fixing config"),
+                    ])
+                elif "deferred" in low or "unavailable" in low:
                     ux.print_next([
                         ("→", "twin interpret   # model unreachable; "
                               "start Ollama / configure a chat client"),
@@ -3380,12 +3548,27 @@ def cmd_doctor(args) -> None:
 
     ws = Workspace(args.home)
     ux.print_rule("doctor")
-    ux.print_kv([
+    kv = [
         ("home", str(ws.cfg.home)),
         ("db", ws.cfg.resolved_db_url),
         ("llm", f"{ws.cfg.normalized_llm_provider} @ {ws.cfg.resolved_llm_base_url}"),
         ("model", ws.cfg.resolved_llm_model),
-    ])
+    ]
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from ..cognition.llm.usage import JsonlLedger, default_ledger_path, summarize
+        _since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        _rows = JsonlLedger(default_ledger_path(ws.cfg.home)).read(since=_since)
+        if _rows:
+            _t = summarize(_rows)["totals"]
+            _c = _t["cost_usd"]
+            _cost = "$0" if _c == 0 else (f"${_c:.4f}" if _c < 0.01 else f"${_c:.2f}")
+            kv.append(("spend 7d", f"{_cost} · {_t['calls']} calls "
+                                   f"({_t['total_tokens']:,} tok) — twin usage"))
+    except Exception:
+        pass
+    ux.print_kv(kv)
     ux.print_legend([
         ("✓", "ok — healthy"),
         ("!", "warn — usable but incomplete / optional missing"),
@@ -3426,6 +3609,136 @@ def cmd_doctor(args) -> None:
             ("→", "twin setup mcp cursor  — wire MCP"),
         ], title="fix hints")
         raise SystemExit(1)
+
+
+def _fmt_tokens(n: int) -> str:
+    n = int(n or 0)
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
+def _fmt_cost(v: float) -> str:
+    v = float(v or 0.0)
+    if v == 0:
+        return "$0"
+    if v < 0.01:
+        return f"${v:.4f}"
+    return f"${v:.2f}"
+
+
+def cmd_usage(args) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from . import ux
+    from ..cognition.llm.usage import JsonlLedger, default_ledger_path, summarize
+
+    ws = Workspace(args.home)
+    ledger = JsonlLedger(default_ledger_path(ws.cfg.home))
+
+    since = getattr(args, "since", None)
+    days = getattr(args, "days", None)
+    if not since and days:
+        since = (datetime.now(timezone.utc) - timedelta(days=int(days))).isoformat()
+    rows = ledger.read(since=since)
+    stage_filter = getattr(args, "stage", None)
+    if stage_filter:
+        rows = [r for r in rows if r.get("stage") == stage_filter]
+
+    sub = getattr(args, "usage_command", None) or "summary"
+
+    if sub == "log":
+        limit = int(getattr(args, "limit", 20) or 20)
+        recent = rows[-limit:][::-1]
+
+        def pretty_log():
+            ux.print_rule("usage · recent calls")
+            if not recent:
+                ux.print_warn("no usage recorded yet")
+                return
+            ux.print_table(
+                ["when", "stage", "role", "model", "in", "out", "cost", "ms", "ok"],
+                [[
+                    (r.get("at") or "")[5:16].replace("T", " "),
+                    str(r.get("stage") or "—"),
+                    str(r.get("role") or "—"),
+                    str(r.get("model") or "—")[:24],
+                    _fmt_tokens(r.get("input_tokens")),
+                    _fmt_tokens(r.get("output_tokens")),
+                    _fmt_cost(r.get("cost_usd")),
+                    str(r.get("latency_ms") or 0),
+                    "✓" if r.get("ok", True) else "✗",
+                ] for r in recent],
+            )
+
+        _emit(args, {"calls": recent, "count": len(recent)}, pretty_log)
+        return
+
+    report = summarize(rows)
+
+    def pretty():
+        span = f"since {since[:10]}" if since else "all time"
+        ux.print_rule(f"usage · {span}")
+        t = report["totals"]
+        if not rows:
+            ux.print_warn("no usage recorded yet — any model call (extract, "
+                          "observe, correlate, meditate, reflect, pattern, cloud "
+                          "embeddings) is recorded here automatically")
+            ux.print_dim(f"ledger: {default_ledger_path(ws.cfg.home)}")
+            return
+        ux.print_kv([
+            ("calls", f"{t['calls']}  ({t['errors']} failed)"),
+            ("tokens in / out", f"{_fmt_tokens(t['input_tokens'])} / "
+                                f"{_fmt_tokens(t['output_tokens'])}"),
+            ("tokens total", _fmt_tokens(t["total_tokens"])),
+            ("est. cost", _fmt_cost(t["cost_usd"])),
+            ("avg latency", f"{t['avg_latency_ms']} ms"),
+        ])
+        if t["unpriced_calls"]:
+            ux.print_warn(
+                f"{t['unpriced_calls']} cloud call(s) had no price in the table — "
+                f"cost is understated. Add prices in {ws.cfg.home / 'pricing.json'}"
+            )
+
+        def _bucket_table(title: str, bucket: dict, key_label: str):
+            if not bucket:
+                return
+            ux.print_rule(title)
+            ordered = sorted(
+                bucket.items(), key=lambda kv: kv[1]["cost_usd"], reverse=True,
+            )
+            ux.print_table(
+                [key_label, "calls", "in", "out", "cost"],
+                [[
+                    k,
+                    str(v["calls"]),
+                    _fmt_tokens(v["input_tokens"]),
+                    _fmt_tokens(v["output_tokens"]),
+                    _fmt_cost(v["cost_usd"]),
+                ] for k, v in ordered],
+            )
+
+        _bucket_table("by stage (where it was spent)", report["by_stage"], "stage")
+        _bucket_table("by model", report["by_model"], "model")
+        _bucket_table("hot-path vs analysis", report["by_role"], "role")
+
+        # last 14 active days
+        by_day = report["by_day"]
+        if by_day:
+            ux.print_rule("by day")
+            recent_days = sorted(by_day.items())[-14:]
+            ux.print_table(
+                ["day", "calls", "tokens", "cost"],
+                [[
+                    k, str(v["calls"]), _fmt_tokens(v["total_tokens"]),
+                    _fmt_cost(v["cost_usd"]),
+                ] for k, v in recent_days],
+            )
+        ux.print_dim(f"ledger: {default_ledger_path(ws.cfg.home)}")
+
+    _emit(args, report, pretty)
 
 
 def cmd_setup(args) -> None:
@@ -3831,6 +4144,9 @@ def main(argv: list[str] | None = None) -> None:
     cbf.add_argument("--preview", action="store_true")
     cbf.add_argument("--create", action="store_true",
                      help="create a year-month BackfillJob (no ingest)")
+    cbf.add_argument("--cancel", action="store_true",
+                     help="cancel a BackfillJob (requires --job-id); frees you "
+                          "to --create a fresh one, e.g. to re-anchor its floor")
     cbf.add_argument("--jobs", action="store_true",
                      help="list BackfillJobs for the connector")
     cbf.add_argument("--run", action="store_true",
@@ -4116,6 +4432,27 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_watch)
 
     sub.add_parser("doctor", help="verify the installation").set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("usage", help="LLM token / cost accounting")
+    us = p.add_subparsers(dest="usage_command", required=False)
+    for _name, _help in (("summary", "totals + breakdowns"), ("log", "recent calls")):
+        sp = us.add_parser(_name, help=_help)
+        sp.add_argument("--days", type=int, default=30,
+                        help="look back this many days (default 30)")
+        sp.add_argument("--since", default=None, help="ISO cutoff (overrides --days)")
+        sp.add_argument("--stage", default=None,
+                        help="filter to one stage (interpret|observe|amygdala|"
+                             "cortex|reflect|pattern|embed)")
+        sp.add_argument("--limit", type=int, default=20,
+                        help="rows for `log` (default 20)")
+        sp.add_argument("--json", action="store_true", help="machine-readable output")
+        sp.set_defaults(func=cmd_usage)
+    # bare `twin usage` → summary over the default window
+    p.add_argument("--days", type=int, default=30)
+    p.add_argument("--since", default=None)
+    p.add_argument("--stage", default=None)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_usage, usage_command="summary", limit=20)
 
     p = sub.add_parser("setup", help="bootstrap local infrastructure")
     p.add_argument("target", choices=["ollama", "postgres", "mcp"])

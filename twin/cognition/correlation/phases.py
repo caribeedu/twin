@@ -84,9 +84,13 @@ def member_briefs(store, ep: WorkEpisode) -> list[dict[str, Any]]:
     time and a denser content excerpt (title + body, not headline alone).
     No conclusions, no roles.
     """
+    from ..actor_labels import humanize_record_text
+
     briefs: list[dict[str, Any]] = []
     for lk, rec in _ordered_active_links(store, ep.id):
         content = getattr(rec, "content", "") or ""
+        if rec is not None:
+            content = humanize_record_text(store, rec, content)
         briefs.append({
             "ref": _member_ref(lk),
             "external_type": lk.external_type or "",

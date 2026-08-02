@@ -30,10 +30,12 @@ class FakeGitHubAPI:
     # -- fixture builders ---------------------------------------------------
 
     def add_repo(self, full_name: str, *, private: bool = True,
-                 default_branch: str = "main") -> None:
+                 default_branch: str = "main",
+                 created_at: str = "2020-05-01T00:00:00Z") -> None:
         self.repos[full_name] = {
             "meta": {"full_name": full_name, "private": private,
                      "default_branch": default_branch, "open_issues_count": 0,
+                     "created_at": created_at,
                      "pushed_at": "2026-01-01T00:00:00Z", "size": 128,
                      "owner": _user(full_name.split("/")[0]),
                      "permissions": {"pull": True, "push": False, "admin": False}},

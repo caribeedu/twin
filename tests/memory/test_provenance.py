@@ -3,7 +3,11 @@
 from twin import ids
 from twin.clock import now_iso
 from twin.memory.models import Artifact, Evidence, MemoryItem, MemoryStatus
-from twin.memory.provenance import ensure_artifact_from_percept, memory_provenance
+from twin.memory.provenance import (
+    ensure_artifact_from_percept,
+    memory_provenance,
+    memory_source_summary,
+)
 from twin.memory.retention import delete_artifact
 from twin.sensory.percept import Percept
 
@@ -83,3 +87,44 @@ def test_delete_artifact_does_not_cascade_by_hash(store, embedder):
     assert p2.id not in plan["percepts"]
     assert "[content destroyed]" not in store.get_percept(p2.id).content
     assert store.get_memory(m2.id).status == MemoryStatus.confirmed
+
+
+def test_source_summary_hides_duplicate_episode_reflect(store, embedder):
+    """Reflect percepts must not spam the UI when a GitHub artifact is present."""
+    gh = Percept(
+        id=ids.new_id("pct"),
+        percept_type="pull_request",
+        source_sensor="github",
+        content="PR body",
+        metadata={
+            "external_type": "pull_request",
+            "external_id": "caribeedu/dogwalker#3",
+            "source_metadata": {"html_url": "https://github.com/caribeedu/dogwalker/pull/3"},
+        },
+    )
+    r1 = Percept(
+        id=ids.new_id("pct"),
+        percept_type="episode_reflection",
+        source_sensor="episode_reflect",
+        content="reflection a",
+        metadata={},
+    )
+    r2 = Percept(
+        id=ids.new_id("pct"),
+        percept_type="episode_reflection",
+        source_sensor="episode_reflect",
+        content="reflection b",
+        metadata={},
+    )
+    for p in (gh, r1, r2):
+        store.insert_percept(p)
+    mem = _mem(store, embedder, title="AgentDocsSync", summary="deferred roadmap item")
+    for p, quote in ((gh, "PR"), (r1, "reflect a"), (r2, "reflect b")):
+        store.insert_evidence(Evidence(
+            id=ids.evidence_id(), memory_id=mem.id, percept_id=p.id, quote=quote,
+        ))
+    summary = memory_source_summary(store, mem.id)
+    labels = [r["label"] for r in summary["refs"]]
+    assert labels == ["GitHub · pull request · caribeedu/dogwalker#3"]
+    assert "episode_reflect" not in " ".join(labels).lower()
+    assert summary["label"] == "GitHub"

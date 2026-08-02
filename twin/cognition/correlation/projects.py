@@ -50,7 +50,16 @@ def _external_container(record: Any) -> tuple[str, str]:
     if repo:
         return "github_repository", str(repo)
     channel = sm.get("channel_id") or sm.get("channel")
-    if channel and (et.startswith("slack") or "channel" in et):
+    # Slack message/thread records carry ``external_type`` like "message" (not
+    # "slack…"), so key off the slack-specific metadata instead of the type name.
+    slackish = (
+        et.startswith("slack")
+        or "channel" in et
+        or bool(sm.get("team_id") or sm.get("workspace_id")
+                or sm.get("channel_kind"))
+        or ("ts" in sm and "author_kind" in sm)
+    )
+    if channel and slackish:
         return "slack_channel", str(channel)
     if et.startswith("document") or et == "document_revision_chunk":
         root = sm.get("path") or getattr(record, "project_hint", None)

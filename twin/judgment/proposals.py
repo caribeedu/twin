@@ -10,6 +10,7 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from ..memory.models import MemoryItem, MemoryStatus
+from ..memory.provenance import count_independent_sources, memory_source_keys
 from ..memory.store.base import MemoryStore
 from .models import (
     ACTIONS_REQUIRING_TARGET,
@@ -61,6 +62,7 @@ def propose_from_memory(
         "constraint": "constraint",
         "decision": "heuristic",
     }.get(mem.type.value, "preference")
+    independent = count_independent_sources(store, [mem])
 
     item = {
         "kind": mapped_kind,
@@ -76,6 +78,8 @@ def propose_from_memory(
             "source": "promoted_memory",
             "twin_influenced": twin_influenced,
             "independence_weight": 0.4 if twin_influenced else 1.0,
+            "independent_sources": independent,
+            "memory_count": 1,
         },
     }
     proposal = JudgmentProposal(
@@ -84,11 +88,12 @@ def propose_from_memory(
         proposed_item=item,
         reason=f"Manual promotion of confirmed memory {mem.id}",
         supporting_memory_ids=[mem.id],
-        support_count=1,
+        support_count=independent,
         confidence=float(item["confidence"]),
         scope={"domain": mem.domain, "projects": [mem.project_id] if mem.project_id else []},
         status=ProposalStatus.pending,
         created_at=now_iso(),
+        metadata={"independent_sources": independent, "memory_count": 1},
     )
     store.insert_judgment_proposal(proposal)
     return proposal
@@ -128,6 +133,7 @@ def propose_from_pattern(
         return []
 
     supporting = [m.id for m, _ in cluster]
+    independent_sources = count_independent_sources(store, [m for m, _ in cluster])
     contradicting = [
         m.id for m in decisions
         if m.id not in supporting
@@ -155,6 +161,8 @@ def propose_from_pattern(
             "source": "repeated_behavior",
             "twin_influenced": False,
             "independence_weight": 1.0,
+            "independent_sources": independent_sources,
+            "memory_count": len(supporting),
         },
     }
     proposal = JudgmentProposal(
@@ -163,18 +171,23 @@ def propose_from_pattern(
         proposed_item=item,
         reason=(
             f"[demo detector] Repeated decisions across {len(projects)} projects "
-            f"favor operational simplicity (support={len(supporting)}, "
+            f"favor operational simplicity ({independent_sources} independent "
+            f"source(s) across {len(supporting)} memories, "
             f"contradictions={len(contradicting)})."
         ),
         supporting_memory_ids=supporting,
         contradicting_memory_ids=contradicting,
-        support_count=len(supporting),
+        support_count=independent_sources,
         contradiction_count=len(contradicting),
         confidence=float(item["confidence"]),
         scope={"domain": domain},
         status=ProposalStatus.pending,
         created_at=now_iso(),
-        metadata={"detector": "simplicity_cluster_demo"},
+        metadata={
+            "detector": "simplicity_cluster_demo",
+            "independent_sources": independent_sources,
+            "memory_count": len(supporting),
+        },
     )
     store.insert_judgment_proposal(proposal)
     return [proposal]
@@ -219,16 +232,22 @@ def propose_from_episode(
         or (seed.payload or {}).get("judgment_influenced")
     )
     memory_ids = [m.id for m in trajectory]
+    # Support = distinct *independent sources*, not memory rows. Several claims
+    # from one episode share one source (episode:<id>); a cross-sense corroboration
+    # (Slack symptom for a GitHub fix) adds a genuine second source. This keeps
+    # "2 supports from 1 episode" honest as one source with humble confidence.
+    independent = count_independent_sources(store, trajectory)
     item = {
         "kind": JudgmentKind.heuristic.value,
         "statement": seed.summary or seed.title,
         "description": (
             f"Generalized from the confirmed trajectory of episode {episode_id}: "
-            f"{seed.title}. Detector: episode_pattern."
+            f"{seed.title}. Detector: episode_pattern. "
+            f"Independent sources: {independent} (from {len(memory_ids)} memories)."
         ),
         "domain": dom,
         "strength": 0.6,
-        "confidence": min(0.8, 0.5 + 0.05 * len(memory_ids)) if not twin_influenced else 0.55,
+        "confidence": min(0.8, 0.5 + 0.05 * independent) if not twin_influenced else 0.55,
         "stability": JudgmentStability.evolving.value,
         "scope": {
             "domains": [dom],
@@ -239,6 +258,8 @@ def propose_from_episode(
             "source": "episode_pattern",
             "twin_influenced": twin_influenced,
             "independence_weight": 0.4 if twin_influenced else 1.0,
+            "independent_sources": independent,
+            "memory_count": len(memory_ids),
         },
     }
     proposal = JudgmentProposal(
@@ -247,15 +268,21 @@ def propose_from_episode(
         proposed_item=item,
         reason=(
             f"Confirmed trajectory of episode {episode_id} "
-            f"(support={len(memory_ids)}) suggests a durable heuristic."
+            f"({independent} independent source(s) across {len(memory_ids)} "
+            f"memories) suggests a durable heuristic."
         ),
         supporting_memory_ids=memory_ids,
-        support_count=len(memory_ids),
+        support_count=independent,
         confidence=float(item["confidence"]),
         scope={"domain": dom},
         status=ProposalStatus.pending,
         created_at=now_iso(),
-        metadata={"detector": "episode_pattern", "episode_id": episode_id},
+        metadata={
+            "detector": "episode_pattern",
+            "episode_id": episode_id,
+            "independent_sources": independent,
+            "memory_count": len(memory_ids),
+        },
     )
     store.insert_judgment_proposal(proposal)
     return proposal
@@ -288,6 +315,7 @@ def propose_from_episode_patterns(
     if len(trajectory) < min_evidence or len(episodes) < min_episodes:
         return []
     supporting = [m.id for m in trajectory]
+    independent = count_independent_sources(store, trajectory)
     item = {
         "kind": JudgmentKind.heuristic.value,
         "statement": (
@@ -296,11 +324,12 @@ def propose_from_episode_patterns(
         ),
         "description": (
             f"Observed across {len(episodes)} episodes with confirmed pivots. "
-            "Detector: episode_pattern (trajectory cluster)."
+            "Detector: episode_pattern (trajectory cluster). "
+            f"Independent sources: {independent} (from {len(supporting)} memories)."
         ),
         "domain": domain,
         "strength": 0.6,
-        "confidence": min(0.8, 0.5 + 0.05 * len(supporting)),
+        "confidence": min(0.8, 0.5 + 0.05 * independent),
         "stability": JudgmentStability.evolving.value,
         "scope": {"domains": [domain], "task_profiles": ["architecture", "planning"]},
         "provenance": {
@@ -308,6 +337,8 @@ def propose_from_episode_patterns(
             "source": "episode_pattern",
             "twin_influenced": False,
             "independence_weight": 1.0,
+            "independent_sources": independent,
+            "memory_count": len(supporting),
         },
     }
     proposal = JudgmentProposal(
@@ -316,15 +347,19 @@ def propose_from_episode_patterns(
         proposed_item=item,
         reason=(
             f"[episode_pattern] Confirmed trajectory pivots across "
-            f"{len(episodes)} episodes (support={len(supporting)})."
+            f"{len(episodes)} episodes ({independent} independent source(s))."
         ),
         supporting_memory_ids=supporting,
-        support_count=len(supporting),
+        support_count=independent,
         confidence=float(item["confidence"]),
         scope={"domain": domain},
         status=ProposalStatus.pending,
         created_at=now_iso(),
-        metadata={"detector": "episode_pattern"},
+        metadata={
+            "detector": "episode_pattern",
+            "independent_sources": independent,
+            "memory_count": len(supporting),
+        },
     )
     store.insert_judgment_proposal(proposal)
     return [proposal]
@@ -339,13 +374,18 @@ def _memory_fingerprint(store: MemoryStore, memory_id: str) -> dict[str, Any]:
     ev_fp = hashlib.sha256(
         "|".join(sorted(f"{e.id}:{e.quote[:40]}" for e in evidence)).encode()
     ).hexdigest()[:16] if evidence else ""
+    # Independent sources behind this one memory (episode / sense / lineage).
+    sources = sorted(memory_source_keys(store, m))
     return {
         "id": m.id,
+        "title": m.title,
+        "type": m.type.value if hasattr(m.type, "value") else str(m.type),
         "updated_at": m.updated_at or "",
         "status": m.status.value if hasattr(m.status, "value") else str(m.status),
         "content_hash": content_hash,
         "confidence": m.confidence,
         "evidence_fingerprint": ev_fp,
+        "independent_sources": sources,
     }
 
 
@@ -366,6 +406,8 @@ def compute_proposal_preview_token(
     final_item = merge_proposed_item(proposal, edits)
     supporting = [_memory_fingerprint(store, mid) for mid in proposal.supporting_memory_ids]
     contradicting = [_memory_fingerprint(store, mid) for mid in proposal.contradicting_memory_ids]
+    # Honest support: distinct independent sources behind the supporting memories.
+    independent_sources = count_independent_sources(store, proposal.supporting_memory_ids)
     target_rev = None
     target_stability = None
     target_snapshot: Optional[dict[str, Any]] = None
@@ -391,6 +433,9 @@ def compute_proposal_preview_token(
         "final_item": final_item,
         "supporting": supporting,
         "contradicting": contradicting,
+        "support_count": proposal.support_count,
+        "independent_sources": independent_sources,
+        "memory_count": len(proposal.supporting_memory_ids),
         "confidence": proposal.confidence,
         "scope": proposal.scope,
         "status": proposal.status.value if hasattr(proposal.status, "value") else proposal.status,

@@ -73,6 +73,9 @@ class OllamaEmbedder:
         self.dim = 0  # discovered on first embed
 
     def embed(self, text: str) -> list[float]:
+        # Local embeddings are free and very high-volume (one per memory) — not
+        # recorded to the usage ledger to keep it lean. Cloud embedders (which
+        # cost money) are instrumented instead.
         resp = self._client.post("/api/embed", json={"model": self.model, "input": text})
         resp.raise_for_status()
         vector = resp.json()["embeddings"][0]
@@ -104,12 +107,25 @@ class OpenAICompatEmbedder:
         self.dim = 0
 
     def embed(self, text: str) -> list[float]:
+        import time as _time
+
+        from ..cognition.llm.usage import emit_usage
+
         path = "/embeddings" if self.base_url.endswith("/v1") else "/v1/embeddings"
-        resp = self._client.post(path, json={"model": self.model, "input": text})
-        resp.raise_for_status()
-        vector = resp.json()["data"][0]["embedding"]
-        self.dim = len(vector)
-        return vector
+        _t0 = _time.perf_counter()
+        try:
+            resp = self._client.post(path, json={"model": self.model, "input": text})
+            resp.raise_for_status()
+            body = resp.json()
+            vector = body["data"][0]["embedding"]
+            self.dim = len(vector)
+            emit_usage(kind="openai_compatible", model=self.model, body=body,
+                       started=_t0, stage="embed")
+            return vector
+        except Exception:
+            emit_usage(kind="openai_compatible", model=self.model, body=None,
+                       started=_t0, stage="embed", ok=False)
+            raise
 
 
 class GeminiEmbedder:
@@ -132,18 +148,31 @@ class GeminiEmbedder:
         self.dim = 0
 
     def embed(self, text: str) -> list[float]:
+        import time as _time
+
+        from ..cognition.llm.usage import emit_usage
+
         model = self.model
         if not model.startswith("models/"):
             model = f"models/{model}"
-        resp = self._client.post(
-            f"/v1beta/{model}:embedContent",
-            params={"key": self.api_key},
-            json={"model": model, "content": {"parts": [{"text": text}]}},
-        )
-        resp.raise_for_status()
-        vector = resp.json()["embedding"]["values"]
-        self.dim = len(vector)
-        return vector
+        _t0 = _time.perf_counter()
+        try:
+            resp = self._client.post(
+                f"/v1beta/{model}:embedContent",
+                params={"key": self.api_key},
+                json={"model": model, "content": {"parts": [{"text": text}]}},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            vector = body["embedding"]["values"]
+            self.dim = len(vector)
+            emit_usage(kind="gemini", model=self.model, body=body,
+                       started=_t0, stage="embed")
+            return vector
+        except Exception:
+            emit_usage(kind="gemini", model=self.model, body=None,
+                       started=_t0, stage="embed", ok=False)
+            raise
 
 
 def sanitize_base_url(base_url: str) -> str:

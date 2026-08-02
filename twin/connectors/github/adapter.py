@@ -248,6 +248,26 @@ class GithubConnector:
                 out[f"repo:{repo}:{family}"] = signal
         return out
 
+    def backfill_floor(self) -> Optional[str]:
+        """Earliest date worth backfilling: the oldest repository-creation date
+        across configured repos. A repo cannot hold commits/issues/PRs before it
+        existed, so anchoring here avoids planning years of empty month
+        partitions (the planner's blind default is 10 years). Best-effort —
+        returns None (caller keeps its default) if no dates are discoverable."""
+        earliest: Optional[str] = None
+        for repo in self.repositories:
+            try:
+                meta, _ = self.client.get(f"/repos/{repo}")
+            except ConnectorError:
+                continue
+            created = (meta or {}).get("created_at")
+            if not created:
+                continue
+            day = str(created)[:10]  # ISO8601 → YYYY-MM-DD
+            if earliest is None or day < earliest:
+                earliest = day
+        return earliest
+
     def validate_credentials(self) -> ConnectorHealth:
         if not self.secret:
             return ConnectorHealth(status=HealthStatus.unauthorized,

@@ -53,6 +53,7 @@ class ConsolidationCycleResult:
     goals_observed: list[dict[str, Any]] = field(default_factory=list)
     judgment_proposal_ids: list[str] = field(default_factory=list)
     reflected_candidate_ids: list[str] = field(default_factory=list)
+    pattern_candidate_ids: list[str] = field(default_factory=list)
     episode_cognition: dict[str, Any] = field(default_factory=dict)
     closed_sessions: list[dict[str, Any]] = field(default_factory=list)
     open_tasks: list[dict[str, Any]] = field(default_factory=list)
@@ -363,6 +364,67 @@ def reflect_recent_episodes(
             continue
         reflected += 1
         for claim in result.claims:
+            if claim.get("memory_id") and claim.get("created"):
+                created.append(claim["memory_id"])
+    return created
+
+
+def run_pattern_reflect_pass(
+    store: MemoryStore,
+    cfg: Config,
+    embedder: Embedder,
+    *,
+    window_start: str,
+    window_end: str,
+    dry_run: bool = False,
+    max_windows: int = 6,
+) -> list[str]:
+    """Nightly "dream" pass: mine each (vault, project) window for durable
+    patterns (preferences / procedures / constraints) via the Analysis Context
+    Compiler. Candidates only — never confirms. Defers when no model.
+
+    The window is derived from the consolidation window; project scoping keeps
+    each pass focused and one un-scoped pass per vault catches cross-project
+    habits. Each pass is isolated so one failure never breaks the cycle.
+    """
+    if dry_run or not hasattr(store, "list_work_episodes"):
+        return []
+    from .pattern_reflect import pattern_reflect
+
+    time_from = f"{window_start}T00:00:00Z"
+    time_until = f"{window_end}T23:59:59Z"
+
+    # Distinct (vault, project) targets from recent episodes; plus one
+    # whole-vault pass to catch patterns that cross projects.
+    pairs: list[tuple[str, Optional[str]]] = []
+    seen: set[tuple[str, Optional[str]]] = set()
+    vaults: list[str] = []
+    for ep in store.list_work_episodes(limit=200):
+        vault = ep.vault_id or "vault_unknown"
+        if vault not in vaults:
+            vaults.append(vault)
+        key = (vault, ep.project_id)
+        if ep.project_id and key not in seen:
+            seen.add(key)
+            pairs.append(key)
+    for vault in vaults:
+        key = (vault, None)
+        if key not in seen:
+            seen.add(key)
+            pairs.append(key)
+
+    created: list[str] = []
+    for vault_id, project_id in pairs[:max_windows]:
+        try:
+            res = pattern_reflect(
+                store, cfg, embedder,
+                vault_id=vault_id, project_id=project_id,
+                time_from=time_from, time_until=time_until,
+                title=f"{window_start}..{window_end}",
+            )
+        except Exception:
+            continue
+        for claim in res.claims:
             if claim.get("memory_id") and claim.get("created"):
                 created.append(claim["memory_id"])
     return created
@@ -743,6 +805,19 @@ def run_consolidation_cycle(
                 store, cfg, embedder,
                 episode_ids=touched or None,
                 max_episodes=max_eps,
+            )
+
+        # Nightly pattern pass: mine the window for durable habits/preferences
+        # across senses (multi-domain, not only code). Weekly reaches wider.
+        stage = "pattern_reflect"
+        result.stages.append("pattern_reflect")
+        if dry_run:
+            result.notes.append("dry_run skipped pattern reflection")
+        else:
+            result.pattern_candidate_ids = run_pattern_reflect_pass(
+                store, cfg, embedder,
+                window_start=window_start, window_end=window_end,
+                max_windows=6 if kind == "daily" else 12,
             )
 
         if propose_judgment:

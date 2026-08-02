@@ -10,7 +10,7 @@ guessing through it.
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from ...sensory.percept import Percept
 from .schema import (
@@ -24,7 +24,7 @@ from .schema import (
 from ..schema import SENSITIVITIES
 from ...config import ALL_DOMAINS
 
-PROMPT_VERSION = "interpret-v2"
+PROMPT_VERSION = "interpret-v3"
 SCHEMA_VERSION = "1"
 
 SYSTEM_PROMPT = """\
@@ -43,9 +43,28 @@ For every item you catalogue, decide the COGNITIVE ACT that produced it:
   owner — attribute it, never adopt it as the user's own knowledge;
 - statement: a plain factual assertion by the author.
 
-Then classify memory_type: decision, task, fact, event, preference, belief,
-constraint, procedure, relationship, communication_act, or
-rejected_alternative (an option considered and turned down).
+Then classify memory_type. Choose by what the item IS, not by the artifact it
+came from. Use these definitions and discriminators:
+- decision: a settled choice the parties made ("we chose Postgres over Mongo").
+- task: an assigned or self-committed FUTURE obligation with an owner — someone
+  is expected to DO it ("Edu should build the backend"; "can you implement the
+  presets?"). Work that was ALREADY done is never a task: a commit or PR that
+  landed a feature is an event or a fact, not a task.
+- procedure: a repeatable how-to that a person or agent FOLLOWS ("to set a memory
+  limit, right-click the terminal and pick a preset"; "before a release, run a
+  README truth pass"). A one-off description of how the code was changed is NOT a
+  procedure — that is an event (it happened) or a fact (how the system now works).
+- event: something that happened at a point in time — a PR merged, a release cut,
+  a change that landed, a message posted.
+- fact: a durable state, capability or technical constant that stays true ("the
+  renderer reaches disk only through FsService over IPC").
+- constraint: a rule, gate, dependency or limit that bounds choices ("launch is
+  blocked until presets and roles ship").
+- preference, belief, relationship, communication_act, or rejected_alternative
+  (an option considered and turned down): as named.
+Rule of thumb: a landed commit / PR / merge is an event or a capability fact —
+never a task and never a procedure. Reserve task for an explicit directive or
+obligation, and procedure for a repeatable, followable how-to.
 
 Each item MUST use these field names exactly (no synonyms):
 - title: short label (a few words)
@@ -57,6 +76,13 @@ fill title and summary, omit the item.
 Hard rules:
 - evidence_span MUST be a verbatim excerpt from the source that supports the
   item. If you cannot ground an item in the text, do NOT emit it.
+- Self-contained: title and summary MUST name their concrete subject so a reader
+  with NO other context understands them. When the source is a specific artifact
+  (a commit, pull request, issue, file, release, channel, message), cite its
+  identifier — repo, PR number, commit sha, file path, version — taken from the
+  "Source identity" block below. NEVER write bare deixis like "this commit", "the
+  PR", "this change", or "the previous discussion" without naming what it refers
+  to. If you cannot name the subject, omit the item.
 - attributed_to is the person the item comes from (a speaker/author name from
   the source). Set speaker_is_owner true only when the account owner is
   clearly the author; otherwise false or null.
@@ -78,11 +104,53 @@ Hard rules:
 """
 
 
+def _source_identity(percept: Percept) -> str:
+    """A compact identity block so claims can name their concrete subject.
+
+    Pulls the artifact's system / kind / id / repo / url / project from the
+    percept metadata (set at ingest). Without this the model only sees a bare
+    commit message and produces context-free claims like "this commit …".
+    """
+    meta = percept.metadata or {}
+    sm = meta.get("source_metadata") or {}
+    lines: list[str] = []
+    # Whether any field names a *concrete subject* (not just system/kind). The
+    # block is only worth emitting when the model can actually cite something.
+    has_subject = False
+
+    def add(label: str, value: Any, *, subject: bool = False) -> None:
+        nonlocal has_subject
+        if value is None:
+            return
+        text = str(value).strip()
+        if text:
+            lines.append(f"- {label}: {text}")
+            if subject:
+                has_subject = True
+
+    add("system", percept.source_sensor)
+    add("kind", meta.get("external_type"))
+    add("id", meta.get("external_id"), subject=True)
+    add("repo", sm.get("repo"), subject=True)
+    add("channel", sm.get("channel_id") or sm.get("channel"), subject=True)
+    add("url", sm.get("html_url") or sm.get("permalink") or sm.get("url"),
+        subject=True)
+    add("merge_commit", sm.get("merge_commit_sha"), subject=True)
+    add("project", percept.project_id, subject=True)
+    if not has_subject:
+        return ""
+    return (
+        "Source identity (cite these concretely; never say \"this commit\" / "
+        "\"the PR\" without the id):\n" + "\n".join(lines) + "\n"
+    )
+
+
 def _user_content(percept: Percept, text: str) -> str:
     return (
         f"Percept type: {percept.percept_type}\n"
         f"Known actors: {', '.join(percept.actors) or 'unknown'}\n"
         f"Occurred at: {percept.occurred_at or 'unknown'}\n"
+        f"{_source_identity(percept)}"
         f"--- BEGIN SOURCE ---\n{text}\n--- END SOURCE ---"
     )
 

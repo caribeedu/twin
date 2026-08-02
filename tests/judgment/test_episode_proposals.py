@@ -57,6 +57,25 @@ def test_propose_from_episode_creates_pending_proposal(store):
     assert proposal.metadata.get("episode_id") == ep
 
 
+def test_propose_from_episode_support_counts_independent_sources(store):
+    # two confirmed trajectory memories from the SAME episode → one source,
+    # not "support=2" (the memory count is surfaced separately).
+    ep = "episode_shared"
+    _confirmed_trajectory_memory(
+        store, episode_id=ep, title="Kafka → SQS",
+        summary="pivoted the queue", project_id="proj_atlas",
+    )
+    _confirmed_trajectory_memory(
+        store, episode_id=ep, title="Chose SQS for cost",
+        summary="reasoned on operational cost", project_id="proj_atlas",
+    )
+    proposal = propose_from_episode(store, ep)
+    assert proposal is not None
+    assert proposal.support_count == 1
+    assert proposal.metadata.get("memory_count") == 2
+    assert proposal.metadata.get("independent_sources") == 1
+
+
 def test_propose_from_episode_patterns_needs_multiple_episodes(store):
     _confirmed_trajectory_memory(
         store, episode_id="ep1", title="A → B",

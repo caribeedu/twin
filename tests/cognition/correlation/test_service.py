@@ -107,6 +107,65 @@ def test_extract_github_refs():
     assert "github:acme/atlas#9" in refs
 
 
+def test_extract_github_refs_merge_squash_closing():
+    """The forms Git/GitHub actually emit must link a commit to its PR:
+    merge-commit subjects, squash-merge ``(#N)`` suffixes and closing keywords.
+    A bare unrelated ``#N`` must NOT match (avoid fusing distinct work)."""
+    repo = "caribeedu/dogwalker"
+    assert extract_github_refs(
+        "Merge pull request #8 from caribeedu/v1.1.0", default_repo=repo,
+    ) == ["github:caribeedu/dogwalker#8"]
+    assert extract_github_refs(
+        "fix: apply role context on walker assign (#12)", default_repo=repo,
+    ) == ["github:caribeedu/dogwalker#12"]
+    for kw in ("closes #5", "fixed #5", "resolves #5"):
+        assert extract_github_refs(kw, default_repo=repo) == [
+            "github:caribeedu/dogwalker#5"
+        ], kw
+    # A bare number that is not a recognized PR reference stays unlinked.
+    assert extract_github_refs("bumped limit to #99 items", default_repo=repo) == []
+
+
+def test_pr_fuses_with_merge_commit_sha(store):
+    """A merged PR carrying ``merge_commit_sha`` fuses with the commit of that
+    sha structurally — no PR reference in the commit message required."""
+    acc, inst = _acct(store, vault_id="vault_work_acme", account_id="acct_msha")
+    sha = "abc123def456abc123def456abc123def456abcd"
+    pr = _rec(
+        id="pr_msha",
+        connector_id=inst.id,
+        source_account_id=acc.id,
+        external_type="pull_request",
+        external_id="acme/atlas#42",
+        content="GitHub pull request acme/atlas#42: ship the thing",
+        ownership={"vault_id": "vault_work_acme"},
+        source_metadata={
+            "lineage_root": "github:acme/atlas#42",
+            "repo": "acme/atlas",
+            "merge_commit_sha": sha,
+        },
+    )
+    commit = _rec(
+        id="cm_msha",
+        connector_id=inst.id,
+        source_account_id=acc.id,
+        external_type="commit",
+        external_id=sha,  # commit external_id is the sha
+        content="ship the thing\n\nno PR number mentioned anywhere",
+        ownership={"vault_id": "vault_work_acme"},
+        source_metadata={"repo": "acme/atlas"},
+    )
+    for r in (pr, commit):
+        store.insert_connector_record(r)
+    eps = correlate_records(store, [pr, commit], vault_id="vault_work_acme")
+    assert eps, "PR and its merge commit should form one episode"
+    ext_ids = {
+        lk.external_id for ep in eps for lk in store.list_episode_links(ep.id)
+    }
+    assert "acme/atlas#42" in ext_ids
+    assert sha in ext_ids
+
+
 def test_identity_email_link_same_vault_only(store):
     a = upsert_external_identity(
         store, actor_id="github:edu", source_account_id="gh",

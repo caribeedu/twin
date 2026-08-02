@@ -123,6 +123,36 @@ const LABELS = {
     evidence_mapping_required: "Needs evidence mapping",
     claim_match: "Same claim",
   },
+  altitude: {
+    ground: "Ground",
+    linked: "Linked",
+    distilled: "Distilled",
+    stance: "Stance",
+  },
+  sensor: {
+    github: "GitHub",
+    slack: "Slack",
+    git: "Git",
+    document: "Document",
+    meeting: "Meeting",
+    mail: "Mail",
+    email: "Email",
+    episode: "Episode",
+    episode_reflect: "Episode reflection",
+    pattern: "Pattern",
+    workspace: "Workspace",
+    unknown: "Unknown",
+  },
+  kind: {
+    pull_request: "pull request",
+    commit: "commit",
+    message: "message",
+    thread_reply: "reply",
+    issue: "issue",
+    channel: "channel",
+    episode: "episode",
+    episode_reflection: "reflection",
+  },
   why: {
     "text match": "Text match",
     "semantic similarity": "Semantic match",
@@ -139,6 +169,8 @@ const LABELS = {
     "more evidence requested": "More evidence requested",
     "restored from reject — re-review required": "Restored — needs re-review",
     "merged synthesis — confirm": "Merged — confirm synthesis",
+    "condensed near-duplicates — confirm": "Condensed near-duplicates — confirm synthesis",
+    episode_reflect: "Episode reflection",
     semantic: "Semantic similarity",
     entity: "Shared entity",
     project: "Same project",
@@ -202,7 +234,69 @@ function tag(text, cls = "") {
   return `<span class="tag ${cls}">${esc(text)}</span>`;
 }
 
-function memTags(mem, { showStatus = true } = {}) {
+function friendlySourceText(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "Source";
+  // Already-friendly labels from the API (e.g. "GitHub · pull request · #3").
+  if (LABELS.sensor[text]) return LABELS.sensor[text];
+  if (LABELS.reason[text]) return LABELS.reason[text];
+  // Rewrite bare snake_case tokens inside compound labels.
+  return text
+    .split(" · ")
+    .map((part) => {
+      const p = part.trim();
+      if (LABELS.sensor[p]) return LABELS.sensor[p];
+      if (LABELS.kind[p]) return LABELS.kind[p];
+      if (p.includes(" ") || /[#/]/.test(p)) return p;
+      return humanizeKey(p);
+    })
+    .join(" · ");
+}
+
+function sourceTags(mem) {
+  const refs = mem.source_refs || [];
+  const seen = new Set();
+  const chips = [];
+  const push = (text, url) => {
+    const friendly = friendlySourceText(text);
+    const key = friendly.toLowerCase();
+    if (!friendly || seen.has(key)) return;
+    // Drop synthetic "Episode reflection" when a concrete source chip exists.
+    if (key === "episode reflection" && [...seen].some((k) => k !== "episode reflection")) {
+      return;
+    }
+    seen.add(key);
+    if (url) {
+      chips.push(
+        `<span class="tag source"><a href="${esc(url)}" target="_blank" rel="noopener">${esc(friendly)}</a></span>`,
+      );
+    } else {
+      chips.push(tag(friendly, "source"));
+    }
+  };
+  if (refs.length) {
+    for (const r of refs.slice(0, 4)) {
+      push(r.label || r.sensor || "source", r.url);
+    }
+  } else {
+    const sensors = mem.sources || [];
+    if (!sensors.length && mem.source_label) {
+      push(mem.source_label);
+    } else {
+      for (const s of sensors) push(s);
+    }
+  }
+  // If we added concrete chips first, strip any leftover reflection chip.
+  const concrete = chips.filter((c) => !/Episode reflection/i.test(c));
+  return (concrete.length ? concrete : chips).join("");
+}
+
+function memTags(mem, {
+  showStatus = true,
+  showAltitude = false,
+  showSources = false,
+  showFlags = true,
+} = {}) {
   const parts = [];
   if (showStatus && mem.status) {
     const st = String(mem.status);
@@ -214,6 +308,26 @@ function memTags(mem, { showStatus = true } = {}) {
   if (mem.type) parts.push(tag(label("type", mem.type), "type"));
   if (mem.domain) parts.push(tag(label("domain", mem.domain), "domain"));
   if (mem.sensitivity) parts.push(tag(label("sensitivity", mem.sensitivity), "sens"));
+  if (showAltitude) {
+    const altitude = mem.altitude || (mem.payload && mem.payload.altitude);
+    if (altitude) {
+      parts.push(tag(label("altitude", altitude), `altitude altitude-${altitude}`));
+    }
+  }
+  const payload = mem.payload || {};
+  if (mem.condensed || payload.condensed || (payload.merged_from && payload.merged_from.length)) {
+    parts.push(tag("Condensed", "ok"));
+  }
+  if (showFlags) {
+    for (const f of (mem.quality_flags || []).slice(0, 8)) {
+      const key = String(f);
+      parts.push(tag(label("flag", key), "flag"));
+    }
+  }
+  if (showSources) {
+    const src = sourceTags(mem);
+    if (src) parts.push(src);
+  }
   return `<div class="tags">${parts.join("")}</div>`;
 }
 
@@ -222,9 +336,47 @@ function flagTags(flags) {
   if (!list.length) return "";
   return `<div class="tags flags">${list.map((f) => {
     const key = String(f);
-    const tone = /conflict|duplicate|weak|unsupported/i.test(key) ? "warn" : "";
-    return tag(label("flag", key), tone);
+    return tag(label("flag", key), "flag");
   }).join("")}</div>`;
+}
+
+function memAccordion(title, itemsHtml) {
+  if (!itemsHtml) return "";
+  return `
+    <details class="mem-accordion">
+      <summary>${esc(title)}</summary>
+      <ul class="mem-accordion-list">${itemsHtml}</ul>
+    </details>`;
+}
+
+function sourcesAccordion(mem) {
+  const refs = mem.source_refs || [];
+  if (!refs.length) return "";
+  const items = refs.map((r) => {
+    const text = friendlySourceText(r.label || r.sensor || "source");
+    if (r.url) {
+      return `<li><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(text)}</a></li>`;
+    }
+    return `<li>${esc(text)}</li>`;
+  }).join("");
+  return memAccordion("Sources", items);
+}
+
+function basedInAccordion(mem) {
+  const rows = mem.based_in || [];
+  if (!rows.length) return "";
+  const items = rows.map((r) => {
+    const st = r.status && r.status !== "unknown"
+      ? ` <span class="meta">(${esc(label("status", r.status))})</span>`
+      : "";
+    return `<li><span class="based-in-title">${esc(r.title || r.id || "Memory")}</span>${st}</li>`;
+  }).join("");
+  return memAccordion("Based in", items);
+}
+
+function altitudeLabel(mem) {
+  const k = mem.altitude || (mem.payload && mem.payload.altitude) || "ground";
+  return LABELS.altitude[k] || k;
 }
 
 function setNav(view) {
@@ -447,7 +599,7 @@ function fmtWhen(iso) {
 }
 
 /** Body text only when it adds something beyond the title (CLI does the same). */
-function memBody(mem, { max = 280 } = {}) {
+function memBody(mem, { max = 0 } = {}) {
   const title = String(mem?.title || "").trim();
   let summary = String(mem?.summary || "").trim();
   if (!summary || summary === title) return "";
@@ -458,8 +610,29 @@ function memBody(mem, { max = 280 } = {}) {
     // Still mostly the same sentence — prefer full summary only if much longer.
     if (summary.length <= title.length + 12) return "";
   }
-  if (max && summary.length > max) summary = summary.slice(0, max);
+  if (max && summary.length > max) {
+    // Break on a word boundary so the web UI never mid-cuts a sentence.
+    let cut = summary.slice(0, max);
+    const sp = cut.lastIndexOf(" ");
+    if (sp > Math.floor(max * 0.6)) cut = cut.slice(0, sp);
+    summary = `${cut.trimEnd()}…`;
+  }
   return summary;
+}
+
+function memBodyHtml(mem, { max = 0 } = {}) {
+  const full = String(mem?.summary || "").trim();
+  const shown = memBody(mem, { max });
+  if (!shown) return "";
+  if (!max || full.length <= max || shown === full) {
+    return `<p class="mem-summary">${esc(shown)}</p>`;
+  }
+  // Expandable: list views may clip; click reveals the rest.
+  return `
+    <details class="mem-summary-details">
+      <summary class="mem-summary">${esc(shown)}</summary>
+      <p class="mem-summary mem-summary-full">${esc(full)}</p>
+    </details>`;
 }
 
 function memCard(mem, evidence, heading) {
@@ -469,21 +642,22 @@ function memCard(mem, evidence, heading) {
       return q ? `<blockquote class="evidence">“${esc(q)}”</blockquote>` : "";
     }).join("");
   const conf = pct01(mem.confidence);
-  const prio = pct01(mem.review_priority);
+  const review = pct01(mem.review_priority);
   const when = fmtWhen(mem.created_at);
-  const body = memBody(mem, { max: 0 });
   return `
     <article class="mem-card">
       <div class="card-kicker">${esc(heading)}</div>
       ${when ? `<div class="card-when">${esc(when)}</div>` : ""}
       <h3>${esc(mem.title)}</h3>
-      ${memTags(mem)}
+      ${memTags(mem, { showAltitude: false, showSources: false, showFlags: true })}
       <div class="stats-line">
+        <span>Altitude <strong>${esc(altitudeLabel(mem))}</strong></span>
         <span>Confidence <strong>${conf}%</strong></span>
-        <span>Priority <strong>${prio}%</strong></span>
+        <span>Review <strong>${review}%</strong></span>
       </div>
-      ${flagTags(mem.quality_flags)}
-      ${body ? `<p>${esc(body)}</p>` : ""}
+      ${memBodyHtml(mem, { max: 0 })}
+      ${sourcesAccordion(mem)}
+      ${basedInAccordion(mem)}
       ${quotes}
     </article>`;
 }
@@ -549,7 +723,6 @@ function search() {
               || (p.startsWith("graph expansion") ? "Related via graph" : humanizeKey(p));
             return tag(friendly, "why");
           });
-        const body = memBody(h, { max: 220 });
         return `<div class="hit">
           <div class="hit-score">
             <div class="score">${pct}%</div>
@@ -559,7 +732,7 @@ function search() {
           <div>
             <strong>${esc(h.title)}</strong>
             ${memTags(h)}
-            ${body ? `<p>${esc(body)}</p>` : ""}
+            ${memBodyHtml(h, { max: 0 })}
           </div>
         </div>`;
       }).join("") + (data.blocked?.length
@@ -639,53 +812,137 @@ function pack() {
 
 /* —— Memories —— */
 
+const MEM_TYPE_FILTER = ["", ...Object.keys(LABELS.type)];
+const MEM_DOMAIN_FILTER = ["", ...DOMAIN_OPTIONS];
+const MEM_SENS_FILTER = ["", ...SENSITIVITY_OPTIONS];
+const MEM_ALTITUDE_FILTER = ["", "ground", "linked", "distilled", "stance"];
+const MEM_FLAG_FILTER = ["", ...Object.keys(LABELS.flag)];
+const MEM_SOURCE_FILTER = ["", "github", "slack", "git", "document", "meeting",
+  "mail", "episode_reflect", "episode", "pattern"];
+
+function memoriesMatchFilters(m, f) {
+  if (f.status && m.status !== f.status) return false;
+  if (f.type && m.type !== f.type) return false;
+  if (f.domain && m.domain !== f.domain) return false;
+  if (f.sensitivity && m.sensitivity !== f.sensitivity) return false;
+  const alt = m.altitude || (m.payload && m.payload.altitude) || "ground";
+  if (f.altitude && alt !== f.altitude) return false;
+  const condensed = !!(m.condensed || (m.payload || {}).condensed
+    || ((m.payload || {}).merged_from || []).length);
+  if (f.condensed === "yes" && !condensed) return false;
+  if (f.condensed === "no" && condensed) return false;
+  if (f.flag && !(m.quality_flags || []).includes(f.flag)) return false;
+  if (f.source) {
+    const sensors = m.sources || [];
+    const refs = (m.source_refs || []).map((r) => r.sensor);
+    if (![...sensors, ...refs].includes(f.source)) return false;
+  }
+  if (f.q) {
+    const blob = `${m.title || ""}\n${m.summary || ""}`.toLowerCase();
+    if (!blob.includes(f.q)) return false;
+  }
+  return true;
+}
+
+function renderMemCardBrowse(m) {
+  const when = (m.created_at || "").slice(0, 10);
+  return `
+    <article class="mem-card">
+      <h3>${esc(m.title)}</h3>
+      ${memTags(m, { showAltitude: false, showSources: false, showFlags: true })}
+      <div class="stats-line">
+        <span>Altitude <strong>${esc(altitudeLabel(m))}</strong></span>
+        <span>Confidence <strong>${pct01(m.confidence)}%</strong></span>
+        <span>Review <strong>${pct01(m.review_priority)}%</strong></span>
+        ${when ? `<span>${esc(when)}</span>` : ""}
+      </div>
+      ${memBodyHtml(m, { max: 0 })}
+      ${sourcesAccordion(m)}
+      ${basedInAccordion(m)}
+    </article>`;
+}
+
 async function memories() {
   app.innerHTML = `
     <div class="panel">
       <h2>Memories</h2>
       <p class="lede">Browse stored memory items.</p>
-      <div class="row" style="margin-bottom:1rem">
+      <div class="mem-filters">
+        <div class="field" style="flex:2"><label>Search</label>
+          <input id="mem-q" type="search" placeholder="Title or summary…" /></div>
         <div class="field"><label>Status</label>
-          <select id="mem-status">${selectOptions("status", STATUS_FILTER_OPTIONS, "")}</select>
-        </div>
+          <select id="mem-status">${selectOptions("status", STATUS_FILTER_OPTIONS, "")}</select></div>
+        <div class="field"><label>Type</label>
+          <select id="mem-type">${selectOptions("type", MEM_TYPE_FILTER, "")}</select></div>
+        <div class="field"><label>Domain</label>
+          <select id="mem-domain">${selectOptions("domain", MEM_DOMAIN_FILTER, "")}</select></div>
+        <div class="field"><label>Sensitivity</label>
+          <select id="mem-sens">${selectOptions("sensitivity", MEM_SENS_FILTER, "")}</select></div>
+        <div class="field"><label>Altitude</label>
+          <select id="mem-altitude">${selectOptions("altitude", MEM_ALTITUDE_FILTER, "")}</select></div>
+        <div class="field"><label>Condensed</label>
+          <select id="mem-condensed">
+            <option value="">All</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select></div>
+        <div class="field"><label>Source</label>
+          <select id="mem-source">${selectOptions("sensor", MEM_SOURCE_FILTER, "")}</select></div>
+        <div class="field"><label>Quality flag</label>
+          <select id="mem-flag">${selectOptions("flag", MEM_FLAG_FILTER, "")}</select></div>
         <button class="btn" id="mem-reload">Refresh</button>
       </div>
+      <p class="meta" id="mem-count" style="margin:.5rem 0 1rem"></p>
       <div id="mem-list"><span class="spinner"></span></div>
     </div>
   `;
+  let cache = [];
+  const filters = () => ({
+    q: ($("#mem-q").value || "").trim().toLowerCase(),
+    status: $("#mem-status").value,
+    type: $("#mem-type").value,
+    domain: $("#mem-domain").value,
+    sensitivity: $("#mem-sens").value,
+    altitude: $("#mem-altitude").value,
+    condensed: $("#mem-condensed").value,
+    source: $("#mem-source").value,
+    flag: $("#mem-flag").value,
+  });
+  const render = () => {
+    const list = $("#mem-list");
+    const f = filters();
+    const rows = cache.filter((m) => memoriesMatchFilters(m, f));
+    $("#mem-count").textContent = rows.length
+      ? `Showing ${rows.length} of ${cache.length}`
+      : cache.length ? "No memories match these filters" : "";
+    if (!cache.length) {
+      list.innerHTML = `<div class="empty"><strong>No memories</strong></div>`;
+      return;
+    }
+    if (!rows.length) {
+      list.innerHTML = `<div class="empty"><strong>No matches</strong>Try clearing a filter.</div>`;
+      return;
+    }
+    list.innerHTML = rows.slice(0, 200).map(renderMemCardBrowse).join("");
+  };
   const load = async () => {
-    const status = $("#mem-status").value;
     const list = $("#mem-list");
     list.innerHTML = `<span class="spinner"></span>`;
     try {
-      const q = status ? `?status=${encodeURIComponent(status)}` : "";
-      const rows = await api(`/api/memories${q}`);
-      if (!rows.length) {
-        list.innerHTML = `<div class="empty"><strong>No memories</strong></div>`;
-        return;
-      }
-      list.innerHTML = rows.slice(0, 200).map((m) => {
-        const body = memBody(m, { max: 280 });
-        const when = (m.created_at || "").slice(0, 10);
-        return `
-        <article class="mem-card">
-          <h3>${esc(m.title)}</h3>
-          ${memTags(m)}
-          <div class="stats-line">
-            <span>Priority <strong>${pct01(m.review_priority)}%</strong></span>
-            <span>Confidence <strong>${pct01(m.confidence)}%</strong></span>
-            ${when ? `<span>${esc(when)}</span>` : ""}
-          </div>
-          ${flagTags(m.quality_flags)}
-          ${body ? `<p>${esc(body)}</p>` : ""}
-        </article>`;
-      }).join("");
+      cache = await api("/api/memories?limit=1000");
+      render();
     } catch (err) {
       list.innerHTML = `<div class="empty"><strong>Failed</strong>${esc(err.message)}</div>`;
     }
   };
   $("#mem-reload").addEventListener("click", load);
-  $("#mem-status").addEventListener("change", load);
+  for (const id of [
+    "mem-status", "mem-type", "mem-domain", "mem-sens", "mem-altitude",
+    "mem-condensed", "mem-source", "mem-flag",
+  ]) {
+    $(`#${id}`)?.addEventListener("change", render);
+  }
+  $("#mem-q")?.addEventListener("input", render);
   load();
 }
 

@@ -65,6 +65,122 @@ def _records_by_type(store, connector_id):
     return out
 
 
+# -- stream layout parsing ---------------------------------------------------------
+
+
+def test_parse_stream_continuous():
+    from twin.connectors.slack.adapter import _parse_stream
+
+    assert _parse_stream("channel:C0BM451Q9MH") == "C0BM451Q9MH"
+
+
+def test_parse_stream_strips_backfill_namespace():
+    """Backfill partitions arrive namespaced as
+    ``backfill:{job}:{partition}:channel:{id}`` — the base channel must survive."""
+    from twin.connectors.slack.adapter import _parse_stream
+
+    stream = "backfill:backfill_01kyxjefyf1vdzr29s:2016-09:channel:C0BM451Q9MH"
+    assert _parse_stream(stream) == "C0BM451Q9MH"
+
+
+def test_parse_stream_rejects_garbage():
+    from twin.connectors.slack.adapter import _parse_stream
+    from twin.connectors.protocol import ConnectorError
+
+    with pytest.raises(ConnectorError):
+        _parse_stream("bogus:C0BM451Q9MH")
+    with pytest.raises(ConnectorError):
+        _parse_stream("backfill:job:2016-09:bogus:C0BM451Q9MH")
+
+
+# -- backfill config invariant -----------------------------------------------------
+
+
+def test_backfill_does_not_mutate_configuration(store, creds, slack):
+    """Backfill partitions must not persist team_id/channel_metadata into
+    ``ConnectorInstance.configuration`` — ``run_backfill_partition`` snapshots
+    config and raises 'backfill mutated connector configuration' if it drifts.
+    The adapter caches those only during continuous sync."""
+    from twin.connectors import SyncExecutionContext
+
+    slack.add_message(CHANNEL, "1700000001.000100", text="hi")
+    _acc, inst = _mk(store, creds)
+
+    before = dict(store.get_connector_instance(inst.id).configuration or {})
+    assert "team_id" not in before  # fresh connector — nothing cached yet
+
+    ctx = SyncExecutionContext(
+        mode="backfill", job_id="backfill_test", partition_key="2016-09",
+        range_start="2016-09-01T00:00:00Z", range_end="2016-09-30T23:59:59Z",
+    )
+    sync_connector(
+        store, creds, inst.id,
+        streams=[f"backfill:backfill_test:2016-09:channel:{CHANNEL}"],
+        execution_context=ctx,
+    )
+
+    after = dict(store.get_connector_instance(inst.id).configuration or {})
+    assert after == before  # invariant: configuration untouched during backfill
+
+
+def test_continuous_sync_still_caches_team_id(store, creds, slack):
+    """Guard rail: suppressing config writes in backfill must not break the
+    continuous-sync cache of team_id."""
+    slack.add_message(CHANNEL, "1700000001.000100", text="hi")
+    _acc, inst = _mk(store, creds)
+    sync_connector(store, creds, inst.id)
+    cfg = store.get_connector_instance(inst.id).configuration or {}
+    assert cfg.get("team_id")
+
+
+# -- backfill floor (oldest-content anchor) ----------------------------------------
+
+
+def test_backfill_floor_single_channel(store, creds, slack):
+    """Backfill starts at the channel-creation date, not the planner's blind
+    10-year default (which produced ~121 mostly-empty month partitions)."""
+    from twin.connectors import create_backfill_job
+
+    slack.add_message(CHANNEL, "1700000100.000100", text="hi")
+    _acc, inst = _mk(store, creds)
+    job = create_backfill_job(store, creds, inst.id)
+
+    # mock channel created=1700000000 → 2023-11-14 (UTC)
+    assert job.range_start == "2023-11-14"
+    assert job.progress["partitions"][0]["partition_key"] == "2023-11"
+
+
+def test_backfill_floor_anchors_at_oldest_channel(store, creds, slack):
+    """With several channels, the floor is the earliest creation date."""
+    from twin.connectors import create_backfill_job
+
+    slack.add_channel("C_OLD", name="old-channel")
+    slack.channels["C_OLD"]["created"] = 1262304000  # 2010-01-01 UTC
+    slack.add_message(CHANNEL, "1700000100.000100", text="hi")
+
+    _acc, inst = _mk(store, creds, channels=(CHANNEL, "C_OLD"))
+    job = create_backfill_job(store, creds, inst.id)
+
+    assert job.range_start == "2010-01-01"
+    assert job.progress["partitions"][0]["partition_key"] == "2010-01"
+
+
+def test_cancel_backfill_job_allows_recreate(store, creds, slack):
+    from twin.connectors import cancel_backfill_job, create_backfill_job
+
+    slack.add_message(CHANNEL, "1700000100.000100", text="hi")
+    _acc, inst = _mk(store, creds)
+    job = create_backfill_job(store, creds, inst.id)
+
+    cancelled = cancel_backfill_job(store, job.id)
+    assert cancelled.status.value == "cancelled"
+    # idempotent
+    assert cancel_backfill_job(store, job.id).status.value == "cancelled"
+    # a fresh (re-anchored) job can now be created
+    job2 = create_backfill_job(store, creds, inst.id)
+    assert job2.id != job.id
+
+
 # -- streams, lineage, trust -------------------------------------------------------
 
 

@@ -57,6 +57,26 @@ def _mk(store, creds, *, labels=(LABEL,), secret=TOKEN, extra=None):
     return acc, inst
 
 
+def test_backfill_floor_anchors_at_oldest_message(store, creds, gmail):
+    """Gmail exposes no ascending order, so the floor is discovered by a
+    bounded ``before:`` binary search — anchoring at the oldest message month
+    instead of the planner's blind 10-year default."""
+    from datetime import datetime, timezone
+
+    def _ms(y, mo, d):
+        return int(datetime(y, mo, d, tzinfo=timezone.utc).timestamp()) * 1000
+
+    gmail.add_message("m_new", thread_id="t1", subject="new", body="hi",
+                      internal_date_ms=_ms(2023, 11, 14))
+    gmail.add_message("m_old", thread_id="t2", subject="old", body="hi",
+                      internal_date_ms=_ms(2019, 2, 10))
+    _acc, inst = _mk(store, creds)
+    job = create_backfill_job(store, creds, inst.id)
+
+    assert job.range_start == "2019-02-01"
+    assert job.progress["partitions"][0]["partition_key"] == "2019-02"
+
+
 def test_empty_labels_await_configuration(store, creds, gmail):
     _acc, inst = _mk(store, creds, labels=())
     result = sync_connector(store, creds, inst.id)

@@ -18,39 +18,50 @@ from ...memory.models import MemoryType
 if TYPE_CHECKING:  # avoid import cycle at module load
     from ..episode_reflect import EpisodeBrief, TrajectoryClaim
 
-PROMPT_VERSION = "6"
+PROMPT_VERSION = "8"
 SCHEMA_VERSION = "1"
 
 _MEMORY_TYPES = [t.value for t in MemoryType]
 _DOMAINS = list(ALL_DOMAINS)
 
 _SYSTEM = """\
-You synthesize DURABLE memories from a unit of work across sources.
+You are an advisor, not a parrot. You synthesize DURABLE memories from a unit
+of work across sources, using a compiled dossier.
 You are given:
 - an episode's ordered phases (goal → decision → execution → outcome),
 - narrative edges,
-- denser member quotes (PR bodies, commits, chat/Slack — not titles alone),
-- RELATED context: vault memories (confirmed / candidate / rejected) and
-  open-session artifacts (live Cursor/chat intent not yet extracted).
+- a DOSSIER: dense PRIMARY evidence, CROSS-SENSE soft neighbors (same
+  project/time/people/topic but NOT explicitly linked), NEIGHBOR episodes,
+  RELATED memories (confirmed / candidate / rejected), the user's established
+  STANCE, per-sense LENSES, and COMPILER HINTS.
 
-Your job is NOT to narrate GitHub process. Emit a claim ONLY when the arc
-(plus related context) reveals something worth remembering later across
-domains — a durable preference, decision, constraint, belief, procedure,
-relationship fact, task policy, etc.
+Read each sense through its LENS: what matters in a GitHub PR (decisions,
+trade-offs, style/DRY, pivots) is not what matters in Slack (commitments,
+symptoms, tone) or a meeting (decisions, owners, open questions).
+
+Your job is NOT to narrate GitHub process. Emit a claim ONLY when the evidence
+reveals something worth remembering later across domains — a durable
+preference, decision, constraint, belief, procedure, relationship fact, task
+policy, etc.
 
 Prefer, in order:
-1. a durable pivot grounded in evidence: earlier approach superseded
+1. CROSS-SENSE synthesis: connect a symptom/request in one sense to work in
+   another when project/time/topic align — e.g. 'PR #7 resolved the payments
+   double-charge that ops reported in Slack by adding webhook idempotency'.
+   The COMPILER HINTS point at exactly these unlinked pairs;
+2. a durable pivot grounded in evidence: earlier approach superseded
    (e.g. 'intended Kafka, then chose SQS for operational cost');
-2. linking episode evidence to RELATED context (open-session intent,
-   Slack/chat notes, prior decisions, rejected alternatives) that the
-   version sources alone omit;
-3. a contradiction across sources or vs related context;
-4. a goal/decision that closed as a distinct outcome with lasting force.
+3. a durable preference/procedure revealed by choices (style, DRY, workflow)
+   that extends — not restates — the established STANCE;
+4. a contradiction across sources or vs related context;
+5. a goal/decision that closed as a distinct outcome with lasting force.
 
 Use related context:
-- confirmed: treat as established (still cite episode quotes for new claims);
+- confirmed / STANCE: treat as established — extend it, never restate it;
 - candidate: suggestive only — do not treat as fact;
 - rejected: negative evidence — do not re-propose the same claim;
+- cross_sense: a soft neighbor, not a proven link — judge whether it truly
+  relates before connecting it, and cite it when you do;
 - session_artifact: live human/assistant intent from an open session —
   high-value for linking chat→PR, but still unconfirmed.
 
@@ -69,6 +80,21 @@ Catalog — pick the best Memory type and domain for each claim:
 - types: """ + " | ".join(_MEMORY_TYPES) + """
 - domains: """ + " | ".join(_DOMAINS) + """
 
+Type discriminators (do not confuse these):
+- decision: a CHOICE among alternatives that commits future work
+  (picked X over Y, assigned an owner, chose a version/stack). Not every
+  resolved outcome is a decision.
+- constraint: a hard requirement / gate that shapes what is allowed
+  (must have X to launch) — keep as constraint even when later fulfilled.
+- event: a completed occurrence with lasting significance when it is not a
+  standing rule (blocker resolved, feature shipped, launch gate cleared).
+- fact: a durable state of the world / mechanism (how persistence works).
+- Prefer event or constraint over decision for "requirement fulfilled /
+  resolved by PR #N" claims that do not name an explicit choice.
+
+When quoting people or channels, use the human labels already in the brief
+(@Name, #channel) — never invent or echo bare Slack ids (U… / C…).
+
 Ground every claim in the provided quotes and/or related ids.
 Prefer zero claims over a shallow or process-only claim. You never confirm
 anything; these are candidates for human review.
@@ -80,6 +106,10 @@ Respond with JSON only, matching the schema. Field names MUST be exactly:
 - title, summary: strings
 - evidence_quotes: array of strings (optional)
 - related_memory_ids: ids from RELATED context you used (optional)
+- cross_sense_refs: the exact ref(s) (e.g. 'slack:channel_message:123') from the
+  CROSS-SENSE block that this claim genuinely connects — list one ONLY when the
+  claim actually links that neighbor to the primary work. These become
+  independent corroborating evidence, so do not pad them. (optional)
 - from_phase_key / to_phase_key: phase_key strings from the input (optional)
 - confidence: number in [0,1] (optional)
 Do NOT emit prose or alternate field names.
@@ -103,6 +133,9 @@ _SCHEMA: dict[str, Any] = {
                     "related_memory_ids": {
                         "type": "array", "items": {"type": "string"},
                     },
+                    "cross_sense_refs": {
+                        "type": "array", "items": {"type": "string"},
+                    },
                     "from_phase_key": {"type": "string"},
                     "to_phase_key": {"type": "string"},
                     "confidence": {"type": "number"},
@@ -113,6 +146,29 @@ _SCHEMA: dict[str, Any] = {
     },
     "required": ["claims"],
 }
+
+
+def _coerce_claim_type(mem_type: str, *, title: str, summary: str) -> str:
+    """Fix common mis-labels: fulfilled gates are not decisions."""
+    if mem_type != "decision":
+        return mem_type
+    blob = f"{title}\n{summary}".lower()
+    choice_markers = (
+        "chose", "chosen", "decided", "picked", "selected", "opted",
+        "over ", "instead of", "rather than", "prefer",
+    )
+    if any(m in blob for m in choice_markers):
+        return mem_type
+    resolved_markers = (
+        "resolved by", "fulfilled", "blocker", "launch gate",
+        "requirement", "constraint", "cannot launch", "hard gate",
+        "cleared by", "landed",
+    )
+    if any(m in blob for m in resolved_markers):
+        if any(m in blob for m in ("must", "needs to", "required", "cannot launch", "gate")):
+            return "constraint"
+        return "event"
+    return mem_type
 
 
 def _render_brief(brief: "EpisodeBrief") -> str:
@@ -135,26 +191,34 @@ def _render_brief(brief: "EpisodeBrief") -> str:
     for ref, q in brief.quotes_by_ref.items():
         lines.append(f"  {ref}: {q}")
     lines.append("")
-    lines.append(
-        "RELATED context (vault memories + open-session artifacts — use as "
-        "context; do not restate without new episode evidence):"
-    )
-    if brief.related_memories:
-        for rm in brief.related_memories:
-            lines.append(
-                f"  [{rm.get('status')}] {rm.get('id')} "
-                f"type={rm.get('type')} domain={rm.get('domain')}: "
-                f"{rm.get('title')} — {rm.get('summary')}"
-            )
+
+    dossier = getattr(brief, "dossier", None)
+    if dossier is not None:
+        # The compiler already assembled dense primary + cross-sense + related
+        # + lenses + hints; render it verbatim as the analyst's briefing.
+        lines.append("=== DOSSIER ===")
+        lines.append(dossier.render())
     else:
-        lines.append("  (none retrieved)")
+        lines.append(
+            "RELATED context (vault memories + open-session artifacts — use as "
+            "context; do not restate without new episode evidence):"
+        )
+        if brief.related_memories:
+            for rm in brief.related_memories:
+                lines.append(
+                    f"  [{rm.get('status')}] {rm.get('id')} "
+                    f"type={rm.get('type')} domain={rm.get('domain')}: "
+                    f"{rm.get('title')} — {rm.get('summary')}"
+                )
+        else:
+            lines.append("  (none retrieved)")
     lines.append("")
     lines.append(
-        "If quotes across phases are near-paraphrases AND related context "
-        "adds nothing durable, return {\"claims\":[]}. Prefer durable "
-        "preferences/decisions/constraints over PR-process narration. "
-        "When session_artifact intent matches the episode, prefer a claim "
-        "that names that durable stance."
+        "If the evidence is near-paraphrase across phases AND nothing durable "
+        "or cross-sense emerges, return {\"claims\":[]}. Prefer durable "
+        "preferences/decisions/constraints and cross-sense synthesis over "
+        "PR-process narration. When a COMPILER HINT or session_artifact points "
+        "at a real link, prefer a claim that names that durable stance."
     )
     return "\n".join(lines)
 
@@ -174,6 +238,10 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
 
     phase_keys = {p["phase_key"] for p in brief.phases}
     related_ids = {rm.get("id") for rm in brief.related_memories if rm.get("id")}
+    dossier = getattr(brief, "dossier", None)
+    cross_refs = {
+        b.ref for b in getattr(dossier, "cross_sense", [])
+    } if dossier is not None else set()
     out: list[TrajectoryClaim] = []
     for rc in raw_claims:
         if not isinstance(rc, dict) or not rc.get("title"):
@@ -203,9 +271,18 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
         mem_type = str(rc.get("type") or "decision")
         if mem_type not in _MEMORY_TYPES:
             mem_type = "decision"
+        mem_type = _coerce_claim_type(
+            mem_type,
+            title=str(rc.get("title") or ""),
+            summary=str(rc.get("summary") or ""),
+        )
         used_related = [
             str(i) for i in (rc.get("related_memory_ids") or [])
             if i in related_ids
+        ]
+        used_cross = [
+            str(r) for r in (rc.get("cross_sense_refs") or [])
+            if r in cross_refs
         ]
         out.append(TrajectoryClaim(
             type=mem_type,
@@ -222,6 +299,7 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
             phase_keys=keys,
             edge_ids=edge_ids,
             percept_ids=percept_ids,
+            cross_sense_refs=used_cross,
             canonical_claim={
                 "subject": brief.project_id or brief.title,
                 "predicate": "trajectory",

@@ -125,6 +125,23 @@ class OutlookClient:
             data = self.call(path, params=params)
         return list(data.get("value") or []), data.get("@odata.nextLink")
 
+    def oldest_received(self, folder_id: str) -> Optional[str]:
+        """Cheapest historical floor: the oldest message's ``receivedDateTime``.
+        Real Graph returns a single row for ``$orderby=receivedDateTime asc &
+        $top=1``; we still ``min()`` the response so it stays correct against
+        backends that ignore ordering. None when the folder is empty."""
+        path = f"me/mailFolders/{quote(folder_id, safe='')}/messages"
+        data = self.call(path, params={
+            "$top": 1,
+            "$orderby": "receivedDateTime asc",
+            "$select": "receivedDateTime",
+        })
+        received = [
+            v.get("receivedDateTime")
+            for v in (data.get("value") or []) if v.get("receivedDateTime")
+        ]
+        return min(received) if received else None
+
     def delta_messages(
         self, folder_id: str, *,
         link: Optional[str] = None,

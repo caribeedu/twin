@@ -226,8 +226,10 @@ def _classify(members: list[dict[str, Any]], cfg: Config, gate: _Gate):
         return StageStatus.deferred, {}, "model unavailable"
     try:
         from .interpreter.classify_prompt import classify_members
+        from .llm.usage import usage_context
 
-        roles = classify_members(gate.chat, members)
+        with usage_context(stage=BrainStage.amygdala.value, role="llm"):
+            roles = classify_members(gate.chat, members)
     except Exception as exc:
         return StageStatus.deferred, {}, f"amygdala error: {type(exc).__name__}"
     if members and not roles:
@@ -250,8 +252,10 @@ def _understand(phases: list[dict[str, Any]], quotes: dict[str, str],
         return StageStatus.deferred, [], "model unavailable"
     try:
         from .interpreter.understand_prompt import understand_edges
+        from .llm.usage import usage_context
 
-        return StageStatus.ok, understand_edges(gate.chat, phases, quotes), "llm"
+        with usage_context(stage=BrainStage.cortex.value, role="llm"):
+            return StageStatus.ok, understand_edges(gate.chat, phases, quotes), "llm"
     except Exception as exc:
         return StageStatus.deferred, [], f"cortex error: {type(exc).__name__}"
 
@@ -410,6 +414,25 @@ def _run_semantic_stages(
             store, cfg, embedder, episodes, report,
             reflect_limit=reflect_limit, dry_run=dry_run,
         )
+        # Collapse near-duplicate reflect paraphrases before prefrontal.
+        if not dry_run and report.candidate_ids:
+            try:
+                from .condense import condense_near_duplicates
+                cr = condense_near_duplicates(
+                    store, embedder, memory_ids=list(report.candidate_ids),
+                )
+                con = report.stage(BrainStage.hippocampus_consolidate)
+                if cr.merged:
+                    con.bump("condensed", cr.merged)
+                    # Replace absorbed ids with survivors in the report list.
+                    absorbed = set(cr.absorbed_ids)
+                    kept = [i for i in report.candidate_ids if i not in absorbed]
+                    for sid in cr.survivor_ids:
+                        if sid not in kept:
+                            kept.append(sid)
+                    report.candidate_ids = kept
+            except Exception:
+                pass
 
     # -- prefrontal: draft judgment proposals from confirmed trajectories --
     if _stage_index(until_stage) >= _stage_index(BrainStage.prefrontal):

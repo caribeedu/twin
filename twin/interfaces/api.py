@@ -177,11 +177,51 @@ class ConnectorSyncRequest(BaseModel):
     emit_percepts: bool = True
 
 
-def _mem_dict(mem) -> dict[str, Any]:
+def _mem_dict(mem, store=None) -> dict[str, Any]:
     data = mem.model_dump()
     data["type"] = mem.type.value
     data["sensitivity"] = mem.sensitivity.value
     data["status"] = mem.status.value
+    try:
+        from ..cognition.quality import memory_altitude
+        data["altitude"] = (mem.payload or {}).get("altitude") or memory_altitude(mem)
+    except Exception:
+        data["altitude"] = (mem.payload or {}).get("altitude") or "ground"
+    data["condensed"] = bool(
+        (mem.payload or {}).get("condensed")
+        or (mem.payload or {}).get("merged_from")
+    )
+    if store is not None:
+        try:
+            from ..memory.provenance import memory_source_summary
+            src = memory_source_summary(store, mem.id)
+            data["sources"] = src.get("sensors") or []
+            data["source_label"] = src.get("label") or ""
+            data["source_refs"] = src.get("refs") or []
+        except Exception:
+            data["sources"] = []
+            data["source_label"] = ""
+            data["source_refs"] = []
+        # Memories this one was condensed/merged from (for "Based in").
+        based_in: list[dict[str, Any]] = []
+        for mid in (mem.payload or {}).get("merged_from") or []:
+            if not isinstance(mid, str):
+                continue
+            other = store.get_memory(mid)
+            if other is None:
+                based_in.append({
+                    "id": mid, "title": mid, "status": "unknown",
+                })
+            else:
+                based_in.append({
+                    "id": other.id,
+                    "title": other.title,
+                    "status": other.status.value,
+                    "type": other.type.value,
+                })
+        data["based_in"] = based_in
+    else:
+        data["based_in"] = []
     return data
 
 
@@ -233,10 +273,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         domain: Optional[str] = None,
         type: Optional[str] = None,
         needs_review: Optional[bool] = None,
+        limit: int = 500,
     ):
-        memories = ws.store.list_memories(status=status, domain=domain, type_=type,
-                                          needs_review=needs_review)
-        return [_mem_dict(m) for m in memories]
+        memories = ws.store.list_memories(
+            status=status, domain=domain, type_=type,
+            needs_review=needs_review, limit=max(1, min(limit, 2000)),
+        )
+        return [_mem_dict(m, ws.store) for m in memories]
 
     @app.get("/api/memories/{memory_id}")
     def api_memory(memory_id: str):
@@ -244,7 +287,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         if mem is None:
             raise HTTPException(404, "memory not found")
         evidence = [e.model_dump() for e in ws.store.get_evidence(memory_id)]
-        return {**_mem_dict(mem), "evidence": evidence}
+        return {**_mem_dict(mem, ws.store), "evidence": evidence}
 
     @app.post("/api/memories/{memory_id}/review")
     def api_review(memory_id: str, action: str, domain: Optional[str] = None,
@@ -262,7 +305,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             ws.store.set_status(memory_id, MemoryStatus.rejected)
         elif action != "update":
             raise HTTPException(400, "action must be approve | reject | update")
-        return _mem_dict(ws.store.get_memory(memory_id))
+        return _mem_dict(ws.store.get_memory(memory_id), ws.store)
 
     # -- memory formation ----------------------------------------------
 
@@ -348,7 +391,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         result = search(ws.store, ws.embedder, q, target_domain=domain,
                         firewall=ws.firewall, type_=type, limit=limit)
         return {
-            "hits": [{**_mem_dict(h.memory), "score": h.score, "why": h.why} for h in result.hits],
+            "hits": [{**_mem_dict(h.memory, ws.store), "score": h.score, "why": h.why} for h in result.hits],
             "blocked": [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
         }
 
@@ -808,7 +851,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             sensitivity=sensitivity, min_priority=min_priority,
             conflicts_only=conflicts, limit=limit,
         )
-        return [_mem_dict(m) for m in queue]
+        return [_mem_dict(m, ws.store) for m in queue]
 
     class BatchCreateRequest(BaseModel):
         name: str = Field(min_length=1, max_length=200)
@@ -876,7 +919,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "memory not found")
         neighbors = discover_neighbors(ws.store, ws.embedder, mem)
         return [
-            {**_mem_dict(n), "similarity": sim, "reason": reason}
+            {**_mem_dict(n, ws.store), "similarity": sim, "reason": reason}
             for n, sim, reason in neighbors
         ]
 
@@ -954,7 +997,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             review_reason="more evidence requested",
             quality_flags=list(set(mem.quality_flags + ["weak_evidence"])),
         )
-        return _mem_dict(ws.store.get_memory(memory_id))
+        return _mem_dict(ws.store.get_memory(memory_id), ws.store)
 
     @app.get("/api/artifacts/{artifact_id}")
     def api_artifact(artifact_id: str):
@@ -1487,7 +1530,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             }
         return JSONResponse({
             "memories": [
-                {**_mem_dict(m), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
+                {**_mem_dict(m, ws.store), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
                 for m in memories
             ],
             "entities": [e.model_dump() for e in ws.store.list_entities()],

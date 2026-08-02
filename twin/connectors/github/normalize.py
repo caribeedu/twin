@@ -175,7 +175,7 @@ def record_from_pull_request(connector_id: str, account_id: str, repo: str,
         lines.append("Closed WITHOUT merging — the change was not adopted.")
     if pr.get("body"):
         lines.append(_clip(pr["body"]))
-    return _record(
+    rec = _record(
         connector_id=connector_id, account_id=account_id,
         external_type="pull_request", external_id=f"{repo}#{number}",
         external_revision=pr.get("updated_at") or "0",
@@ -187,6 +187,15 @@ def record_from_pull_request(connector_id: str, account_id: str, repo: str,
         lineage_root=f"github:{repo}#{number}",
         state=state,
     )
+    # Authoritative structural link to the landing commit. For a *merged* PR,
+    # ``merge_commit_sha`` is the sha that actually landed on the base branch
+    # (the merge commit, or the squashed/rebased commit). Correlation keys an
+    # anchor off it so the PR and its commit fuse without parsing messages.
+    # (Open PRs also carry a merge_commit_sha, but it is a throwaway test-merge
+    # not present in history, so we only trust it once merged.)
+    if merged and pr.get("merge_commit_sha"):
+        rec.source_metadata["merge_commit_sha"] = pr["merge_commit_sha"]
+    return rec
 
 
 def record_from_review(connector_id: str, account_id: str, repo: str,
