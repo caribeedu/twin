@@ -75,7 +75,162 @@ Episode cognition makes the analogy operational: turning connector records into 
 
 Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin judgment approve` is the executive gate for durable judgment. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
 
+## Runtime sequences
+
+These sequence diagrams show how Twin turns distributed work into reusable
+understanding — and how that understanding re-enters authorized tools.
+They are contracts of intent, not an inventory of every module.
+
+### From Connector to Context Pack
+
+End-to-end path from an external system to a pack an authorized client can
+consume. Extraction creates **atomic** candidates; meditation builds
+**situations** (`WorkEpisode`) and may reflect **trajectory** candidates;
+packs only use what privacy and review allow.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ext as External system<br/>(GitHub / Slack / …)
+    participant Conn as Connector + normalize
+    participant PII as PII / quarantine
+    participant Store as MemoryStore
+    participant ExtLLM as Extract interpreter
+    participant Corr as Correlate<br/>(sensory→cortex)
+    participant ACC as ACC + reflect
+    participant Human as Human gates
+    participant Pack as Pack assembly
+    participant FW as Domain Firewall
+    participant Client as Native / MCP / CLI / API
+
+    Ext->>Conn: sync / webhook / backfill
+    Conn->>PII: ConnectorRecord (+ humanized actors)
+    PII->>Store: Artifact / record (vault-partitioned)
+    Conn->>Store: Percept (normalized observation)
+    Note over Store: Percept ≠ Memory.<br/>Evidence is preserved for audit.
+
+    Client->>ExtLLM: twin extract
+    ExtLLM->>Store: read pending percepts
+    ExtLLM->>PII: mask before any cloud LLM
+    ExtLLM->>Store: atomic MemoryCandidates + evidence
+    ExtLLM->>Human: selective review queue
+
+    Client->>Corr: twin meditate / correlate
+    Corr->>Store: WorkEpisode membership, phases, edges
+    Note over Corr: Structural scaffold never invents an arc.<br/>Semantic stages defer without a model.
+    Corr->>ACC: consolidate-ready episodes
+    ACC->>Store: trajectory MemoryCandidates
+    ACC->>Human: review (+ optional judgment drafts)
+
+    Human->>Store: confirm / reject / merge / resolve
+    Note over Human,Store: Only confirmed memories<br/>are pack-eligible by default.
+
+    Client->>Pack: pack / session_start / get_context_pack
+    Pack->>Store: hybrid search (FTS + vectors + graph)
+    Pack->>FW: privacy + domain + persona before content
+    FW-->>Pack: allow / redact / deny
+    Pack->>Pack: judgment slice + budget + dedupe
+    Pack-->>Client: Safe context pack
+    Note over Client: Understanding enters the tool<br/>without re-briefing the user.
+```
+
+### Native Session — Inject & Absorb
+
+Native binding is how a host gets continuity **into** a chat and returns what happened **out** as evidence — without a parallel memory store and without auto-confirming Memory or Judgment.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Host as Host (Claude Code)
+    participant Native as twin native event
+    participant Bind as HostSessionBinding
+    participant Sess as CognitiveSession
+    participant Vote as Domain search-vote
+    participant Pack as Pack assembly + Firewall
+    participant Runtime as twin-runtime
+    participant Store as MemoryStore
+    participant ExtLLM as Extract
+
+    Host->>Native: SessionStart (hook)
+    Native->>Bind: open / resume binding
+    Native->>Sess: start CognitiveSession
+    alt domain already known
+        Native->>Pack: assemble pack (hot-path deadline)
+        Pack->>Store: retrieve + govern
+        Pack-->>Native: context pack
+        Native-->>Host: additionalContext (inject)
+    else unclassified (no prompt text yet)
+        Native-->>Host: bind only (empty pack)
+    end
+
+    Host->>Native: UserPromptSubmit
+    Native->>Sess: observe user_message
+    alt search-vote names a domain
+        Native->>Vote: upgrade domain once
+        Native->>Pack: emit pack
+        Pack-->>Host: additionalContext (inject)
+    else still inconclusive
+        Native->>Runtime: enqueue session_domain_resolve
+        Native-->>Host: return fast (no mid-turn push)
+        Runtime->>Vote: background multi-message classify
+        Runtime->>Bind: freeze domain + pending_context_pack
+        Note over Host,Bind: Next injection-capable turn<br/>emits the deferred pack
+    end
+
+    Host->>Native: PostToolUse / Stop (turn_completed)
+    Native->>Sess: observe tools + turn<br/>(Stop does not close binding)
+
+    Host->>Native: SessionEnd
+    Native->>Bind: close binding immediately
+    Native->>Runtime: enqueue session_complete
+    Native-->>Host: ok (fail-open if configured)
+    Runtime->>Sess: fold dialogue + deliberate notes
+    Runtime->>Store: session_summary Percept
+    Runtime->>ExtLLM: extract → MemoryCandidates
+    ExtLLM->>Store: candidates for human review
+    Note over Host,Store: Inject governed understanding at the start;<br/>absorb the session as evidence at the end.<br/>Humans still confirm durable Memory / Judgment.
+```
+
+Reference: Claude Code hooks
+
+
+### Analysis Context Compiler (ACC)
+
+Reflect and pattern passes must **judge**, not discover the corpus. The ACC
+is a deterministic compiler: it builds a budgeted, cross-sense
+`AnalysisDossier` (primary evidence, soft neighbors, related memories,
+per-sense lenses) and only then calls the analysis LLM. No LLM runs inside
+the compile itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Meditate / reflect / pattern
+    participant ACC as ACC compiler
+    participant Store as MemoryStore + connectors
+    participant Retr as Hybrid retrieve
+    participant Lens as Sense lenses
+    participant LLM as Analysis LLM
+    participant Review as Human review
+
+    Orch->>ACC: compile dossier (episode or time window)
+    ACC->>Store: load focus members (Slack, GitHub, mail, …)
+    ACC->>Store: soft cross-sense neighbors<br/>(project / time / actor / lexical)
+    Note over ACC: Diversify senses so one connector<br/>cannot crowd out the others
+    ACC->>Retr: related confirmed / candidate / rejected<br/>+ open-session artifacts
+    Retr-->>ACC: graph-expanded neighborhood
+    ACC->>Lens: attach per-sense checklists<br/>(what to look for in github vs slack vs …)
+    ACC->>ACC: tier + budget (L0 abstract → L2 full)
+    ACC-->>Orch: AnalysisDossier (deterministic)
+    Orch->>LLM: judge dossier → trajectory / pattern claims
+    LLM-->>Orch: claims with evidence refs
+    Orch->>Store: MemoryCandidates only<br/>(needs_review, never auto-confirm)
+    Orch->>Review: twin review / judgment gates
+    Note over Orch,Review: Model proposes understanding<br/>humans constitute Memory and Judgment
+```
+
 ## Architecture Principles
+
 
 These principles are the constitution of `twin`. Roadmaps can change, backends can change and interfaces can change, but new features should remain compatible with these rules. When an implementation choice is ambiguous, the preferred option is the one that preserves cognition, autonomy, evidence, safety and portability.
 
@@ -396,7 +551,8 @@ Still open: richer automatic validity inference and a full belief timeline.
 
 ## Ingestion and extraction pipeline
 
-Flow:
+End-to-end runtime (connectors → extract → meditate → pack) is in
+[Runtime sequences](#runtime-sequences). The short ingest spine:
 
 ```text
 raw source
@@ -405,7 +561,7 @@ normalization
         ↓
 PII filter
         ↓
-local LLM extraction (Ollama) or heuristic
+interpret (chat LLM) or defer — never silent lexical “understanding”
         ↓
 schema normalization
         ↓
@@ -415,6 +571,7 @@ review classification
         ↓
 graph + evidence + embedding
 ```
+
 
 Professional / technical sources (connectors and file ingest):
 
