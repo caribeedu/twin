@@ -255,3 +255,90 @@ def test_review_ui_form_roundtrip(client):
     updated = client.get(f"/api/memories/{mem_id}").json()
     assert updated["status"] == "confirmed"
     assert updated["domain"] == "work"
+
+
+def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
+    """Review workbench resolve endpoint: merge, contradict, dismiss finding."""
+    from twin import ids
+    from twin.memory.models import (
+        FindingType,
+        MemoryItem,
+        ReviewFinding,
+        SuggestedAction,
+    )
+    from twin.workspace import Workspace
+
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    home = str(tmp_path / "twin-resolve")
+    client = TestClient(create_app(home=home))
+    ws = Workspace(home)
+
+    def _seed(title, summary, **kw):
+        mem = MemoryItem(
+            id=ids.memory_id(), type="fact", title=title, summary=summary,
+            domain="technical", confidence=0.85, status="candidate",
+            needs_review=True, **kw,
+        )
+        ws.store.insert_memory(mem)
+        ws.store.store_embedding(
+            mem.id, "memory", ws.embedder.name,
+            ws.embedder.embed(f"{mem.title}\n{mem.summary}"),
+        )
+        return mem
+
+    a = _seed("Retry uses exponential backoff",
+              "Webhook retries use exponential backoff with jitter.")
+    b = _seed("Retry uses exponential backoff",
+              "Webhook retries use exponential backoff with jitter.")
+    finding = ReviewFinding(
+        id=ids.finding_id(), memory_id=b.id, type=FindingType.near_duplicate,
+        related_memory_id=a.id, confidence=0.95,
+        reason="near-duplicate via test",
+        suggested_action=SuggestedAction.merge,
+        requires_human_review=True,
+    )
+    ws.store.insert_finding(finding)
+
+    findings = client.get(f"/api/memories/{b.id}/findings").json()
+    assert len(findings) == 1
+    assert findings[0]["related"]["id"] == a.id
+
+    # Dismiss leaves both memories intact.
+    c = _seed("Unrelated note", "Something else entirely.")
+    f2 = ReviewFinding(
+        id=ids.finding_id(), memory_id=c.id, type=FindingType.weak_evidence,
+        confidence=0.9, reason="no evidence",
+        suggested_action=SuggestedAction.request_more_evidence,
+    )
+    ws.store.insert_finding(f2)
+    r = client.post(f"/api/memories/{c.id}/resolve", json={
+        "action": "dismiss", "finding_id": f2.id,
+    })
+    assert r.status_code == 200
+    assert r.json()["finding"]["status"] == "dismissed"
+    assert client.get(f"/api/memories/{c.id}/findings").json() == []
+
+    # Contradict marks the relation without removing the candidate.
+    d = _seed("Use linear retry", "Retries should be linear, not exponential.")
+    r = client.post(f"/api/memories/{d.id}/resolve", json={
+        "action": "contradict", "related_memory_id": a.id,
+    })
+    assert r.status_code == 200
+    assert r.json()["action"] == "contradict"
+    assert d.id not in (r.json().get("removed_from_queue") or [])
+
+    # Merge collapses the near-duplicates.
+    r = client.post(f"/api/memories/{b.id}/resolve", json={
+        "action": "merge",
+        "related_memory_id": a.id,
+        "finding_id": finding.id,
+        "title": "Webhook retries use exponential backoff",
+        "summary": "Webhook retries use exponential backoff with jitter.",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["merged_id"]
+    assert set(body["removed_from_queue"]) >= {a.id, b.id}
+    merged = client.get(f"/api/memories/{body['merged_id']}").json()
+    assert merged["status"] in ("candidate", "confirmed", "merged") or merged["title"]

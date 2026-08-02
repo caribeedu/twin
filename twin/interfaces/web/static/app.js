@@ -6,7 +6,16 @@ const toastEl = $("#toast");
 
 const state = {
   view: "home",
-  review: { queue: [], index: 0, loading: false },
+  review: {
+    queue: [],
+    index: 0,
+    loading: false,
+    selectedRelatedId: null,
+    findings: [],
+    neighbors: [],
+    quality: null,
+    splitOpen: false,
+  },
 };
 
 function toast(msg, kind = "") {
@@ -110,18 +119,38 @@ const LABELS = {
   flag: {
     exact_duplicate: "Exact duplicate",
     near_duplicate: "Near duplicate",
+    possible_duplicate: "Possible duplicate",
     possible_conflict: "Possible conflict",
     conflict: "Conflict",
     contradiction: "Contradiction",
     possible_supersedence: "May supersede another",
     possible_merge: "Possible merge",
+    possible_split: "Possible split",
     possibly_related: "Possibly related",
     related: "Related",
     scope_difference: "Different scope",
     weak_evidence: "Weak evidence",
+    low_specificity: "Low specificity",
     high_future_reuse: "High reuse value",
     evidence_mapping_required: "Needs evidence mapping",
+    cross_source_temporal_conflict: "Cross-source temporal conflict",
     claim_match: "Same claim",
+    stale: "Stale",
+    unsupported: "Unsupported",
+  },
+  action: {
+    confirm: "Approve",
+    reject: "Reject",
+    edit: "Edit",
+    merge: "Merge",
+    split: "Split",
+    supersede: "Supersede",
+    contradict: "Mark conflict",
+    defer: "Defer",
+    archive: "Archive",
+    request_more_evidence: "Request evidence",
+    attach_evidence: "Attach evidence",
+    none: "Review",
   },
   altitude: {
     ground: "Ground",
@@ -349,6 +378,18 @@ function memAccordion(title, itemsHtml) {
     </details>`;
 }
 
+function evidenceAccordion(evidence) {
+  const rows = (evidence || []).filter((e) => (e.quote || "").trim());
+  if (!rows.length) return "";
+  const items = rows.slice(0, 8).map((e) => {
+    const q = String(e.quote || "").trim();
+    const shown = q.length > 320 ? `${q.slice(0, 320)}…` : q;
+    return `<li class="evidence-item">“${esc(shown)}”</li>`;
+  }).join("");
+  const title = rows.length === 1 ? "Evidence" : `Evidence (${rows.length})`;
+  return memAccordion(title, items);
+}
+
 function sourcesAccordion(mem) {
   const refs = mem.source_refs || [];
   if (!refs.length) return "";
@@ -468,18 +509,24 @@ async function review() {
   app.innerHTML = `
     <div class="panel">
       <h2>Review workbench</h2>
-      <p class="lede">Priority queue — approve memories that should enter retrieval & packs.</p>
+      <p class="lede">Resolve duplicates, conflicts and weak claims — then approve what should enter retrieval.</p>
       <div class="legend" id="review-legend">
         <span><kbd>A</kbd> approve</span>
         <span><kbd>R</kbd> reject</span>
         <span><kbd>S</kbd> skip</span>
+        <span><kbd>M</kbd> merge</span>
         <span><kbd>N</kbd> / <kbd>P</kbd> next / prev</span>
-        <span><kbd>E</kbd> focus edit</span>
+        <span><kbd>E</kbd> save details</span>
       </div>
       <div id="review-body" class="empty"><span class="spinner"></span> Loading queue…</div>
     </div>
   `;
   state.review.loading = true;
+  state.review.selectedRelatedId = null;
+  state.review.findings = [];
+  state.review.neighbors = [];
+  state.review.quality = null;
+  state.review.splitOpen = false;
   try {
     const queue = await api("/api/review/queue?limit=200");
     state.review.queue = queue;
@@ -492,6 +539,339 @@ async function review() {
   }
 }
 
+function findingLabel(type) {
+  return LABELS.flag[type] || humanizeKey(type);
+}
+
+function actionLabel(action) {
+  return LABELS.action[action] || humanizeKey(action);
+}
+
+function reviewFormMeta() {
+  const form = $("#review-form");
+  return {
+    domain: form?.domain?.value || undefined,
+    sensitivity: form?.sensitivity?.value || undefined,
+  };
+}
+
+function removeFromReviewQueue(ids) {
+  const drop = new Set((ids || []).filter(Boolean));
+  if (!drop.size) return;
+  const { queue, index } = state.review;
+  const currentId = queue[index]?.id;
+  state.review.queue = queue.filter((m) => !drop.has(m.id));
+  if (currentId && drop.has(currentId)) {
+    state.review.index = Math.min(
+      state.review.index,
+      Math.max(0, state.review.queue.length - 1),
+    );
+  } else {
+    const next = state.review.queue.findIndex((m) => m.id === currentId);
+    state.review.index = next >= 0 ? next : Math.max(0, state.review.queue.length - 1);
+  }
+  state.review.selectedRelatedId = null;
+  state.review.splitOpen = false;
+}
+
+async function resolveMemory(memoryId, payload) {
+  const meta = reviewFormMeta();
+  return api(`/api/memories/${memoryId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ ...meta, ...payload }),
+  });
+}
+
+function defaultSplitParts(mem) {
+  const summary = String(mem.summary || mem.title || "").trim();
+  const bits = summary.split(/\s+(?:and|,)\s+/i).filter((s) => s.trim().length > 12);
+  if (bits.length >= 2) {
+    return bits.slice(0, 2).map((s, i) => ({
+      title: s.slice(0, 80),
+      summary: s,
+    }));
+  }
+  const mid = Math.max(40, Math.floor(summary.length / 2));
+  const cut = summary.lastIndexOf(" ", mid);
+  const a = summary.slice(0, cut > 20 ? cut : mid).trim() || `${mem.title} (part 1)`;
+  const b = summary.slice(cut > 20 ? cut : mid).trim() || `${mem.title} (part 2)`;
+  return [
+    { title: a.slice(0, 80), summary: a },
+    { title: b.slice(0, 80), summary: b },
+  ];
+}
+
+/** Plain-language framing for each finding type. */
+function issueGuide(finding) {
+  const type = finding.type || "";
+  const guides = {
+    possible_conflict: {
+      title: "Possible conflict",
+      ask: "Do these two memories disagree about the same thing?",
+    },
+    possible_supersedence: {
+      title: "Newer version?",
+      ask: "Did this memory replace the related one?",
+    },
+    near_duplicate: {
+      title: "Near duplicate",
+      ask: "Are these basically the same memory?",
+    },
+    exact_duplicate: {
+      title: "Exact duplicate",
+      ask: "Reject this copy, or merge them into one?",
+    },
+    possible_merge: {
+      title: "Possible merge",
+      ask: "Should these be combined into one memory?",
+    },
+    possible_split: {
+      title: "Compound memory",
+      ask: "Does this mix two claims that should be separate?",
+    },
+    weak_evidence: {
+      title: "Weak evidence",
+      ask: "Keep asking for sources, or approve anyway later?",
+    },
+    low_specificity: {
+      title: "Too vague",
+      ask: "Edit domain/sensitivity below, or split if it mixes topics.",
+    },
+    possibly_related: {
+      title: "Related, not conflicting",
+      ask: "Usually safe to ignore — only act if they truly collide.",
+    },
+    scope_difference: {
+      title: "Different scope",
+      ask: "They can coexist (e.g. prod vs dev). Ignore unless wrong.",
+    },
+  };
+  return guides[type] || {
+    title: findingLabel(type),
+    ask: finding.reason || "Choose what should happen to this memory.",
+  };
+}
+
+/**
+ * Decision buttons: primary (suggested) + secondary in a disclosure.
+ * Labels describe the *outcome*, not the internal verb.
+ */
+function findingActionsHtml(finding, relatedId) {
+  const act = finding.suggested_action || "none";
+  const hasRel = Boolean(relatedId);
+  const type = finding.type || "";
+  const primary = [];
+  const secondary = [];
+  const push = (bucket, action, label, hint, cls = "") => {
+    bucket.push({ action, label, hint, cls });
+  };
+
+  if (type === "possible_conflict" || act === "contradict") {
+    push(primary, "contradict", "They disagree", "Keep both; mark as conflicting", "warn");
+    if (hasRel) {
+      push(secondary, "supersede", "This replaces the other", "Deprecate related; approve this");
+      push(secondary, "supersede_by", "The other already won", "Deprecate this; keep related");
+      push(secondary, "merge", "Same claim — merge", "Combine into one memory");
+    }
+    push(secondary, "dismiss", "False alarm", "Not a real conflict");
+  } else if (type === "possible_supersedence" || act === "supersede") {
+    push(primary, "supersede", "This replaces the other", "Deprecate related; approve this", "ok");
+    if (hasRel) {
+      push(secondary, "supersede_by", "The other already won", "Deprecate this instead");
+      push(secondary, "contradict", "They still disagree", "Mark as conflict, keep both");
+      push(secondary, "merge", "Same claim — merge", "Combine into one");
+    }
+    push(secondary, "dismiss", "Both can stay", "Not a replacement");
+  } else if (type === "near_duplicate" || type === "possible_merge" || act === "merge") {
+    push(primary, "merge", "Merge into one", "Combine this with the related memory", "ok");
+    if (hasRel) {
+      push(secondary, "supersede", "Keep this, drop related", "Deprecate the other copy");
+      push(secondary, "reject", "Reject this copy", "Related is enough");
+    }
+    push(secondary, "dismiss", "Keep both", "Not duplicates");
+  } else if (type === "exact_duplicate" || act === "reject") {
+    push(primary, "reject", "Reject this copy", "Related already covers it", "err");
+    if (hasRel) push(secondary, "merge", "Merge instead", "Combine into one");
+    push(secondary, "dismiss", "Keep both", "Not a duplicate");
+  } else if (type === "possible_split" || act === "split") {
+    push(primary, "split", "Split into parts…", "Break into two clearer memories");
+    push(secondary, "dismiss", "Fine as one", "Leave compound");
+  } else if (type === "weak_evidence" || act === "request_more_evidence") {
+    push(primary, "request_evidence", "Ask for more evidence", "Stay in review until sources land", "warn");
+    push(secondary, "dismiss", "Evidence is enough", "Clear this warning");
+  } else if (act === "archive") {
+    push(primary, "archive", "Archive", "Remove from active memory", "err");
+    push(secondary, "dismiss", "Keep active", "Ignore archive hint");
+  } else if (act === "confirm" || type === "scope_difference") {
+    push(primary, "dismiss", "Looks fine — clear issue", "They can coexist", "ok");
+    push(secondary, "confirm", "Approve memory now", "Confirm this candidate");
+  } else if (act === "defer" || type === "possibly_related") {
+    push(primary, "dismiss", "Ignore for now", "Not actionable", "ok");
+    push(secondary, "defer", "Defer memory", "Stay in queue, lower urgency");
+    if (hasRel) {
+      push(secondary, "merge", "Merge with related", "Combine into one");
+      push(secondary, "contradict", "Mark as conflict", "They disagree");
+    }
+  } else {
+    if (hasRel) {
+      push(primary, "merge", "Merge with related", "Combine into one");
+      push(secondary, "contradict", "Mark as conflict", "They disagree");
+      push(secondary, "supersede", "This replaces the other", "Deprecate related");
+    }
+    push(secondary, "dismiss", "Clear issue", "Nothing to do");
+  }
+
+  // Ensure dismiss always available once.
+  if (![...primary, ...secondary].some((b) => b.action === "dismiss")) {
+    push(secondary, "dismiss", "Clear issue", "Nothing to do");
+  }
+
+  const btnHtml = (b) => `
+    <button type="button" class="btn issue-btn ${b.cls}" data-resolve="${esc(b.action)}"
+      data-finding="${esc(finding.id)}" data-related="${esc(relatedId || "")}"
+      title="${esc(b.hint || "")}">
+      <span class="issue-btn-label">${esc(b.label)}</span>
+      ${b.hint ? `<span class="issue-btn-hint">${esc(b.hint)}</span>` : ""}
+    </button>`;
+
+  const primaryHtml = primary.map(btnHtml).join("");
+  const secondaryHtml = secondary.length
+    ? `<details class="issue-more">
+        <summary>Other options</summary>
+        <div class="issue-actions secondary">${secondary.map(btnHtml).join("")}</div>
+      </details>`
+    : "";
+
+  return `<div class="issue-actions primary">${primaryHtml}</div>${secondaryHtml}`;
+}
+
+function issuesPanelHtml(findings, neighbors) {
+  if (!findings?.length) {
+    return `
+      <div class="issues-panel empty-issues">
+        <div class="issues-head">
+          <strong>No open issues</strong>
+          <button type="button" class="btn ghost" id="rev-reanalyze">Re-analyze</button>
+        </div>
+        <p class="meta">Approve if this memory should enter retrieval, or pick a related memory below.</p>
+      </div>`;
+  }
+  const cards = findings.map((f, i) => {
+    const relatedId = f.related_memory_id
+      || state.review.selectedRelatedId
+      || neighbors[0]?.id
+      || "";
+    const relatedTitle = f.related?.title
+      || neighbors.find((n) => n.id === f.related_memory_id)?.title
+      || "";
+    const guide = issueGuide(f);
+    const conf = pct01(f.confidence);
+    const weak = conf !== "" && Number(conf) < 55;
+    return `
+      <article class="issue-card" data-finding-id="${esc(f.id)}" data-related="${esc(f.related_memory_id || "")}">
+        <div class="issue-top">
+          <span class="issue-step">Issue ${i + 1}</span>
+          <span class="tag warn">${esc(guide.title)}</span>
+          ${weak ? `<span class="meta">Low confidence (${conf}%) — double-check</span>`
+            : conf ? `<span class="meta">${conf}% sure</span>` : ""}
+        </div>
+        <p class="issue-ask">${esc(guide.ask)}</p>
+        ${relatedTitle
+          ? `<p class="issue-related">Compared with:
+              <button type="button" class="linkish" data-select-related="${esc(f.related_memory_id || relatedId)}">${esc(relatedTitle)}</button>
+              <span class="meta">(click to show on the right)</span>
+            </p>`
+          : ""}
+        ${f.reason && f.reason !== guide.ask
+          ? `<p class="issue-reason meta">${esc(f.reason)}</p>` : ""}
+        ${findingActionsHtml(f, f.related_memory_id || relatedId)}
+      </article>`;
+  }).join("");
+  return `
+    <div class="issues-panel">
+      <div class="issues-head">
+        <div>
+          <strong>${findings.length} thing${findings.length === 1 ? "" : "s"} to decide</strong>
+          <p class="meta" style="margin:0.2rem 0 0">Pick what should happen. Primary button is the usual answer; open Other options if not.</p>
+        </div>
+        <button type="button" class="btn ghost" id="rev-reanalyze">Re-analyze</button>
+      </div>
+      <div class="issue-list">${cards}</div>
+    </div>`;
+}
+
+function neighborRailHtml(neighbors, selectedId) {
+  if (!neighbors?.length) {
+    return `
+      <aside class="neighbor-rail empty-rail">
+        <div class="card-kicker">Related memories</div>
+        <p class="meta">No similar memories nearby.</p>
+      </aside>`;
+  }
+  const items = neighbors.slice(0, 10).map((n) => {
+    const pct = pct01(n.similarity);
+    const active = n.id === selectedId ? "active" : "";
+    return `
+      <button type="button" class="neighbor-chip ${active}" data-select-related="${esc(n.id)}">
+        <span class="neighbor-score">${pct}%</span>
+        <span class="neighbor-title">${esc(n.title || n.id)}</span>
+        <span class="neighbor-why">${esc(reasonLabel(n.reason) || "")}</span>
+      </button>`;
+  }).join("");
+  return `
+    <aside class="neighbor-rail">
+      <div class="card-kicker">Related memories</div>
+      <p class="meta">Click one to compare.</p>
+      <div class="neighbor-list">${items}</div>
+      <details class="issue-more neighbor-more">
+        <summary>Tools for selected</summary>
+        <div class="neighbor-tools" id="neighbor-tools">
+          <button type="button" class="btn ok issue-btn" data-resolve="merge" data-related="${esc(selectedId || "")}">
+            <span class="issue-btn-label">M · Merge</span>
+            <span class="issue-btn-hint">Same claim — combine</span>
+          </button>
+          <button type="button" class="btn warn issue-btn" data-resolve="contradict" data-related="${esc(selectedId || "")}">
+            <span class="issue-btn-label">They disagree</span>
+            <span class="issue-btn-hint">Keep both as conflict</span>
+          </button>
+          <button type="button" class="btn issue-btn" data-resolve="supersede" data-related="${esc(selectedId || "")}">
+            <span class="issue-btn-label">This replaces the other</span>
+            <span class="issue-btn-hint">Deprecate related</span>
+          </button>
+          <button type="button" class="btn issue-btn" data-resolve="supersede_by" data-related="${esc(selectedId || "")}">
+            <span class="issue-btn-label">The other already won</span>
+            <span class="issue-btn-hint">Deprecate this candidate</span>
+          </button>
+        </div>
+      </details>
+    </aside>`;
+}
+
+function splitPanelHtml(mem) {
+  if (!state.review.splitOpen) return "";
+  const parts = defaultSplitParts(mem);
+  return `
+    <div class="split-panel" id="split-panel">
+      <div class="issues-head"><strong>Split into parts</strong></div>
+      <div class="pair">
+        <div class="field"><label>Part 1 title</label>
+          <input name="p1_title" value="${esc(parts[0].title)}" /></div>
+        <div class="field"><label>Part 2 title</label>
+          <input name="p2_title" value="${esc(parts[1].title)}" /></div>
+      </div>
+      <div class="pair">
+        <div class="field"><label>Part 1 summary</label>
+          <textarea name="p1_summary" rows="3">${esc(parts[0].summary)}</textarea></div>
+        <div class="field"><label>Part 2 summary</label>
+          <textarea name="p2_summary" rows="3">${esc(parts[1].summary)}</textarea></div>
+      </div>
+      <div class="row tight">
+        <button type="button" class="btn ok" id="split-confirm">Confirm split</button>
+        <button type="button" class="btn ghost" id="split-cancel">Cancel</button>
+      </div>
+    </div>`;
+}
+
 async function renderReviewItem() {
   const box = $("#review-body");
   if (!box) return;
@@ -501,26 +881,56 @@ async function renderReviewItem() {
     return;
   }
   const mem = queue[index];
+  box.innerHTML = `<div class="empty"><span class="spinner"></span> Loading item…</div>`;
+
   let evidence = [];
-  let neighbor = null;
-  let nEvidence = [];
+  let neighbors = [];
+  let findings = [];
+  let quality = null;
   try {
     const full = await api(`/api/memories/${mem.id}`);
     evidence = full.evidence || [];
+    Object.assign(mem, full);
   } catch (_) { /* ignore */ }
   try {
-    const neighbors = await api(`/api/memories/${mem.id}/neighbors`);
-    if (neighbors?.length) {
-      neighbor = neighbors[0];
-      const nf = await api(`/api/memories/${neighbor.id}`);
-      nEvidence = nf.evidence || [];
-    }
-  } catch (_) { /* ignore */ }
+    neighbors = await api(`/api/memories/${mem.id}/neighbors`) || [];
+  } catch (_) { neighbors = []; }
+  try {
+    quality = await api(`/api/memories/${mem.id}/quality`);
+    findings = quality?.issues || [];
+  } catch (_) {
+    try {
+      findings = await api(`/api/memories/${mem.id}/findings`) || [];
+    } catch (_) { findings = []; }
+  }
 
-  const neighPct = neighbor != null ? pct01(neighbor.similarity) : null;
-  const neighWhy = neighbor?.reason ? reasonLabel(neighbor.reason) : "";
-  const neighHeading = neighbor
-    ? `Similar memory · ${neighPct}% match${neighWhy ? ` · ${neighWhy}` : ""}`
+  state.review.neighbors = neighbors;
+  state.review.findings = findings;
+  state.review.quality = quality;
+  if (!state.review.selectedRelatedId) {
+    const fromFinding = findings.find((f) => f.related_memory_id)?.related_memory_id;
+    state.review.selectedRelatedId = fromFinding || neighbors[0]?.id || null;
+  }
+  const selectedId = state.review.selectedRelatedId;
+  let related = neighbors.find((n) => n.id === selectedId) || null;
+  let relatedEvidence = [];
+  if (selectedId && !related) {
+    try {
+      related = await api(`/api/memories/${selectedId}`);
+    } catch (_) { related = null; }
+  }
+  if (related) {
+    try {
+      const nf = await api(`/api/memories/${related.id}`);
+      relatedEvidence = nf.evidence || [];
+      related = { ...related, ...nf };
+    } catch (_) { /* ignore */ }
+  }
+
+  const neighPct = related?.similarity != null ? pct01(related.similarity) : null;
+  const neighWhy = related?.reason ? reasonLabel(related.reason) : "";
+  const neighHeading = related
+    ? `Related · ${neighPct != null ? `${neighPct}% match` : "selected"}${neighWhy ? ` · ${neighWhy}` : ""}`
     : "";
 
   box.innerHTML = `
@@ -533,13 +943,14 @@ async function renderReviewItem() {
     </div>
     ${mem.review_reason
       ? `<div class="reason">⚠ ${esc(reasonLabel(mem.review_reason))}</div>` : ""}
-    <div class="pair">
+    <div class="review-compare">
       ${memCard(mem, evidence, "Candidate")}
-      ${neighbor
-        ? memCard(neighbor, nEvidence, neighHeading)
+      ${related
+        ? memCard(related, relatedEvidence, neighHeading)
         : `<div class="mem-card empty-card"><div class="meta">No similar memory nearby</div></div>`}
+      ${neighborRailHtml(neighbors, selectedId)}
     </div>
-    <form class="row" id="review-form">
+    <form class="row review-controls" id="review-form">
       <div class="field"><label>Domain</label>
         <select name="domain">${selectOptions("domain", DOMAIN_OPTIONS, mem.domain)}</select>
       </div>
@@ -549,24 +960,137 @@ async function renderReviewItem() {
       <button type="button" class="btn ok" data-act="approve">A · Approve</button>
       <button type="button" class="btn err" data-act="reject">R · Reject</button>
       <button type="button" class="btn" data-act="update">E · Save details</button>
+      <button type="button" class="btn" data-act="defer">Defer</button>
+      <button type="button" class="btn ghost" data-act="archive">Archive</button>
       <button type="button" class="btn ghost" data-act="skip">S · Skip</button>
     </form>
+    ${issuesPanelHtml(findings, neighbors)}
+    ${splitPanelHtml(mem)}
   `;
+
+  bindReviewHandlers(mem);
+}
+
+function bindReviewHandlers(mem) {
+  const { queue, index } = state.review;
 
   $("#rev-prev")?.addEventListener("click", () => {
     state.review.index = Math.max(0, index - 1);
+    state.review.selectedRelatedId = null;
+    state.review.splitOpen = false;
     renderReviewItem();
   });
   $("#rev-next")?.addEventListener("click", () => {
     state.review.index = Math.min(queue.length - 1, index + 1);
+    state.review.selectedRelatedId = null;
+    state.review.splitOpen = false;
     renderReviewItem();
   });
+
+  $("#rev-reanalyze")?.addEventListener("click", async () => {
+    try {
+      toast("Re-analyzing…");
+      const quality = await api(`/api/memories/${mem.id}/quality?refresh=true`);
+      state.review.quality = quality;
+      state.review.findings = quality?.issues || [];
+      renderReviewItem();
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  for (const pick of document.querySelectorAll("[data-select-related]")) {
+    pick.addEventListener("click", () => {
+      state.review.selectedRelatedId = pick.dataset.selectRelated;
+      renderReviewItem();
+    });
+  }
+
+  for (const resolveBtn of document.querySelectorAll("[data-resolve]")) {
+    resolveBtn.addEventListener("click", async () => {
+      const action = resolveBtn.dataset.resolve;
+      const findingId = resolveBtn.dataset.finding || undefined;
+      const related = resolveBtn.dataset.related || state.review.selectedRelatedId || undefined;
+
+      if (action === "split") {
+        state.review.splitOpen = true;
+        renderReviewItem();
+        return;
+      }
+      if (["merge", "contradict", "supersede", "supersede_by"].includes(action) && !related) {
+        toast("Select a related memory first", "err");
+        return;
+      }
+      resolveBtn.disabled = true;
+      try {
+        const out = await resolveMemory(mem.id, {
+          action,
+          related_memory_id: related || null,
+          finding_id: findingId || null,
+        });
+        const labels = {
+          merge: "Merged into one",
+          contradict: "Marked as conflicting",
+          supersede: "This replaced the other",
+          supersede_by: "Related kept; this deprecated",
+          dismiss: "Issue cleared",
+          archive: "Archived",
+          request_evidence: "Staying in review for evidence",
+          defer: "Deferred",
+          confirm: "Approved",
+          reject: "Rejected this copy",
+        };
+        toast(labels[action] || "Resolved", "ok");
+        if (out.removed_from_queue?.length) {
+          removeFromReviewQueue(out.removed_from_queue);
+        }
+        renderReviewItem();
+      } catch (err) {
+        toast(err.message, "err");
+        resolveBtn.disabled = false;
+      }
+    });
+  }
+
+  $("#split-cancel")?.addEventListener("click", () => {
+    state.review.splitOpen = false;
+    renderReviewItem();
+  });
+  $("#split-confirm")?.addEventListener("click", async () => {
+    const panel = $("#split-panel");
+    if (!panel) return;
+    const parts = [
+      {
+        title: panel.querySelector('[name="p1_title"]').value.trim(),
+        summary: panel.querySelector('[name="p1_summary"]').value.trim(),
+      },
+      {
+        title: panel.querySelector('[name="p2_title"]').value.trim(),
+        summary: panel.querySelector('[name="p2_summary"]').value.trim(),
+      },
+    ];
+    if (parts.some((p) => !p.title || !p.summary)) {
+      toast("Both parts need title and summary", "err");
+      return;
+    }
+    try {
+      const out = await resolveMemory(mem.id, { action: "split", parts });
+      toast("Split into candidates", "ok");
+      removeFromReviewQueue(out.removed_from_queue || [mem.id]);
+      renderReviewItem();
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
   $("#review-form")?.addEventListener("click", async (ev) => {
     const btn = ev.target.closest("[data-act]");
     if (!btn) return;
     const act = btn.dataset.act;
     if (act === "skip") {
       state.review.index = Math.min(queue.length - 1, index + 1);
+      state.review.selectedRelatedId = null;
+      state.review.splitOpen = false;
       renderReviewItem();
       return;
     }
@@ -578,12 +1102,16 @@ async function renderReviewItem() {
       await api(`/api/memories/${mem.id}/review?action=${act}&domain=${encodeURIComponent(domain)}&sensitivity=${encodeURIComponent(sensitivity)}`, {
         method: "POST",
       });
-      toast(act === "approve" ? "Approved" : act === "reject" ? "Rejected" : "Saved", "ok");
-      if (act === "approve" || act === "reject") {
-        state.review.queue.splice(index, 1);
-        if (state.review.index >= state.review.queue.length) {
-          state.review.index = Math.max(0, state.review.queue.length - 1);
-        }
+      const msg = {
+        approve: "Approved",
+        reject: "Rejected",
+        update: "Saved",
+        defer: "Deferred",
+        archive: "Archived",
+      }[act] || "Done";
+      toast(msg, "ok");
+      if (act === "approve" || act === "reject" || act === "archive") {
+        removeFromReviewQueue([mem.id]);
       }
       renderReviewItem();
     } catch (err) {
@@ -636,11 +1164,6 @@ function memBodyHtml(mem, { max = 0 } = {}) {
 }
 
 function memCard(mem, evidence, heading) {
-  const quotes = (evidence || []).slice(0, 2)
-    .map((e) => {
-      const q = (e.quote || "").slice(0, 240);
-      return q ? `<blockquote class="evidence">“${esc(q)}”</blockquote>` : "";
-    }).join("");
   const conf = pct01(mem.confidence);
   const review = pct01(mem.review_priority);
   const when = fmtWhen(mem.created_at);
@@ -656,9 +1179,9 @@ function memCard(mem, evidence, heading) {
         <span>Review <strong>${review}%</strong></span>
       </div>
       ${memBodyHtml(mem, { max: 0 })}
+      ${evidenceAccordion(evidence)}
       ${sourcesAccordion(mem)}
       ${basedInAccordion(mem)}
-      ${quotes}
     </article>`;
 }
 
@@ -672,6 +1195,10 @@ function onReviewKey(e) {
   if (key === "r") { e.preventDefault(); form.querySelector('[data-act="reject"]')?.click(); }
   if (key === "s") { e.preventDefault(); form.querySelector('[data-act="skip"]')?.click(); }
   if (key === "e") { e.preventDefault(); form.querySelector('[data-act="update"]')?.click(); }
+  if (key === "m") {
+    e.preventDefault();
+    document.querySelector('#neighbor-tools [data-resolve="merge"]')?.click();
+  }
   if (key === "n") { e.preventDefault(); $("#rev-next")?.click(); }
   if (key === "p") { e.preventDefault(); $("#rev-prev")?.click(); }
 }

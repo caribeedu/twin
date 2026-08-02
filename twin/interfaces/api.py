@@ -30,7 +30,12 @@ from ..cognition.sessions import (
 from ..cognition.workspace import workspace_tick
 from ..config import ALL_DOMAINS, UNCLASSIFIED_DOMAIN
 from ..judgment.profile import load_profile
-from ..memory.models import FeedbackVerdict, MemoryStatus, TaskProfile
+from ..memory.models import (
+    FeedbackVerdict,
+    FindingStatus,
+    MemoryStatus,
+    TaskProfile,
+)
 from ..memory.search import search
 from ..workspace import Workspace
 from .web import STATIC_DIR, read_index
@@ -177,6 +182,39 @@ class ConnectorSyncRequest(BaseModel):
     emit_percepts: bool = True
 
 
+class MergeRequest(BaseModel):
+    memory_ids: list[str] = Field(min_length=2)
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    confirm_cross_scope_merge: bool = False
+    human_confirmed_synthesis: bool = False
+    output_type: Optional[str] = None
+    output_domain: Optional[str] = None
+    output_persona: Optional[str] = None
+    output_project_id: Optional[str] = None
+    output_canonical_claim: Optional[dict[str, Any]] = None
+    set_output_project_id: bool = False
+    set_output_canonical_claim: bool = False
+
+
+class SplitRequest(BaseModel):
+    parts: list[dict[str, Any]] = Field(min_length=2)
+
+
+class ResolveRequest(BaseModel):
+    """Resolve a review finding / neighbor relation for one memory."""
+
+    action: str  # merge|contradict|supersede|supersede_by|dismiss|archive|split|…
+    related_memory_id: Optional[str] = None
+    finding_id: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    parts: Optional[list[dict[str, Any]]] = None
+    confirm_cross_scope_merge: bool = False
+    domain: Optional[str] = None
+    sensitivity: Optional[str] = None
+
+
 def _mem_dict(mem, store=None) -> dict[str, Any]:
     data = mem.model_dump()
     data["type"] = mem.type.value
@@ -292,6 +330,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/memories/{memory_id}/review")
     def api_review(memory_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
+        from ..clock import now_iso
+        from ..memory.lifecycle import archive_memory
         mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
@@ -301,10 +341,21 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             ws.store.update_memory(memory_id, sensitivity=sensitivity)
         if action == "approve":
             ws.store.set_status(memory_id, MemoryStatus.confirmed)
+            ws.store.update_memory(memory_id, reviewed_at=now_iso(), needs_review=False)
         elif action == "reject":
             ws.store.set_status(memory_id, MemoryStatus.rejected)
+            ws.store.update_memory(memory_id, reviewed_at=now_iso(), needs_review=False)
+        elif action == "defer":
+            ws.store.update_memory(memory_id, needs_review=True, review_reason="deferred")
+        elif action == "archive":
+            try:
+                archive_memory(ws.store, memory_id)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         elif action != "update":
-            raise HTTPException(400, "action must be approve | reject | update")
+            raise HTTPException(
+                400, "action must be approve | reject | update | defer | archive",
+            )
         return _mem_dict(ws.store.get_memory(memory_id), ws.store)
 
     # -- memory formation ----------------------------------------------
@@ -864,22 +915,39 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         force: bool = False
         preview_token: Optional[str] = None
 
-    class MergeRequest(BaseModel):
-        memory_ids: list[str] = Field(min_length=2)
-        title: Optional[str] = None
-        summary: Optional[str] = None
-        confirm_cross_scope_merge: bool = False
-        human_confirmed_synthesis: bool = False
-        output_type: Optional[str] = None
-        output_domain: Optional[str] = None
-        output_persona: Optional[str] = None
-        output_project_id: Optional[str] = None
-        output_canonical_claim: Optional[dict[str, Any]] = None
-        set_output_project_id: bool = False
-        set_output_canonical_claim: bool = False
+    def _finding_dict(finding, store) -> dict[str, Any]:
+        data = finding.model_dump(mode="json")
+        rid = finding.related_memory_id
+        if rid:
+            related = store.get_memory(rid)
+            if related is not None:
+                data["related"] = {
+                    "id": related.id,
+                    "title": related.title,
+                    "summary": related.summary,
+                    "status": getattr(related.status, "value", related.status),
+                    "type": getattr(related.type, "value", related.type),
+                    "domain": getattr(related.domain, "value", related.domain),
+                }
+        return data
 
-    class SplitRequest(BaseModel):
-        parts: list[dict[str, Any]] = Field(min_length=2)
+    def _close_finding(store, memory_id: str, finding_id: Optional[str], *,
+                       status: FindingStatus = FindingStatus.resolved,
+                       operation_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        if not finding_id or not hasattr(store, "get_findings"):
+            return None
+        from ..clock import now_iso
+        findings = store.get_findings(memory_id, unresolved_only=False)
+        finding = next((f for f in findings if f.id == finding_id), None)
+        if finding is None:
+            return None
+        finding.status = status
+        finding.resolved = True
+        finding.resolved_at = now_iso()
+        if operation_id:
+            finding.resolution_operation_id = operation_id
+        store.update_finding(finding)
+        return _finding_dict(finding, store)
 
     @app.post("/api/review/batches")
     def api_create_batch(req: BatchCreateRequest):
@@ -924,13 +992,197 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ]
 
     @app.get("/api/memories/{memory_id}/quality")
-    def api_quality(memory_id: str):
+    def api_quality(memory_id: str, refresh: bool = False):
         from ..cognition.quality import analyze_memory
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        # Prefer stored findings unless caller asks to re-analyze.
+        if not refresh and hasattr(ws.store, "get_findings"):
+            stored = ws.store.get_findings(memory_id, unresolved_only=True)
+            if stored:
+                from ..cognition.quality import memory_altitude
+                return {
+                    "memory_id": memory_id,
+                    "quality_score": mem.quality_score,
+                    "review_priority": mem.review_priority,
+                    "impact": mem.impact,
+                    "issues": [_finding_dict(f, ws.store) for f in stored],
+                    "suggested_action": (
+                        stored[0].suggested_action.value if stored else "none"
+                    ),
+                    "requires_human_review": bool(mem.needs_review),
+                    "quality_flags": list(mem.quality_flags or []),
+                    "neighbors": [],
+                    "altitude": memory_altitude(mem),
+                    "from_store": True,
+                }
         try:
             report = analyze_memory(ws.store, ws.embedder, memory_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
-        return report.model_dump(mode="json")
+        data = report.model_dump(mode="json")
+        data["issues"] = [_finding_dict(f, ws.store) for f in report.issues]
+        data["from_store"] = False
+        return data
+
+    @app.get("/api/memories/{memory_id}/findings")
+    def api_findings(memory_id: str, unresolved_only: bool = True):
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        if not hasattr(ws.store, "get_findings"):
+            return []
+        return [
+            _finding_dict(f, ws.store)
+            for f in ws.store.get_findings(memory_id, unresolved_only=unresolved_only)
+        ]
+
+    @app.post("/api/memories/{memory_id}/findings/{finding_id}/dismiss")
+    def api_dismiss_finding(memory_id: str, finding_id: str):
+        closed = _close_finding(
+            ws.store, memory_id, finding_id, status=FindingStatus.dismissed,
+        )
+        if closed is None:
+            raise HTTPException(404, "finding not found")
+        return closed
+
+    @app.post("/api/memories/{memory_id}/resolve")
+    def api_resolve(memory_id: str, req: ResolveRequest):
+        from ..clock import now_iso
+        from ..memory.lifecycle import (
+            archive_memory,
+            contradict,
+            merge_memories,
+            split_memory,
+            supersede,
+        )
+
+        mem = ws.store.get_memory(memory_id)
+        if mem is None:
+            raise HTTPException(404, "memory not found")
+        if req.domain:
+            ws.store.update_memory(memory_id, domain=req.domain)
+        if req.sensitivity:
+            ws.store.update_memory(memory_id, sensitivity=req.sensitivity)
+
+        action = (req.action or "").strip().lower()
+        related_id = req.related_memory_id
+        result: dict[str, Any] = {"action": action, "memory_id": memory_id}
+        op_id: Optional[str] = None
+        remove_ids: list[str] = []
+        finding_status = FindingStatus.resolved
+
+        try:
+            if action == "dismiss":
+                finding_status = FindingStatus.dismissed
+            elif action == "merge":
+                if not related_id:
+                    raise ValueError("related_memory_id required for merge")
+                merged = merge_memories(
+                    ws.store, [memory_id, related_id],
+                    title=req.title, summary=req.summary,
+                    embedder=ws.embedder,
+                    confirm_cross_scope_merge=req.confirm_cross_scope_merge,
+                    human_confirmed_synthesis=True,
+                )
+                op_id = merged.operation_id
+                merged_id = merged.extras.get("merged_id")
+                result.update({
+                    "merged_id": merged_id,
+                    "operation_id": op_id,
+                    **merged.extras,
+                })
+                remove_ids = [memory_id, related_id]
+            elif action == "contradict":
+                if not related_id:
+                    raise ValueError("related_memory_id required for contradict")
+                out = contradict(ws.store, memory_id, related_id)
+                op_id = out.operation_id
+                result["operation_id"] = op_id
+            elif action == "supersede":
+                if not related_id:
+                    raise ValueError("related_memory_id required for supersede")
+                out = supersede(ws.store, memory_id, related_id)
+                # Keep the newer claim as confirmed — matches legacy review form.
+                ws.store.set_status(memory_id, MemoryStatus.confirmed)
+                ws.store.update_memory(
+                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                )
+                op_id = out.operation_id
+                result["operation_id"] = op_id
+                remove_ids = [memory_id, related_id]
+            elif action == "supersede_by":
+                if not related_id:
+                    raise ValueError("related_memory_id required for supersede_by")
+                out = supersede(ws.store, related_id, memory_id)
+                related_mem = ws.store.get_memory(related_id)
+                if related_mem is not None and related_mem.status == MemoryStatus.candidate:
+                    ws.store.set_status(related_id, MemoryStatus.confirmed)
+                    ws.store.update_memory(
+                        related_id, reviewed_at=now_iso(), needs_review=False,
+                    )
+                op_id = out.operation_id
+                result["operation_id"] = op_id
+                remove_ids = [memory_id, related_id]
+            elif action == "split":
+                parts = req.parts or []
+                if len(parts) < 2:
+                    raise ValueError("split requires at least two parts")
+                out = split_memory(ws.store, memory_id, parts, embedder=ws.embedder)
+                op_id = out.operation_id
+                result.update({
+                    "children": out.extras.get("children"),
+                    "operation_id": op_id,
+                })
+                remove_ids = [memory_id]
+            elif action == "archive":
+                out = archive_memory(ws.store, memory_id)
+                op_id = out.operation_id
+                result["operation_id"] = op_id
+                remove_ids = [memory_id]
+            elif action == "request_evidence":
+                ws.store.update_memory(
+                    memory_id, needs_review=True,
+                    review_reason="more evidence requested",
+                    quality_flags=list(set((mem.quality_flags or []) + ["weak_evidence"])),
+                )
+            elif action == "defer":
+                ws.store.update_memory(
+                    memory_id, needs_review=True, review_reason="deferred",
+                )
+            elif action == "confirm":
+                ws.store.set_status(memory_id, MemoryStatus.confirmed)
+                ws.store.update_memory(
+                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                )
+                remove_ids = [memory_id]
+            elif action == "reject":
+                ws.store.set_status(memory_id, MemoryStatus.rejected)
+                ws.store.update_memory(
+                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                )
+                remove_ids = [memory_id]
+            else:
+                raise HTTPException(
+                    400,
+                    "unknown action; expected merge | contradict | supersede | "
+                    "supersede_by | dismiss | archive | split | request_evidence | "
+                    "defer | confirm | reject",
+                )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        closed = _close_finding(
+            ws.store, memory_id, req.finding_id,
+            status=finding_status, operation_id=op_id,
+        )
+        if closed is not None:
+            result["finding"] = closed
+        result["removed_from_queue"] = remove_ids
+        result["memory"] = _mem_dict(ws.store.get_memory(memory_id), ws.store) \
+            if ws.store.get_memory(memory_id) else None
+        return result
 
     @app.get("/api/memories/{memory_id}/provenance")
     def api_provenance(memory_id: str):
