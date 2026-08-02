@@ -100,7 +100,7 @@ def doctor(cfg: Config) -> list[Check]:
             checks.append(Check(f"dependency:{module}", OK))
         except ImportError:
             checks.append(Check(f"dependency:{module}", WARN,
-                                f'not installed — pip install "twin[{extra}]"'))
+                                f'not installed — pip install "twin-cognition[{extra}]"'))
 
     # store connectivity + backend capabilities (also runs migrations)
     url = cfg.resolved_db_url

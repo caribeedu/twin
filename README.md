@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/quickstart-setup-7c3aed?style=for-the-badge" alt="Setup"></a>
+  <a href="https://pypi.org/project/twin-cognition/"><img src="https://img.shields.io/pypi/v/twin-cognition?style=for-the-badge&logo=pypi&logoColor=white&label=twin-cognition" alt="PyPI"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
@@ -33,6 +34,7 @@
   <a href="#evidence-over-ideology">Evidence</a> ·
   <a href="#success-criteria">Success</a> ·
   <a href="#final-objective">Final Objective</a> ·
+  <a href="#install">Install</a> ·
   <a href="#docs">Docs</a> ·
   <a href="#license">License</a>
 </p>
@@ -514,6 +516,24 @@ It should remain independent of any single model, interface or provider, allowin
 This README is the public destination statement. Deeper docs expand
 concepts without hiding them.
 
+### Product, architecture & ops
+
+| Doc | Source of truth for |
+|---|---|
+| **[SETUP.md](docs/SETUP.md)** | Install, first-run wizard, providers, config, tests |
+| **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, meditate, native, review, recovery |
+| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — pipeline, data model, threat model |
+| **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
+| **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
+| **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
+| **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
+
+### Research & evaluation
+
+| Doc | Source of truth for |
+|---|---|
+| **[RESEARCH.md](docs/RESEARCH.md)** | Hypotheses, method, scenario benchmarks, open directions |
+
 ### Destination & framing
 
 | Doc | Source of truth for |
@@ -527,24 +547,6 @@ concepts without hiding them.
 |---|---|
 | **[COGNITION.md](docs/COGNITION.md)** | Understanding and Situation Models — bridge from percepts to reusable interpretation |
 | **[FOUNDATIONS.md](docs/FOUNDATIONS.md)** | Appendix — academic roots (Extended Mind, 4E, …); inspiration, not claims |
-
-### Research & evaluation
-
-| Doc | Source of truth for |
-|---|---|
-| **[RESEARCH.md](docs/RESEARCH.md)** | Hypotheses, method, scenario benchmarks, open directions |
-
-### Product, architecture & ops
-
-| Doc | Source of truth for |
-|---|---|
-| **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
-| **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
-| **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
-| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — pipeline, data model, threat model |
-| **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
-| **[SETUP.md](docs/SETUP.md)** | Install, first-run wizard, providers, config, tests |
-| **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, meditate, native, review, recovery |
 
 ## License
 

@@ -12,14 +12,28 @@ native, backup): [OPERATIONS.md](OPERATIONS.md). Surfaces:
 
 ## Installation
 
+PyPI project name is **`twin-cognition`**. The import and CLI stay
+**`twin`** (`import twin`, commands `twin` / `twin-runtime`).
+
 ```bash
+pip install "twin-cognition[api,mcp,postgres,crypto]"
+```
+
+Extras: `api` (HTTP UI), `mcp` (MCP server), `postgres` (pgvector store),
+`crypto` (at-rest encryption). Omit extras you do not need.
+
+Optional: install [Ollama](https://ollama.com/download) if you want the
+recommended local chat with embed path.
+
+### Development from source
+
+```bash
+git clone https://github.com/caribeedu/twin.git
+cd twin
 pip install -e ".[dev]"        # api + mcp + postgres + crypto + tests
 # or granular:
 pip install -e ".[api,mcp,postgres,crypto]"
 ```
-
-Optional: install [Ollama](https://ollama.com/download) if you want the
-recommended local chat + embed path.
 
 ## First-run wizard (`twin init`)
 

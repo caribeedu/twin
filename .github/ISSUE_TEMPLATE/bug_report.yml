@@ -1,0 +1,61 @@
+name: Bug report
+description: Something does not work as expected
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For setup questions, see [SETUP.md](https://github.com/caribeedu/twin/blob/main/docs/SETUP.md).
+        For security issues, use [SECURITY.md](https://github.com/caribeedu/twin/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Clear description of the bug.
+      placeholder: Expected X, got Y…
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps or commands.
+      placeholder: |
+        1. twin init …
+        2. twin ingest …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Twin version
+      description: Output of `python -c "import twin; print(twin.__version__)"` or the git tag.
+      placeholder: "1.4.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - pip (twin-cognition)
+        - editable from source
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, LLM provider if relevant.
+      placeholder: |
+        OS: …
+        Python: 3.11
+        Provider: ollama / …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: Paste relevant stderr or `twin doctor` output (redact secrets).
+      render: shell
