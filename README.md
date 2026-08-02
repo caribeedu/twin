@@ -37,8 +37,6 @@
   <a href="#license">License</a>
 </p>
 
----
-
 ## Purpose
 
 Twin exists to reduce the cognitive cost of repeatedly explaining the
@@ -59,8 +57,6 @@ This README defines that destination. It is not a release plan or a
 description of the current implementation. Near-term increments live in
 [docs/PRODUCT.md](docs/PRODUCT.md) and [docs/ROADMAP.md](docs/ROADMAP.md);
 deeper architecture and interfaces live under [Docs](#docs).
-
----
 
 ## The Problem
 
@@ -92,8 +88,6 @@ providers without surrendering privacy, ownership or authority.
 The consequence of failing at that is repeated explanations,
 inconsistent reasoning, context loss and dependence on product-specific
 memory.
-
----
 
 ## The Current Landscape
 
@@ -140,8 +134,6 @@ Governed Context
 Any Authorized Intelligence
 ```
 
----
-
 ## Current Findings
 
 Twin is an active engineering research and product project.
@@ -167,8 +159,6 @@ These findings remain subject to revision.
 Twin intentionally treats every architectural decision as provisional until
 supported by broader experimentation and reproducible benchmarks.
 
----
-
 ## What Twin Is Trying to Prove
 
 Twin is guided by the following hypotheses:
@@ -183,8 +173,6 @@ Twin is guided by the following hypotheses:
 8. **Inferred knowledge remains falsifiable.**
 
 These hypotheses should be validated through reproducible experiments and benchmarks.
-
----
 
 ## Concrete Example
 
@@ -209,8 +197,6 @@ Twin should instead synthesize:
 The objective is reusable understanding — not a collection of matching
 records. What Twin means by *understanding* and *situation models* is
 defined in [docs/COGNITION.md](docs/COGNITION.md).
-
----
 
 ## Where to Aim
 
@@ -238,8 +224,6 @@ Beyond what happened, the long-term system should represent:
 Models may propose interpretations, memories and revisions. Identity-
 level claims, durable judgment and delegated authority require
 proportionate evidence, transparency and human control.
-
----
 
 ## Research Objective
 
@@ -282,8 +266,6 @@ More on academic roots in [docs/FOUNDATIONS.md](docs/FOUNDATIONS.md).
 Open research questions beyond the current loop are tracked in
 [docs/RESEARCH.md](docs/RESEARCH.md#open-directions).
 
----
-
 ## Product Objective
 
 In practical use, Twin should make authorized AI tools feel progressively less forgetful and less dependent on re-briefing.
@@ -315,8 +297,6 @@ Users should always be able to inspect:
 
 Install and first use: [docs/SETUP.md](docs/SETUP.md). Product shape: [docs/PRODUCT.md](docs/PRODUCT.md).
 
----
-
 ## Runtime Philosophy
 
 Twin was conceived with a strong local-first philosophy.
@@ -344,8 +324,6 @@ The objective is computational understanding with complete transparency,
 user control and a progressive path back to local execution as model
 quality evolves.
 
----
-
 ## What Twin Is Not
 
 Twin should not become:
@@ -359,8 +337,6 @@ Twin should not become:
 - a chatbot that impersonates the owner;
 - a system that hides reasoning costs;
 - a collection of cognitive terminology without measurable behavior.
-
----
 
 ## Direction
 
@@ -411,8 +387,6 @@ The long-term direction is a persistent cognitive substrate capable of supportin
 
 Pipeline detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Planned work in [docs/ROADMAP.md](docs/ROADMAP.md).
 
----
-
 ## Evidence Over Ideology
 
 Twin follows evidence over ideology.
@@ -428,8 +402,6 @@ understanding above adherence to any particular technology or paradigm.
 This philosophy also applies to Twin itself: hypotheses should be
 revised whenever stronger evidence appears. Architectural language is
 only valuable when it produces behavior that can be tested.
-
----
 
 ## Success Criteria
 
@@ -462,8 +434,6 @@ failure cases and comparative evaluations against simpler memory and
 retrieval baselines. Communication should lead with those demonstrated
 outcomes — see [docs/IDENTITY.md](docs/IDENTITY.md#how-twin-should-be-spoken-about).
 
----
-
 ## Final Objective
 
 > **Every authorized AI should understand the user better tomorrow than
@@ -473,8 +443,6 @@ Twin aims to make that possible without requiring the user to surrender
 privacy, ownership, portability or control — and without collapsing a
 durable cognitive counterpart into any single model, product or
 impersonation.
-
----
 
 ## Docs
 
@@ -512,8 +480,6 @@ concepts without hiding them.
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
 | **[SETUP.md](docs/SETUP.md)** | Install, providers, config, tests |
 | **[OPERATIONS.md](docs/OPERATIONS.md)** | Runtime, backup, incidents |
-
----
 
 ## License
 
