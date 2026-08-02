@@ -20,9 +20,9 @@
   <a href="#purpose">Purpose</a> ·
   <a href="#the-problem">The Problem</a> ·
   <a href="#the-current-landscape">Landscape</a> ·
+  <a href="#what-twin-is-trying-to-prove">Hypotheses</a> ·
   <a href="#demonstration">Demonstration</a> ·
   <a href="#current-findings">Findings</a> ·
-  <a href="#what-twin-is-trying-to-prove">Hypotheses</a> ·
   <a href="#where-to-aim">Where to Aim</a> ·
   <a href="#research-objective">Research</a> ·
   <a href="#product-objective">Product</a><br/>
@@ -46,7 +46,7 @@ systems.
 It is not another chatbot, another agent framework, another RAG pipeline
 or another knowledge graph.
 
-Its perspective is broader:
+Its proposal is broader:
 
 > **Build a persistent, governed and model-independent cognitive layer that transforms distributed observations into reusable understanding.**
 
@@ -133,9 +133,24 @@ Governed Context
 Any Authorized Intelligence
 ```
 
+## What Twin Is Trying to Prove
+
+Twin is guided by the following hypotheses:
+
+1. **Understanding is more valuable than isolated retrieval.**
+2. **Distributed observations can form coherent situation models.**
+3. **Reflection should precede durable memory.**
+4. **Judgment should evolve separately from factual memory.**
+5. **Cognitive continuity depends more on reusable understanding than on context-window size.**
+6. **A person's cognitive substrate should remain portable across models and vendors.**
+7. **Governance must be applied before sensitive context reaches the reasoning model.**
+8. **Inferred knowledge remains falsifiable.**
+
+These hypotheses should be validated through reproducible experiments and benchmarks.
+
 ## Demonstration
 
-The following demonstration shows one of Twin's current research findings operating in a real-world scenario.
+The following demonstration shows Twin operating in a real-world scenario.
 
 > **The objective is not to retrieve related artifacts. The objective is to synthesize reusable computational understanding.**
 
@@ -236,21 +251,6 @@ These findings remain subject to revision.
 
 Twin intentionally treats every architectural decision as provisional until
 supported by broader experimentation and reproducible benchmarks.
-
-## What Twin Is Trying to Prove
-
-Twin is guided by the following hypotheses:
-
-1. **Understanding is more valuable than isolated retrieval.**
-2. **Distributed observations can form coherent situation models.**
-3. **Reflection should precede durable memory.**
-4. **Judgment should evolve separately from factual memory.**
-5. **Cognitive continuity depends more on reusable understanding than on context-window size.**
-6. **A person's cognitive substrate should remain portable across models and vendors.**
-7. **Governance must be applied before sensitive context reaches the reasoning model.**
-8. **Inferred knowledge remains falsifiable.**
-
-These hypotheses should be validated through reproducible experiments and benchmarks.
 
 ## Where to Aim
 
