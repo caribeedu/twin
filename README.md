@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/quickstart-setup-7c3aed?style=for-the-badge" alt="Setup"></a>
-  <a href="https://pypi.org/project/twin-cognition/"><img src="https://img.shields.io/pypi/v/twin-cognition?style=for-the-badge&logo=pypi&logoColor=white&label=twin-cognition" alt="PyPI"></a>
+  <a href="https://pypi.org/project/twin-cognition/"><img src="https://img.shields.io/pypi/v/twin-cognition.svg?style=for-the-badge&amp;logo=pypi&amp;logoColor=white&amp;label=twin-cognition" alt="PyPI twin-cognition"></a>
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT"></a>
 </p>
