@@ -94,6 +94,7 @@ from .commands.cli_handlers import (  # noqa: E402
     _add_json_flag_tree,
     _print,
     _emit,
+    _connector_adapter,
 )
 
 def main(argv: list[str] | None = None) -> None:

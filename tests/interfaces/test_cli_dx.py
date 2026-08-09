@@ -82,6 +82,7 @@ def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
         ConnectorInstance, ConnectorStatus, OwnershipClass, SourceAccount,
     )
     from twin.interfaces import cli
+    from twin.interfaces.commands import cli_handlers
     from twin.memory.store.sqlite import SqliteStore
 
     store = SqliteStore(str(tmp_path / "twin.db"))
@@ -97,13 +98,13 @@ def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
         {"full_name": "caribeedu/twin", "private": True,
          "open_issues": 3, "pushed_at": "x"},
     ])
-    monkeypatch.setattr(cli, "_connector_adapter", lambda ws, creds, cid: fake)
+    monkeypatch.setattr(cli_handlers, "_connector_adapter", lambda ws, creds, cid: fake)
 
     args = types.SimpleNamespace(
         connector_id=inst.id, connector_command="repositories",
         select=["caribeedu/twin", "ghost/missing"], json=False)
     ws = types.SimpleNamespace(store=store)
-    cli._connector_discovery(
+    cli_handlers._connector_discovery(
         args, ws, None, method="list_repositories",
         headers=["repository"], row=lambda r: [r["full_name"]],
         scope_key="repositories", id_of=lambda r: r.get("full_name"))

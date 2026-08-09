@@ -1251,9 +1251,8 @@ def cmd_judgment(args) -> None:
     from twin.judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
     from twin.judgment.versions import active_items
 
-    ux.print_warn(
-        "deprecated: `twin judgment` — prefer `twin stance`"
-    )
+    if not getattr(args, "json", False):
+        ux.print_warn("deprecated: `twin judgment` — prefer `twin stance`")
 
     ws = Workspace(args.home)
     cmd = args.judgment_command
@@ -3014,18 +3013,26 @@ def cmd_meditate(args) -> None:
         allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
     )
     if gate.halted:
-        ux.print_rule("meditate")
-        ux.print_warn(
-            f"Cognize halted: {gate.halt_reason.value if gate.halt_reason else 'unknown'}"
-            f" — {gate.detail}"
-        )
-        if getattr(args, "json", False):
-            _emit(args, {
-                "ok": False,
-                "halted": True,
-                "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
-                "detail": gate.detail,
-            }, None)
+        payload = {
+            "ok": False,
+            "halted": True,
+            "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
+            "detail": gate.detail,
+            "stages": [],
+            "review_ran": False,
+            "episode_ids": [],
+            "candidate_ids": [],
+            "proposal_ids": [],
+        }
+
+        def pretty_halt():
+            ux.print_rule("meditate · halted")
+            ux.print_warn(
+                f"Cognize halted: {gate.halt_reason.value if gate.halt_reason else 'unknown'}"
+                f" — {gate.detail}"
+            )
+
+        _emit(args, payload, pretty_halt)
         return
 
     mode = getattr(args, "mode", "full")
