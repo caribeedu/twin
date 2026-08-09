@@ -5,6 +5,19 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.3.0 — Command Center
+
+Goal: bare `twin` TTY Command Center (Home / Services / Connectors / Jobs /
+Cognize / Review / Narratives / Stance / MCP / palette) plus doc split
+pointers and COMMAND_CENTER.md.
+
+Delivered:
+
+- Textual Command Center; non-TTY bare invoke prints help (no hang);
+- supervised serve/runtime start/stop with exit prompt;
+- docs: COMMAND_CENTER.md; README/v2.md point at split doc homes;
+- package / `__version__` → `2.3.0`.
+
 ### v2.2.0 — Consolidation & accessibility
 
 Goal: nightly consolidation judgment with caps, Fade/Remarkable Trace ledger,

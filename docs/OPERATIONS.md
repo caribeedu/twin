@@ -327,3 +327,10 @@ pytest -q
 ---
 
 Install in [SETUP.md](SETUP.md). Interfaces in [INTERFACES.md](INTERFACES.md). Overview in [README](../README.md).
+
+## Command Center and v2 verbs
+
+Prefer `twin cognize run`, `twin narrative …`, `twin stance …`, `twin inject pack`.
+Legacy `extract` / `meditate` / `correlate` / `judgment` / `memory` warn and remain
+as aliases. On a TTY, bare `twin` opens the [Command Center](COMMAND_CENTER.md).
+
