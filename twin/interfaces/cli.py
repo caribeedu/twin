@@ -264,10 +264,33 @@ def cmd_interpret(args) -> None:
 def cmd_extract(args) -> None:
     from ..cognition import extract_pending
     from ..cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+    from ..cognize.gate import require_chat_llm
     from ..memory.models import MemoryStatus
     from . import ux
+    import os
 
     ws = Workspace(args.home)
+    gate = require_chat_llm(
+        extractor=ws.cfg.extractor,
+        chat_provider=ws.cfg.normalized_llm_provider,
+        allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
+    )
+    if gate.halted:
+        ux.print_rule("extract")
+        ux.print_warn(
+            f"Cognize halted: {gate.halt_reason.value if gate.halt_reason else 'unknown'}"
+            f" — {gate.detail}"
+        )
+        ux.print_dim("Sense may still ingest; no cognitive writes without a chat LLM.")
+        if getattr(args, "json", False):
+            _emit(args, {
+                "ok": False,
+                "halted": True,
+                "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
+                "detail": gate.detail,
+            }, None)
+        return
+
     pending = ws.store.percepts_pending_interpretation(
         max_attempts=MAX_INTERPRETATION_ATTEMPTS,
     )
@@ -3018,13 +3041,37 @@ def cmd_meditate(args) -> None:
     sensory → amygdala → basal → hippocampus_bind → cortex →
     hippocampus_consolidate → [optional review] → prefrontal (drafts only).
     Never auto-confirms Memory nor auto-approves Judgment.
+
+    Twin v2: prefer ``twin cognize``; this path respects LLM-or-halt.
     """
+    import os
     import sys
 
     from . import ux
     from ..cognition.episode_pipeline import BrainStage, run_episode_cognition
+    from ..cognize.gate import require_chat_llm
 
     ws = Workspace(args.home)
+    gate = require_chat_llm(
+        extractor=ws.cfg.extractor,
+        chat_provider=ws.cfg.normalized_llm_provider,
+        allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
+    )
+    if gate.halted:
+        ux.print_rule("meditate")
+        ux.print_warn(
+            f"Cognize halted: {gate.halt_reason.value if gate.halt_reason else 'unknown'}"
+            f" — {gate.detail}"
+        )
+        if getattr(args, "json", False):
+            _emit(args, {
+                "ok": False,
+                "halted": True,
+                "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
+                "detail": gate.detail,
+            }, None)
+        return
+
     mode = getattr(args, "mode", "full")
     no_reflect = bool(getattr(args, "no_reflect", False))
     no_propose = bool(getattr(args, "no_propose", False))
@@ -3759,6 +3806,95 @@ def cmd_setup(args) -> None:
         lines = setup_mcp(ws.cfg, args.client)
     for line in lines:
         ux.print_dim(line)
+
+
+def cmd_cognize(args) -> None:
+    from . import ux
+    from .commands import cognize_cmd
+
+    ws = Workspace(args.home)
+    sub = getattr(args, "cognize_command", None) or "run"
+    if sub == "status":
+        data = cognize_cmd.cognize_status(ws, args)
+    else:
+        data = cognize_cmd.cognize_run(ws, args)
+    if getattr(args, "json", False):
+        _emit(args, data, None)
+        return
+    ux.print_rule("cognize")
+    if data.get("halted"):
+        ux.print_warn(f"halted: {data.get('halt_reason')} — {data.get('detail')}")
+        return
+    if sub == "status":
+        ux.print_ok(
+            f"pending={data.get('pending_percepts')} open_reflections={data.get('open_reflections')} "
+            f"llm={data.get('llm_reachable')} gate_ok={data.get('gate_ok')}"
+        )
+        if data.get("halt_reason"):
+            ux.print_dim(f"{data.get('halt_reason')}: {data.get('detail')}")
+        return
+    for st in data.get("stages") or []:
+        print(f"  {st.get('stage')}: {st.get('status')} {st.get('counts')}")
+    ux.print_ok(
+        f"situations={len(data.get('situation_ids') or [])} "
+        f"reflections={len(data.get('reflection_ids') or [])} "
+        f"interpretations={len(data.get('interpretation_ids') or [])}"
+    )
+
+
+def cmd_narrative(args) -> None:
+    from . import ux
+    from .commands import cognize_cmd
+
+    ws = Workspace(args.home)
+    sub = getattr(args, "narrative_command", None)
+    if sub == "show":
+        data = cognize_cmd.narrative_show(ws, args)
+    elif sub == "commit":
+        data = cognize_cmd.narrative_commit(ws, args)
+    elif sub == "backfill":
+        data = cognize_cmd.narrative_backfill(ws, args)
+    else:
+        data = cognize_cmd.narrative_search(ws, args)
+    if getattr(args, "json", False):
+        _emit(args, data, None)
+        return
+    ux.print_rule("narrative")
+    if not data.get("ok", True) and data.get("error"):
+        ux.print_warn(str(data.get("error")))
+        return
+    print(data)
+
+
+def cmd_stance(args) -> None:
+    from . import ux
+    from .commands import cognize_cmd
+
+    ws = Workspace(args.home)
+    data = cognize_cmd.stance_list(ws, args)
+    if getattr(args, "json", False):
+        _emit(args, data, None)
+        return
+    ux.print_rule("stance")
+    ux.print_ok(f"{data.get('count', 0)} stance(s)")
+    for s in data.get("stances") or []:
+        print(f"  [{s.get('status')}] {s.get('kind')}: {s.get('statement')[:120]}")
+
+
+def cmd_inject(args) -> None:
+    from . import ux
+    from .commands import cognize_cmd
+
+    ws = Workspace(args.home)
+    data = cognize_cmd.inject_pack(ws, args)
+    if getattr(args, "json", False):
+        _emit(args, data, None)
+        return
+    ux.print_rule("inject pack")
+    print(data.get("context_pack") or "")
+    n = len(data.get("narratives") or [])
+    r = len(data.get("open_reflections") or [])
+    ux.print_dim(f"narratives={n} open_reflections={r}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -4544,6 +4680,63 @@ def main(argv: list[str] | None = None) -> None:
     pexport = sub.add_parser("export", help="export everything as JSON")
     _add_json_flag(pexport)
     pexport.set_defaults(func=cmd_export)
+
+    # Twin v2 cognition surface
+    pc = sub.add_parser("cognize", help="run Cognize pipeline (LLM-or-halt)")
+    pcs = pc.add_subparsers(dest="cognize_command")
+    pcr = pcs.add_parser("run", help="Salience→…→Evidence audit; never commits Narrative")
+    pcr.add_argument("--until", default=None, help="stop after stage id")
+    pcr.add_argument("--dry-run", action="store_true")
+    pcr.add_argument("--limit", type=int, default=50)
+    pcr.add_argument("--vault", default="default")
+    pcr.set_defaults(func=cmd_cognize, cognize_command="run")
+    pcsst = pcs.add_parser("status", help="pending percepts / halt reason")
+    pcsst.add_argument("--vault", default="default")
+    pcsst.set_defaults(func=cmd_cognize, cognize_command="status")
+    _add_json_flag_tree(pc)
+    pc.set_defaults(func=cmd_cognize, cognize_command="run")
+
+    pn = sub.add_parser("narrative", help="search / show / commit Narratives")
+    pns = pn.add_subparsers(dest="narrative_command", required=True)
+    pnsr = pns.add_parser("search")
+    pnsr.add_argument("query", nargs="?", default="")
+    pnsr.add_argument("--vault", default="default")
+    pnsr.set_defaults(func=cmd_narrative)
+    pnss = pns.add_parser("show")
+    pnss.add_argument("narrative_id")
+    pnss.set_defaults(func=cmd_narrative)
+    pnsc = pns.add_parser("commit")
+    pnsc.add_argument("--account", required=True)
+    pnsc.add_argument("--evidence", action="append", default=[])
+    pnsc.add_argument("--evidence-id", default=None)
+    pnsc.add_argument("--interpretation", action="append", default=[])
+    pnsc.add_argument("--dissent", action="append", default=[])
+    pnsc.add_argument("--domain", default="")
+    pnsc.add_argument("--vault", default="default")
+    pnsc.add_argument("--actor", default="user")
+    pnsc.set_defaults(func=cmd_narrative)
+    pnsb = pns.add_parser("backfill", help="dual-read migrate memories → narratives")
+    pnsb.add_argument("--apply", action="store_true")
+    pnsb.add_argument("--vault", default="default")
+    pnsb.add_argument("--limit", type=int, default=10_000)
+    pnsb.set_defaults(func=cmd_narrative)
+    _add_json_flag_tree(pn)
+
+    pst = sub.add_parser("stance", help="Stance (ex-Judgment) surface")
+    psts = pst.add_subparsers(dest="stance_command")
+    pstl = psts.add_parser("list")
+    pstl.set_defaults(func=cmd_stance)
+    pst.set_defaults(func=cmd_stance)
+    _add_json_flag_tree(pst)
+
+    pin = sub.add_parser("inject", help="Inject-facing helpers")
+    pins = pin.add_subparsers(dest="inject_command", required=True)
+    pinp = pins.add_parser("pack", help="context pack with EpistemicState")
+    pinp.add_argument("query")
+    pinp.add_argument("--domain", default="technical")
+    pinp.add_argument("--max-tokens", type=int, default=1200)
+    pinp.set_defaults(func=cmd_inject)
+    _add_json_flag_tree(pin)
 
     args = parser.parse_args(argv)
     args.func(args)

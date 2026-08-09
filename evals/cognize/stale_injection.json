@@ -1,0 +1,11 @@
+{
+  "id": "stale_injection_v2",
+  "title": "Stale Narrative must not inject as fresh",
+  "priority": 1,
+  "contract": [
+    "Commit a Narrative with EpistemicState fresh",
+    "Insert a newer overlapping Percept",
+    "EpistemicState becomes stale before Cognize re-runs",
+    "build_context_pack omits stale account from fresh Narratives section"
+  ]
+}

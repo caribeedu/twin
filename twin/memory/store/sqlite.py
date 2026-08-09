@@ -20,6 +20,7 @@ from ..models import (
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
+from .cognize_mixin import COGNIZE_SCHEMA, CognizeStoreMixin
 from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
 from .workspace_ops_mixin import WORKSPACE_OPS_SCHEMA, WorkspaceOpsStoreMixin
 from twin.runtime.store_mixin import RUNTIME_SCHEMA, RuntimeStoreMixin
@@ -689,6 +690,7 @@ CREATE INDEX IF NOT EXISTS idx_ccb_conn ON connector_counter_batches(connector_i
 
 class SqliteStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
+    CognizeStoreMixin,
     HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
     RuntimeStoreMixin, SessionOpsStoreMixin, AttentionOpsStoreMixin, MemoryStore,
 ):
@@ -710,6 +712,7 @@ class SqliteStore(
         self.conn.executescript(PRIVACY_SCHEMA)
         self.conn.executescript(CONNECTOR_SCHEMA)
         self.conn.executescript(CORRELATION_SCHEMA)
+        self.conn.executescript(COGNIZE_SCHEMA)
         self.conn.executescript(HOST_BINDING_SCHEMA)
         self.conn.executescript(WORKSPACE_OPS_SCHEMA)
         self.conn.executescript(RUNTIME_SCHEMA)
@@ -970,6 +973,12 @@ class SqliteStore(
             ),
         )
         self._maybe_commit()
+        try:
+            from twin.cognize.stale import mark_stale_for_new_percept
+
+            mark_stale_for_new_percept(self, percept)
+        except Exception:
+            pass
         return percept.id
 
     def _row_to_percept(self, row: sqlite3.Row) -> Percept:

@@ -135,3 +135,45 @@ def session_closure_id() -> str:
 
 def attention_emission_id() -> str:
     return new_id("attn")
+
+
+def situation_id() -> str:
+    return new_id("sit")
+
+
+def reflection_id() -> str:
+    return new_id("ref")
+
+
+def interpretation_id() -> str:
+    return new_id("intp")
+
+
+def narrative_id() -> str:
+    return new_id("nar")
+
+
+def epistemic_state_id() -> str:
+    return new_id("eps")
+
+
+def cognize_relation_id() -> str:
+    """Prefixed Relation id for Cognize graph edges (distinct from memory ``rel_``)."""
+    return new_id("crel")
+
+
+def evidence_anchor_id() -> str:
+    """Evidence attachment for Interpretations / Narratives (Cognize)."""
+    return new_id("evac")
+
+
+def trace_id() -> str:
+    return new_id("trc")
+
+
+def narrative_revision_id() -> str:
+    return new_id("nrev")
+
+
+def cognize_run_id() -> str:
+    return new_id("cogrun")

@@ -1,23 +1,31 @@
 # Cognition
 
-This document explains Twin’s core cognitive concepts — **understanding**
-and **situation models** — and how they relate to artifacts, percepts,
-memory and judgment.
+This document explains Twin’s core cognitive concepts — **understanding**,
+**situations**, and how they relate to artifacts, percepts, Narratives and
+Stance.
 
-It does not specify the runtime pipeline
-([ARCHITECTURE.md](ARCHITECTURE.md)) or academic lineage
+It does not specify the full Cognize stage pipeline
+([COGNIZE.md](COGNIZE.md) · [v2.md](v2.md) §2) or academic lineage
 ([FOUNDATIONS.md](FOUNDATIONS.md)). Identity and unit of value:
 [IDENTITY.md](IDENTITY.md). Short definitions: [GLOSSARY.md](GLOSSARY.md).
-Destination narrative: [README](../README.md).
+Architecture walls: [ARCHITECTURE.md](ARCHITECTURE.md). Destination:
+[README](../README.md).
 
 ---
 
 ## Understanding
 
-Understanding is not a collection of documents, embeddings or memories.
+Understanding is not a collection of documents, embeddings or “memory
+blobs.”
 
-Twin defines **Understanding** as a reusable semantic representation of
-a situation. It answers:
+Twin treats **Understanding** as an **emergent** state — not a schema root:
+
+```text
+Narratives + Relations + EpistemicStates + Stances
+  + Open Reflections (+ Evidence)
+```
+
+A useful account of a situation answers:
 
 - What actually happened?
 - Why did it happen?
@@ -26,18 +34,23 @@ a situation. It answers:
 - What is now true that wasn't true before?
 
 If Twin stores or retrieves information without increasing understanding,
-it has failed ([IDENTITY.md](IDENTITY.md#the-unit-of-value)).
+it has failed ([IDENTITY.md](IDENTITY.md#the-unit-of-value)). The durable
+product artifact that carries an accepted account is a **Narrative**, not
+a Memory row.
 
 ### Relationship to Other Concepts
 
 | Concept | Role |
 |---|---|
-| Artifact | Raw observation |
-| Percept | Structured observation |
-| **Situation Model** | Transient structure that explains a coherent situation |
-| **Understanding** | Reusable interpretation formed from situations / correlated percepts |
-| Memory | Durable knowledge extracted from understanding |
-| Judgment | How similar situations should be evaluated later |
+| Artifact | Raw observation (Sense) |
+| Percept | Structured observation (Sense) |
+| **Situation** | Working cluster of percepts for one happening |
+| **Reflection** | Open question / tension Cognize is holding |
+| **Interpretation** | Competing candidate explanation |
+| **Narrative** | Human-committed, evidence-backed, revisable account |
+| **Stance** | How similar cases should be evaluated later (ex-Judgment) |
+| **Understanding** | Emergent state over the above — not a table |
+| Memory *(legacy)* | Deprecated product term; code dual-reads `MemoryItem` during migration |
 
 ### Example
 
@@ -47,31 +60,33 @@ Artifacts:
 - GitHub: PR #15 implements Feature A.
 - Slack: “I've merged it.”
 
-Understanding:
+Narrative (after Cognize + human commit):
 
 > John requested Feature A because launch was blocked. Edu implemented
 > it in PR #15. The merge removed the launch blocker.
 
-This understanding can later produce memories, decisions and governed
-context packs — without forcing every consumer to re-read the raw
-artifacts. Same narrative: [README — Demonstration](../README.md#demonstration).
+Hosts receive that account via Inject — without re-reading raw artifacts.
+Same story: [README — Demonstration](../README.md#demonstration).
 
 ---
 
-## Situation Models
+## Situations
 
 Humans rarely remember isolated messages. They remember situations.
 
-Twin adopts **Situation Models** as the primary abstraction for forming
-understanding — before durable memory is written. In the runtime the
-closest revisable carrier is the `WorkEpisode` arc (phases + narrative
-edges) — see [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
+Twin uses **Situations** as the working container while Cognize raises
+Reflections and Interpretations — before a human commits a Narrative.
+Older docs say **Situation Model**; the runtime may still expose related
+structure as `WorkEpisode` (phases + edges) until Situate fully replaces
+it — see [ARCHITECTURE.md](ARCHITECTURE.md) (legacy Cognize / episode
+pipeline) and [COGNIZE.md](COGNIZE.md).
+
 Hypothesis under test:
 [RESEARCH.md](RESEARCH.md#hypothesis-2-situation-models-are-the-correct-cognitive-primitive).
 
 ### Components
 
-A Situation Model may include:
+A Situation may include:
 
 - actors;
 - intentions;
@@ -81,22 +96,22 @@ A Situation Model may include:
 - evidence;
 - temporal evolution;
 - outcomes;
-- unresolved questions.
+- unresolved questions (often surfaced as **Reflections**).
 
-### Lifecycle
+### Lifecycle (v2 target)
 
 ```text
-Artifacts → Percepts → Correlation → Situation Model → Understanding
-    → Memory → Reflection → Judgment
+Artifacts → Percepts → Situate → Reflections → Interpretations
+  → Narrative Revision → Evidence audit → Human review
+  → Commit Narrative → Stance drafts
 ```
 
-Situation Models are **transient** cognitive structures. They exist to
-explain what happened before durable memory is created. What leaves that
-process as reusable interpretation is **understanding** (above).
+Situations are working structure. **Narratives** are the durable,
+governed accounts Inject may project. Understanding remains emergent.
 
 ### Design Principle
 
-A Situation Model should summarize **reality**, not summarize documents.
+A Situation should summarize **reality**, not summarize documents.
 
-That aligns with understanding before memory and evidence before belief
-([IDENTITY.md](IDENTITY.md#design-principles)).
+That aligns with understanding before durable commit and evidence before
+belief ([IDENTITY.md](IDENTITY.md#design-principles) · [v2.md](v2.md)).

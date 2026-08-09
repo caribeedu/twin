@@ -26,6 +26,7 @@ from ..models import (
 from .base import MemoryStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
+from .cognize_mixin import COGNIZE_SCHEMA, CognizeStoreMixin
 from .host_binding_mixin import HOST_BINDING_SCHEMA, HostBindingStoreMixin
 from .judgment_mixin import JudgmentStoreMixin
 from .privacy_mixin import PrivacyStoreMixin
@@ -717,6 +718,7 @@ def _vec_literal(vector: list[float]) -> str:
 
 class PostgresStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
+    CognizeStoreMixin,
     HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
     RuntimeStoreMixin, SessionOpsStoreMixin, AttentionOpsStoreMixin, MemoryStore,
 ):
@@ -739,6 +741,7 @@ class PostgresStore(
             cur.execute(_SCHEMA_BASE)
             cur.execute(_CONNECTOR_SCHEMA)
             cur.execute(CORRELATION_SCHEMA)
+            cur.execute(COGNIZE_SCHEMA)
             cur.execute(HOST_BINDING_SCHEMA)
             cur.execute(WORKSPACE_OPS_SCHEMA)
             cur.execute(RUNTIME_SCHEMA)
@@ -824,6 +827,12 @@ class PostgresStore(
                 percept.project_id, percept.content_hash,
             ),
         )
+        try:
+            from twin.cognize.stale import mark_stale_for_new_percept
+
+            mark_stale_for_new_percept(self, percept)
+        except Exception:
+            pass
         return percept.id
 
     def _row_to_percept(self, row: dict) -> Percept:

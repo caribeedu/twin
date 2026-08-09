@@ -1,0 +1,65 @@
+"""Cognize package — Twin v2 narrative cognition contracts and (later) pipeline.
+
+Public architecture remains Sense → Cognize → Inject
+(``docs/ARCHITECTURE.md``). Stage implementations land incrementally.
+"""
+
+from twin.cognize.gate import CognizeGateResult, CognizeHaltReason, require_chat_llm
+from twin.cognize.models import (
+    DerivedConfidence,
+    EpistemicState,
+    EpistemicStatus,
+    EvidenceAnchor,
+    IndependenceSummary,
+    Interpretation,
+    InterpretationStatus,
+    Narrative,
+    NarrativeGrain,
+    NarrativeRevisionDecision,
+    NarrativeRevisionOutcome,
+    NarrativeStatus,
+    Reflection,
+    ReflectionStatus,
+    Relation,
+    RelationAssertedBy,
+    RelationType,
+    Situation,
+    SituationStatus,
+    Stance,
+    StanceStatus,
+    SurpriseLevel,
+    Trace,
+    collapse_independent_origins,
+    derive_confidence,
+)
+
+__all__ = [
+    "CognizeGateResult",
+    "CognizeHaltReason",
+    "DerivedConfidence",
+    "EpistemicState",
+    "EpistemicStatus",
+    "EvidenceAnchor",
+    "IndependenceSummary",
+    "Interpretation",
+    "InterpretationStatus",
+    "Narrative",
+    "NarrativeGrain",
+    "NarrativeRevisionDecision",
+    "NarrativeRevisionOutcome",
+    "NarrativeStatus",
+    "Reflection",
+    "ReflectionStatus",
+    "Relation",
+    "RelationAssertedBy",
+    "RelationType",
+    "Situation",
+    "SituationStatus",
+    "Stance",
+    "StanceStatus",
+    "SurpriseLevel",
+    "Trace",
+    "collapse_independent_origins",
+    "derive_confidence",
+    "require_chat_llm",
+]
