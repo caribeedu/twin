@@ -1,4 +1,4 @@
-"""Cognize entity store mixin (Twin v2 Narratives / Reflections / …)."""
+"""Cognize entity store mixin."""
 
 from __future__ import annotations
 
@@ -125,6 +125,17 @@ CREATE TABLE IF NOT EXISTS cognize_narrative_revisions (
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cog_nrev_vault ON cognize_narrative_revisions(vault_id);
+
+CREATE TABLE IF NOT EXISTS cognize_runs (
+    id TEXT PRIMARY KEY,
+    vault_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ok',
+    halt_reason TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cog_runs_created ON cognize_runs(created_at);
 """
 
 
@@ -190,6 +201,13 @@ class CognizeStoreMixin:
         )
         return [row_to_reflection(r, decrypt=self._cog_dec) for r in rows]
 
+    def list_reflections(self, vault_id: str) -> list[Reflection]:
+        rows = self._j_fetchall(
+            "SELECT * FROM cognize_reflections WHERE vault_id = ?",
+            (vault_id,),
+        )
+        return [row_to_reflection(r, decrypt=self._cog_dec) for r in rows]
+
     # --- Interpretation ---
 
     def upsert_interpretation(self, obj: Interpretation) -> str:
@@ -198,15 +216,39 @@ class CognizeStoreMixin:
         )
         return obj.id
 
-    def get_interpretation(self, intp_id: str) -> Optional[Interpretation]:
+    def get_cognize_interpretation(self, intp_id: str) -> Optional[Interpretation]:
         row = self._j_fetchone(
             "SELECT * FROM cognize_interpretations WHERE id = ?", (intp_id,)
         )
         return row_to_interpretation(row, decrypt=self._cog_dec) if row else None
 
+    def list_cognize_interpretations(
+        self,
+        vault_id: str,
+        *,
+        status: Optional[str] = None,
+    ) -> list[Interpretation]:
+        if status:
+            rows = self._j_fetchall(
+                "SELECT * FROM cognize_interpretations WHERE vault_id = ? AND status = ?",
+                (vault_id, status),
+            )
+        else:
+            rows = self._j_fetchall(
+                "SELECT * FROM cognize_interpretations WHERE vault_id = ?",
+                (vault_id,),
+            )
+        return [row_to_interpretation(r, decrypt=self._cog_dec) for r in rows]
+
+    def list_competing_interpretations(self, vault_id: str) -> list[Interpretation]:
+        return self.list_cognize_interpretations(vault_id, status="competing")
+
     # --- Relation ---
 
     def upsert_relation(self, obj: Relation) -> str:
+        from twin.cognize.relations import validate_relation
+
+        validate_relation(obj)
         self._cog_upsert("cognize_relations", obj.id, relation_to_row(obj))
         return obj.id
 
@@ -249,7 +291,7 @@ class CognizeStoreMixin:
         reason: str,
         unseen_percept_id: str,
     ) -> Optional[EpistemicState]:
-        """Deterministic stale latch — no LLM."""
+        """Mark EpistemicState stale."""
         eps = self.get_epistemic_state(eps_id)
         if eps is None:
             return None
@@ -261,6 +303,34 @@ class CognizeStoreMixin:
                 "status": EpistemicStatus.stale,
                 "stale_reason": reason,
                 "unseen_since": unseen,
+            }
+        )
+        self.upsert_epistemic_state(updated)
+        return updated
+
+    def mark_epistemic_fresh(
+        self,
+        eps_id: str,
+        *,
+        evidence_ids: Optional[list[str]] = None,
+        freshness_boundary: Optional[str] = None,
+        synthesized_at: Optional[str] = None,
+    ) -> Optional[EpistemicState]:
+        from twin.clock import now_iso
+
+        eps = self.get_epistemic_state(eps_id)
+        if eps is None:
+            return None
+        updated = eps.model_copy(
+            update={
+                "status": EpistemicStatus.fresh,
+                "stale_reason": "",
+                "unseen_since": [],
+                "evidence_ids": list(evidence_ids)
+                if evidence_ids is not None
+                else list(eps.evidence_ids),
+                "freshness_boundary": freshness_boundary or now_iso(),
+                "synthesized_at": synthesized_at or now_iso(),
             }
         )
         self.upsert_epistemic_state(updated)
@@ -284,7 +354,7 @@ class CognizeStoreMixin:
         )
         return [row_to_narrative(r, decrypt=self._cog_dec) for r in rows]
 
-    # --- Evidence + Trace + Revision ---
+    # --- Evidence + Trace + Revision + Runs ---
 
     def upsert_evidence_anchor(self, obj: EvidenceAnchor) -> str:
         self._cog_upsert(
@@ -292,8 +362,25 @@ class CognizeStoreMixin:
         )
         return obj.id
 
+    def list_evidence_anchors(
+        self,
+        vault_id: str,
+        *,
+        target_kind: Optional[str] = None,
+        target_id: Optional[str] = None,
+    ) -> list[EvidenceAnchor]:
+        rows = self._j_fetchall(
+            "SELECT * FROM cognize_evidence_anchors WHERE vault_id = ?",
+            (vault_id,),
+        )
+        out = [row_to_evidence_anchor(r, decrypt=self._cog_dec) for r in rows]
+        if target_kind:
+            out = [a for a in out if a.target_kind == target_kind]
+        if target_id:
+            out = [a for a in out if a.target_id == target_id]
+        return out
+
     def append_trace(self, obj: Trace) -> str:
-        # Traces are append-only — never update in place.
         self._c_insert("cognize_traces", self._cog_enc_row(trace_to_row(obj)))
         return obj.id
 
@@ -310,3 +397,62 @@ class CognizeStoreMixin:
             "SELECT * FROM cognize_narrative_revisions WHERE id = ?", (rev_id,)
         )
         return row_to_narrative_revision(row, decrypt=self._cog_dec) if row else None
+
+    def record_cognize_run(
+        self,
+        *,
+        vault_id: str = "",
+        status: str = "ok",
+        halt_reason: str = "",
+        detail: str = "",
+        payload: Optional[dict[str, Any]] = None,
+    ) -> str:
+        from twin import ids
+        from twin.clock import now_iso
+        import json
+
+        run_id = ids.cognize_run_id()
+        created = now_iso()
+        row = {
+            "id": run_id,
+            "vault_id": vault_id or "",
+            "status": status,
+            "halt_reason": halt_reason or "",
+            "detail": (detail or "")[:2000],
+            "created_at": created,
+            "payload": json.dumps(payload or {}, ensure_ascii=False, default=str),
+        }
+        self._c_insert("cognize_runs", row)
+        return run_id
+
+    def last_cognize_run(self, vault_id: str = "") -> Optional[dict[str, Any]]:
+        import json
+
+        if vault_id:
+            row = self._j_fetchone(
+                "SELECT * FROM cognize_runs WHERE vault_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (vault_id,),
+            )
+        else:
+            row = self._j_fetchone(
+                "SELECT * FROM cognize_runs ORDER BY created_at DESC LIMIT 1",
+                (),
+            )
+        if not row:
+            return None
+        payload = row.get("payload") or "{}"
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        return {
+            "id": row["id"],
+            "vault_id": row.get("vault_id") or "",
+            "status": row.get("status") or "",
+            "halt_reason": row.get("halt_reason") or "",
+            "detail": row.get("detail") or "",
+            "created_at": row.get("created_at") or "",
+            "payload": payload,
+        }

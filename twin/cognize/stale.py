@@ -1,4 +1,4 @@
-"""Mark Narratives stale when a relevant Percept lands (deterministic)."""
+"""Mark Narratives stale when a relevant Percept lands."""
 
 from __future__ import annotations
 
@@ -20,12 +20,7 @@ def _domain_hint(percept: Percept) -> str:
 
 
 def mark_stale_for_new_percept(store: Any, percept: Percept) -> list[str]:
-    """Deterministic safety latch — no LLM.
-
-    Marks EpistemicState of Narratives in the same vault (and overlapping
-    domain/project when set) as ``stale`` and records the percept id in
-    ``unseen_since``. Returns narrative ids touched.
-    """
+    """Mark overlapping Narratives stale; return touched narrative ids."""
     if not hasattr(store, "list_narratives") or not hasattr(store, "mark_epistemic_stale"):
         return []
     vault = _vault_for_percept(percept)
@@ -52,3 +47,42 @@ def mark_stale_for_new_percept(store: Any, percept: Percept) -> list[str]:
         )
         touched.append(nar.id)
     return touched
+
+
+def refresh_after_resynthesis(
+    store: Any,
+    *,
+    vault_id: str,
+    domain: str = "",
+    project_id: Optional[str] = None,
+    except_narrative_id: Optional[str] = None,
+    clear_stale_only: bool = True,
+) -> list[str]:
+    """Clear stale on Narratives in scope after re-commit. Returns refreshed ids."""
+    if not hasattr(store, "list_narratives") or not hasattr(store, "mark_epistemic_fresh"):
+        return []
+    refreshed: list[str] = []
+    for nar in store.list_narratives(vault_id):
+        if except_narrative_id and nar.id == except_narrative_id:
+            continue
+        if domain and nar.domain and nar.domain != domain:
+            continue
+        if project_id and nar.project_id and nar.project_id != project_id:
+            continue
+        if not nar.epistemic_state_id:
+            continue
+        eps = store.get_epistemic_state(nar.epistemic_state_id)
+        if eps is None:
+            continue
+        if clear_stale_only and eps.status is not EpistemicStatus.stale:
+            continue
+        if eps.status in (EpistemicStatus.tombstoned, EpistemicStatus.superseded):
+            continue
+        store.mark_epistemic_fresh(
+            nar.epistemic_state_id,
+            evidence_ids=list(eps.evidence_ids or nar.evidence_ids),
+            freshness_boundary=now_iso(),
+            synthesized_at=now_iso(),
+        )
+        refreshed.append(nar.id)
+    return refreshed

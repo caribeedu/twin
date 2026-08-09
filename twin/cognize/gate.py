@@ -1,7 +1,7 @@
-"""Cognize availability gate — LLM-or-halt.
+"""Cognize availability gate.
 
-Cognition without an upstream chat LLM does not exist in Twin v2.
-Sense I/O and Domain Firewall may still run; Cognize must refuse.
+Without a chat LLM, Cognize writes nothing. Sense I/O and the Domain Firewall
+may still run.
 """
 
 from __future__ import annotations

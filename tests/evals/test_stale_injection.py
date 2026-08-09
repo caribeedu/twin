@@ -28,7 +28,7 @@ def test_eval_stale_injection(store, cfg):
     )
     store.insert_percept(newer)
     eps = store.get_epistemic_state(nar.epistemic_state_id)
-    assert eps.status is EpistemicStatus.stale, "floor failed: Narrative not marked stale"
+    assert eps.status is EpistemicStatus.stale, "Narrative not marked stale after newer Percept"
     assert newer.id in eps.unseen_since
 
     pack = build_context_pack(
@@ -40,7 +40,6 @@ def test_eval_stale_injection(store, cfg):
     assert entry["epistemic_status"] == "stale"
     assert entry["account"] is None
     assert entry.get("account_omitted") is True
-    # Fresh section must not narrate the old world without stale labeling
     fresh_section = ""
     text = pack.context_pack or ""
     if "## Narratives" in text:

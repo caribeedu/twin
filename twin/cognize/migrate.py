@@ -1,10 +1,9 @@
-"""Dual-read / backfill: MemoryItem → Narrative / Interpretation."""
+"""Backfill MemoryItem → Narrative / Interpretation."""
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from twin.cognize.commit import commit_narrative
 from twin.cognize.models import (
     EpistemicState,
     EpistemicStatus,
@@ -22,41 +21,62 @@ def memory_to_provisional(
     *,
     vault_id: str = "default",
 ) -> tuple[str, Narrative | Interpretation]:
-    """Map a memory to Narrative (confirmed) or Interpretation (candidate)."""
+    """Map memory to Narrative (confirmed) or Interpretation (candidate / needs_review)."""
     evidence_ids = list(getattr(mem, "source_ids", None) or [])
-    # Prefer evidence row ids if present on the object via store later.
-    if mem.status == MemoryStatus.confirmed:
-        eps = EpistemicState(
-            status=EpistemicStatus.fresh,
-            synthesized_at=mem.created_at or now_iso(),
-            freshness_boundary=mem.valid_from or mem.created_at or now_iso(),
-            evidence_ids=evidence_ids,
-        )
-        nar = Narrative(
+    if mem.needs_review or mem.status != MemoryStatus.confirmed:
+        intp = Interpretation(
             vault_id=vault_id,
-            account=(mem.summary or mem.title or "").strip() or mem.id,
-            status=NarrativeStatus.committed,
-            epistemic_state_id=eps.id,
+            explanation=(mem.summary or mem.title or "").strip() or mem.id,
+            status=InterpretationStatus.competing,
             evidence_ids=evidence_ids,
-            domain=mem.domain or "",
-            persona=mem.persona or "",
-            sensitivity=mem.sensitivity.value
-            if hasattr(mem.sensitivity, "value")
-            else str(mem.sensitivity or "internal"),
-            project_id=getattr(mem, "project_id", None),
-            migrated_from_memory=True,
-            committed_by="migration",
-            metadata={"memory_id": mem.id, "eps_pending": eps.model_dump(mode="json")},
+            metadata={
+                "memory_id": mem.id,
+                "needs_review": bool(mem.needs_review),
+                "memory_status": mem.status.value
+                if hasattr(mem.status, "value")
+                else str(mem.status),
+            },
         )
-        return "narrative", nar
-    intp = Interpretation(
-        vault_id=vault_id,
-        explanation=(mem.summary or mem.title or "").strip() or mem.id,
-        status=InterpretationStatus.competing,
+        return "interpretation", intp
+
+    eps = EpistemicState(
+        status=EpistemicStatus.fresh,
+        synthesized_at=mem.created_at or now_iso(),
+        freshness_boundary=mem.valid_from or mem.created_at or now_iso(),
         evidence_ids=evidence_ids,
-        metadata={"memory_id": mem.id, "needs_review": mem.needs_review},
     )
-    return "interpretation", intp
+    nar = Narrative(
+        vault_id=vault_id,
+        account=(mem.summary or mem.title or "").strip() or mem.id,
+        status=NarrativeStatus.committed,
+        epistemic_state_id=eps.id,
+        evidence_ids=evidence_ids,
+        domain=mem.domain or "",
+        persona=mem.persona or "",
+        sensitivity=mem.sensitivity.value
+        if hasattr(mem.sensitivity, "value")
+        else str(mem.sensitivity or "internal"),
+        project_id=getattr(mem, "project_id", None),
+        migrated_from_memory=True,
+        committed_by="migration",
+        metadata={"memory_id": mem.id, "eps_pending": eps.model_dump(mode="json")},
+    )
+    return "narrative", nar
+
+
+def _existing_memory_ids(store: Any, vault_id: str) -> set[str]:
+    existing: set[str] = set()
+    if hasattr(store, "list_narratives"):
+        for nar in store.list_narratives(vault_id):
+            mid = (nar.metadata or {}).get("memory_id")
+            if mid:
+                existing.add(mid)
+    if hasattr(store, "list_cognize_interpretations"):
+        for intp in store.list_cognize_interpretations(vault_id):
+            mid = (intp.metadata or {}).get("memory_id")
+            if mid:
+                existing.add(mid)
+    return existing
 
 
 def backfill_from_memories(
@@ -66,7 +86,7 @@ def backfill_from_memories(
     dry_run: bool = True,
     limit: int = 10_000,
 ) -> dict[str, Any]:
-    """Copy existing memories into Cognize entities. Idempotent on memory_id metadata."""
+    """Copy memories into Cognize entities; idempotent on ``metadata.memory_id``."""
     memories = store.list_memories() if hasattr(store, "list_memories") else []
     stats = {
         "scanned": 0,
@@ -75,12 +95,7 @@ def backfill_from_memories(
         "skipped": 0,
         "dry_run": dry_run,
     }
-    existing_mem_ids: set[str] = set()
-    for nar in store.list_narratives(vault_id):
-        mid = (nar.metadata or {}).get("memory_id")
-        if mid:
-            existing_mem_ids.add(mid)
-    # Also scan interpretations would need list_all — skip for MVP; upsert by memory id in metadata
+    existing_mem_ids = _existing_memory_ids(store, vault_id)
 
     for mem in memories[:limit]:
         stats["scanned"] += 1
@@ -110,7 +125,6 @@ def backfill_from_memories(
                 eps = EpistemicState.model_validate(eps_data)
                 store.upsert_epistemic_state(eps)
                 obj.epistemic_state_id = eps.id
-            # Attach evidence from store if available
             if hasattr(store, "get_evidence"):
                 try:
                     evs = store.get_evidence(mem.id)
@@ -124,7 +138,6 @@ def backfill_from_memories(
                 except Exception:
                     pass
             if not obj.evidence_ids:
-                # Confirmed without evidence — still migrate but flag in metadata
                 obj.metadata["migration_warning"] = "confirmed_without_evidence"
                 obj.evidence_ids = [f"migrated:{mem.id}"]
                 if obj.epistemic_state_id:
@@ -140,4 +153,5 @@ def backfill_from_memories(
             assert isinstance(obj, Interpretation)
             store.upsert_interpretation(obj)
             stats["interpretations"] += 1
+            existing_mem_ids.add(mem.id)
     return stats

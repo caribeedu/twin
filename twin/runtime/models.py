@@ -24,6 +24,7 @@ class JobKind(str, Enum):
     consolidate_weekly = "consolidate_weekly"
     reembed_memory = "reembed_memory"
     integrity_check = "integrity_check"
+    cognize_batch = "cognize_batch"
     connector_reconcile = "connector_reconcile"
     backfill_partition = "backfill_partition"
     session_domain_resolve = "session_domain_resolve"

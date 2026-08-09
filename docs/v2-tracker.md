@@ -220,10 +220,10 @@ Update `docs/GLOSSARY.md` and `docs/COGNITION.md` so the v2 entity names are can
 
 ### Exit criteria
 
-- [ ] `GLOSSARY.md` contains every entity in `v2.md` §2.2 table with lifecycle one-liners matching the redesign.
-- [ ] `COGNITION.md` explains Understanding as emergent and points Situation Model → Situation + Narrative (WorkEpisode called out as legacy carrier).
-- [ ] No new doc introduced in this task uses “memory” as a product noun in headings or CLI examples (academic citations in FOUNDATIONS/RESEARCH may still say “memory”).
-- [ ] A one-paragraph “Migration note” in GLOSSARY lists deprecated terms → replacements.
+- [x] `GLOSSARY.md` contains every entity in `v2.md` §2.2 table with lifecycle one-liners matching the redesign.
+- [x] `COGNITION.md` explains Understanding as emergent and points Situation Model → Situation + Narrative (WorkEpisode called out as legacy carrier).
+- [x] No new doc introduced in this task uses “memory” as a product noun in headings or CLI examples (academic citations in FOUNDATIONS/RESEARCH may still say “memory”).
+- [x] A one-paragraph “Migration note” in GLOSSARY lists deprecated terms → replacements.
 
 ### Assumptions
 
@@ -272,11 +272,11 @@ Update sequence diagrams that currently say “extract → meditate → pack” 
 
 ### Exit criteria
 
-- [ ] Opening architecture diagram / mermaid shows exactly three modules.
-- [ ] Hard-wall table present (Sense / Cognize / Inject owns / must not).
-- [ ] No README-bound architecture language lists Cognize stages as peer modules.
-- [ ] Threat-model and firewall sections still present and consistent with fail-closed Inject firewall + Cognize LLM-or-halt.
-- [ ] Cross-links to `v2.md` for pipeline detail.
+- [x] Opening architecture diagram / mermaid shows exactly three modules.
+- [x] Hard-wall table present (Sense / Cognize / Inject owns / must not).
+- [x] No README-bound architecture language lists Cognize stages as peer modules.
+- [x] Threat-model and firewall sections still present and consistent with fail-closed Inject firewall + Cognize LLM-or-halt.
+- [x] Cross-links to `v2.md` for pipeline detail.
 
 ### Assumptions
 
@@ -316,9 +316,9 @@ Update `docs/RESEARCH.md` with a “v2 redesign hypotheses” subsection listing
 
 ### Exit criteria
 
-- [ ] Both new files exist and are linked from ARCHITECTURE.md and the docs table in README (or OPERATIONS index).
-- [ ] Stubs do not invent schemas beyond `v2.md`.
-- [ ] RESEARCH.md lists experiment IDs matching T-110–T-115.
+- [x] Both new files exist and are linked from ARCHITECTURE.md and the docs table in README (or OPERATIONS index).
+- [x] Stubs do not invent schemas beyond `v2.md`.
+- [x] RESEARCH.md lists experiment IDs matching T-110–T-115.
 
 ### Assumptions
 
@@ -367,10 +367,10 @@ Provide JSON-schema export or pydantic `.model_json_schema()` used by LLM stage 
 
 ### Exit criteria
 
-- [ ] Types importable; unit tests construct valid and reject invalid Relation types.
-- [ ] `NarrativeRevisionDecision.outcome` enum matches `integrate \| branch \| contradict \| supersede \| keep_separate \| defer`.
-- [ ] Docstrings cite `docs/v2.md` §2.2 / §10.
-- [ ] No `MemoryItem` subclass pretending to be Narrative without an explicit `LegacyMemoryAdapter` name.
+- [x] Types importable; unit tests construct valid and reject invalid Relation types.
+- [x] `NarrativeRevisionDecision.outcome` enum matches `integrate \| branch \| contradict \| supersede \| keep_separate \| defer`.
+- [x] Docstrings cite `docs/v2.md` §2.2 / §10.
+- [x] No `MemoryItem` subclass pretending to be Narrative without an explicit `LegacyMemoryAdapter` name.
 
 ### Assumptions
 
@@ -411,10 +411,10 @@ Implement store mixins analogous to existing `correlation_mixin.py` / `judgment_
 
 ### Exit criteria
 
-- [ ] CRUD round-trips on SQLite and Postgres CI jobs.
-- [ ] Vault isolation test: writing Relation/Narrative in vault A is invisible when querying as vault B without cross-domain flag.
-- [ ] `twin backup create` / export includes new entities (or explicitly documents “empty until first cognize”).
-- [ ] Schema version bump recorded where the project tracks migrations.
+- [x] CRUD round-trips on SQLite and Postgres CI jobs.
+- [x] Vault isolation test: writing Relation/Narrative in vault A is invisible when querying as vault B without cross-domain flag.
+- [x] `twin backup create` / export includes new entities (or explicitly documents “empty until first cognize”).
+- [x] Schema version bump recorded where the project tracks migrations.
 
 ### Assumptions
 
@@ -467,9 +467,9 @@ These helpers must **not** write a confidence float back onto the Narrative row.
 
 ### Exit criteria
 
-- [ ] Cannot persist Narrative EpistemicState with a required `confidence` column (schema review).
-- [ ] Unit tests: adding a `same_originating_decision` edge among four agreeing sources does **not** increase derived independent-origin count.
-- [ ] Marking `status=stale` with reason is a deterministic store update (no LLM).
+- [x] Cannot persist Narrative EpistemicState with a required `confidence` column (schema review).
+- [x] Unit tests: adding a `same_originating_decision` edge among four agreeing sources does **not** increase derived independent-origin count.
+- [x] Marking `status=stale` with reason is a deterministic store update (no LLM).
 
 ### Assumptions
 
@@ -504,9 +504,9 @@ Provide query helpers: neighbors by type, collapse independent-origin sets for I
 
 ### Exit criteria
 
-- [ ] Enum rejects unknown types.
-- [ ] Test: creating `same_originating_decision` without `asserted_by=llm` fails closed in production API (tests may inject with explicit test flag / override similar to `set_stage_override` today).
-- [ ] Narrative↔Narrative `part-of` / `continues` / `supersedes` supported for composition (`v2.md` §2.4).
+- [x] Enum rejects unknown types.
+- [x] Test: creating `same_originating_decision` without `asserted_by=llm` fails closed in production API (tests may inject with explicit test flag / override similar to `set_stage_override` today).
+- [x] Narrative↔Narrative `part-of` / `continues` / `supersedes` supported for composition (`v2.md` §2.4).
 
 ### Assumptions
 
@@ -545,9 +545,9 @@ Do **not** delete memory tables in this task.
 
 ### Exit criteria
 
-- [ ] Written ADR/section in `docs/COGNIZE.md` or tracker note describing the mapping 1:1.
-- [ ] Dual-read pack fixture: old DB with only memories still produces a pack (legacy) OR empty Narratives with clear “migration required” — pick one behavior and test it; prefer dual-read so v1 users do not brick.
-- [ ] `--dry-run` backfill prints counts; `--apply` is idempotent.
+- [x] Written ADR/section in `docs/COGNIZE.md` or tracker note describing the mapping 1:1.
+- [x] Dual-read pack fixture: old DB with only memories still produces a pack (legacy) OR empty Narratives with clear “migration required” — pick one behavior and test it; prefer dual-read so v1 users do not brick.
+- [x] `--dry-run` backfill prints counts; `--apply` is idempotent.
 
 ### Assumptions
 
@@ -587,9 +587,9 @@ Constitutional confirm flags and proposal preview tokens keep the same security 
 
 ### Exit criteria
 
-- [ ] `twin stance list` works; `twin judgment list` warns deprecation and returns same data.
-- [ ] Existing judgment tests pass via aliases.
-- [ ] Pack JSON includes Stance naming per chosen compatibility policy (tested).
+- [x] `twin stance list` works; `twin judgment list` warns deprecation and returns same data.
+- [x] Existing judgment tests pass via aliases.
+- [x] Pack JSON includes Stance naming per chosen compatibility policy (tested).
 
 ### Assumptions
 
@@ -641,9 +641,9 @@ Wire gate into future orchestrator and, temporarily, into existing `extract` / `
 
 ### Exit criteria
 
-- [ ] With LLM stopped: cognize/extract/meditate semantic paths halt; percepts remain pending/deferred — **no new MemoryCandidates invented by heuristics in interpreting modes**.
-- [ ] Status command/API shows last halt reason + timestamp.
-- [ ] Unit test covers each halt reason.
+- [x] With LLM stopped: cognize/extract/meditate semantic paths halt; percepts remain pending/deferred — **no new MemoryCandidates invented by heuristics in interpreting modes**.
+- [x] Status command/API shows last halt reason + timestamp.
+- [x] Unit test covers each halt reason.
 
 ### Assumptions
 
@@ -685,9 +685,9 @@ Update docs/SETUP: heuristic is not a cognition backend.
 
 ### Exit criteria
 
-- [ ] Test: `TWIN_EXTRACTOR=heuristic` + `twin cognize`/`extract` does not insert MemoryItems or Interpretations; returns blocked/halt.
-- [ ] CI still has a deterministic stand-in for tests via **authored overrides** / recorded fixtures (like `set_interpreter_override`), not lexical meaning.
-- [ ] CHANGELOG/OPERATIONS note the behavior change.
+- [x] Test: `TWIN_EXTRACTOR=heuristic` + `twin cognize`/`extract` does not insert MemoryItems or Interpretations; returns blocked/halt.
+- [x] CI still has a deterministic stand-in for tests via **authored overrides** / recorded fixtures (like `set_interpreter_override`), not lexical meaning.
+- [x] CHANGELOG/OPERATIONS note the behavior change.
 
 ### Assumptions
 
@@ -723,9 +723,9 @@ Echo extractor/interpreter is a **test double**, not a production cognition back
 
 ### Exit criteria
 
-- [ ] Default install / `twin init` never configures echo.
-- [ ] Gate treats echo as halt in production.
-- [ ] Tests that need deterministic cognition use stage overrides / recorded LLM fixtures.
+- [x] Default install / `twin init` never configures echo.
+- [x] Gate treats echo as halt in production.
+- [x] Tests that need deterministic cognition use stage overrides / recorded LLM fixtures.
 
 ### Assumptions
 
@@ -763,9 +763,9 @@ This task is the bridge: either wrap the old pipeline behind the new gate or mar
 
 ### Exit criteria
 
-- [ ] No production path writes phase/edge with `method` implying lexical understanding when LLM down.
-- [ ] Tests for deferral remain green; any test that expected lexical phases updated.
-- [ ] OPERATIONS.md notes halt behavior.
+- [x] No production path writes phase/edge with `method` implying lexical understanding when LLM down.
+- [x] Tests for deferral remain green; any test that expected lexical phases updated.
+- [x] OPERATIONS.md notes halt behavior.
 
 ### Assumptions
 
@@ -806,10 +806,10 @@ Wire runtime job kind `cognize_batch` (name flexible) in `twin/runtime/`.
 
 ### Exit criteria
 
-- [ ] `twin cognize run --dry-run` (or python API) prints stage plan and halt if no LLM.
-- [ ] Report schema stable enough for CLI `--json`.
-- [ ] Unit test: LLM down → all cognitive stages halted, zero entity writes.
-- [ ] Unit test: LLM up with all stages stubbed `skipped` still persists nothing durable except optional run record.
+- [x] `twin cognize run --dry-run` (or python API) prints stage plan and halt if no LLM.
+- [x] Report schema stable enough for CLI `--json`.
+- [x] Unit test: LLM down → all cognitive stages halted, zero entity writes.
+- [x] Unit test: LLM up with all stages stubbed `skipped` still persists nothing durable except optional run record.
 
 ### Assumptions
 
@@ -846,9 +846,9 @@ No keyword classifier as authority. Prompt/schema versioned. Test override hook 
 
 ### Exit criteria
 
-- [ ] Live LLM path + `set_stage_override("salience", …)` for CI.
-- [ ] Dropped percepts remain available for a future run (not deleted).
-- [ ] Halt if LLM fails mid-stage (no partial silent success without record).
+- [x] Live LLM path + `set_stage_override("salience", …)` for CI.
+- [x] Dropped percepts remain available for a future run (not deleted).
+- [x] Halt if LLM fails mid-stage (no partial silent success without record).
 
 ### Assumptions
 
@@ -880,9 +880,9 @@ Persist Situation membership. Reuse lessons from WorkEpisode clustering but **do
 
 ### Exit criteria
 
-- [ ] Situations CRUD via stage output.
-- [ ] Cross-vault situate refused.
-- [ ] Override tests for join vs new situation.
+- [x] Situations CRUD via stage output.
+- [x] Cross-vault situate refused.
+- [x] Override tests for join vs new situation.
 
 ### Assumptions
 
@@ -915,9 +915,9 @@ Status `open` by default. Always visible in Review later (T-040).
 
 ### Exit criteria
 
-- [ ] Reflections persisted; linked to situations/percepts.
-- [ ] Prompt forbids inventing Reflections that are not grounded in provided batch/situation brief.
-- [ ] CI override can emit canonical Reflection set.
+- [x] Reflections persisted; linked to situations/percepts.
+- [x] Prompt forbids inventing Reflections that are not grounded in provided batch/situation brief.
+- [x] CI override can emit canonical Reflection set.
 
 ### Assumptions
 
@@ -951,9 +951,9 @@ Status starts `competing`. Multiple Interpretations per Reflection allowed.
 
 ### Exit criteria
 
-- [ ] Ungrounded interpretation dropped with counter.
-- [ ] No auto-promote to Narrative.
-- [ ] Schema distinguishes Interpretation from Narrative in storage.
+- [x] Ungrounded interpretation dropped with counter.
+- [x] No auto-promote to Narrative.
+- [x] Schema distinguishes Interpretation from Narrative in storage.
 
 ### Assumptions
 
@@ -983,9 +983,9 @@ LLM links Reflections: `same-as` / `related` / conflict-of-asks. Collapse duplic
 
 ### Exit criteria
 
-- [ ] Relations written with rationales.
-- [ ] Canonical Reflection id stable under re-run (idempotent).
-- [ ] Review can see merged history.
+- [x] Relations written with rationales.
+- [x] Canonical Reflection id stable under re-run (idempotent).
+- [x] Review can see merged history.
 
 ### Assumptions
 
@@ -1013,9 +1013,9 @@ LLM relates Interpretations: `same-as` / `supports` / `contradicts` / evidence o
 
 ### Exit criteria
 
-- [ ] Contradict Relations retained for Stage 6.
-- [ ] Idempotent re-cross on same set.
-- [ ] Metrics/counters for support vs contradict edges.
+- [x] Contradict Relations retained for Stage 6.
+- [x] Idempotent re-cross on same set.
+- [x] Metrics/counters for support vs contradict edges.
 
 ### Assumptions
 
@@ -1051,10 +1051,10 @@ Does not itself commit Narrative (Stage 9 / human).
 
 ### Exit criteria
 
-- [ ] Decision objects persisted and attached to review clusters.
-- [ ] Supersede outcome lists `retained_dissent_ids` non-empty when a loser exists.
-- [ ] Override tests for each outcome at least once.
-- [ ] Logging hooks for research (§9.3 #7) — even if full eval is T-115.
+- [x] Decision objects persisted and attached to review clusters.
+- [x] Supersede outcome lists `retained_dissent_ids` non-empty when a loser exists.
+- [x] Override tests for each outcome at least once.
+- [x] Logging hooks for research (§9.3 #7) — even if full eval is T-115.
 
 ### Assumptions
 
@@ -1091,9 +1091,9 @@ Rules:
 
 ### Exit criteria
 
-- [ ] Multi-source fixture collapses to one independent origin when LLM override says same decision.
-- [ ] Evidence ids include dissenting spans.
-- [ ] Production refuses to set `narrative.confidence += x`.
+- [x] Multi-source fixture collapses to one independent origin when LLM override says same decision.
+- [x] Evidence ids include dissenting spans.
+- [x] Production refuses to set `narrative.confidence += x`.
 
 ### Assumptions
 
@@ -1134,9 +1134,9 @@ Remove product copy that says “confirm memory.”
 
 ### Exit criteria
 
-- [ ] Open Reflections section always rendered when any exist (CLI + API).
-- [ ] Commit path calls Stage 9 API (T-041) — if T-041 not merged, gate behind feature flag but UI wired.
-- [ ] Legacy memory review still reachable via deprecated mode during migration, with warning banner.
+- [x] Open Reflections section always rendered when any exist (CLI + API).
+- [x] Commit path calls Stage 9 API (T-041) — if T-041 not merged, gate behind feature flag but UI wired.
+- [x] Legacy memory review still reachable via deprecated mode during migration, with warning banner.
 
 ### Assumptions
 
@@ -1172,10 +1172,10 @@ Human accept applies:
 
 ### Exit criteria
 
-- [ ] Commit without evidence fails closed.
-- [ ] Commit without human actor fails closed.
-- [ ] Idempotent commit token / preview fingerprint (mirror judgment preview pattern).
-- [ ] Pack-eligible Narratives are committed+fresh (or explicitly stale-labeled — never silent stale).
+- [x] Commit without evidence fails closed.
+- [x] Commit without human actor fails closed.
+- [x] Idempotent commit token / preview fingerprint (mirror judgment preview pattern).
+- [x] Pack-eligible Narratives are committed+fresh (or explicitly stale-labeled — never silent stale).
 
 ### Assumptions
 
@@ -1313,9 +1313,9 @@ When a Percept is committed by Sense into a domain/vault that overlaps a committ
 
 ### Exit criteria
 
-- [ ] Test: insert percept → Narrative becomes stale without LLM configured.
-- [ ] Inject path (even stub) can detect stale immediately.
-- [ ] Re-synthesis / commit clears stale and refreshes freshness_boundary (integration with T-041).
+- [x] Test: insert percept → Narrative becomes stale without LLM configured.
+- [x] Inject path (even stub) can detect stale immediately.
+- [x] Re-synthesis / commit clears stale and refreshes freshness_boundary (integration with T-041).
 
 ### Assumptions
 
@@ -1384,9 +1384,9 @@ Update context pack assembly (`twin/cognition/context_pack.py`, pack_format/sele
 
 ### Exit criteria
 
-- [ ] Contract test: stale Narrative cannot appear in `active` without `epistemic.status=stale`.
-- [ ] Golden pack JSON schema includes epistemic fields.
-- [ ] Blocked items still ids/reasons only (no leak).
+- [x] Contract test: stale Narrative cannot appear in `active` without `epistemic.status=stale`.
+- [x] Golden pack JSON schema includes epistemic fields.
+- [x] Blocked items still ids/reasons only (no leak).
 
 ### Assumptions
 
@@ -1558,13 +1558,13 @@ Refactor `twin/interfaces/cli.py` monolith: move business handlers into `twin/in
 
 **Mandate:** TUI and argparse call the **same** functions — no forked logic (`v2.md` §12.6).
 
-No user-visible behavior change required in this task beyond optional import path cleanup.
+Handlers live in `twin/interfaces/commands/cli_handlers.py` (+ `cognize_cmd.py` / `pack_cmd.py` for Cognize surface). `cli.py` is registration + parsing.
 
 ### Exit criteria
 
-- [ ] `cli.py` mostly registration + parsing.
-- [ ] `pytest` / smoke CLI commands still work.
-- [ ] Public function signatures documented for TUI use.
+- [x] `cli.py` mostly registration + parsing.
+- [x] `pytest` / smoke CLI commands still work (`cognize`/`narrative` help + pack path).
+- [x] Public function signatures in `twin/interfaces/commands/` suitable for TUI reuse.
 
 ### Assumptions
 
@@ -1606,10 +1606,10 @@ Scripted shape must support CI (`--json`).
 
 ### Exit criteria
 
-- [ ] Help text lists v2 verbs prominently.
-- [ ] `cognize run` respects LLM-or-halt.
-- [ ] `narrative show` prints EpistemicState.
-- [ ] Docs CLI.md updated for new verbs (legacy appendix can wait for T-082).
+- [x] Help text lists v2 verbs prominently.
+- [x] `cognize run` respects LLM-or-halt.
+- [x] `narrative show` prints EpistemicState.
+- [x] Docs CLI.md updated for new verbs (legacy appendix can wait for T-082).
 
 ### Assumptions
 
@@ -1925,9 +1925,9 @@ Offline fixtures preferred; optional model layer gated by env.
 
 ### Exit criteria
 
-- [ ] Eval case under `evals/` with pass/fail assertions.
-- [ ] Wired into `twin eval` or pytest.
-- [ ] Failure message explains which floor broke.
+- [x] Eval case under `evals/` with pass/fail assertions.
+- [x] Wired into `twin eval` or pytest.
+- [x] Failure message explains which floor broke.
 
 ### Assumptions
 

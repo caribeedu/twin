@@ -89,11 +89,12 @@ class ContextPack:
     token_budget: dict = field(default_factory=dict)
     blocked_count: int = 0
     explanation: dict = field(default_factory=dict)
-    # Twin v2 Cognize inject surface
     narratives: list = field(default_factory=list)
     open_reflections: list = field(default_factory=list)
     epistemic: list = field(default_factory=list)
     derived_confidence: dict = field(default_factory=dict)
+    applicable_stance: list = field(default_factory=list)
+    applicable_judgment: list = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -226,9 +227,12 @@ def build_context_pack(
         return True
 
     judgment_snapshot_id: Optional[str] = None
+    applicable_stance_out: list = []
+    applicable_judgment_out: list = []
     if include_judgment:
         _check_pack_deadline(deadline_monotonic, stage="before_judgment")
         judgment_text = ""
+        pack_j: dict = {}
         if hasattr(store, "list_judgment_items"):
             from ..judgment.application import applicable_pack, render_applicable
             from ..judgment.models import AppliedRevisionRef, JudgmentItem
@@ -330,7 +334,22 @@ def build_context_pack(
                 judgment_snapshot_id = snap.id
                 pack_j["snapshot_id"] = snap.id
                 judgment_text = render_applicable(pack_j)
-        # No runtime judgment.yaml fallback — YAML is bootstrap/export only 
+                flat: list = []
+                for key in (
+                    "hard_constraints",
+                    "principles",
+                    "heuristics",
+                    "preferences",
+                    "beliefs",
+                    "values",
+                    "applicable_judgments",
+                ):
+                    for it in pack_j.get(key) or []:
+                        if it.get("id") and it not in flat:
+                            flat.append(it)
+                pack_j["applicable_stance"] = list(flat)
+                applicable_stance_out = list(flat)
+                applicable_judgment_out = list(flat)
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
 
@@ -509,7 +528,6 @@ def build_context_pack(
             )
             if eps and eps.status is EpistemicStatus.tombstoned:
                 continue
-            # Floor: never present stale as fresh in active narratives
             entry = {
                 "narrative_id": nar.id,
                 "account": nar.account if not (eps and eps.status is EpistemicStatus.stale) else None,
@@ -594,6 +612,8 @@ def build_context_pack(
         open_reflections=reflections_out,
         epistemic=epistemic_out,
         derived_confidence=derived_conf,
+        applicable_stance=applicable_stance_out,
+        applicable_judgment=applicable_judgment_out,
     )
 
 

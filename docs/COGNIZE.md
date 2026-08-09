@@ -9,8 +9,8 @@ Epistemics: [EPISTEMICS.md](EPISTEMICS.md).
 Vocabulary: [GLOSSARY.md](GLOSSARY.md).  
 Implementation inventory: [v2-tracker.md](v2-tracker.md).
 
-**Status:** stub while Twin v2.0 lands. Prefer [v2.md](v2.md) §2 for full
-I/O contracts until stages are implemented in code.
+Normative contracts: [v2.md](v2.md) §2. This file holds the stage map and
+Memory→Narrative mapping.
 
 ---
 
@@ -39,6 +39,27 @@ drafts, or Fade/Remarkable judgment).
 Entities and lifecycles: [GLOSSARY.md](GLOSSARY.md) · [v2.md](v2.md) §2.2.
 
 Narrative Revision decision shape: [v2.md](v2.md) §10.
+
+---
+
+## Migration ADR — MemoryItem → Narrative / Interpretation
+
+**Rule (dual-read):** confirmed memories map to provisional **Narratives**;
+candidates (and any `needs_review` rows) map to competing **Interpretations**.
+Rejected / merged / split / deleted / archived memories are skipped.
+
+| Legacy | Cognize | Notes |
+|---|---|---|
+| `MemoryStatus.confirmed` | `Narrative` + `EpistemicState` | `migrated_from_memory=true`; `freshness_boundary` ← `valid_from` or `created_at`; evidence from evidence rows or `migrated:{memory_id}` placeholder |
+| `MemoryStatus.candidate` | `Interpretation` (`competing`) | Never committed Narratives via backfill |
+| `needs_review=true` | `Interpretation` only | Even if status were confirmed-shaped — never auto-commit |
+| Judgment items | Stance (alias layer) | Store tables unchanged |
+
+**CLI:** `twin narrative backfill --dry-run` prints counts; `--apply` is
+idempotent on `metadata.memory_id` for both Narratives and Interpretations.
+
+**Packs:** legacy memory sections still pack; Narratives appear under
+`## Narratives` / `## Stale Narratives`.
 
 ---
 

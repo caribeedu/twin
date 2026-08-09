@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from twin.clock import now_iso
 
-SCHEMA_VERSION = "twin-sovereignty-1"
+SCHEMA_VERSION = "twin-sovereignty-2"
 
 
 class FileEntry(BaseModel):

@@ -25,6 +25,16 @@ SECTIONS = (
     "privacy_decisions",
     "memory_operations",
     "personas",
+    "cognize_situations",
+    "cognize_reflections",
+    "cognize_interpretations",
+    "cognize_relations",
+    "cognize_narratives",
+    "cognize_epistemic_states",
+    "cognize_evidence_anchors",
+    "cognize_traces",
+    "cognize_narrative_revisions",
+    "cognize_runs",
 )
 
 
@@ -102,6 +112,40 @@ def collect_export(store: MemoryStore) -> dict[str, list[Any]]:
             )
     if hasattr(store, "list_personas"):
         data["personas"] = list(store.list_personas(active_only=False))
+
+    # Cognize entities
+    vaults: set[str] = {"default"}
+    if hasattr(store, "list_narratives"):
+        for nar in store.list_narratives("default"):
+            vaults.add(nar.vault_id or "default")
+        if hasattr(store, "list_situations"):
+            for sit in store.list_situations("default"):
+                vaults.add(sit.vault_id or "default")
+        for vid in sorted(vaults):
+            if hasattr(store, "list_situations"):
+                data["cognize_situations"].extend(store.list_situations(vid))
+            if hasattr(store, "list_reflections"):
+                data["cognize_reflections"].extend(store.list_reflections(vid))
+            elif hasattr(store, "list_open_reflections"):
+                data["cognize_reflections"].extend(store.list_open_reflections(vid))
+            if hasattr(store, "list_cognize_interpretations"):
+                data["cognize_interpretations"].extend(
+                    store.list_cognize_interpretations(vid)
+                )
+            if hasattr(store, "list_relations"):
+                data["cognize_relations"].extend(store.list_relations(vid))
+            data["cognize_narratives"].extend(store.list_narratives(vid))
+            if hasattr(store, "list_evidence_anchors"):
+                data["cognize_evidence_anchors"].extend(store.list_evidence_anchors(vid))
+        seen_eps: set[str] = set()
+        for nar in data["cognize_narratives"]:
+            if not nar.epistemic_state_id or nar.epistemic_state_id in seen_eps:
+                continue
+            if hasattr(store, "get_epistemic_state"):
+                eps = store.get_epistemic_state(nar.epistemic_state_id)
+                if eps is not None:
+                    data["cognize_epistemic_states"].append(eps)
+                    seen_eps.add(nar.epistemic_state_id)
     return data
 
 

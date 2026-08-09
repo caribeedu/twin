@@ -1,4 +1,4 @@
-"""Shared Cognize CLI handlers (argparse + future Command Center)."""
+"""Cognize / narrative / stance / inject CLI handlers."""
 
 from __future__ import annotations
 
@@ -43,19 +43,52 @@ def cognize_status(ws, args) -> dict[str, Any]:
         chat_reachable=reachable,
         allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
     )
-    open_refs = 0
     vault = getattr(args, "vault", None) or "default"
+    open_refs = 0
+    competing = 0
     if hasattr(ws.store, "list_open_reflections"):
         open_refs = len(ws.store.list_open_reflections(vault))
+    if hasattr(ws.store, "list_competing_interpretations"):
+        competing = len(ws.store.list_competing_interpretations(vault))
+    last = None
+    if hasattr(ws.store, "last_cognize_run"):
+        last = ws.store.last_cognize_run(vault)
     return {
         "pending_percepts": len(pending),
         "open_reflections": open_refs,
+        "competing_interpretations": competing,
         "llm_reachable": reachable,
         "gate_ok": gate.ok,
         "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
         "detail": gate.detail,
         "extractor": ws.cfg.extractor,
         "model": ws.cfg.resolved_llm_model,
+        "last_run": last,
+    }
+
+
+def cognize_review(ws, args) -> dict[str, Any]:
+    vault = getattr(args, "vault", None) or "default"
+    open_refs = []
+    if hasattr(ws.store, "list_open_reflections"):
+        open_refs = [
+            r.model_dump(mode="json") for r in ws.store.list_open_reflections(vault)
+        ]
+    competing = []
+    if hasattr(ws.store, "list_competing_interpretations"):
+        competing = [
+            i.model_dump(mode="json")
+            for i in ws.store.list_competing_interpretations(vault)
+        ]
+    return {
+        "ok": True,
+        "vault_id": vault,
+        "open_reflections": open_refs,
+        "competing_interpretations": competing,
+        "counts": {
+            "open_reflections": len(open_refs),
+            "competing_interpretations": len(competing),
+        },
     }
 
 
@@ -96,6 +129,29 @@ def narrative_search(ws, args) -> dict[str, Any]:
     return {"ok": True, "count": len(rows), "narratives": rows}
 
 
+def narrative_commit_preview(ws, args) -> dict[str, Any]:
+    from twin.cognize.commit import preview_commit_token
+
+    evidence = list(getattr(args, "evidence", None) or [])
+    if getattr(args, "evidence_id", None):
+        evidence.append(args.evidence_id)
+    token = preview_commit_token(
+        account=getattr(args, "account", None) or "",
+        evidence_ids=evidence,
+        vault_id=getattr(args, "vault", None) or "default",
+        interpretation_ids=list(getattr(args, "interpretation", None) or []),
+        dissent_interpretation_ids=list(getattr(args, "dissent", None) or []),
+        domain=getattr(args, "domain", None) or "",
+    )
+    return {
+        "ok": True,
+        "preview_token": token,
+        "account": getattr(args, "account", None) or "",
+        "evidence_ids": evidence,
+        "vault_id": getattr(args, "vault", None) or "default",
+    }
+
+
 def narrative_commit(ws, args) -> dict[str, Any]:
     from twin.cognize.commit import CommitError, commit_narrative
 
@@ -112,10 +168,18 @@ def narrative_commit(ws, args) -> dict[str, Any]:
             interpretation_ids=list(getattr(args, "interpretation", None) or []),
             dissent_interpretation_ids=list(getattr(args, "dissent", None) or []),
             domain=getattr(args, "domain", None) or "",
+            supersedes_narrative_id=getattr(args, "supersedes", None) or None,
+            preview_token=getattr(args, "token", None) or None,
+            require_preview_token=bool(getattr(args, "require_token", False)),
         )
     except CommitError as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, "narrative_id": nar.id, "epistemic_state_id": nar.epistemic_state_id}
+    return {
+        "ok": True,
+        "narrative_id": nar.id,
+        "epistemic_state_id": nar.epistemic_state_id,
+        "preview_token": (nar.metadata or {}).get("preview_token"),
+    }
 
 
 def narrative_backfill(ws, args) -> dict[str, Any]:

@@ -1,8 +1,7 @@
-"""Cognize orchestrator — stages 0–7 with LLM-or-halt and test overrides.
+"""Cognize orchestrator — stages 0–7.
 
-Without stage overrides, every thinking stage requires a live chat LLM
-(``llm_available``). Overrides are the CI stand-in (like episode
-``set_stage_override``). Default lexical invention is forbidden.
+Without stage overrides, every thinking stage requires a live chat LLM.
+Overrides stand in for CI. Lexical invention is forbidden.
 """
 
 from __future__ import annotations
@@ -198,18 +197,42 @@ def run_cognize(
         allow_echo_cognition=allow_echo or has_overrides,
     )
     if gate.halted:
-        return CognitionReport(
+        report = CognitionReport(
             ok=False,
             halted=True,
             halt_reason=gate.halt_reason.value if gate.halt_reason else "halt",
             detail=gate.detail,
         )
+        _persist_run(store, vault_id or "", report)
+        return report
 
     percepts = _load_percepts(store, percept_ids, limit)
     if not percepts:
-        return CognitionReport(ok=True, detail="no percepts to cognize")
+        report = CognitionReport(ok=True, detail="no percepts to cognize")
+        _persist_run(store, vault_id or "default", report)
+        return report
 
     vault = vault_id or _vault(percepts)
+    kept_vault: list[Percept] = []
+    foreign = 0
+    for p in percepts:
+        meta = p.metadata or {}
+        pvault = str(meta.get("vault_id") or meta.get("vault") or vault)
+        if pvault != vault:
+            foreign += 1
+            continue
+        kept_vault.append(p)
+    if not kept_vault:
+        report = CognitionReport(
+            ok=False,
+            halted=True,
+            halt_reason="cross_vault_refuse",
+            detail=f"no percepts in vault={vault} (refused {foreign} foreign)",
+        )
+        _persist_run(store, vault, report)
+        return report
+    percepts = kept_vault
+
     report = CognitionReport(ok=True)
 
     if not dry_run:
@@ -233,6 +256,7 @@ def run_cognize(
         "revision": None,
         "llm": llm,
         "model_id": getattr(cfg, "resolved_llm_model", "") or "",
+        "ungrounded_dropped": 0,
     }
 
     stop_at = _until_index(until)
@@ -254,6 +278,7 @@ def run_cognize(
                 report.halted = True
                 report.halt_reason = stage.value
                 report.detail = result.detail
+                _persist_run(store, vault, report)
                 return report
     finally:
         if llm is not None:
@@ -268,7 +293,28 @@ def run_cognize(
     if ctx.get("revision") is not None:
         report.revision_ids = [ctx["revision"].id]
     report.review_enqueued = bool(report.interpretation_ids) and not dry_run
+    if ctx.get("ungrounded_dropped"):
+        report.detail = (
+            (report.detail + "; " if report.detail else "")
+            + f"ungrounded_dropped={ctx['ungrounded_dropped']}"
+        )
+    _persist_run(store, vault, report)
     return report
+
+
+def _persist_run(store: Any, vault_id: str, report: CognitionReport) -> None:
+    if not hasattr(store, "record_cognize_run"):
+        return
+    try:
+        store.record_cognize_run(
+            vault_id=vault_id or "",
+            status="halted" if report.halted else ("ok" if report.ok else "error"),
+            halt_reason=report.halt_reason or "",
+            detail=report.detail or "",
+            payload=report.to_dict(),
+        )
+    except Exception:
+        pass
 
 
 def _run_stage(
@@ -381,12 +427,21 @@ def _llm_stage(
                 f"Reflections: {json.dumps([r.text for r in ctx['reflections']])}\n"
                 f"Percepts:\n{brief}",
             )
+            known_ids = {p.id for p in ctx["kept_percepts"]}
             intps = []
+            dropped = 0
             for item in data.get("interpretations") or []:
                 expl = str(item.get("explanation") or "").strip()
                 if not expl:
                     continue
-                evid = item.get("evidence_percept_ids") or [p.id for p in ctx["kept_percepts"]]
+                evid = [
+                    pid
+                    for pid in (item.get("evidence_percept_ids") or [])
+                    if pid in known_ids
+                ]
+                if not evid:
+                    dropped += 1
+                    continue
                 intp = Interpretation(
                     vault_id=vault,
                     explanation=expl,
@@ -413,13 +468,16 @@ def _llm_stage(
                                     target_id=intp.id,
                                 )
                             )
+            ctx["ungrounded_dropped"] = int(ctx.get("ungrounded_dropped") or 0) + dropped
             if not intps:
-                raise RuntimeError("LLM returned no interpretations")
+                raise RuntimeError(
+                    f"LLM returned no grounded interpretations (dropped={dropped})"
+                )
             ctx["interpretations"] = intps
             return StageResult(
                 stage=stage,
                 status=StageRunStatus.ok,
-                counts={"interpretations": len(intps)},
+                counts={"interpretations": len(intps), "ungrounded_dropped": dropped},
             )
 
         if stage is CognizeStage.cross_reflections:

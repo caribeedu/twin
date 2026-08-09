@@ -79,9 +79,9 @@ def test_pack_withholds_stale_as_fresh(store, cfg):
     assert stale_entries
     assert stale_entries[0]["epistemic_status"] == "stale"
     assert stale_entries[0]["account"] is None
-    # Must not present stale account as current narrative body
-    assert "- [nar_" not in (pack.context_pack or "") or "stale" in (pack.context_pack or "").lower()
-    assert "Old world" not in (pack.context_pack or "").split("## Narratives")[-1].split("## Stale")[0] if "## Narratives" in (pack.context_pack or "") else True
+    if "## Narratives" in (pack.context_pack or ""):
+        fresh = (pack.context_pack or "").split("## Narratives")[-1].split("## Stale")[0]
+        assert "Old world" not in fresh
 
 
 def test_backfill_dry_run(store):

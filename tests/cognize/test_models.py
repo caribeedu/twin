@@ -1,4 +1,4 @@
-"""Unit tests for Twin v2 Cognize entity contracts."""
+"""Cognize entity contract tests."""
 
 from __future__ import annotations
 

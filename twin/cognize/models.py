@@ -1,9 +1,8 @@
-"""Twin v2 Cognize entity contracts.
+"""Cognize entity contracts.
 
-These types are the schema root for Situations, Reflections, Interpretations,
-Relations, Narratives, EpistemicState, Evidence anchors, Traces, and Narrative
-Revision decisions. Understanding is *emergent* — there is no Understanding
-table or model.
+Situations, Reflections, Interpretations, Relations, Narratives,
+EpistemicState, Evidence anchors, Traces, and Narrative Revision decisions.
+Understanding is emergent — not a stored type.
 
 See ``docs/v2.md`` §2.2 / §10 and ``docs/GLOSSARY.md``.
 """
@@ -74,6 +73,7 @@ class NarrativeStatus(str, Enum):
     ordinary = "ordinary"
     fading = "fading"
     archived = "archived"
+    superseded = "superseded"
 
 
 class EpistemicStatus(str, Enum):

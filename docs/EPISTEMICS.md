@@ -8,8 +8,7 @@ Cognize stages: [COGNIZE.md](COGNIZE.md).
 Design source: [v2.md](v2.md) §§2.3, 3.4, 6.  
 Vocabulary: [GLOSSARY.md](GLOSSARY.md).
 
-**Status:** stub while Twin v2.0 lands. Prefer [v2.md](v2.md) for normative
-detail until store + Inject enforce these contracts in code.
+Normative detail: [v2.md](v2.md) §§2.3, 3.4, 6.
 
 ---
 

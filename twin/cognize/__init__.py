@@ -1,8 +1,4 @@
-"""Cognize package — Twin v2 narrative cognition contracts and (later) pipeline.
-
-Public architecture remains Sense → Cognize → Inject
-(``docs/ARCHITECTURE.md``). Stage implementations land incrementally.
-"""
+"""Cognize package — narrative cognition contracts and pipeline."""
 
 from twin.cognize.gate import CognizeGateResult, CognizeHaltReason, require_chat_llm
 from twin.cognize.models import (

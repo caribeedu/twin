@@ -32,6 +32,21 @@ def run_integrity_checks(store: MemoryStore) -> dict[str, Any]:
     stats["orphan_evidence"] = orphan_evidence
     stats["confirmed_without_evidence"] = missing_evidence
 
+    nar_without_evidence = 0
+    if hasattr(store, "list_narratives"):
+        for vault in ("default",):
+            for nar in store.list_narratives(vault):
+                if not (nar.evidence_ids or []):
+                    nar_without_evidence += 1
+                    problems.append(f"narrative {nar.id} has no evidence_ids")
+                if nar.epistemic_state_id and hasattr(store, "get_epistemic_state"):
+                    eps = store.get_epistemic_state(nar.epistemic_state_id)
+                    if eps is None:
+                        problems.append(
+                            f"narrative {nar.id} missing epistemic_state {nar.epistemic_state_id}"
+                        )
+    stats["narratives_without_evidence"] = nar_without_evidence
+
     if hasattr(store, "runtime_queue_depth"):
         stats.update({f"queue_{k}": v for k, v in store.runtime_queue_depth().items()})
 
