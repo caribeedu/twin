@@ -463,12 +463,78 @@ def create_server(home: Optional[str] = None):
         return json.dumps({"error": "emission_id or session_id required"})
 
     @mcp.tool()
+    def narrative_list(vault: str = "default", domain: str = "") -> str:
+        """List committed Narratives with EpistemicState status (not memory blobs)."""
+        if not hasattr(ws.store, "list_narratives"):
+            return json.dumps({"narratives": []})
+        rows = []
+        for nar in ws.store.list_narratives(vault):
+            if domain and nar.domain and nar.domain != domain:
+                continue
+            eps = (
+                ws.store.get_epistemic_state(nar.epistemic_state_id)
+                if nar.epistemic_state_id
+                else None
+            )
+            rows.append({
+                "id": nar.id,
+                "account": nar.account,
+                "domain": nar.domain,
+                "epistemic_status": eps.status.value if eps else None,
+                "stale_reason": eps.stale_reason if eps else "",
+                "sensitivity": nar.sensitivity,
+            })
+        return json.dumps({"count": len(rows), "narratives": rows}, ensure_ascii=False)
+
+    @mcp.tool()
+    def narrative_show(narrative_id: str) -> str:
+        """Show one Narrative + EpistemicState."""
+        nar = ws.store.get_narrative(narrative_id) if hasattr(ws.store, "get_narrative") else None
+        if nar is None:
+            return json.dumps({"error": "narrative not found"})
+        eps = (
+            ws.store.get_epistemic_state(nar.epistemic_state_id)
+            if nar.epistemic_state_id
+            else None
+        )
+        return json.dumps({
+            "narrative": nar.model_dump(mode="json"),
+            "epistemic": eps.model_dump(mode="json") if eps else None,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def stance_list() -> str:
+        """List active Stances (approved Judgment items)."""
+        from twin.cognize.stance import list_stances
+
+        rows = [s.model_dump(mode="json") for s in list_stances(ws.store)]
+        return json.dumps({"count": len(rows), "stances": rows}, ensure_ascii=False)
+
+    @mcp.tool()
+    def stance_proposals(status: str = "pending") -> str:
+        """List Stance/Judgment proposals (pending until human approve)."""
+        if not hasattr(ws.store, "list_judgment_proposals"):
+            return json.dumps({"proposals": []})
+        rows = [
+            {
+                "id": p.id,
+                "status": p.status.value,
+                "reason": p.reason,
+                "statement": (p.proposed_item or {}).get("statement"),
+                "narrative_id": (p.metadata or {}).get("narrative_id"),
+            }
+            for p in ws.store.list_judgment_proposals(status=status, limit=100)
+        ]
+        return json.dumps({"count": len(rows), "proposals": rows}, ensure_ascii=False)
+
+    @mcp.tool()
     def capabilities() -> str:
         """Negotiable MCP capability list for Twin cognitive core."""
         return json.dumps({
             "schema_version": "2.1",
             "tools": [
                 "inject_context_pack", "get_context_pack", "memory_safe_context_pack",
+                "narrative_list", "narrative_show", "stance_list", "stance_proposals",
                 "memory_observe",
                 "get_active_session", "get_attention", "append_session_delta",
                 "session_start", "session_complete", "provide_feedback",

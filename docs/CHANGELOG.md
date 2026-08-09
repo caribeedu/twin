@@ -5,6 +5,14 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.3.1 — Exit-criteria hardening
+
+Closes gaps found after the v2.3 cut: Command Center Jobs/Connectors use
+shared handlers (cognize_batch enqueue fixed); COGNIZE/EPISTEMICS expanded;
+Review workbench `#narratives` commit UX; MCP `narrative_*` / `stance_*`
+tools; Stage 10–12 late-stage module with LLM/override; deeper evals;
+native pack + CLI deprecation tests; README architecture section.
+
 ### v2.3.0 — Command Center
 
 Goal: bare `twin` TTY Command Center (Home / Services / Connectors / Jobs /

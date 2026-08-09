@@ -19,12 +19,11 @@ from twin.interfaces.center import (
     stop_runtime,
     stop_serve,
 )
+from twin.interfaces.center import actions
 from twin.workspace import Workspace
 
 
 class ExitPrompt(ModalScreen[str]):
-    """Stop supervised services? Yes / Leave running / Cancel."""
-
     def compose(self) -> ComposeResult:
         yield Vertical(
             Label("Stop supervised services?"),
@@ -65,11 +64,18 @@ class HomeScreen(Screen):
     def refresh_home(self) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
         snap = home_snapshot(app.ws)
+        doc = actions.doctor_summary(app.ws)
         serve = "running" if app.state.serve.proc and app.state.serve.proc.poll() is None else "stopped"
         runtime = "running" if app.state.runtime.proc and app.state.runtime.proc.poll() is None else "stopped"
+        warns = "\n".join(
+            f"  · {w.get('name')}: {w.get('detail')}" for w in (doc.get("warnings") or [])[:5]
+        ) or "  (none)"
         body = (
             f"[b]Twin Command Center[/b]\n\n"
             f"home: {snap['home']}\n"
+            f"doctor: {doc.get('checks_ok')}/{doc.get('checks_total')} ok · "
+            f"llm={doc.get('llm')} extractor={doc.get('extractor')}\n"
+            f"warnings:\n{warns}\n"
             f"review backlog: {snap['review_backlog']}\n"
             f"open reflections: {snap['open_reflections']}\n"
             f"connectors: {snap['connectors']}\n"
@@ -147,13 +153,11 @@ class ServicesScreen(Screen):
         app: TwinCenterApp = self.app  # type: ignore[assignment]
         bid = event.button.id
         if bid == "start-serve":
-            url = start_serve(app.state)
-            self.notify(f"serve at {url}")
+            self.notify(f"serve at {start_serve(app.state)}")
         elif bid == "stop-serve":
             stop_serve(app.state)
         elif bid == "start-runtime":
-            msg = start_runtime(app.state)
-            self.notify(f"runtime {msg}")
+            self.notify(f"runtime {start_runtime(app.state)}")
         elif bid == "stop-runtime":
             stop_runtime(app.state)
         self._refresh()
@@ -164,21 +168,55 @@ class ConnectorsScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield VerticalScroll(Static(id="connectors-body"))
+        yield Vertical(
+            Label("Connectors (Sense I/O) — pause / resume / test"),
+            Input(placeholder="connector id", id="connector-id"),
+            Horizontal(
+                Button("Refresh", id="cx-refresh"),
+                Button("Test", id="cx-test"),
+                Button("Pause", id="cx-pause"),
+                Button("Resume", id="cx-resume"),
+            ),
+            Static(id="connectors-body"),
+        )
         yield Footer()
 
     def on_mount(self) -> None:
+        self._refresh()
+
+    def _refresh(self) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
-        rows = []
-        if hasattr(app.ws.store, "list_connector_instances"):
-            for inst in app.ws.store.list_connector_instances():
-                rows.append(
-                    f"{getattr(inst, 'id', '?')} · {getattr(inst, 'connector_type', getattr(inst, 'type', '?'))} · "
-                    f"{getattr(inst, 'status', '')}"
-                )
-        body = "Connectors (Sense I/O)\n\n" + ("\n".join(rows) if rows else "(none registered)")
-        body += "\n\nDestructive revoke still requires CLI confirm (`twin connector …`)."
+        rows = actions.connector_rows(app.ws)
+        lines = [
+            f"{r['id']} · {r['type']} · status={r['status']} · health={r['health']}"
+            for r in rows
+        ]
+        body = "\n".join(lines) if lines else "(none registered)"
+        body += "\n\nRevoke remains CLI-confirmed: twin connector revoke <id>"
         self.query_one("#connectors-body", Static).update(body)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        cid = self.query_one("#connector-id", Input).value.strip()
+        try:
+            if event.button.id == "cx-refresh":
+                self._refresh()
+                return
+            if not cid:
+                self.notify("enter connector id", severity="warning")
+                return
+            if event.button.id == "cx-test":
+                out = actions.connector_test(app.ws, cid)
+                self.notify(f"test {out.get('health', {}).get('status', 'ok')}")
+            elif event.button.id == "cx-pause":
+                actions.connector_pause(app.ws, cid)
+                self.notify(f"paused {cid}")
+            elif event.button.id == "cx-resume":
+                actions.connector_resume(app.ws, cid)
+                self.notify(f"resumed {cid}")
+        except Exception as exc:
+            self.notify(str(exc), severity="error")
+        self._refresh()
 
 
 class JobsScreen(Screen):
@@ -187,10 +225,11 @@ class JobsScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Vertical(
-            Label("Jobs — same runtime queue as CLI"),
+            Label("Jobs — runtime queue (kind · state · progress · log_ref)"),
             Horizontal(
-                Button("Enqueue cognize", id="enq-cognize"),
-                Button("Enqueue consolidate daily", id="enq-consol"),
+                Button("Enqueue cognize_batch", id="enq-cognize"),
+                Button("Enqueue consolidate_daily", id="enq-consol"),
+                Button("Enqueue backfill_partition", id="enq-backfill"),
                 Button("Refresh", id="refresh"),
             ),
             Static(id="jobs-body"),
@@ -202,30 +241,36 @@ class JobsScreen(Screen):
 
     def _refresh(self) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
-        lines = []
-        if hasattr(app.ws.store, "runtime_queue_depth"):
-            lines.append(f"depth: {app.ws.store.runtime_queue_depth()}")
-        if hasattr(app.ws.store, "list_runtime_jobs"):
-            try:
-                for job in app.ws.store.list_runtime_jobs(limit=15):
-                    lines.append(
-                        f"{getattr(job, 'id', '?')[:12]} {getattr(job, 'kind', '')} "
-                        f"{getattr(job, 'status', getattr(job, 'state', ''))}"
-                    )
-            except Exception as exc:
-                lines.append(f"(list error: {exc})")
+        snap = actions.jobs_snapshot(app.ws)
+        lines = [f"depth: {snap.get('depth')}"]
+        for j in snap.get("jobs") or []:
+            lines.append(
+                f"{j.get('id', '')[:12]} · {j.get('kind')} · {j.get('state')} · "
+                f"progress={j.get('progress')} · log={j.get('log_ref') or '-'}"
+            )
+        if snap.get("backfills"):
+            lines.append("\nBackfills:")
+            for bf in snap["backfills"]:
+                lines.append(f"  {bf.get('id')} · {bf.get('state')} · {bf.get('progress')}")
         self.query_one("#jobs-body", Static).update("\n".join(lines) or "(no jobs)")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
+        kind_map = {
+            "enq-cognize": "cognize_batch",
+            "enq-consol": "consolidate_daily",
+            "enq-backfill": "backfill_partition",
+        }
+        bid = event.button.id or ""
+        if bid == "refresh":
+            self._refresh()
+            return
+        kind = kind_map.get(bid)
+        if not kind:
+            return
         try:
-            from twin.runtime.queue import RuntimeQueue
-            from twin.runtime.models import JobKind
-
-            q = RuntimeQueue(app.ws.store)
-            if event.button.id in ("enq-cognize", "enq-consol"):
-                q.enqueue(JobKind.consolidate_daily, payload={}, vault_id="default")
-                self.notify("enqueued consolidate_daily")
+            out = actions.enqueue_job(app.ws, kind)
+            self.notify(f"enqueued {out['kind']} {out['job_id'][:12]}")
         except Exception as exc:
             self.notify(str(exc), severity="error")
         self._refresh()
@@ -236,35 +281,47 @@ class CognizeScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield VerticalScroll(Static(id="cognize-body"))
+        yield Vertical(
+            Horizontal(
+                Button("Refresh", id="cog-refresh"),
+                Button("Run cognize", id="cog-run"),
+            ),
+            VerticalScroll(Static(id="cognize-body")),
+        )
         yield Footer()
 
     def on_mount(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        from twin.cognize.gate import require_chat_llm
-        import os
+        self._refresh()
 
-        gate = require_chat_llm(
-            extractor=app.ws.cfg.extractor,
-            chat_provider=app.ws.cfg.normalized_llm_provider,
-            allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
-        )
-        last = ""
-        if hasattr(app.ws.store, "last_cognize_run"):
-            last = str(app.ws.store.last_cognize_run() or "")
-        refs = 0
-        if hasattr(app.ws.store, "list_open_reflections"):
-            refs = len(app.ws.store.list_open_reflections("default"))
+    def _refresh(self) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        st = actions.cognize_status(app.ws)
+        refs = "\n".join(
+            f"- {r['id'][:10]} {r['text']}" for r in st.get("reflection_previews") or []
+        ) or "(none)"
         body = (
             "Cognize\n\n"
-            f"halted: {gate.halted}\n"
-            f"halt_reason: {gate.halt_reason.value if gate.halt_reason else '(none)'}\n"
-            f"detail: {gate.detail}\n"
-            f"open reflections: {refs}\n"
-            f"last run: {last[:200]}\n\n"
-            "Run via CLI: twin cognize run"
+            f"halted: {st['halted']}\n"
+            f"halt_reason: {st['halt_reason'] or '(none)'}\n"
+            f"detail: {st['detail']}\n"
+            f"open reflections: {st['open_reflections']}\n"
+            f"{refs}\n"
+            f"last run: {str(st.get('last_run') or '')[:240]}"
         )
         self.query_one("#cognize-body", Static).update(body)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        if event.button.id == "cog-refresh":
+            self._refresh()
+            return
+        if event.button.id == "cog-run":
+            try:
+                out = actions.cognize_run(app.ws)
+                self.notify(f"cognize status={out.get('status') or out.get('ok')}")
+            except Exception as exc:
+                self.notify(str(exc), severity="error")
+            self._refresh()
 
 
 class ReviewScreen(Screen):
@@ -277,19 +334,23 @@ class ReviewScreen(Screen):
 
     def on_mount(self) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
-        snap = home_snapshot(app.ws)
+        snap = actions.review_snapshot(app.ws)
         url = app.state.serve.url or "http://127.0.0.1:8765"
-        refs = []
-        if hasattr(app.ws.store, "list_open_reflections"):
-            for r in app.ws.store.list_open_reflections("default")[:8]:
-                refs.append(f"- {r.id[:10]} {r.text[:60]}")
+        refs = "\n".join(
+            f"- {r['id'][:10]} {r['text']}" for r in snap.get("open_reflections") or []
+        ) or "(none)"
+        fade = "\n".join(
+            f"- {r.get('narrative_id', '')[:10]} → {r.get('recommended')} ({r.get('reason')})"
+            for r in snap.get("accessibility") or []
+        ) or "(none)"
         body = (
             "Review\n\n"
-            f"candidate backlog: {snap['review_backlog']}\n"
-            f"workbench: {url}/review\n\n"
+            f"candidate backlog: {snap['backlog']}\n"
+            f"workbench: {url}/#review\n\n"
             "Open Reflections:\n"
-            + ("\n".join(refs) if refs else "(none)")
-            + "\n\nCLI: twin review · twin serve"
+            f"{refs}\n\n"
+            "Accessibility (Fade/Remarkable):\n"
+            f"{fade}"
         )
         self.query_one("#review-body", Static).update(body)
 
@@ -305,10 +366,11 @@ class NarrativesScreen(Screen):
     def on_mount(self) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
         lines = []
-        if hasattr(app.ws.store, "list_narratives"):
-            for nar in app.ws.store.list_narratives("default")[:20]:
-                st = nar.status.value if hasattr(nar.status, "value") else nar.status
-                lines.append(f"{nar.id[:12]} [{st}] {(nar.account or '')[:70]}")
+        for n in actions.narrative_list(app.ws):
+            lines.append(
+                f"{n['id'][:12]} [{n['status']}/{n['epistemic']}] "
+                f"grain={n['grain'] or '-'} {(n['account'] or '')[:70]}"
+            )
         self.query_one("#narratives-body", Static).update(
             "Narratives\n\n" + ("\n".join(lines) if lines else "(none)")
         )
@@ -319,18 +381,30 @@ class StanceScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield VerticalScroll(Static(id="stance-body"))
+        yield Vertical(
+            Input(placeholder="proposal id to approve", id="proposal-id"),
+            Horizontal(
+                Button("Refresh", id="st-refresh"),
+                Button("Approve proposal", id="st-approve"),
+            ),
+            VerticalScroll(Static(id="stance-body")),
+        )
         yield Footer()
 
     def on_mount(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        from twin.cognize.stance import list_stances
+        self._refresh()
 
-        lines = [f"{s.id[:12]} {(s.statement or '')[:70]}" for s in list_stances(app.ws.store)[:20]]
-        pending = []
-        if hasattr(app.ws.store, "list_judgment_proposals"):
-            for p in app.ws.store.list_judgment_proposals(status="pending", limit=10):
-                pending.append(f"proposal {p.id[:12]} {(p.reason or '')[:50]}")
+    def _refresh(self) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        ov = actions.stance_overview(app.ws)
+        lines = [
+            f"{s['id'][:12]} [{s['status']}] {(s['statement'] or '')[:70]}"
+            for s in ov.get("stances") or []
+        ]
+        pending = [
+            f"proposal {p['id'][:12]} nar={p.get('narrative_id') or '-'} {(p.get('reason') or '')[:50]}"
+            for p in ov.get("proposals") or []
+        ]
         body = (
             "Stance\n\n"
             + ("\n".join(lines) if lines else "(no active stances)")
@@ -338,6 +412,23 @@ class StanceScreen(Screen):
             + ("\n".join(pending) if pending else "(none)")
         )
         self.query_one("#stance-body", Static).update(body)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        if event.button.id == "st-refresh":
+            self._refresh()
+            return
+        if event.button.id == "st-approve":
+            pid = self.query_one("#proposal-id", Input).value.strip()
+            if not pid:
+                self.notify("enter proposal id", severity="warning")
+                return
+            try:
+                actions.approve_stance_proposal(app.ws, pid)
+                self.notify(f"approved {pid}")
+            except Exception as exc:
+                self.notify(str(exc), severity="error")
+            self._refresh()
 
 
 class McpScreen(Screen):
@@ -353,7 +444,9 @@ class McpScreen(Screen):
             "MCP\n\n"
             "Process identity: TWIN_MCP_CLIENT + TWIN_MCP_CLIENT_TOKEN\n"
             "Setup: twin setup mcp <client>\n"
-            "Preferred pack tool: inject_context_pack\n"
+            "Preferred pack: inject_context_pack\n"
+            "Narratives: narrative_list / narrative_show\n"
+            "Stance: stance_list / stance_proposals\n"
             "Legacy: memory_safe_context_pack (deprecated)\n"
         )
         self.query_one("#mcp-body", Static).update(body)
@@ -401,6 +494,5 @@ class TwinCenterApp(App[None]):
             if choice in ("stop", "leave"):
                 self.state.exit_choice = choice or "leave"
                 self.exit()
-            # cancel → stay
 
         self.push_screen(ExitPrompt(), done)
