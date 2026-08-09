@@ -1,6 +1,6 @@
 # Twin v2 Tracker — implementable task inventory
 
-Working tracker for the redesign in [`docs/v2.md`](./v2.md) (v2.7).  
+Working tracker for the redesign in [`docs/v2.md`](./v2.md).  
 Audience: an implementer (human or LLM) **with no prior chat context**. Every task is sized so another agent can pick it up, implement, and verify without guessing product intent.
 
 **Source of truth for product intent:** `docs/v2.md`  
@@ -2137,6 +2137,6 @@ Unless a new tracker ID is added, do **not**:
 
 ---
 
-*Tracker aligned to `docs/v2.md` v2.7 — longitudinal narratives, architecture vs pipeline, CLI command center.*
+*Tracker aligned to `docs/v2.md` — longitudinal narratives, architecture vs pipeline, CLI command center.*
 
 ATTENTION: Do not mention task numbers in any Git resource (PR/release/commit).
