@@ -89,6 +89,12 @@ class ContextPack:
     token_budget: dict = field(default_factory=dict)
     blocked_count: int = 0
     explanation: dict = field(default_factory=dict)
+    narratives: list = field(default_factory=list)
+    open_reflections: list = field(default_factory=list)
+    epistemic: list = field(default_factory=list)
+    derived_confidence: dict = field(default_factory=dict)
+    applicable_stance: list = field(default_factory=list)
+    applicable_judgment: list = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -221,9 +227,12 @@ def build_context_pack(
         return True
 
     judgment_snapshot_id: Optional[str] = None
+    applicable_stance_out: list = []
+    applicable_judgment_out: list = []
     if include_judgment:
         _check_pack_deadline(deadline_monotonic, stage="before_judgment")
         judgment_text = ""
+        pack_j: dict = {}
         if hasattr(store, "list_judgment_items"):
             from ..judgment.application import applicable_pack, render_applicable
             from ..judgment.models import AppliedRevisionRef, JudgmentItem
@@ -325,7 +334,22 @@ def build_context_pack(
                 judgment_snapshot_id = snap.id
                 pack_j["snapshot_id"] = snap.id
                 judgment_text = render_applicable(pack_j)
-        # No runtime judgment.yaml fallback — YAML is bootstrap/export only 
+                flat: list = []
+                for key in (
+                    "hard_constraints",
+                    "principles",
+                    "heuristics",
+                    "preferences",
+                    "beliefs",
+                    "values",
+                    "applicable_judgments",
+                ):
+                    for it in pack_j.get(key) or []:
+                        if it.get("id") and it not in flat:
+                            flat.append(it)
+                pack_j["applicable_stance"] = list(flat)
+                applicable_stance_out = list(flat)
+                applicable_judgment_out = list(flat)
         if judgment_text:
             push(judgment_text[: int(budget * profile.judgment_share)])
 
@@ -483,6 +507,87 @@ def build_context_pack(
         uncertainty=uncertainty,
     )
 
+    narratives_out: list = []
+    reflections_out: list = []
+    epistemic_out: list = []
+    derived_conf: dict = {}
+    if hasattr(store, "list_narratives"):
+        from twin.cognize.models import EpistemicStatus, derive_confidence
+        from twin.cognize.models import RelationType
+
+        vault = "default"
+        if access and isinstance(getattr(access, "metadata", None), dict):
+            vault = str(access.metadata.get("vault_id") or vault)
+        for nar in store.list_narratives(vault):
+            if nar.domain and nar.domain != target_domain and target_domain not in ("general", "*"):
+                continue
+            eps = (
+                store.get_epistemic_state(nar.epistemic_state_id)
+                if nar.epistemic_state_id
+                else None
+            )
+            if eps and eps.status is EpistemicStatus.tombstoned:
+                continue
+            entry = {
+                "narrative_id": nar.id,
+                "account": nar.account if not (eps and eps.status is EpistemicStatus.stale) else None,
+                "grain": nar.grain.value if nar.grain else None,
+                "domain": nar.domain,
+                "epistemic_status": eps.status.value if eps else "unknown",
+                "stale_reason": eps.stale_reason if eps else "",
+                "synthesized_at": eps.synthesized_at if eps else "",
+                "evidence_ids": list(nar.evidence_ids),
+            }
+            if eps and eps.status is EpistemicStatus.stale:
+                entry["account_omitted"] = True
+                entry["note"] = "stale — withheld as fresh; re-synthesize or proceed knowingly"
+            else:
+                entry["account_omitted"] = False
+            narratives_out.append(entry)
+            if eps:
+                epistemic_out.append(eps.model_dump(mode="json"))
+                groups = []
+                if hasattr(store, "list_relations"):
+                    sod = store.list_relations(
+                        vault,
+                        rel_type=RelationType.same_originating_decision.value,
+                    )
+                    for rel in sod:
+                        groups.append([rel.from_id, rel.to_id])
+                derived = derive_confidence(
+                    evidence_ids=list(eps.evidence_ids or nar.evidence_ids),
+                    same_originating_decision_groups=groups,
+                    epistemic_status=eps.status,
+                )
+                derived_conf[nar.id] = derived.model_dump(mode="json")
+        if hasattr(store, "list_open_reflections"):
+            for ref in store.list_open_reflections(vault):
+                reflections_out.append(
+                    {
+                        "reflection_id": ref.id,
+                        "text": ref.text,
+                        "status": ref.status.value,
+                    }
+                )
+        uncertainty = dict(uncertainty)
+        uncertainty["open_reflections"] = [r["reflection_id"] for r in reflections_out]
+        if reflections_out:
+            extra = "\n## Open Reflections\n" + "\n".join(
+                f"- {r['text']}" for r in reflections_out[:8]
+            )
+            pack_text = pack_text + "\n" + extra
+        stale_nars = [n for n in narratives_out if n.get("epistemic_status") == "stale"]
+        fresh_nars = [n for n in narratives_out if n.get("epistemic_status") == "fresh" and n.get("account")]
+        if fresh_nars:
+            pack_text += "\n## Narratives\n" + "\n".join(
+                f"- [{n['narrative_id']}] {n['account']}" for n in fresh_nars[:5]
+            )
+        if stale_nars:
+            pack_text += "\n## Stale Narratives (not current)\n" + "\n".join(
+                f"- [{n['narrative_id']}] stale: {n.get('stale_reason') or 'new evidence'}"
+                for n in stale_nars[:5]
+            )
+
     return ContextPack(
         context_pack=pack_text,
         sources=sources,
@@ -503,6 +608,12 @@ def build_context_pack(
         token_budget=token_budget,
         blocked_count=len(blocked),
         explanation=explanation,
+        narratives=narratives_out,
+        open_reflections=reflections_out,
+        epistemic=epistemic_out,
+        derived_confidence=derived_conf,
+        applicable_stance=applicable_stance_out,
+        applicable_judgment=applicable_judgment_out,
     )
 
 

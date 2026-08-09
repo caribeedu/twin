@@ -131,6 +131,23 @@ documents are retrieved ([IDENTITY.md](IDENTITY.md#positioning-not-these-categor
 
 ---
 
+## v2 redesign hypotheses (falsifiable)
+
+Claims from [v2.md](v2.md) §9.3. Experiment IDs map to [v2-tracker.md](v2-tracker.md) P11.
+
+| Experiment ID | Tracker | Claim |
+|---|---|---|
+| **EXP-STALE-INJECTION** | T-110 | After a newer overlapping Percept, Inject must not present a stale Narrative account as fresh. |
+| **EXP-QUIET-REVERSAL** | T-113 | Quiet contradiction of a committed Narrative surfaces as revision/review work, not silent overwrite. |
+| **EXP-INDEPENDENCE-COLLAPSE** | T-111 | `same_originating_decision` Relations collapse correlated sources; derived independent-origin count does not inflate. |
+| **EXP-DISAGREEMENT-ATTENTION** | T-112 | Competing Interpretations / contradict Relations draw review attention preferentially over redundant agreement. |
+| **EXP-ACL-INTERSECT** | T-114 | Pack ACL ∩ Narrative ACL withholds unauthorized Narratives; revoke tombs synchronously. |
+| **EXP-SURPRISE-LOG** | T-115 | Narrative Revision records `surprise` / `explanatory_delta` without inventing confidence scalars. |
+
+See also [EPISTEMICS.md](EPISTEMICS.md) and [COGNIZE.md](COGNIZE.md).
+
+---
+
 ## Open Directions
 
 Speculative by design. Promotion into the hypotheses above requires the

@@ -39,7 +39,19 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 |---|---|
 | `twin search <query>` | Hybrid search (optional `--domain`). |
 | `twin pack <query> --domain <domain>` | Build a safe context pack (candidates off unless flagged). |
+| `twin inject pack <query> --domain <domain>` | Twin v2 Inject pack (EpistemicState + Narratives + open Reflections). |
 | `twin observe <text>` | Memory observer suggestion for current text. |
+
+## Cognize (Twin v2)
+
+| Command | What it does |
+|---|---|
+| `twin cognize run [--until <stage>]` | Cognize pipeline Salience→Evidence audit (**LLM-or-halt**; never commits Narrative). |
+| `twin cognize status` | Pending percepts, open Reflections, halt reason. |
+| `twin narrative search\|show\|commit\|backfill` | Narrative ops + dual-read memory backfill. |
+| `twin stance list` | Stance surface (Judgment alias). |
+
+Legacy `twin extract` / `twin meditate` / `twin correlate` still exist but halt without a chat LLM; prefer `twin cognize`.
 
 ## Memory lifecycle
 

@@ -5,6 +5,37 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.0.0 — Narrative substrate
+
+Goal: ship Twin’s longitudinal Narrative architecture — Sense → Cognize →
+Inject — with LLM-or-halt cognition, human Commit Narrative, deterministic
+stale floor, and Inject EpistemicState (no stale-as-fresh).
+
+Delivered:
+
+- public architecture walls Sense / Cognize / Inject
+  ([ARCHITECTURE.md](ARCHITECTURE.md)); Cognize / Epistemics stubs;
+  glossary retargeted to Narrative / Reflection / Interpretation / Stance;
+- Cognize entity contracts + store mixin (Situations, Reflections,
+  Interpretations, Relations incl. `same_originating_decision`, Narratives,
+  EpistemicState without stored confidence, Evidence anchors, Traces,
+  Narrative Revision decisions);
+- `require_chat_llm` gate; `twin extract` / `twin meditate` halt on
+  heuristic/echo/unreachable model; Cognize orchestrator stages 0–7 with
+  LLM path + test overrides;
+- human `commit_narrative`; deterministic stale mark on percept land;
+  context packs attach EpistemicState, withhold stale accounts from fresh
+  section, surface open Reflections + read-time derived confidence;
+- dual-read backfill `twin narrative backfill`; Stance list alias over
+  Judgment;
+- CLI: `twin cognize`, `twin narrative`, `twin stance`, `twin inject pack`;
+- eval `tests/evals/test_stale_injection.py` (stale injection floor);
+- package / `__version__` → `2.0.0`.
+
+Follow-ons: Twin **v2.1** (full host surfaces / ACL tombstone / independence
+evals), **v2.2** (consolidation / fade), **v2.3** (Command Center) —
+[ROADMAP.md](ROADMAP.md) · [v2-tracker.md](v2-tracker.md).
+
 ### v0.1 — Local Technical Memory
 
 Goal: prove the system reduces re-explanation in technical work.

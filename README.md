@@ -522,10 +522,13 @@ concepts without hiding them.
 |---|---|
 | **[SETUP.md](docs/SETUP.md)** | Install, first-run wizard, providers, config, tests |
 | **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, meditate, native, review, recovery |
-| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — pipeline, data model, threat model |
+| **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — Sense → Cognize → Inject, data model, threat model |
+| **[COGNIZE.md](docs/COGNIZE.md)** | Cognize pipeline stages (internal — not the public architecture) |
+| **[EPISTEMICS.md](docs/EPISTEMICS.md)** | Freshness, independence, ACL on derived claims, read-time confidence |
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
 | **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
 | **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
+| **[v2.md](docs/v2.md)** / **[v2-tracker.md](docs/v2-tracker.md)** | Twin v2 redesign intent and package-cut task inventory |
 | **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
 
 ### Research & evaluation
@@ -539,13 +542,13 @@ concepts without hiding them.
 | Doc | Source of truth for |
 |---|---|
 | **[IDENTITY.md](docs/IDENTITY.md)** | What Twin is — unit of value, positioning, principles, how Twin is spoken about |
-| **[GLOSSARY.md](docs/GLOSSARY.md)** | Shared vocabulary — Artifact, Percept, Situation Model, Understanding, … |
+| **[GLOSSARY.md](docs/GLOSSARY.md)** | Shared vocabulary — Narrative, Reflection, Interpretation, Stance, … |
 
 ### Cognition concepts
 
 | Doc | Source of truth for |
 |---|---|
-| **[COGNITION.md](docs/COGNITION.md)** | Understanding and Situation Models — bridge from percepts to reusable interpretation |
+| **[COGNITION.md](docs/COGNITION.md)** | Understanding (emergent) and Situations — bridge from percepts to Narratives |
 | **[FOUNDATIONS.md](docs/FOUNDATIONS.md)** | Appendix — academic roots (Extended Mind, 4E, …); inspiration, not claims |
 
 ## License

@@ -4,8 +4,21 @@ This document explains Twin’s shared vocabulary — short definitions so
 other docs can link here instead of redefining terms.
 
 Deeper concepts: [COGNITION.md](COGNITION.md). Identity and unit of
-value: [IDENTITY.md](IDENTITY.md). Destination narrative:
-[README](../README.md).
+value: [IDENTITY.md](IDENTITY.md). Twin v2 redesign:
+[v2.md](v2.md). Destination narrative: [README](../README.md).
+
+---
+
+## Sense / Cognize / Inject
+
+Twin’s three hard modules ([ARCHITECTURE.md](ARCHITECTURE.md),
+[v2.md](v2.md) §1):
+
+| Module | Role |
+|---|---|
+| **Sense** | Deterministic capture and normalization into Artifacts / Percepts |
+| **Cognize** | LLM-driven formation and revision of Narratives (pipeline detail in [COGNIZE.md](COGNIZE.md)) |
+| **Inject** | Domain Firewall + governed packs (+ Observer slot) toward authorized hosts |
 
 ---
 
@@ -15,46 +28,110 @@ A raw piece of information collected from a connector or local source.
 
 ## Percept
 
-A normalized observation extracted from one or more artifacts.
+A normalized, attributable observation produced by Sense from one or more
+artifacts. Immutable once stored.
 
-## Situation Model
+## Situation
 
-A semantic representation of a coherent real-world situation formed from
-multiple percepts. Lifecycle and components:
-[COGNITION.md](COGNITION.md#situation-models).
-
-## Understanding
-
-The reusable interpretation produced from a Situation Model. Full
-definition: [COGNITION.md](COGNITION.md#understanding).
-
-## Memory
-
-Durable knowledge accepted by the cognitive system — typically extracted
-from understanding after reflection and review.
+Clustering of percepts that appear to belong to the same happening
+(container — not the durable product). Lifecycle: `working` → `concluded`.
+The older phrase **Situation Model** refers to this idea; runtime may still
+carry related structure as `WorkEpisode` until Cognize Situate fully lands.
 
 ## Reflection
 
-The process of revising understanding or memory using additional
-evidence.
+An open epistemic gap: a question, tension, or unresolved framing the
+system is holding. Lifecycle: `open` → `answered` / `superseded` /
+`faded`. Always visible in Review.
 
-## Judgment
+*(Legacy sense: “reflection” as a process verb still appears in older
+docs; the product noun is this entity.)*
 
-A representation of how similar situations should be evaluated in the
-future — kept distinct from factual memory
-([IDENTITY.md](IDENTITY.md#design-principles)).
+## Interpretation
+
+A candidate **explanation** of a Situation / Reflection set — competing,
+revisable, not an answer to a user query. Lifecycle: `competing` →
+`rejected` / `merged` / `superseded` / `committed-as-Narrative`.
+
+## Relation
+
+A typed link among Reflections, Interpretations, Narratives, or Evidence —
+asserted by Cognize (LLM), not by embeddings alone. Types include
+`same-as`, `related`, `supports`, `contradicts`, `depends-on`,
+`supersedes`, `part-of`, `continues`, and **`same_originating_decision`**.
+
+## Narrative
+
+Human-accepted, evidence-backed, temporally bounded, revisable **account**
+of a situation (actors, causality, goals, state change) — not fiction and
+not a styled summary. Optional soft `grain`: `episode` \| `arc` \|
+`domain`. May be marked **stale**. Durable product unit for Twin v2.
+
+## EpistemicState
+
+Freshness and evidence-set metadata attached to a Narrative (and optionally
+an Interpretation): `synthesized_at`, `freshness_boundary`, `unseen_since`,
+`status` (`fresh` \| `stale` \| `superseded` \| `tombstoned`),
+`stale_reason`, `evidence_ids`. **Confidence is not a stored scalar** — it
+is derived at read / Inject / Review time. See [EPISTEMICS.md](EPISTEMICS.md).
+
+## Stance
+
+How similar situations should be evaluated later — evaluative posture,
+kept distinct from factual Narratives. Public name for what older docs
+called **Judgment**. Lifecycle: `pending` → `approved` → `active` /
+`deprecated`.
 
 ## Evidence
 
-The supporting observations used to justify an understanding or memory.
+Anchored percept span (source id, timestamp, ACL tags) that warrants an
+Interpretation or Narrative. Losing / dissenting evidence stays attached
+when contradictions resolve.
+
+## Trace
+
+Append-only retrieval / use events that inform accessibility policy
+(Fade / Remarkable).
+
+## Understanding
+
+**Not** a schema root or required table. Understanding is the *emergent*
+state produced by:
+
+```text
+Narratives + Relations + EpistemicStates + Stances
+  + Open Reflections (+ Evidence)
+```
+
+Full discussion: [COGNITION.md](COGNITION.md#understanding).
 
 ## Governed Context
 
-A context package assembled after privacy, domain and policy evaluation
-— privacy before reasoning ([IDENTITY.md](IDENTITY.md#design-principles)).
+A context package assembled after privacy, domain and policy evaluation —
+privacy before reasoning ([IDENTITY.md](IDENTITY.md#design-principles)).
+Inject packs must attach EpistemicState and must not present stale
+Narratives as fresh.
 
 ## Cognitive Continuity
 
 The ability for different AI systems to progressively understand the
 same person over time rather than repeatedly starting from zero. See
 [README — The Problem](../README.md#the-problem).
+
+---
+
+## Migration note (deprecated product terms)
+
+| Deprecated (avoid in product / CLI / MCP copy) | Prefer |
+|---|---|
+| **Memory** (as product noun / `twin memory`) | **Narrative** (+ Relations); code may still use `Memory*` until dual-read migration finishes |
+| **Judgment** (public name) | **Stance** (`twin stance`; `judgment` remains a deprecated alias) |
+| **Situation Model** (as sole label) | **Situation** (+ Narrative as the durable account) |
+| Understanding as a stored row / table | Understanding as **emergent** (above) |
+
+Academic citations may still say “memory” (paper titles). Everyday speech
+(“Twin remembers”) is fine in conversation; commands, schema, and product
+docs should not.
+
+Code note: internal `MemoryItem` / `WorkEpisode` types remain until Cognize
+store migration completes — see [v2-tracker.md](v2-tracker.md).

@@ -1,17 +1,80 @@
 # Architecture
 
-This document explains how Twin works — brain analogies, architecture
-principles, stack, data model, pipeline, privacy, review, judgment,
-observer and threat model.
+This document explains how Twin works — the three hard modules, contracts,
+runtime topology, data model, privacy, review, observer and threat model.
 
 Durable principles: [IDENTITY.md](IDENTITY.md#design-principles).
 Cognitive concepts: [COGNITION.md](COGNITION.md) ·
-[GLOSSARY.md](GLOSSARY.md). Academic inspirations (appendix):
+[GLOSSARY.md](GLOSSARY.md). Cognize pipeline detail:
+[COGNIZE.md](COGNIZE.md) · [v2.md](v2.md) §2. Epistemics:
+[EPISTEMICS.md](EPISTEMICS.md). Academic inspirations (appendix):
 [FOUNDATIONS.md](FOUNDATIONS.md). Product: [PRODUCT.md](PRODUCT.md).
-Interfaces: [INTERFACES.md](INTERFACES.md). Direction loop:
-[README — Direction](../README.md#direction).
+Interfaces: [INTERFACES.md](INTERFACES.md). Twin v2 cuts:
+[ROADMAP.md](ROADMAP.md) · [v2-tracker.md](v2-tracker.md).
+
+## Sense → Cognize → Inject
+
+Public architecture is **three modules only**. Cognize’s internal stages
+are pipeline detail ([COGNIZE.md](COGNIZE.md)) — not peer walls and not
+README architecture.
+
+```text
+Sense → Cognize → Inject
+
+  Sense   captures the world (deterministic I/O)
+  Cognize forms and revises narratives (LLM brain — or hard halt)
+  Inject  projects governed cognition to an authorized host
+```
+
+```mermaid
+flowchart TB
+  subgraph Sense [Sense - absorb]
+    World[World connectors files]
+    Art[Artifact]
+    Perc[Percept]
+    World --> Art --> Perc
+  end
+
+  subgraph Cognize [Cognize - form / revise narratives]
+    Pipe[Internal pipeline — COGNIZE.md]
+    Perc --> Pipe
+    Pipe --> Substrate[Committed substrate<br/>Narratives + Stance + Evidence<br/>+ EpistemicState]
+  end
+
+  subgraph Inject [Inject - project]
+    Policy[Firewall privacy domain]
+    Pack[Governed pack]
+    Host[Host LLM / UI / MCP]
+    Substrate --> Policy --> Pack --> Host
+  end
+
+  Host -.->|session deltas summaries| Sense
+```
+
+### Hard walls
+
+| Module | Owns | Must not |
+|---|---|---|
+| **Sense** | Capture, normalize, allowlists, percepts, connector state (**deterministic I/O**) | Thinking: Reflections, Interpretations, meaning, commit Narrative, packs |
+| **Cognize** | Entire **LLM-driven** pipeline (reflect / interpret / revise narratives / …); fade/remarkable *judgment* from the model | Speak to host UIs as Inject; own OAuth; any smart path without LLM; pretend the pipeline *is* the product architecture |
+| **Inject** | Firewall (deterministic) + pack render + **Observer slot** (LLM that watches the live conversation) + **stale-as-fresh refusal** | Mutate Cognize substrate as a side-effect; invent Narratives; heuristic “fake observe”; serve stale as current |
+
+A host **conversation** is not a fourth module and not a product “mode.”
+While it runs, Inject projects context outward and Sense absorbs residue
+inward. Cognize never talks to Slack/Cursor directly.
+
+**LLM-or-halt:** if the chat LLM is offline, unreachable, misconfigured, or
+a heuristic meaning path is requested, Cognize refuses to run. Sense may
+still capture; Inject’s Domain Firewall may still refuse unsafe leakage.
+See [v2.md](v2.md) §0.
+
+---
 
 ## Brain analogies
+
+*(Engineering metaphors and the pre-v2 episode CLI stage map. Target Cognize
+stages live in [COGNIZE.md](COGNIZE.md); do not expand the public diagram
+above into Salience→…→Fade.)*
 
 Twin does **not** simulate a biological brain. Neuroscience and cognitive science supply *engineering analogies*: they explain why the system separates episodic capture, semantic structure, executive control, salience and working context instead of collapsing everything into one retrieval index. Deeper academic sources live in [FOUNDATIONS.md](FOUNDATIONS.md).
 
@@ -59,9 +122,20 @@ Memory Observer (parallel suggestions)
 
 If a feature blurs these boundaries — e.g. treating raw text as confirmed memory, or bypassing the firewall “for convenience” — it fights the architecture, not just a style preference.
 
-### Brain analogies and CLI stages
+### Brain analogies and CLI stages (legacy episode pipeline)
 
-Episode cognition makes the analogy operational: turning connector records into trajectory understanding is a chain of stages, each named for the region it plays. The `sensory` scaffold and `hippocampus_bind` are structural (explicit anchors, exact identity/project, membership); `basal` is report-only lifecycle. Stages that *interpret* (`amygdala`, `cortex` edges/phases, `hippocampus_consolidate` reflect) use an LLM (or a deterministic test override) and **defer** when the model is missing — they never invent an arc from lexical rules. `extractor=heuristic` blocks those semantic stages. `twin correlate` runs up to `cortex`; `twin meditate` orchestrates the whole chain up to the human gates (`twin review`, `twin judgment approve`).
+Episode cognition (pre–Twin v2 primary UX) turns connector records into
+trajectory structure as a chain of stages named for brain regions. Twin v2
+retargets the happy path to Cognize ([COGNIZE.md](COGNIZE.md));
+`twin correlate` / `twin meditate` remain transitional. The `sensory`
+scaffold and `hippocampus_bind` are structural (explicit anchors, exact
+identity/project, membership); `basal` is report-only lifecycle. Stages that
+*interpret* (`amygdala`, `cortex` edges/phases, `hippocampus_consolidate`
+reflect) use an LLM (or a deterministic test override) and **halt / defer**
+when the model is missing — they never invent an arc from lexical rules.
+`extractor=heuristic` blocks those semantic stages. `twin correlate` runs up
+to `cortex`; `twin meditate` orchestrates the whole chain up to the human
+gates (`twin review`, `twin judgment approve` / Stance).
 
 | # | Stage id (`brain_stage`) | Brain region | Job | Writes | CLI |
 |---|---|---|---|---|---|

@@ -141,6 +141,26 @@ def handle_integrity_check(
     return report
 
 
+def handle_cognize_batch(
+    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+) -> dict[str, Any]:
+    from twin.cognize.orchestrator import CognizeStage, run_cognize
+
+    p = job.payload or {}
+    until = p.get("until")
+    until_stage = CognizeStage(until) if until else None
+    report = run_cognize(
+        store,
+        cfg,
+        percept_ids=list(p.get("percept_ids") or []) or None,
+        until=until_stage,
+        dry_run=bool(p.get("dry_run")),
+        limit=int(p.get("limit") or 50),
+        vault_id=p.get("vault_id") or p.get("vault") or None,
+    )
+    return report.to_dict()
+
+
 def handle_attention_evaluate(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
@@ -342,6 +362,7 @@ HANDLERS: dict[JobKind, Handler] = {
     JobKind.consolidate_weekly: handle_consolidate_weekly,
     JobKind.reembed_memory: handle_reembed_memory,
     JobKind.integrity_check: handle_integrity_check,
+    JobKind.cognize_batch: handle_cognize_batch,
     JobKind.connector_reconcile: handle_connector_reconcile,
     JobKind.backfill_partition: handle_backfill_partition,
     JobKind.session_domain_resolve: handle_session_domain_resolve,
