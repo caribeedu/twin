@@ -99,6 +99,43 @@ from .commands.cli_handlers import (  # noqa: E402
 )
 
 def main(argv: list[str] | None = None) -> None:
+    import sys
+
+    from twin.interfaces.center import is_tty, should_launch_center, launch_command_center
+
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # Resolve --home early for center launch without requiring a subcommand.
+    home = None
+    i = 0
+    while i < len(raw):
+        if raw[i] == "--home" and i + 1 < len(raw):
+            home = raw[i + 1]
+            i += 2
+            continue
+        if raw[i].startswith("--home="):
+            home = raw[i].split("=", 1)[1]
+            i += 1
+            continue
+        i += 1
+
+    if should_launch_center(raw):
+        raise SystemExit(launch_command_center(home))
+
+    # Non-TTY bare invoke: concise help, never hang in TUI.
+    cleaned = [a for a in raw if a != "--home" and not a.startswith("--home=")]
+    # drop home value if present after --home already stripped partially
+    if home and home in cleaned:
+        cleaned = [a for a in cleaned if a != home]
+    if len(cleaned) == 0 and not is_tty():
+        print(
+            "twin — Sense → Cognize → Inject\n"
+            "Usage: twin <command> …\n"
+            "TTY: bare `twin` opens Command Center.\n"
+            "Try: twin doctor | twin cognize run | twin narrative search | twin --help",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     parser = argparse.ArgumentParser(prog="twin", description="Personal Cognitive OS")
     parser.add_argument("--home", default=None, help="twin home dir (default ~/.twin or $TWIN_HOME)")
     sub = parser.add_subparsers(dest="command", required=True)

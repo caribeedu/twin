@@ -109,9 +109,9 @@ Recommended ship order: **v2.0 → v2.1 → v2.2 → v2.3**. T-090 (Center MVP) 
 
 #### v2.3 — Command Center
 
-- [ ] T-090 T-091 T-092
-- [ ] T-120 T-121
-- [ ] `__version__ = 2.3.0` + CHANGELOG + tag `v2.3.0`
+- [x] T-090 T-091 T-092
+- [x] T-120 T-121
+- [x] `__version__ = 2.3.0` + CHANGELOG + tag `v2.3.0`
 
 ---
 
@@ -180,9 +180,9 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-080 | **v2.0** | P8 | Extract CLI handlers to `twin/interfaces/commands/` | done |
 | T-081 | **v2.0** | P8 | Introduce `twin cognize` / `narrative` / `stance` / `inject pack` | done |
 | T-082 | **v2.1** | P8 | Deprecate aliases: extract, meditate, correlate, judgment, memory | done |
-| T-090 | **v2.3** | P9 | Command Center MVP: bare `twin` TUI Home + Services + palette | todo |
-| T-091 | **v2.3** | P9 | Center: Connectors + Jobs screens | todo |
-| T-092 | **v2.3** | P9 | Center: Cognize / Review / Narratives / Stance / MCP screens | todo |
+| T-090 | **v2.3** | P9 | Command Center MVP: bare `twin` TUI Home + Services + palette | done |
+| T-091 | **v2.3** | P9 | Center: Connectors + Jobs screens | done |
+| T-092 | **v2.3** | P9 | Center: Cognize / Review / Narratives / Stance / MCP screens | done |
 | T-100 | **v2.1** | P10 | MCP tool rename + pack EpistemicState fields | done |
 | T-101 | **v2.1** | P10 | REST / Review workbench Narrative commit UX | done |
 | T-102 | **v2.1** | P10 | Native pack injection uses v2 pack contract | done |
@@ -192,8 +192,8 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-113 | **v2.2** | P11 | Eval: quiet reversal path (§9.3 #2) | done |
 | T-114 | **v2.1** | P11 | Eval: ACL intersection (§9.3 #5) | done |
 | T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | done |
-| T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | todo |
-| T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | todo |
+| T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | done |
+| T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | done |
 
 
 ---
@@ -1670,7 +1670,7 @@ Command Center must **not** list legacy names as primary (fuzzy match OK).
 
 ## T-090 — Command Center MVP: bare `twin` TUI Home + Services + palette
 
-**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `done`  
 **Depends on:** T-080, T-081  
 **Blocks:** T-091, T-092
 
@@ -1692,10 +1692,10 @@ Stack suggestion: Textual (swap allowed if justified). Prefer panes over emoji c
 
 ### Exit criteria
 
-- [ ] `twin` on TTY opens center; `echo | twin` does not hang in TUI.
-- [ ] Starting serve from Services shows URL; stop works.
-- [ ] Runtime attach-vs-start rule implemented.
-- [ ] `docs/COMMAND_CENTER.md` stub or § in CLI.md describing MVP.
+- [x] `twin` on TTY opens center; `echo | twin` does not hang in TUI.
+- [x] Starting serve from Services shows URL; stop works.
+- [x] Runtime attach-vs-start rule implemented.
+- [x] `docs/COMMAND_CENTER.md` stub or § in CLI.md describing MVP.
 
 ### Assumptions
 
@@ -1717,7 +1717,7 @@ Stack suggestion: Textual (swap allowed if justified). Prefer panes over emoji c
 
 ## T-091 — Center: Connectors + Jobs screens
 
-**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `done`  
 **Depends on:** T-090  
 **Blocks:** none
 
@@ -1734,9 +1734,9 @@ Share implementation with `twin connector …` / runtime enqueue.
 
 ### Exit criteria
 
-- [ ] Backfill progress visible without leaving TUI.
-- [ ] Destructive connector revoke still requires confirm.
-- [ ] Jobs use same runtime queue as CLI.
+- [x] Backfill progress visible without leaving TUI.
+- [x] Destructive connector revoke still requires confirm.
+- [x] Jobs use same runtime queue as CLI.
 
 ### Assumptions
 
@@ -1755,7 +1755,7 @@ Share implementation with `twin connector …` / runtime enqueue.
 
 ## T-092 — Center: Cognize / Review / Narratives / Stance / MCP screens
 
-**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `done`  
 **Depends on:** T-090, T-081, T-040, T-082  
 **Blocks:** none
 
@@ -1774,9 +1774,9 @@ Primary labels are v2-only.
 
 ### Exit criteria
 
-- [ ] Each screen calls shared command functions (no duplicated store logic).
-- [ ] Review shows open Reflections.
-- [ ] Cognize screen surfaces halt reason when LLM down.
+- [x] Each screen calls shared command functions (no duplicated store logic).
+- [x] Review shows open Reflections.
+- [x] Cognize screen surfaces halt reason when LLM down.
 
 ### Assumptions
 
@@ -2103,7 +2103,7 @@ Not a ship gate for product, but required instrumentation:
 
 ## T-120 — Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH
 
-**Twin version:** `v2.3` · **Phase:** P12 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P12 · **Status:** `done`  
 **Depends on:** T-001, T-002, majority of P3–P7 `done`  
 **Blocks:** T-121
 
@@ -2124,9 +2124,9 @@ Update GLOSSARY/COGNITION/IDENTITY cross-links.
 
 ### Exit criteria
 
-- [ ] No critical implementer info lives only in outdated stubs.
-- [ ] README docs table updated.
-- [ ] Academic claims absent from README.
+- [x] No critical implementer info lives only in outdated stubs.
+- [x] README docs table updated.
+- [x] Academic claims absent from README.
 
 ### Assumptions
 
@@ -2146,7 +2146,7 @@ Update GLOSSARY/COGNITION/IDENTITY cross-links.
 
 ## T-121 — README stays architecture-layer only; add COMMAND_CENTER.md
 
-**Twin version:** `v2.3` · **Phase:** P12 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P12 · **Status:** `done`  
 **Depends on:** T-120, T-090  
 **Blocks:** none (release documentation gate)
 
@@ -2160,9 +2160,9 @@ Update GLOSSARY/COGNITION/IDENTITY cross-links.
 
 ### Exit criteria
 
-- [ ] README architecture section matches three-module rule.
-- [ ] COMMAND_CENTER.md describes TTY behavior + screens shipped.
-- [ ] Setup/Operations examples use v2 verbs with legacy alias notes.
+- [x] README architecture section matches three-module rule.
+- [x] COMMAND_CENTER.md describes TTY behavior + screens shipped.
+- [x] Setup/Operations examples use v2 verbs with legacy alias notes.
 
 ### Assumptions
 

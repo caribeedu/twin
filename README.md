@@ -525,16 +525,12 @@ concepts without hiding them.
 | **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — Sense → Cognize → Inject, data model, threat model |
 | **[COGNIZE.md](docs/COGNIZE.md)** | Cognize pipeline stages (internal — not the public architecture) |
 | **[EPISTEMICS.md](docs/EPISTEMICS.md)** | Freshness, independence, ACL on derived claims, read-time confidence |
+| **[COMMAND_CENTER.md](docs/COMMAND_CENTER.md)** | Bare `twin` TTY operator surface (Services, Jobs, Cognize, …) |
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
 | **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
 | **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
-| **[v2.md](docs/v2.md)** / **[v2-tracker.md](docs/v2-tracker.md)** | Twin v2 redesign intent and package-cut task inventory |
+| **[v2.md](docs/v2.md)** / **[v2-tracker.md](docs/v2-tracker.md)** | Twin v2 redesign journal + package-cut inventory (historical; prefer split docs above) |
 | **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
-
-### Research & evaluation
-
-| Doc | Source of truth for |
-|---|---|
 | **[RESEARCH.md](docs/RESEARCH.md)** | Hypotheses, method, scenario benchmarks, open directions |
 
 ### Destination & framing
