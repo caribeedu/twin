@@ -895,10 +895,38 @@ def run_consolidation_cycle(
         if dry_run:
             result.notes.append("dry_run skipped fade recommendations")
         else:
-            from twin.cognize.fade import recommend_accessibility
+            from twin.cognize.stages_late import run_fade_judgment
 
-            fade_recs = recommend_accessibility(store, vault_id="default", dry_run=False)
-            result.notes.append(f"fade_recommendations={len(fade_recs)}")
+            fade = run_fade_judgment(store, cfg, vault_id="default", dry_run=False)
+            result.notes.append(
+                f"fade_recommendations={len(fade.get('recommendations') or [])}"
+                + (" halted" if fade.get("halted") else "")
+            )
+
+        # Stage 11 consolidation judgment (weekly / when proposing)
+        if propose_judgment and not dry_run:
+            stage = "consolidation_judgment"
+            result.stages.append("consolidation_judgment")
+            from twin.cognize.stages_late import run_consolidation_judgment
+
+            cj = run_consolidation_judgment(
+                store, cfg,
+                max_drafts=MAX_JUDGMENT_DRAFTS_PER_WINDOW,
+                max_tokens=MAX_CONSOLIDATION_TOKENS,
+                dry_run=False,
+            )
+            if cj.get("halted"):
+                result.notes.append(
+                    f"consolidation_judgment halted: {cj.get('detail')}"
+                )
+            else:
+                result.notes.append(
+                    f"consolidation_judgment drafts={len(cj.get('drafts') or [])} "
+                    f"tokens_remaining={cj.get('tokens_remaining')}"
+                )
+                for d in cj.get("drafts") or []:
+                    if d.get("proposal_id"):
+                        result.judgment_proposal_ids.append(d["proposal_id"])
 
         stage = "change_report"
         result.stages.append("change_report")

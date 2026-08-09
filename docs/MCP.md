@@ -64,6 +64,10 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 | Tool | Arguments | What it does |
 |---|---|---|
+| `narrative_list` | `vault?`, `domain?` | Committed Narratives + EpistemicState status |
+| `narrative_show` | `narrative_id` | One Narrative + EpistemicState |
+| `stance_list` | — | Active Stances |
+| `stance_proposals` | `status=pending` | Pending Stance drafts (human approve) |
 | `inject_context_pack` | same shape as legacy pack | **Preferred**: EpistemicState, open reflections, derived confidence/independence, applicable stance. |
 | `memory_safe_context_pack` | `query`, `target_domain="technical`, … | **Legacy** alias — response includes `deprecated`; prefer `inject_context_pack`. |
 | `get_context_pack` | same shape | Lower-level pack builder (prefer `inject_context_pack`). |

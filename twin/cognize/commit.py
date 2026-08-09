@@ -187,9 +187,9 @@ def commit_narrative(
             )
         )
     try:
-        from twin.judgment.proposals import propose_from_narrative
+        from twin.cognize.stages_late import draft_stance_after_commit
 
-        propose_from_narrative(store, nar.id, domain=domain or None)
+        draft_stance_after_commit(store, nar.id, domain=domain or None)
     except Exception:
         pass
     return nar

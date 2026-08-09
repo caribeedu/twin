@@ -10,16 +10,18 @@ enters the TUI.
 
 | Key | Screen | Role |
 |---|---|---|
-| Home | status | home path, doctor-ish counts, serve/runtime state, backlog, open Reflections |
+| Home | status | doctor summary, serve/runtime state, backlog, open Reflections |
 | `s` | Services | start/stop supervised `twin serve` + `twin runtime`; shows serve URL |
-| `c` | Connectors | list Sense connector instances (revoke stays CLI-confirmed) |
-| `j` | Jobs | runtime queue depth + enqueue cognize/consolidate |
-| `g` | Cognize | LLM halt reason + open reflection count |
-| `r` | Review | backlog + open Reflections + workbench URL |
-| `n` | Narratives | search/list committed Narratives |
-| `t` | Stance | active stances + pending proposals |
-| `m` | MCP | client env + setup pointers |
+| `c` | Connectors | list + **test / pause / resume** (revoke stays CLI-confirmed) |
+| `j` | Jobs | queue depth; enqueue `cognize_batch` / `consolidate_daily` / `backfill_partition`; backfill progress |
+| `g` | Cognize | halt reason + open reflections; **Run cognize** via shared handler |
+| `r` | Review | backlog + open Reflections + Fade recommendations + workbench URL |
+| `n` | Narratives | list with epistemic status / grain |
+| `t` | Stance | list + approve pending proposal (preview token) |
+| `m` | MCP | client env + narrative/stance tool names |
 | `/` | Palette | fuzzy over **v2 verbs** (legacy aliases labeled) |
+
+Screens call `twin.interfaces.center.actions` — same store/CLI functions, no duplicated logic.
 
 ## Exit
 

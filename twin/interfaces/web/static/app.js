@@ -430,7 +430,7 @@ function route() {
   const hash = (location.hash || "#home").slice(1).split("?")[0] || "home";
   state.view = hash;
   setNav(hash);
-  const views = { home, review, search, pack, memories, status };
+  const views = { home, review, narratives, search, pack, memories, status };
   (views[hash] || home)();
 }
 
@@ -1267,6 +1267,132 @@ function search() {
         : "");
     } catch (err) {
       out.innerHTML = `<div class="empty"><strong>Search failed</strong>${esc(err.message)}</div>`;
+    }
+  });
+}
+
+/* —— Narratives —— */
+
+async function narratives() {
+  app.innerHTML = `
+    <div class="panel">
+      <h2>Narratives</h2>
+      <p class="lede">Committed accounts with EpistemicState. Commit requires evidence + preview fingerprint.</p>
+      <div class="row" style="gap:1rem;align-items:flex-start">
+        <div style="flex:1">
+          <h3>Open Reflections</h3>
+          <div id="nar-reflections" class="empty"><span class="spinner"></span></div>
+          <h3 style="margin-top:1.25rem">Narratives</h3>
+          <div id="nar-list" class="empty"><span class="spinner"></span></div>
+        </div>
+        <div style="flex:1" class="panel" id="nar-commit-panel">
+          <h3>Commit Narrative</h3>
+          <form id="nar-commit-form">
+            <div class="field"><label>Account</label>
+              <textarea name="account" required rows="4" placeholder="What is true, in your words"></textarea></div>
+            <div class="field"><label>Evidence ids (comma-separated)</label>
+              <input name="evidence" required placeholder="pct_…, pct_…" /></div>
+            <div class="field"><label>Actor</label>
+              <input name="actor" required value="user" /></div>
+            <div class="field"><label>Domain</label>
+              <select name="domain">${selectOptions("domain", PACK_DOMAIN_OPTIONS, "technical")}</select></div>
+            <div class="row" style="margin-top:.75rem;gap:.5rem">
+              <button class="btn" type="button" id="nar-preview">Preview token</button>
+              <button class="btn primary" type="submit">Commit</button>
+            </div>
+            <p class="meta" id="nar-token" style="margin-top:.5rem"></p>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+  let previewToken = "";
+  try {
+    const [nars, refs] = await Promise.all([
+      api("/api/narratives"),
+      api("/api/reflections?status=open"),
+    ]);
+    const refEl = $("#nar-reflections");
+    if (!refs?.length) {
+      refEl.innerHTML = `<div class="empty">No open reflections</div>`;
+    } else {
+      refEl.innerHTML = refs.map((r) =>
+        `<div class="hit"><strong>${esc(r.id)}</strong>
+         <span class="tag">${esc(r.status || "open")}</span>
+         <p>${esc(r.text || "")}</p></div>`
+      ).join("");
+    }
+    const list = $("#nar-list");
+    if (!nars?.length) {
+      list.innerHTML = `<div class="empty">No narratives yet</div>`;
+    } else {
+      list.innerHTML = nars.map((n) => {
+        const st = n.epistemic_status || "unknown";
+        const badge = st === "stale"
+          ? `<span class="tag" title="${esc(n.stale_reason || "")}">Epistemic: stale — ${esc(n.stale_reason || "new evidence")}</span>`
+          : `<span class="tag">Epistemic: ${esc(st)}</span>`;
+        return `<div class="hit">
+          <strong>${esc(n.id)}</strong> ${badge}
+          <span class="tag">${esc(n.sensitivity || "internal")}</span>
+          <p>${esc(n.account || "")}</p>
+        </div>`;
+      }).join("");
+    }
+  } catch (err) {
+    $("#nar-list").innerHTML = `<div class="empty"><strong>Load failed</strong>${esc(err.message)}</div>`;
+  }
+
+  $("#nar-preview").addEventListener("click", async () => {
+    const fd = new FormData($("#nar-commit-form"));
+    const evidence_ids = String(fd.get("evidence") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    try {
+      const prev = await api("/api/narratives/commit-preview", {
+        method: "POST",
+        body: JSON.stringify({
+          account: fd.get("account"),
+          evidence_ids,
+          actor: fd.get("actor"),
+          domain: fd.get("domain"),
+        }),
+      });
+      previewToken = prev.preview_token || "";
+      $("#nar-token").textContent = previewToken
+        ? `preview_token ${previewToken} — confirm to commit`
+        : "no token";
+      toast("Preview ready", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  $("#nar-commit-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const evidence_ids = String(fd.get("evidence") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (!evidence_ids.length) {
+      toast("evidence required", "err");
+      return;
+    }
+    if (!previewToken) {
+      toast("run Preview token first", "err");
+      return;
+    }
+    try {
+      const out = await api("/api/narratives/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          account: fd.get("account"),
+          evidence_ids,
+          actor: fd.get("actor"),
+          domain: fd.get("domain"),
+          preview_token: previewToken,
+        }),
+      });
+      toast(`Committed ${out.narrative_id}`, "ok");
+      previewToken = "";
+      narratives();
+    } catch (err) {
+      toast(err.message, "err");
     }
   });
 }
