@@ -57,7 +57,7 @@ flowchart TB
 |---|---|---|
 | **Sense** | Capture, normalize, allowlists, percepts, connector state (**deterministic I/O**) | Thinking: Reflections, Interpretations, meaning, commit Narrative, packs |
 | **Cognize** | Entire **LLM-driven** pipeline (reflect / interpret / revise narratives / …); fade/remarkable *judgment* from the model | Speak to host UIs as Inject; own OAuth; any smart path without LLM; pretend the pipeline *is* the product architecture |
-| **Inject** | Firewall (deterministic) + pack render + **Observer slot** (LLM that watches the live conversation) + **stale-as-fresh refusal** | Mutate Cognize substrate as a side-effect; invent Narratives; heuristic “fake observe”; serve stale as current |
+| **Inject** | Firewall (deterministic) + pack render + **Observer slot** (LLM that watches the live conversation; reserved — `twin.cognition.inject_observer`, flag `TWIN_INJECT_OBSERVER`, default no-op) + **stale-as-fresh refusal** | Mutate Cognize substrate as a side-effect; invent Narratives; heuristic “fake observe”; serve stale as current |
 
 A host **conversation** is not a fourth module and not a product “mode.”
 While it runs, Inject projects context outward and Sense absorbs residue

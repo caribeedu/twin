@@ -52,12 +52,14 @@ CREATE TABLE IF NOT EXISTS percepts (
     source_trust REAL NOT NULL DEFAULT 0.8,
     source_scope TEXT NOT NULL DEFAULT 'work',
     source_confidentiality TEXT NOT NULL DEFAULT 'internal',
+    source_class TEXT NOT NULL DEFAULT 'unknown',
     project_id TEXT,
     content_hash TEXT NOT NULL UNIQUE
 );
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_trust REAL NOT NULL DEFAULT 0.8;
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_scope TEXT NOT NULL DEFAULT 'work';
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_confidentiality TEXT NOT NULL DEFAULT 'internal';
+ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_class TEXT NOT NULL DEFAULT 'unknown';
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS project_id TEXT;
 
 CREATE TABLE IF NOT EXISTS percept_interpretations (
@@ -810,12 +812,13 @@ class PostgresStore(
         percept.seal()
         if self._exec("SELECT id FROM percepts WHERE content_hash = %s", (percept.content_hash,)):
             return None
+        sc = getattr(percept.source_class, "value", None) or str(percept.source_class)
         self._exec(
             "INSERT INTO percepts (id, percept_type, source_sensor, occurred_at,"
             " ingested_at, actors, content, content_refs, attachments,"
             " privacy_hints, integrity, metadata, source_trust, source_scope,"
-            " source_confidentiality, project_id, content_hash)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            " source_confidentiality, source_class, project_id, content_hash)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 percept.id, percept.percept_type, percept.source_sensor,
                 percept.occurred_at, percept.ingested_at or now_iso(),
@@ -824,7 +827,7 @@ class PostgresStore(
                 json.dumps(percept.privacy_hints), json.dumps(percept.integrity),
                 json.dumps(percept.metadata), percept.source_trust,
                 percept.source_scope, percept.source_confidentiality,
-                percept.project_id, percept.content_hash,
+                sc, percept.project_id, percept.content_hash,
             ),
         )
         try:
@@ -845,6 +848,7 @@ class PostgresStore(
             integrity=row["integrity"], metadata=row["metadata"],
             source_trust=row["source_trust"], source_scope=row["source_scope"],
             source_confidentiality=row["source_confidentiality"],
+            source_class=row.get("source_class") or "unknown",
             project_id=row["project_id"],
         )
 

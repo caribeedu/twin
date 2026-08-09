@@ -74,3 +74,32 @@ The deterministic gate is a **safety latch**, not cognition.
    trigger re-synthesis, or refuse.
 3. **Provenance:** every served claim traces to Evidence.
 4. If Cognize never ran, do not invent pack content with heuristics.
+
+---
+
+## Source-class asymmetry
+
+Every Percept carries a durable `source_class` (`code_repo`,
+`chat_discussion`, `meeting`, `mail`, `calendar`, `document`,
+`session_residue`, `unknown`). Connectors map via `source_sensor`;
+missing class defaults to `unknown`.
+
+Policy sketch (enables later quiet-reversal / fade work):
+
+| Class | Lifetime hint |
+|---|---|
+| `code_repo` | Often self-invalidates when tree changes |
+| `chat_discussion` / `meeting` | May reverse quietly with little follow-up |
+| `session_residue` | Host-session absorb; not Cognize talking to host |
+
+Read-time confidence never trusts a stored scalar — packs emit
+`derived_confidence` with `derived: true`, independence display, and
+optional supports/contradicts + retained dissent.
+
+ACL: Narrative `sensitivity` is the ∩ (strictest) of contributing
+Evidence confidentiality; `metadata.source_sensors` records origins.
+Revoke/delete of a source Percept synchronously tombstones dependent
+Narratives (`twin.cognize.acl.tombstone_narratives_for_percept`) and
+appends a Trace. Inject Observer is a reserved Inject LLM slot
+(`twin.cognition.inject_observer`); default stub must not write Cognize
+entities.

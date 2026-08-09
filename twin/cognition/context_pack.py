@@ -521,6 +521,20 @@ def build_context_pack(
         for nar in store.list_narratives(vault):
             if nar.domain and nar.domain != target_domain and target_domain not in ("general", "*"):
                 continue
+            if access is not None:
+                from twin.cognize.acl import narrative_visible_to_access
+
+                if not narrative_visible_to_access(nar, access):
+                    privacy_blocked.append({
+                        "memory_id": nar.id,
+                        "reason": "narrative_acl",
+                        "rule": "sensitivity_audience",
+                    })
+                    blocked.append({
+                        "memory_id": nar.id,
+                        "reason": "narrative_acl",
+                    })
+                    continue
             eps = (
                 store.get_epistemic_state(nar.epistemic_state_id)
                 if nar.epistemic_state_id
@@ -537,6 +551,7 @@ def build_context_pack(
                 "stale_reason": eps.stale_reason if eps else "",
                 "synthesized_at": eps.synthesized_at if eps else "",
                 "evidence_ids": list(nar.evidence_ids),
+                "derived": True,
             }
             if eps and eps.status is EpistemicStatus.stale:
                 entry["account_omitted"] = True
@@ -546,36 +561,103 @@ def build_context_pack(
             narratives_out.append(entry)
             if eps:
                 epistemic_out.append(eps.model_dump(mode="json"))
+                evid = list(eps.evidence_ids or nar.evidence_ids)
+                evid_set = set(evid)
                 groups = []
+                support_count = 0
+                contradict_count = 0
+                dissent_ids: list[str] = []
                 if hasattr(store, "list_relations"):
                     sod = store.list_relations(
                         vault,
                         rel_type=RelationType.same_originating_decision.value,
                     )
                     for rel in sod:
-                        groups.append([rel.from_id, rel.to_id])
+                        pair = [rel.from_id, rel.to_id]
+                        if evid_set.intersection(pair):
+                            groups.append(pair)
+                    for rel in store.list_relations(
+                        vault, rel_type=RelationType.supports.value
+                    ):
+                        if rel.to_id in evid_set or rel.from_id in evid_set:
+                            support_count += 1
+                    for rel in store.list_relations(
+                        vault, rel_type=RelationType.contradicts.value
+                    ):
+                        if rel.to_id in evid_set or rel.from_id in evid_set:
+                            contradict_count += 1
+                            dissent_ids.append(rel.id)
                 derived = derive_confidence(
-                    evidence_ids=list(eps.evidence_ids or nar.evidence_ids),
+                    evidence_ids=evid,
                     same_originating_decision_groups=groups,
+                    support_count=support_count,
+                    contradict_count=contradict_count,
                     epistemic_status=eps.status,
                 )
-                derived_conf[nar.id] = derived.model_dump(mode="json")
+                derived_conf[nar.id] = {
+                    **derived.model_dump(mode="json"),
+                    "derived": True,
+                    "supports": support_count,
+                    "contradicts": contradict_count,
+                    "retained_dissent": dissent_ids[:8],
+                }
+                entry["retained_dissent"] = dissent_ids[:8]
         if hasattr(store, "list_open_reflections"):
             for ref in store.list_open_reflections(vault):
+                ref_domain = (ref.metadata or {}).get("domain") or ""
+                ref_sens = (ref.metadata or {}).get("sensitivity") or "internal"
+                if ref_domain and ref_domain != target_domain and target_domain not in (
+                    "general", "*",
+                ):
+                    privacy_blocked.append({
+                        "memory_id": ref.id,
+                        "reason": "reflection_domain",
+                        "rule": "open_reflection_firewall",
+                    })
+                    blocked.append({
+                        "memory_id": ref.id,
+                        "reason": "reflection_domain",
+                    })
+                    continue
+                if access is not None:
+                    audience = getattr(access, "audience", None) or "self"
+                    if ref_sens in ("private", "restricted") and audience not in (
+                        "self", "owner",
+                    ):
+                        privacy_blocked.append({
+                            "memory_id": ref.id,
+                            "reason": "reflection_acl",
+                            "rule": "sensitivity_audience",
+                        })
+                        blocked.append({
+                            "memory_id": ref.id,
+                            "reason": "reflection_acl",
+                        })
+                        continue
                 reflections_out.append(
                     {
                         "reflection_id": ref.id,
                         "text": ref.text,
                         "status": ref.status.value,
+                        "derived": True,
                     }
                 )
         uncertainty = dict(uncertainty)
         uncertainty["open_reflections"] = [r["reflection_id"] for r in reflections_out]
         if reflections_out:
-            extra = "\n## Open Reflections\n" + "\n".join(
-                f"- {r['text']}" for r in reflections_out[:8]
-            )
-            pack_text = pack_text + "\n" + extra
+            # Respect remaining pack budget (~4 chars/token heuristic).
+            budget_chars = max(0, int(max_tokens or 1200) * 4 - len(pack_text or ""))
+            lines: list[str] = []
+            used = 0
+            for r in reflections_out[:8]:
+                line = f"- {r['text']}"
+                if used + len(line) + 1 > budget_chars and lines:
+                    break
+                lines.append(line)
+                used += len(line) + 1
+            if lines:
+                extra = "\n## Open Reflections\n" + "\n".join(lines)
+                pack_text = pack_text + "\n" + extra
         stale_nars = [n for n in narratives_out if n.get("epistemic_status") == "stale"]
         fresh_nars = [n for n in narratives_out if n.get("epistemic_status") == "fresh" and n.get("account")]
         if fresh_nars:

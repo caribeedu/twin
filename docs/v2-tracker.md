@@ -94,12 +94,12 @@ Recommended ship order: **v2.0 → v2.1 → v2.2 → v2.3**. T-090 (Center MVP) 
 
 #### v2.1 — Epistemics + host surfaces
 
-- [ ] T-050 T-061
-- [ ] T-071 T-072 T-073 T-074
-- [ ] T-082
-- [ ] T-100 T-101 T-102
-- [ ] T-111 T-114
-- [ ] `__version__ = 2.1.0` + CHANGELOG + tag `v2.1.0`
+- [x] T-050 T-061
+- [x] T-071 T-072 T-073 T-074
+- [x] T-082
+- [x] T-100 T-101 T-102
+- [x] T-111 T-114
+- [x] `__version__ = 2.1.0` + CHANGELOG + tag `v2.1.0`
 
 #### v2.2 — Consolidation & accessibility
 
@@ -167,30 +167,30 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-038 | **v2.0** | P3 | Stage 7 Evidence audit + independence Relations | done |
 | T-040 | **v2.0** | P4 | Review queue for Interpretations + always-visible Open Reflections | done |
 | T-041 | **v2.0** | P4 | Stage 9 Commit Narrative + initial EpistemicState | done |
-| T-050 | **v2.1** | P5 | Stage 10 Stance drafts (LLM) + human approve path | todo |
+| T-050 | **v2.1** | P5 | Stage 10 Stance drafts (LLM) + human approve path | done |
 | T-051 | **v2.2** | P5 | Stage 11 Consolidation judgment (nightly LLM, caps) | todo |
 | T-052 | **v2.2** | P5 | Stage 12 Fade / Remarkable + Trace ledger | todo |
 | T-060 | **v2.0** | P6 | Deterministic stale mark on percept land | done |
-| T-061 | **v2.1** | P6 | Source-class + timestamp metadata for invalidation asymmetry | todo |
+| T-061 | **v2.1** | P6 | Source-class + timestamp metadata for invalidation asymmetry | done |
 | T-070 | **v2.0** | P7 | Inject pack: attach EpistemicState; refuse stale-as-fresh | done |
-| T-071 | **v2.1** | P7 | Read-time confidence + independence display in packs | todo |
-| T-072 | **v2.1** | P7 | Open Reflections section in packs | todo |
-| T-073 | **v2.1** | P7 | ACL intersection on Narrative + synchronous revoke tombstone | todo |
-| T-074 | **v2.1** | P7 | Inject Observer slot (interface reserved, stub OK) | todo |
+| T-071 | **v2.1** | P7 | Read-time confidence + independence display in packs | done |
+| T-072 | **v2.1** | P7 | Open Reflections section in packs | done |
+| T-073 | **v2.1** | P7 | ACL intersection on Narrative + synchronous revoke tombstone | done |
+| T-074 | **v2.1** | P7 | Inject Observer slot (interface reserved, stub OK) | done |
 | T-080 | **v2.0** | P8 | Extract CLI handlers to `twin/interfaces/commands/` | done |
 | T-081 | **v2.0** | P8 | Introduce `twin cognize` / `narrative` / `stance` / `inject pack` | done |
-| T-082 | **v2.1** | P8 | Deprecate aliases: extract, meditate, correlate, judgment, memory | todo |
+| T-082 | **v2.1** | P8 | Deprecate aliases: extract, meditate, correlate, judgment, memory | done |
 | T-090 | **v2.3** | P9 | Command Center MVP: bare `twin` TUI Home + Services + palette | todo |
 | T-091 | **v2.3** | P9 | Center: Connectors + Jobs screens | todo |
 | T-092 | **v2.3** | P9 | Center: Cognize / Review / Narratives / Stance / MCP screens | todo |
-| T-100 | **v2.1** | P10 | MCP tool rename + pack EpistemicState fields | todo |
-| T-101 | **v2.1** | P10 | REST / Review workbench Narrative commit UX | todo |
-| T-102 | **v2.1** | P10 | Native pack injection uses v2 pack contract | todo |
+| T-100 | **v2.1** | P10 | MCP tool rename + pack EpistemicState fields | done |
+| T-101 | **v2.1** | P10 | REST / Review workbench Narrative commit UX | done |
+| T-102 | **v2.1** | P10 | Native pack injection uses v2 pack contract | done |
 | T-110 | **v2.0** | P11 | Eval: stale injection (§9.3 #1) | done |
-| T-111 | **v2.1** | P11 | Eval: correlated-source independence collapse (§9.3 #3) | todo |
+| T-111 | **v2.1** | P11 | Eval: correlated-source independence collapse (§9.3 #3) | done |
 | T-112 | **v2.2** | P11 | Eval: disagreement vs agreement attention (§9.3 #4) | todo |
 | T-113 | **v2.2** | P11 | Eval: quiet reversal path (§9.3 #2) | todo |
-| T-114 | **v2.1** | P11 | Eval: ACL intersection (§9.3 #5) | todo |
+| T-114 | **v2.1** | P11 | Eval: ACL intersection (§9.3 #5) | done |
 | T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | todo |
 | T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | todo |
 | T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | todo |
@@ -1195,7 +1195,7 @@ Human accept applies:
 
 ## T-050 — Stage 10 Stance drafts (LLM) + human approve path
 
-**Twin version:** `v2.1` · **Phase:** P5 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P5 · **Status:** `done`  
 **Depends on:** T-041, T-015  
 **Blocks:** T-082
 
@@ -1207,9 +1207,9 @@ Prompts must not treat Stance as factual Narrative.
 
 ### Exit criteria
 
-- [ ] Drafts are pending until approve.
-- [ ] Pack `applicable_stance` uses approved items only.
-- [ ] Tests for propose-from-narrative parallel to `propose_from_episode`.
+- [x] Drafts are pending until approve.
+- [x] Pack `applicable_stance` uses approved items only.
+- [x] Tests for propose-from-narrative parallel to `propose_from_episode`.
 
 ### Assumptions
 
@@ -1334,7 +1334,7 @@ When a Percept is committed by Sense into a domain/vault that overlaps a committ
 
 ## T-061 — Source-class + timestamp metadata for invalidation asymmetry
 
-**Twin version:** `v2.1` · **Phase:** P6 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P6 · **Status:** `done`  
 **Depends on:** T-060  
 **Blocks:** T-113
 
@@ -1346,9 +1346,9 @@ Document the enum; map connectors → classes; forbid missing class on new write
 
 ### Exit criteria
 
-- [ ] Connector normalizers set source class.
-- [ ] Session residue percepts labeled distinctly.
-- [ ] EPISTEMICS.md documents asymmetry policy.
+- [x] Connector normalizers set source class.
+- [x] Session residue percepts labeled distinctly.
+- [x] EPISTEMICS.md documents asymmetry policy.
 
 ### Assumptions
 
@@ -1406,7 +1406,7 @@ Update context pack assembly (`twin/cognition/context_pack.py`, pack_format/sele
 
 ## T-071 — Read-time confidence + independence display in packs
 
-**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `done`  
 **Depends on:** T-070, T-012, T-038  
 **Blocks:** T-111
 
@@ -1423,9 +1423,9 @@ Never show a cached confidence scalar field from DB as authoritative.
 
 ### Exit criteria
 
-- [ ] Correlated-source fixture displays K=1 when Relations say so.
-- [ ] Pack schema documents derived fields as derived.
-- [ ] Unit tests do not require LLM (use stored Relations fixtures).
+- [x] Correlated-source fixture displays K=1 when Relations say so.
+- [x] Pack schema documents derived fields as derived.
+- [x] Unit tests do not require LLM (use stored Relations fixtures).
 
 ### Assumptions
 
@@ -1443,7 +1443,7 @@ Never show a cached confidence scalar field from DB as authoritative.
 
 ## T-072 — Open Reflections section in packs
 
-**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `done`  
 **Depends on:** T-070, T-033  
 **Blocks:** none
 
@@ -1453,9 +1453,9 @@ Settled decision (`v2.md` §10 #4): packs include Open Reflections in an uncerta
 
 ### Exit criteria
 
-- [ ] Open reflections appear when allowed by domain firewall.
-- [ ] Restricted reflections blocked with reasons, not content.
-- [ ] Section named without “memory.”
+- [x] Open reflections appear when allowed by domain firewall.
+- [x] Restricted reflections blocked with reasons, not content.
+- [x] Section named without “memory.”
 
 ### Assumptions
 
@@ -1474,7 +1474,7 @@ Settled decision (`v2.md` §10 #4): packs include Open Reflections in an uncerta
 
 ## T-073 — ACL intersection on Narrative + synchronous revoke tombstone
 
-**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `done`  
 **Depends on:** T-041  
 **Blocks:** T-114
 
@@ -1487,9 +1487,9 @@ Settled decision (`v2.md` §10 #4): packs include Open Reflections in an uncerta
 
 ### Exit criteria
 
-- [ ] ACL stress test: user without Slack ACL cannot see derived Narrative from private Slack + public PR.
-- [ ] Delete-source / revoke path tombstones dependents in same request transaction.
-- [ ] Audit log entries for tombstones.
+- [x] ACL stress test: user without Slack ACL cannot see derived Narrative from private Slack + public PR.
+- [x] Delete-source / revoke path tombstones dependents in same request transaction.
+- [x] Audit log entries for tombstones.
 
 ### Assumptions
 
@@ -1509,7 +1509,7 @@ Settled decision (`v2.md` §10 #4): packs include Open Reflections in an uncerta
 
 ## T-074 — Inject Observer slot (interface reserved, stub OK)
 
-**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `done`  
 **Depends on:** T-070  
 **Blocks:** none
 
@@ -1527,9 +1527,9 @@ Do not implement full watcher yet unless explicitly expanding scope — redesign
 
 ### Exit criteria
 
-- [ ] Interface exists; default stub wired; no heuristic fake observe.
-- [ ] Docs mark Observer as reserved Inject LLM slot.
-- [ ] Tests ensure stub cannot write Cognize entities.
+- [x] Interface exists; default stub wired; no heuristic fake observe.
+- [x] Docs mark Observer as reserved Inject LLM slot.
+- [x] Tests ensure stub cannot write Cognize entities.
 
 ### Assumptions
 
@@ -1629,7 +1629,7 @@ Scripted shape must support CI (`--json`).
 
 ## T-082 — Deprecate aliases: extract, meditate, correlate, judgment, memory
 
-**Twin version:** `v2.1` · **Phase:** P8 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P8 · **Status:** `done`  
 **Depends on:** T-081, T-023  
 **Blocks:** T-092
 
@@ -1647,10 +1647,10 @@ Command Center must **not** list legacy names as primary (fuzzy match OK).
 
 ### Exit criteria
 
-- [ ] Each legacy command warns once per invocation.
-- [ ] CI scripts using meditate still work via alias.
-- [ ] Auto-approve path cannot commit Narrative.
-- [ ] CLI.md “Legacy aliases” appendix exists.
+- [x] Each legacy command warns once per invocation.
+- [x] CI scripts using meditate still work via alias.
+- [x] Auto-approve path cannot commit Narrative.
+- [x] CLI.md “Legacy aliases” appendix exists.
 
 ### Assumptions
 
@@ -1796,7 +1796,7 @@ Primary labels are v2-only.
 
 ## T-100 — MCP tool rename + pack EpistemicState fields
 
-**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `done`  
 **Depends on:** T-070, T-071, T-072, T-081  
 **Blocks:** T-102
 
@@ -1813,9 +1813,9 @@ Keep process-env client identity (`TWIN_MCP_CLIENT`).
 
 ### Exit criteria
 
-- [ ] MCP.md documents v2 fields and deprecations.
-- [ ] Contract tests for pack payload.
-- [ ] Old tool names still work briefly with deprecation note in response metadata.
+- [x] MCP.md documents v2 fields and deprecations.
+- [x] Contract tests for pack payload.
+- [x] Old tool names still work briefly with deprecation note in response metadata.
 
 ### Assumptions
 
@@ -1835,7 +1835,7 @@ Keep process-env client identity (`TWIN_MCP_CLIENT`).
 
 ## T-101 — REST / Review workbench Narrative commit UX
 
-**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `done`  
 **Depends on:** T-040, T-041  
 **Blocks:** none
 
@@ -1853,9 +1853,9 @@ OpenAPI must reflect new resources (`/api/narratives`, `/api/reflections`, …) 
 
 ### Exit criteria
 
-- [ ] OpenAPI lists Narrative commit endpoint.
-- [ ] UI cannot commit without evidence + confirm.
-- [ ] Stale badge visible on stale narratives.
+- [x] OpenAPI lists Narrative commit endpoint.
+- [x] UI cannot commit without evidence + confirm.
+- [x] Stale badge visible on stale narratives.
 
 ### Assumptions
 
@@ -1875,7 +1875,7 @@ OpenAPI must reflect new resources (`/api/narratives`, `/api/reflections`, …) 
 
 ## T-102 — Native pack injection uses v2 pack contract
 
-**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `done`  
 **Depends on:** T-070, T-100  
 **Blocks:** none
 
@@ -1887,9 +1887,9 @@ Clarify in NATIVE.md: conversation uses Sense+Inject edges; no session “mode.�
 
 ### Exit criteria
 
-- [ ] Native pack JSON includes epistemic fields when domain known.
-- [ ] Stale narratives not injected as fresh.
-- [ ] Fake-host evals updated.
+- [x] Native pack JSON includes epistemic fields when domain known.
+- [x] Stale narratives not injected as fresh.
+- [x] Fake-host evals updated.
 
 ### Assumptions
 
@@ -1947,7 +1947,7 @@ Offline fixtures preferred; optional model layer gated by env.
 
 ## T-111 — Eval: correlated-source independence collapse (§9.3 #3)
 
-**Twin version:** `v2.1` · **Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P11 · **Status:** `done`  
 **Depends on:** T-071, T-038  
 **Blocks:** none
 
@@ -1959,9 +1959,9 @@ Use Relation overrides if LLM not in CI.
 
 ### Exit criteria
 
-- [ ] Assert K independent origins == 1.
-- [ ] Assert display string / structure matches.
-- [ ] Counter-example: truly independent contradicting source increases attention / does not collapse incorrectly.
+- [x] Assert K independent origins == 1.
+- [x] Assert display string / structure matches.
+- [x] Counter-example: truly independent contradicting source increases attention / does not collapse incorrectly.
 
 ### Assumptions
 
@@ -2038,7 +2038,7 @@ Known-wrong Narrative invalidated by a quiet meeting percept with **little subse
 
 ## T-114 — Eval: ACL intersection (§9.3 #5)
 
-**Twin version:** `v2.1` · **Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P11 · **Status:** `done`  
 **Depends on:** T-073  
 **Blocks:** none
 
@@ -2048,8 +2048,8 @@ Private Slack fact + public PR → derived Narrative must not be visible to a pr
 
 ### Exit criteria
 
-- [ ] Pack/search deny with reason.
-- [ ] Canary/leakage tests fail closed if content appears.
+- [x] Pack/search deny with reason.
+- [x] Canary/leakage tests fail closed if content appears.
 
 ### Assumptions
 

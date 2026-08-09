@@ -21,6 +21,7 @@ Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
 |---|---|---|
 | Ingest & extract | `/api/ingest`, `/api/extract`, `/api/percepts`, `/api/artifacts` | Artifact → percept → extraction |
 | Memories & review | `/api/memories`, `/api/review` | List, provenance, quality, resolve (merge/conflict/…), batches |
+| Narratives & reflections | `/api/narratives`, `/api/narratives/{id}`, `/api/narratives/commit`, `/api/narratives/commit-preview`, `/api/reflections` | List, EpistemicState badges, human commit with preview fingerprint |
 | Search & packs | `/api/search`, `/api/context_pack`, `/api/observer` | Hybrid retrieval and firewall-filtered packs |
 | Sessions & runtime | `/api/sessions`, `/api/attention`, `/api/runtime`, `/api/health` | Cognitive sessions, attention, worker health |
 | Connectors | `/api/connectors`, `/api/webhooks` | Connector ops and inbound webhooks |

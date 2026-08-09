@@ -263,6 +263,17 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
     return data
 
 
+class NarrativeCommitRequest(BaseModel):
+    account: str
+    evidence_ids: list[str]
+    vault_id: str = "default"
+    domain: str = ""
+    actor: str
+    preview_token: Optional[str] = None
+    interpretation_ids: list[str] = Field(default_factory=list)
+    dissent_ids: list[str] = Field(default_factory=list)
+
+
 def create_app(home: Optional[str] = None) -> FastAPI:
     ws = Workspace(home)
     app = FastAPI(title="twin", description="Personal Cognitive OS — local API")
@@ -477,6 +488,101 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   mode=req.mode,
                                   request_scope=req.request_scope)
         return pack.to_dict()
+
+    @app.get("/api/narratives")
+    def api_narratives(vault: str = "default", domain: Optional[str] = None):
+        if not hasattr(ws.store, "list_narratives"):
+            return []
+        rows = []
+        for nar in ws.store.list_narratives(vault):
+            if domain and nar.domain and nar.domain != domain:
+                continue
+            eps = (
+                ws.store.get_epistemic_state(nar.epistemic_state_id)
+                if nar.epistemic_state_id
+                else None
+            )
+            rows.append({
+                "id": nar.id,
+                "account": nar.account,
+                "domain": nar.domain,
+                "sensitivity": nar.sensitivity,
+                "epistemic_status": eps.status.value if eps else None,
+                "stale_reason": eps.stale_reason if eps else "",
+                "evidence_ids": list(nar.evidence_ids),
+            })
+        return rows
+
+    @app.get("/api/narratives/{narrative_id}")
+    def api_narrative(narrative_id: str):
+        nar = ws.store.get_narrative(narrative_id) if hasattr(ws.store, "get_narrative") else None
+        if nar is None:
+            raise HTTPException(404, "narrative not found")
+        eps = (
+            ws.store.get_epistemic_state(nar.epistemic_state_id)
+            if nar.epistemic_state_id
+            else None
+        )
+        out = nar.model_dump(mode="json")
+        out["epistemic"] = eps.model_dump(mode="json") if eps else None
+        return out
+
+    @app.get("/api/reflections")
+    def api_reflections(vault: str = "default", status: str = "open"):
+        if status == "open" and hasattr(ws.store, "list_open_reflections"):
+            return [r.model_dump(mode="json") for r in ws.store.list_open_reflections(vault)]
+        if hasattr(ws.store, "list_reflections"):
+            return [r.model_dump(mode="json") for r in ws.store.list_reflections(vault)]
+        return []
+
+    @app.post("/api/narratives/commit")
+    def api_narrative_commit(req: NarrativeCommitRequest):
+        from twin.cognize.commit import CommitError, commit_narrative, preview_commit_token
+
+        if not req.evidence_ids:
+            raise HTTPException(400, "evidence_ids required")
+        if not (req.actor or "").strip():
+            raise HTTPException(400, "actor required")
+        token = preview_commit_token(
+            account=req.account,
+            evidence_ids=req.evidence_ids,
+            vault_id=req.vault_id,
+            interpretation_ids=req.interpretation_ids,
+            dissent_interpretation_ids=req.dissent_ids,
+            domain=req.domain,
+        )
+        if req.preview_token is not None and req.preview_token != token:
+            raise HTTPException(400, "preview_token mismatch — re-preview")
+        try:
+            nar = commit_narrative(
+                ws.store,
+                account=req.account,
+                vault_id=req.vault_id,
+                evidence_ids=req.evidence_ids,
+                committed_by=req.actor,
+                interpretation_ids=req.interpretation_ids,
+                dissent_interpretation_ids=req.dissent_ids,
+                domain=req.domain,
+                preview_token=req.preview_token or token,
+                require_preview_token=True,
+            )
+        except CommitError as exc:
+            raise HTTPException(400, str(exc))
+        return {"ok": True, "narrative_id": nar.id, "preview_token": token}
+
+    @app.post("/api/narratives/commit-preview")
+    def api_narrative_commit_preview(req: NarrativeCommitRequest):
+        from twin.cognize.commit import preview_commit_token
+
+        token = preview_commit_token(
+            account=req.account,
+            evidence_ids=req.evidence_ids,
+            vault_id=req.vault_id,
+            interpretation_ids=req.interpretation_ids,
+            dissent_interpretation_ids=req.dissent_ids,
+            domain=req.domain,
+        )
+        return {"preview_token": token, "account": req.account, "evidence_ids": req.evidence_ids}
 
     # -- Cognitive sessions ------------------------------------------------
 

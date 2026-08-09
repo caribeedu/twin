@@ -342,3 +342,42 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     assert set(body["removed_from_queue"]) >= {a.id, b.id}
     merged = client.get(f"/api/memories/{body['merged_id']}").json()
     assert merged["status"] in ("candidate", "confirmed", "merged") or merged["title"]
+
+
+def test_narrative_commit_requires_actor_and_evidence(client):
+    r = client.post("/api/narratives/commit", json={
+        "account": "A claim",
+        "evidence_ids": [],
+        "actor": "tester",
+    })
+    assert r.status_code == 400
+
+    preview = client.post("/api/narratives/commit-preview", json={
+        "account": "A claim",
+        "evidence_ids": ["ev_x"],
+        "actor": "tester",
+        "domain": "technical",
+    })
+    assert preview.status_code == 200
+    token = preview.json()["preview_token"]
+
+    bad = client.post("/api/narratives/commit", json={
+        "account": "A claim",
+        "evidence_ids": ["ev_x"],
+        "actor": "tester",
+        "preview_token": "wrong",
+        "domain": "technical",
+    })
+    assert bad.status_code == 400
+
+    ok = client.post("/api/narratives/commit", json={
+        "account": "A claim",
+        "evidence_ids": ["ev_x"],
+        "actor": "tester",
+        "preview_token": token,
+        "domain": "technical",
+    })
+    assert ok.status_code == 200
+    assert ok.json()["ok"] is True
+    listed = client.get("/api/narratives").json()
+    assert any(n["id"] == ok.json()["narrative_id"] for n in listed)

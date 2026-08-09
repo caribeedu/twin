@@ -106,6 +106,16 @@ def delete_artifact(
             if hasattr(store, "tombstone_percept"):
                 store.tombstone_percept(pid, reason=reason, destroy_content=destroy_content)  # type: ignore[attr-defined]
                 plan["writes"] += 1
+                try:
+                    from twin.cognize.acl import tombstone_narratives_for_percept
+
+                    touched = tombstone_narratives_for_percept(
+                        store, pid, reason=reason,
+                    )
+                    plan.setdefault("narratives_tombstoned", []).extend(touched)
+                    plan["writes"] += len(touched)
+                except Exception:
+                    pass
 
         for mid, ev_ids in affected_memories.items():
             if hasattr(store, "tombstone_evidence"):

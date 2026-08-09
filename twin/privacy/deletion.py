@@ -341,8 +341,24 @@ def execute_deletion(
                                     store.unlink_artifact_percept(aid, pid)
                         if store.count_artifact_links_for_percept(pid) == 0 and hasattr(store, "tombstone_percept"):
                             store.tombstone_percept(pid, reason=req.reason or "privacy_deletion")
+                            try:
+                                from twin.cognize.acl import tombstone_narratives_for_percept
+
+                                tombstone_narratives_for_percept(
+                                    store, pid, reason=req.reason or "privacy_deletion",
+                                )
+                            except Exception:
+                                pass
                     elif hasattr(store, "tombstone_percept"):
                         store.tombstone_percept(pid, reason=req.reason or "privacy_deletion")
+                        try:
+                            from twin.cognize.acl import tombstone_narratives_for_percept
+
+                            tombstone_narratives_for_percept(
+                                store, pid, reason=req.reason or "privacy_deletion",
+                            )
+                        except Exception:
+                            pass
                 except Exception as exc:
                     residuals.append(f"percept:{pid}:{exc}")
 

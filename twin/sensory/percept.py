@@ -8,6 +8,7 @@ never sees sensor-specific formats.
 from __future__ import annotations
 
 import hashlib
+from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -15,10 +16,70 @@ from pydantic import BaseModel, Field
 from .. import ids
 
 
+class SourceClass(str, Enum):
+    code_repo = "code_repo"
+    chat_discussion = "chat_discussion"
+    meeting = "meeting"
+    mail = "mail"
+    calendar = "calendar"
+    document = "document"
+    session_residue = "session_residue"
+    unknown = "unknown"
+
+
+_SENSOR_TO_SOURCE_CLASS: dict[str, SourceClass] = {
+    "github": SourceClass.code_repo,
+    "slack": SourceClass.chat_discussion,
+    "meeting": SourceClass.meeting,
+    "fireflies": SourceClass.meeting,
+    "gmail": SourceClass.mail,
+    "mail": SourceClass.mail,
+    "outlook": SourceClass.mail,
+    "calendar": SourceClass.calendar,
+    "document": SourceClass.document,
+    "folder": SourceClass.document,
+    "session": SourceClass.session_residue,
+    "native": SourceClass.session_residue,
+}
+
+
+def infer_source_class(
+    *,
+    source_sensor: str = "",
+    percept_type: str = "",
+    explicit: Optional[str] = None,
+) -> SourceClass:
+    if explicit:
+        try:
+            return SourceClass(explicit)
+        except ValueError:
+            pass
+    sensor = (source_sensor or "").lower()
+    if sensor in _SENSOR_TO_SOURCE_CLASS:
+        return _SENSOR_TO_SOURCE_CLASS[sensor]
+    ptype = (percept_type or "").lower()
+    if "slack" in ptype or "chat" in ptype or "message" in ptype:
+        return SourceClass.chat_discussion
+    if "pr" in ptype or "commit" in ptype or "github" in ptype:
+        return SourceClass.code_repo
+    if "meeting" in ptype or "transcript" in ptype:
+        return SourceClass.meeting
+    if "mail" in ptype or "email" in ptype:
+        return SourceClass.mail
+    if "calendar" in ptype or "event" in ptype:
+        return SourceClass.calendar
+    if "document" in ptype or "file" in ptype:
+        return SourceClass.document
+    if "session" in ptype:
+        return SourceClass.session_residue
+    return SourceClass.unknown
+
+
 class Percept(BaseModel):
     id: str = Field(default_factory=lambda: ids.new_id("pct"))
     percept_type: str            # document | meeting_transcript | meeting | slack_thread | ...
     source_sensor: str           # sensor name that produced it (document, meeting, slack, ...)
+    source_class: SourceClass = SourceClass.unknown
     occurred_at: Optional[str] = None   # when the sensed thing happened
     ingested_at: str = ""               # when the sensor captured it
     actors: list[str] = Field(default_factory=list)  # people involved (speakers, authors)
@@ -39,6 +100,15 @@ class Percept(BaseModel):
     source_confidentiality: str = "internal"
     # explicit project link (resolved by sensors/sessions when known)
     project_id: Optional[str] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.source_class is SourceClass.unknown:
+            inferred = infer_source_class(
+                source_sensor=self.source_sensor,
+                percept_type=self.percept_type,
+            )
+            if inferred is not SourceClass.unknown:
+                object.__setattr__(self, "source_class", inferred)
 
     def seal(self) -> "Percept":
         """Fill integrity fields from content (idempotent)."""

@@ -288,6 +288,66 @@ def propose_from_episode(
     return proposal
 
 
+def propose_from_narrative(
+    store: MemoryStore,
+    narrative_id: str,
+    *,
+    domain: Optional[str] = None,
+    statement: Optional[str] = None,
+) -> Optional[JudgmentProposal]:
+    """Draft a pending Stance/Judgment from a committed Narrative. Never auto-approves."""
+    if not hasattr(store, "get_narrative"):
+        return None
+    nar = store.get_narrative(narrative_id)
+    if nar is None:
+        raise ValueError(f"narrative {narrative_id} not found")
+    dom = domain or nar.domain or "technical"
+    text = (statement or nar.account or "").strip()
+    if not text:
+        return None
+    item = {
+        "kind": JudgmentKind.heuristic.value,
+        "statement": text[:500],
+        "description": (
+            f"Drafted from committed Narrative {narrative_id}. "
+            "Detector: narrative_stance. Pending human approve."
+        ),
+        "domain": dom,
+        "strength": 0.55,
+        "confidence": 0.55,
+        "stability": JudgmentStability.evolving.value,
+        "scope": {
+            "domains": [dom],
+            "projects": [nar.project_id] if nar.project_id else [],
+        },
+        "provenance": {
+            "memory_ids": [],
+            "source": "narrative_stance",
+            "twin_influenced": True,
+            "independence_weight": 0.4,
+            "narrative_id": narrative_id,
+        },
+    }
+    proposal = JudgmentProposal(
+        id=ids.judgment_proposal_id(),
+        action=ProposalAction.create,
+        proposed_item=item,
+        reason=f"Committed Narrative {narrative_id} suggests a durable evaluative stance.",
+        supporting_memory_ids=[],
+        support_count=1,
+        confidence=0.55,
+        scope={"domain": dom},
+        status=ProposalStatus.pending,
+        created_at=now_iso(),
+        metadata={
+            "detector": "narrative_stance",
+            "narrative_id": narrative_id,
+        },
+    )
+    store.insert_judgment_proposal(proposal)
+    return proposal
+
+
 def propose_from_episode_patterns(
     store: MemoryStore,
     *,
