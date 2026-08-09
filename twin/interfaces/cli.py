@@ -90,6 +90,7 @@ from .commands.cli_handlers import (  # noqa: E402
     cmd_narrative,
     cmd_stance,
     cmd_inject,
+    cmd_research,
     _add_json_flag,
     _add_json_flag_tree,
     _print,
@@ -941,6 +942,13 @@ def main(argv: list[str] | None = None) -> None:
     pnsb.add_argument("--vault", default="default")
     pnsb.add_argument("--limit", type=int, default=10_000)
     pnsb.set_defaults(func=cmd_narrative)
+    pnsa = pns.add_parser(
+        "accessibility",
+        help="list/apply Fade·Remarkable recommendations (never auto-deletes)",
+    )
+    pnsa.add_argument("--vault", default="default")
+    pnsa.add_argument("--apply", action="store_true")
+    pnsa.set_defaults(func=cmd_narrative)
     _add_json_flag_tree(pn)
 
     pst = sub.add_parser("stance", help="Stance (ex-Judgment) surface")
@@ -958,6 +966,14 @@ def main(argv: list[str] | None = None) -> None:
     pinp.add_argument("--max-tokens", type=int, default=1200)
     pinp.set_defaults(func=cmd_inject)
     _add_json_flag_tree(pin)
+
+    prs = sub.add_parser("research", help="export Cognize research instrumentation")
+    prss = prs.add_subparsers(dest="research_command", required=True)
+    prsv = prss.add_parser("revisions", help="surprise / explanatory_delta rows")
+    prsv.add_argument("--vault", default="")
+    prsv.add_argument("--limit", type=int, default=200)
+    prsv.set_defaults(func=cmd_research)
+    _add_json_flag_tree(prs)
 
     args = parser.parse_args(argv)
     args.func(args)

@@ -32,7 +32,22 @@ from .quality import analyze_candidates
 
 
 class ConsolidationInvariantError(RuntimeError):
-    """Cycle mutated the confirmed Memory/Judgment set — must not complete."""
+    """Cycle mutated confirmed Memory/Judgment/Narrative durability — must not complete."""
+
+
+MAX_JUDGMENT_DRAFTS_PER_WINDOW = 20
+MAX_CONSOLIDATION_TOKENS = 50_000
+
+
+def _narrative_committed_ids(store: MemoryStore) -> set[str]:
+    if not hasattr(store, "list_narratives"):
+        return set()
+    return {
+        n.id
+        for n in store.list_narratives("default")
+        if getattr(getattr(n, "status", None), "value", n.status) == "committed"
+        or getattr(n, "status", None) is not None
+    }
 
 
 @dataclass
@@ -707,6 +722,7 @@ def run_consolidation_cycle(
         store.insert_consolidation_run(run)
 
     before_mems, before_judgments = _confirmed_snapshot(store)
+    before_narratives = _narrative_committed_ids(store)
 
     result = ConsolidationCycleResult(
         kind=kind,
@@ -827,34 +843,62 @@ def run_consolidation_cycle(
                 propose_from_episode_patterns,
                 propose_from_pattern,
             )
-            detector = "simplicity_cluster_demo"
-            if dry_run:
-                result.notes.append("dry_run skipped judgment proposals")
+            from twin.cognize.gate import require_chat_llm
+            import os
+
+            gate = require_chat_llm(
+                extractor=cfg.extractor,
+                chat_provider=cfg.normalized_llm_provider,
+                allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
+            )
+            if gate.halted:
+                result.notes.append(
+                    f"judgment_proposals halted: {gate.detail} (retryable; no heuristic drafts)"
+                )
             else:
-                existing = _existing_window_proposals(
-                    store, window_key=window_key, detector=detector,
-                )
-                episode_detector = "episode_pattern"
-                existing_ep = _existing_window_proposals(
-                    store, window_key=window_key, detector=episode_detector,
-                )
-                if existing or existing_ep:
-                    result.judgment_proposal_ids = existing + existing_ep
-                    result.notes.append("reused judgment proposals for window")
+                detector = "simplicity_cluster_demo"
+                if dry_run:
+                    result.notes.append("dry_run skipped judgment proposals")
                 else:
-                    proposals = list(propose_from_pattern(store, domain="technical"))
-                    # Complement the demo detector with episode-arc patterns.
-                    proposals += list(
-                        propose_from_episode_patterns(store, domain="technical")
+                    existing = _existing_window_proposals(
+                        store, window_key=window_key, detector=detector,
                     )
-                    for p in proposals:
-                        meta = dict(getattr(p, "metadata", None) or {})
-                        meta["consolidation_window"] = window_key
-                        meta["consolidation_run_id"] = run.id
-                        meta.setdefault("detector", detector)
-                        if hasattr(store, "update_judgment_proposal"):
-                            store.update_judgment_proposal(p.id, metadata=meta)
-                        result.judgment_proposal_ids.append(p.id)
+                    episode_detector = "episode_pattern"
+                    existing_ep = _existing_window_proposals(
+                        store, window_key=window_key, detector=episode_detector,
+                    )
+                    if existing or existing_ep:
+                        result.judgment_proposal_ids = existing + existing_ep
+                        result.notes.append("reused judgment proposals for window")
+                    else:
+                        proposals = list(propose_from_pattern(store, domain="technical"))
+                        proposals += list(
+                            propose_from_episode_patterns(store, domain="technical")
+                        )
+                        capped = proposals[:MAX_JUDGMENT_DRAFTS_PER_WINDOW]
+                        if len(proposals) > MAX_JUDGMENT_DRAFTS_PER_WINDOW:
+                            result.notes.append(
+                                f"judgment draft cap {MAX_JUDGMENT_DRAFTS_PER_WINDOW} applied"
+                            )
+                        for p in capped:
+                            meta = dict(getattr(p, "metadata", None) or {})
+                            meta["consolidation_window"] = window_key
+                            meta["consolidation_run_id"] = run.id
+                            meta.setdefault("detector", detector)
+                            if hasattr(store, "update_judgment_proposal"):
+                                store.update_judgment_proposal(p.id, metadata=meta)
+                            result.judgment_proposal_ids.append(p.id)
+
+        # Stage 12 accessibility recommendations (never delete Narratives)
+        stage = "fade_recommend"
+        result.stages.append("fade_recommend")
+        if dry_run:
+            result.notes.append("dry_run skipped fade recommendations")
+        else:
+            from twin.cognize.fade import recommend_accessibility
+
+            fade_recs = recommend_accessibility(store, vault_id="default", dry_run=False)
+            result.notes.append(f"fade_recommendations={len(fade_recs)}")
 
         stage = "change_report"
         result.stages.append("change_report")
@@ -872,13 +916,19 @@ def run_consolidation_cycle(
         result.stages.append("done")
 
         after_mems, after_judgments = _confirmed_snapshot(store)
+        after_narratives = _narrative_committed_ids(store)
         if after_mems != before_mems or after_judgments != before_judgments:
             raise ConsolidationInvariantError(
                 "cycle mutated confirmed Memory/Judgment set"
             )
+        if after_narratives - before_narratives:
+            raise ConsolidationInvariantError(
+                "cycle created new Narratives — humans gate durability"
+            )
         result.notes.append(
             "invariant_ok: confirmed Memory/Judgment sets unchanged"
         )
+        result.notes.append("invariant_ok: no Narrative auto-commit")
         result.status = "completed"
 
         run.status = "completed"

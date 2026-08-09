@@ -5,6 +5,24 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.2.0 — Consolidation & accessibility
+
+Goal: nightly consolidation judgment with caps, Fade/Remarkable Trace ledger,
+and evals for disagreement attention, quiet reversal, and research logging.
+
+Delivered:
+
+- consolidation draft caps + LLM-or-halt for judgment proposals; invariant
+  against Narrative auto-commit; fade recommendations in the cycle;
+- Trace on pack serve; `twin narrative accessibility`; no age-only Narrative
+  delete as Cognize policy;
+- Research export (`twin research revisions`) for surprise / explanatory_delta;
+- Evals: disagreement attention, quiet reversal, research field persistence;
+- package / `__version__` → `2.2.0`.
+
+Follow-ons: Twin **v2.3** (Command Center) —
+[ROADMAP.md](ROADMAP.md) · [v2-tracker.md](v2-tracker.md).
+
 ### v2.1.0 — Epistemics + host surfaces
 
 Goal: read-time confidence / independence, ACL ∩ with revoke tombstones,

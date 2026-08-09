@@ -669,6 +669,20 @@ def build_context_pack(
                 f"- [{n['narrative_id']}] stale: {n.get('stale_reason') or 'new evidence'}"
                 for n in stale_nars[:5]
             )
+        if hasattr(store, "append_trace"):
+            from twin.cognize.models import Trace as CogTrace
+
+            for n in narratives_out[:20]:
+                store.append_trace(
+                    CogTrace(
+                        vault_id=vault,
+                        event_kind="pack_serve",
+                        resource_kind="narrative",
+                        resource_id=n["narrative_id"],
+                        session_id=session_id,
+                        metadata={"epistemic_status": n.get("epistemic_status")},
+                    )
+                )
 
     return ContextPack(
         context_pack=pack_text,
