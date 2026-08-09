@@ -5,6 +5,28 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.1.0 — Epistemics + host surfaces
+
+Goal: read-time confidence / independence, ACL ∩ with revoke tombstones,
+Stance drafts after Narrative commit, MCP/REST/Native v2 pack contract, and
+legacy CLI alias deprecation.
+
+Delivered:
+
+- Percept `source_class` (durable) for invalidation asymmetry;
+- Inject Observer reserved slot (`TWIN_INJECT_OBSERVER`, default no-op);
+- Narrative ACL intersection + synchronous tombstone on source delete;
+- Pack: evidence-scoped independence, open Reflections firewall, derived
+  confidence markers; Stance drafts pending human approve;
+- MCP `inject_context_pack`; REST `/api/narratives*` commit preview;
+- Native pack extras carry epistemic / reflections / derived confidence;
+- Legacy CLI aliases warn (extract / meditate / correlate / judgment / memory);
+- Evals: independence collapse + ACL intersection;
+- package / `__version__` → `2.1.0`.
+
+Follow-ons: Twin **v2.2** (consolidation / fade), **v2.3** (Command Center) —
+[ROADMAP.md](ROADMAP.md) · [v2-tracker.md](v2-tracker.md).
+
 ### v2.0.0 — Narrative substrate
 
 Goal: ship Twin’s longitudinal Narrative architecture — Sense → Cognize →

@@ -291,3 +291,22 @@ Without a running runtime, native SessionEnd falls back to in-process `complete_
 ---
 
 Quickstart narrative in [README.md](../README.md). Install/config in [SETUP.md](SETUP.md). Ops in [OPERATIONS.md](OPERATIONS.md).
+
+## Legacy aliases
+
+Prefer Cognize / Narrative / Stance / Inject verbs. These argv names remain as
+aliases through the next minor after v2 and print a deprecation warning
+(stderr), or a `deprecated` field with `--json`. Planned removal: next minor
+after the Twin v2 line ships.
+
+| Legacy | Prefer |
+|---|---|
+| `twin extract` | `twin cognize run` (interpret / Sense→Cognize enqueue) |
+| `twin extract -A` | Confirms **memories** only — cannot commit Narratives; use `twin narrative commit` |
+| `twin meditate` | `twin cognize run` |
+| `twin correlate` | `twin cognize run` |
+| `twin judgment …` | `twin stance …` |
+| `twin memory …` | `twin narrative …` (where mapped) |
+
+Command Center (v2.3) must not list legacy names as primary palette entries.
+

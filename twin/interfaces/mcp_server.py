@@ -186,6 +186,35 @@ def create_server(home: Optional[str] = None):
         return found.id if found else None
 
     @mcp.tool()
+    def inject_context_pack(
+        query: str,
+        target_domain: str = "technical",
+        max_tokens: int = 1200,
+        include_judgment: bool = True,
+        include_candidates: bool = False,
+        task_profile: str = "general",
+        project: Optional[str] = None,
+        persona: str = "individual",
+        purpose: str = "memory_retrieval",
+        audience: str = "self",
+        mode: str = "compact",
+        session_id: Optional[str] = None,
+    ) -> str:
+        """Preferred pack tool. Returns EpistemicState, open reflections, and
+        derived confidence/independence. Same payload as memory_safe_context_pack
+        without the legacy deprecation marker."""
+        raw = memory_safe_context_pack(
+            query=query, target_domain=target_domain, max_tokens=max_tokens,
+            include_judgment=include_judgment, include_candidates=include_candidates,
+            task_profile=task_profile, project=project, persona=persona,
+            purpose=purpose, audience=audience, mode=mode, session_id=session_id,
+        )
+        data = json.loads(raw)
+        data.pop("deprecated", None)
+        data["tool"] = "inject_context_pack"
+        return json.dumps(data, ensure_ascii=False)
+
+    @mcp.tool()
     def get_context_pack(
         query: str,
         target_domain: str = "technical",
@@ -223,20 +252,9 @@ def create_server(home: Optional[str] = None):
         mode: str = "compact",
         session_id: Optional[str] = None,
     ) -> str:
-        """Returns a compact, privacy-filtered context pack (judgment profile
-        + relevant memories, organized in sections: decisions, constraints,
-        tasks, preferences, facts, evidence) to ground your work in the
-        user's real context. For a full unit of work prefer session_start,
-        which wraps this pack in a trackable session.
-        Only human-confirmed memories are included unless you explicitly set
-        include_candidates=true — never treat candidates as established fact.
-        `query` should describe the task you are about to do; `task_profile`
-        (general, coding, architecture, debugging, writing, planning, review,
-        meeting_prep) reorders sections for that kind of task; `project` is
-        an optional project name/alias to boost project-linked memories.
-        Identity comes from process env (TWIN_MCP_CLIENT +
-        TWIN_MCP_CLIENT_TOKEN) provisioned by ``twin setup mcp`` — never
-        from tool arguments."""
+        """LEGACY — prefer inject_context_pack. Returns a privacy-filtered
+        context pack with EpistemicState, open reflections, and derived
+        confidence. `deprecated` is set in the JSON response."""
         access = resolve_mcp_access(
             ws.store,
             persona=persona, purpose=purpose, audience=audience,
@@ -274,6 +292,12 @@ def create_server(home: Optional[str] = None):
             "provenance_summary": pack.provenance_summary,
             "token_budget": pack.token_budget,
             "explanation": pack.explanation,
+            "narratives": pack.narratives,
+            "open_reflections": pack.open_reflections,
+            "epistemic": pack.epistemic,
+            "derived_confidence": pack.derived_confidence,
+            "applicable_stance": pack.applicable_stance,
+            "deprecated": "prefer inject_context_pack; memory_* names are legacy",
         }, ensure_ascii=False)
 
     # -- Cognitive session lifecycle --------------------------------------
@@ -442,17 +466,21 @@ def create_server(home: Optional[str] = None):
     def capabilities() -> str:
         """Negotiable MCP capability list for Twin cognitive core."""
         return json.dumps({
-            "schema_version": "1.0",
+            "schema_version": "2.1",
             "tools": [
-                "get_context_pack", "memory_safe_context_pack", "memory_observe",
+                "inject_context_pack", "get_context_pack", "memory_safe_context_pack",
+                "memory_observe",
                 "get_active_session", "get_attention", "append_session_delta",
                 "session_start", "session_complete", "provide_feedback",
                 "workspace_tick", "consolidate_cycle", "health", "capabilities",
             ],
+            "pack_contract": "v2",
+            "inject_observer": False,
             "attention": True,
             "runtime_jobs": True,
             "formation": True,
             "personas": True,
+            "deprecated_tools": ["memory_safe_context_pack", "memory_observe"],
         }, ensure_ascii=False)
 
     @mcp.tool()

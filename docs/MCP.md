@@ -41,7 +41,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 ## How agents should use it
 
-1. Prefer `memory_safe_context_pack` or `session_start` at the beginning of a technical task.
+1. Prefer `inject_context_pack` or `session_start` at the beginning of a technical task.
 2. Always pass a truthful `target_domain`.
 3. Treat `blocked` as authoritative — do not ask the model to “ignore” the firewall.
 4. Do not treat `candidate` memories as established fact.
@@ -64,8 +64,9 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `memory_safe_context_pack` | `query`, `target_domain="technical"`, `max_tokens=1200`, `include_judgment=true`, `include_candidates=false`, `task_profile="general"`, `project?` | **Primary agent entry**: compact pack after firewall. Identity from process env only. |
-| `get_context_pack` | same shape | Lower-level pack builder (prefer `memory_safe_context_pack` in clients). |
+| `inject_context_pack` | same shape as legacy pack | **Preferred**: EpistemicState, open reflections, derived confidence/independence, applicable stance. |
+| `memory_safe_context_pack` | `query`, `target_domain="technical`, … | **Legacy** alias — response includes `deprecated`; prefer `inject_context_pack`. |
+| `get_context_pack` | same shape | Lower-level pack builder (prefer `inject_context_pack`). |
 | `memory_observe` | `current_text`, `target_domain?` | Parallel “what might be relevant?” suggestion for the current text/task. |
 
 ## Sessions

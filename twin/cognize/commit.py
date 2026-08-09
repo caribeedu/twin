@@ -15,11 +15,23 @@ from twin.cognize.models import (
     NarrativeGrain,
     NarrativeStatus,
 )
+from twin.cognize.acl import sensitivity_from_evidence
 from twin.clock import now_iso
 
 
 class CommitError(ValueError):
     pass
+
+
+_RANK = {"public": 0, "internal": 1, "private": 2, "restricted": 3}
+
+
+def _pick_sensitivity(requested: str, floor: str) -> str:
+    if _RANK.get(requested, 1) < _RANK.get(floor, 1):
+        raise CommitError(
+            f"sensitivity {requested} expands beyond evidence floor {floor}"
+        )
+    return requested or floor
 
 
 def preview_commit_token(
@@ -55,7 +67,7 @@ def commit_narrative(
     dissent_interpretation_ids: Optional[list[str]] = None,
     domain: str = "",
     persona: str = "",
-    sensitivity: str = "internal",
+    sensitivity: str = "",
     project_id: Optional[str] = None,
     grain: Optional[NarrativeGrain] = None,
     freshness_boundary: Optional[str] = None,
@@ -70,6 +82,14 @@ def commit_narrative(
         raise CommitError("commit requires evidence_ids")
     if not (account or "").strip():
         raise CommitError("commit requires account text")
+
+    from twin.cognize.acl import sensitivity_from_evidence
+
+    derived_sens = sensitivity_from_evidence(store, evidence_ids)
+    sensitivity = _pick_sensitivity(sensitivity or derived_sens, derived_sens)
+    from twin.cognize.acl import evidence_source_sensors
+
+    source_sensors = sorted(evidence_source_sensors(store, evidence_ids))
 
     expected = preview_commit_token(
         account=account,
@@ -120,6 +140,7 @@ def commit_narrative(
         metadata={
             "preview_token": expected,
             "supersedes_narrative_id": supersedes_narrative_id or "",
+            "source_sensors": source_sensors,
         },
     )
     store.upsert_narrative(nar)
@@ -165,6 +186,12 @@ def commit_narrative(
                 }
             )
         )
+    try:
+        from twin.judgment.proposals import propose_from_narrative
+
+        propose_from_narrative(store, nar.id, domain=domain or None)
+    except Exception:
+        pass
     return nar
 
 

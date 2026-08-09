@@ -4,8 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Optional
 
 from twin.workspace import Workspace
+
+
+def _legacy_warn(args, *, legacy: str, prefer: str) -> Optional[str]:
+    msg = f"deprecated: `twin {legacy}` — prefer `twin {prefer}`"
+    setattr(args, "_deprecation", msg)
+    if getattr(args, "json", False):
+        return msg
+    from twin.interfaces import ux
+
+    ux.print_warn(msg)
+    return msg
 
 
 def _print(data) -> None:
@@ -23,6 +35,8 @@ def _emit(args, data, pretty) -> None:
     branded human view. Keeps every ported command's ``--json`` branch uniform.
     """
     if _want_json(args):
+        if isinstance(data, dict) and getattr(args, "_deprecation", None):
+            data = {**data, "deprecated": getattr(args, "_deprecation")}
         _print(data)
         return
     pretty()
@@ -238,6 +252,7 @@ def cmd_extract(args) -> None:
     from twin.interfaces import ux
     import os
 
+    _legacy_warn(args, legacy="extract", prefer="cognize run")
     ws = Workspace(args.home)
     gate = require_chat_llm(
         extractor=ws.cfg.extractor,
@@ -269,10 +284,14 @@ def cmd_extract(args) -> None:
         return
 
     auto = bool(getattr(args, "auto_approve", False))
+    if auto and getattr(args, "commit_narratives", False):
+        raise SystemExit(
+            "--auto-approve cannot commit Narratives; use twin narrative commit"
+        )
     ux.print_dim(
         f"{len(pending)} percept(s) · model={ws.cfg.resolved_llm_model} · "
         f"provider={ws.cfg.normalized_llm_provider}"
-        + (" · auto-approve ON" if auto else "")
+        + (" · auto-approve ON (memories only; never Narratives)" if auto else "")
     )
 
     details: list[str] = []
@@ -499,6 +518,8 @@ def cmd_review_batch(args) -> None:
 def cmd_memory(args) -> None:
     from twin.interfaces import ux
     from twin.memory.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
+
+    _legacy_warn(args, legacy="memory", prefer="narrative")
     from twin.memory.provenance import memory_provenance
 
     ws = Workspace(args.home)
@@ -1251,8 +1272,7 @@ def cmd_judgment(args) -> None:
     from twin.judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
     from twin.judgment.versions import active_items
 
-    if not getattr(args, "json", False):
-        ux.print_warn("deprecated: `twin judgment` — prefer `twin stance`")
+    _legacy_warn(args, legacy="judgment", prefer="stance")
 
     ws = Workspace(args.home)
     cmd = args.judgment_command
@@ -2916,6 +2936,7 @@ def cmd_correlate(args) -> None:
         run_episode_cognition,
     )
 
+    _legacy_warn(args, legacy="correlate", prefer="cognize run")
     ws = Workspace(args.home)
     mode = getattr(args, "mode", "full")
     until = getattr(args, "until", "cortex") or "cortex"
@@ -3006,6 +3027,7 @@ def cmd_meditate(args) -> None:
     from twin.cognition.episode_pipeline import BrainStage, run_episode_cognition
     from twin.cognize.gate import require_chat_llm
 
+    _legacy_warn(args, legacy="meditate", prefer="cognize run")
     ws = Workspace(args.home)
     gate = require_chat_llm(
         extractor=ws.cfg.extractor,

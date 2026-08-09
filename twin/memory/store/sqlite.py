@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS percepts (
     source_trust REAL NOT NULL DEFAULT 0.8,
     source_scope TEXT NOT NULL DEFAULT 'work',
     source_confidentiality TEXT NOT NULL DEFAULT 'internal',
+    source_class TEXT NOT NULL DEFAULT 'unknown',
     project_id TEXT,
     content_hash TEXT NOT NULL UNIQUE
 );
@@ -747,6 +748,7 @@ class SqliteStore(
             ("source_trust", "REAL NOT NULL DEFAULT 0.8"),
             ("source_scope", "TEXT NOT NULL DEFAULT 'work'"),
             ("source_confidentiality", "TEXT NOT NULL DEFAULT 'internal'"),
+            ("source_class", "TEXT NOT NULL DEFAULT 'unknown'"),
             ("project_id", "TEXT"),
         ):
             if name not in cols:
@@ -955,12 +957,13 @@ class SqliteStore(
         ).fetchone()
         if existing:
             return None
+        sc = getattr(percept.source_class, "value", None) or str(percept.source_class)
         self.conn.execute(
             "INSERT INTO percepts (id, percept_type, source_sensor, occurred_at,"
             " ingested_at, actors, content, content_refs, attachments,"
             " privacy_hints, integrity, metadata, source_trust, source_scope,"
-            " source_confidentiality, project_id, content_hash)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " source_confidentiality, source_class, project_id, content_hash)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 percept.id, percept.percept_type, percept.source_sensor,
                 percept.occurred_at, percept.ingested_at or now_iso(),
@@ -969,7 +972,7 @@ class SqliteStore(
                 json.dumps(percept.privacy_hints), json.dumps(percept.integrity),
                 json.dumps(percept.metadata), percept.source_trust,
                 percept.source_scope, percept.source_confidentiality,
-                percept.project_id, percept.content_hash,
+                sc, percept.project_id, percept.content_hash,
             ),
         )
         self._maybe_commit()
@@ -982,6 +985,8 @@ class SqliteStore(
         return percept.id
 
     def _row_to_percept(self, row: sqlite3.Row) -> Percept:
+        keys = row.keys()
+        sc = row["source_class"] if "source_class" in keys else "unknown"
         return Percept(
             id=row["id"], percept_type=row["percept_type"],
             source_sensor=row["source_sensor"], occurred_at=row["occurred_at"],
@@ -993,6 +998,7 @@ class SqliteStore(
             integrity=json.loads(row["integrity"]), metadata=json.loads(row["metadata"]),
             source_trust=row["source_trust"], source_scope=row["source_scope"],
             source_confidentiality=row["source_confidentiality"],
+            source_class=sc,
             project_id=row["project_id"],
         )
 

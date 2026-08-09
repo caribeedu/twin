@@ -49,6 +49,21 @@ from .events import ALLOWED_HOST_EVENT_KINDS, PACK_EMIT_KINDS, HostEvent
 logger = logging.getLogger("twin.interfaces.native")
 
 
+def _pack_extras(pack: Any, extras: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    out = dict(extras or {})
+    for key in (
+        "narratives",
+        "open_reflections",
+        "epistemic",
+        "derived_confidence",
+        "applicable_stance",
+    ):
+        val = getattr(pack, key, None)
+        if val is not None:
+            out[key] = val
+    return out
+
+
 @dataclass
 class NativeEventResult:
     ok: bool = True
@@ -79,6 +94,15 @@ class NativeEventResult:
         if include_pack and self.context_pack is not None:
             out["context_pack"] = self.context_pack
             out["sources"] = self.sources
+        for key in (
+            "narratives",
+            "open_reflections",
+            "epistemic",
+            "derived_confidence",
+            "applicable_stance",
+        ):
+            if key in self.extras:
+                out[key] = self.extras[key]
         if self.interventions:
             out["interventions"] = [i.model_dump() for i in self.interventions]
         if self.extras:
@@ -142,6 +166,16 @@ class NativeHostService:
 
     def handle(self, event: HostEvent) -> NativeEventResult:
         try:
+            try:
+                from twin.cognition.inject_observer import get_inject_observer
+
+                get_inject_observer().observe_turn(
+                    self.store,
+                    text=getattr(event, "text", "") or "",
+                    session_id=getattr(event, "external_session_id", "") or "",
+                )
+            except Exception:
+                pass
             return self._handle(event)
         except (ValueError, BindingScopeError) as exc:
             return NativeEventResult(ok=False, error=str(exc))
@@ -396,7 +430,7 @@ class NativeHostService:
                     session_id=upgraded.binding.cognitive_session_id,
                     context_pack=pack.context_pack,
                     sources=list(pack.sources or []),
-                    extras=extras,
+                    extras=_pack_extras(pack, extras),
                 )
             if can_inject:
                 pending = self._maybe_emit_pending_pack(
@@ -478,7 +512,7 @@ class NativeHostService:
             session_id=binding.cognitive_session_id,
             context_pack=pack.context_pack,
             sources=list(pack.sources or []),
-            extras=extras,
+            extras=_pack_extras(pack, extras),
         )
 
     def _start_or_pack(
@@ -574,7 +608,7 @@ class NativeHostService:
             session_id=started.binding.cognitive_session_id,
             context_pack=pack.context_pack,
             sources=list(pack.sources or []),
-            extras=extras,
+            extras=_pack_extras(pack, extras),
         )
 
 

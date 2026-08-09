@@ -30,7 +30,8 @@ async def test_tools_are_registered(server):
     assert {
         "memory_search", "memory_get", "memory_related", "memory_project_context",
         "memory_recent_decisions", "memory_user_preferences",
-        "memory_judgment_profile", "memory_safe_context_pack", "memory_observe",
+        "memory_judgment_profile", "memory_safe_context_pack", "inject_context_pack",
+        "memory_observe",
         "judgment_applicable", "judgment_simulate", "judgment_proposals",
         "judgment_proposal_preview", "judgment_proposal_approve",
         "judgment_proposal_reject", "judgment_conflicts", "judgment_version",
@@ -47,6 +48,18 @@ async def test_safe_context_pack_tool(server):
     payload = json.loads(result[0][0].text)
     assert "context_pack" in payload
     assert "blocked" in payload
+    assert "narratives" in payload
+    assert "derived_confidence" in payload
+    assert "deprecated" in payload
+
+    preferred = await server.call_tool(
+        "inject_context_pack",
+        {"query": "RFC sobre webhooks do Atlas", "target_domain": "technical"},
+    )
+    pref = json.loads(preferred[0][0].text)
+    assert "deprecated" not in pref
+    assert pref.get("tool") == "inject_context_pack"
+    assert "open_reflections" in pref
 
 
 @pytest.mark.anyio
