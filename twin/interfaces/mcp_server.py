@@ -28,7 +28,6 @@ import json
 from typing import Any, Optional
 
 from ..cognition.context_pack import build_context_pack
-from ..cognition.observer import observe
 from ..cognition.sessions import (
     complete_session,
     observe_session,
@@ -59,11 +58,10 @@ def create_server(home: Optional[str] = None):
     mcp = FastMCP(
         "twin",
         instructions=(
-            "Personal memory layer for the user. Call memory_safe_context_pack "
-            "at the start of technical tasks to load the user's relevant context "
-            "(decisions, preferences, projects) without re-asking. All results "
-            "are already filtered by the user's privacy Domain Firewall. "
-            "Identity is configured by the host via process env "
+            "Personal cognitive layer for the user. Call inject_context_pack "
+            "at the start of technical tasks to load relevant Narratives and "
+            "Stance without re-asking. Results are filtered by the Domain "
+            "Firewall. Identity is configured by the host via process env "
             f"({MCP_CLIENT_ENV} / TWIN_MCP_CLIENT_TOKEN) — never pass credentials "
             "as tool arguments."
         ),
@@ -200,61 +198,8 @@ def create_server(home: Optional[str] = None):
         mode: str = "compact",
         session_id: Optional[str] = None,
     ) -> str:
-        """Preferred pack tool. Returns EpistemicState, open reflections, and
-        derived confidence/independence. Same payload as memory_safe_context_pack
-        without the legacy deprecation marker."""
-        raw = memory_safe_context_pack(
-            query=query, target_domain=target_domain, max_tokens=max_tokens,
-            include_judgment=include_judgment, include_candidates=include_candidates,
-            task_profile=task_profile, project=project, persona=persona,
-            purpose=purpose, audience=audience, mode=mode, session_id=session_id,
-        )
-        data = json.loads(raw)
-        data.pop("deprecated", None)
-        data["tool"] = "inject_context_pack"
-        return json.dumps(data, ensure_ascii=False)
-
-    @mcp.tool()
-    def get_context_pack(
-        query: str,
-        target_domain: str = "technical",
-        max_tokens: int = 1200,
-        include_judgment: bool = True,
-        include_candidates: bool = False,
-        task_profile: str = "general",
-        project: Optional[str] = None,
-        persona: str = "individual",
-        purpose: str = "memory_retrieval",
-        audience: str = "self",
-        mode: str = "compact",
-        session_id: Optional[str] = None,
-    ) -> str:
-        """Alias of memory_safe_context_pack with mature pack modes ."""
-        return memory_safe_context_pack(
-            query=query, target_domain=target_domain, max_tokens=max_tokens,
-            include_judgment=include_judgment, include_candidates=include_candidates,
-            task_profile=task_profile, project=project, persona=persona,
-            purpose=purpose, audience=audience, mode=mode, session_id=session_id,
-        )
-
-    @mcp.tool()
-    def memory_safe_context_pack(
-        query: str,
-        target_domain: str = "technical",
-        max_tokens: int = 1200,
-        include_judgment: bool = True,
-        include_candidates: bool = False,
-        task_profile: str = "general",
-        project: Optional[str] = None,
-        persona: str = "individual",
-        purpose: str = "memory_retrieval",
-        audience: str = "self",
-        mode: str = "compact",
-        session_id: Optional[str] = None,
-    ) -> str:
-        """LEGACY — prefer inject_context_pack. Returns a privacy-filtered
-        context pack with EpistemicState, open reflections, and derived
-        confidence. `deprecated` is set in the JSON response."""
+        """Privacy-filtered context pack with EpistemicState, Narratives,
+        open Reflections, and derived confidence/independence."""
         access = resolve_mcp_access(
             ws.store,
             persona=persona, purpose=purpose, audience=audience,
@@ -276,6 +221,7 @@ def create_server(home: Optional[str] = None):
             mode=mode,  # type: ignore[arg-type]
         )
         return json.dumps({
+            "tool": "inject_context_pack",
             "context_pack": pack.context_pack,
             "sources": pack.sources,
             "confidence": pack.confidence,
@@ -297,7 +243,6 @@ def create_server(home: Optional[str] = None):
             "epistemic": pack.epistemic,
             "derived_confidence": pack.derived_confidence,
             "applicable_stance": pack.applicable_stance,
-            "deprecated": "prefer inject_context_pack; memory_* names are legacy",
         }, ensure_ascii=False)
 
     # -- Cognitive session lifecycle --------------------------------------
@@ -533,9 +478,8 @@ def create_server(home: Optional[str] = None):
         return json.dumps({
             "schema_version": "2.1",
             "tools": [
-                "inject_context_pack", "get_context_pack", "memory_safe_context_pack",
+                "inject_context_pack",
                 "narrative_list", "narrative_show", "stance_list", "stance_proposals",
-                "memory_observe",
                 "get_active_session", "get_attention", "append_session_delta",
                 "session_start", "session_complete", "provide_feedback",
                 "workspace_tick", "consolidate_cycle", "health", "capabilities",
@@ -546,7 +490,6 @@ def create_server(home: Optional[str] = None):
             "runtime_jobs": True,
             "formation": True,
             "personas": True,
-            "deprecated_tools": ["memory_safe_context_pack", "memory_observe"],
         }, ensure_ascii=False)
 
     @mcp.tool()
@@ -683,18 +626,6 @@ def create_server(home: Optional[str] = None):
             },
             "session": _session_dict(session) if session else None,
         }, ensure_ascii=False, default=str)
-
-    @mcp.tool()
-    def memory_observe(current_text: str, target_domain: Optional[str] = None) -> str:
-        """Memory Observer: pass the user's current message/task and receive
-        memories that look relevant (suggested_context) plus what was withheld
-        by the privacy firewall (blocked_context, ids only)."""
-        suggestion = observe(ws.store, ws.cfg, ws.embedder, current_text, target_domain)
-        return json.dumps({
-            "inferred_domain": suggestion.inferred_domain,
-            "suggested_context": suggestion.suggested_context,
-            "blocked_context": suggestion.blocked_context,
-        }, ensure_ascii=False)
 
     @mcp.tool()
     def workspace_tick(

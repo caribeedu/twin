@@ -18,11 +18,10 @@ def test_tty_bare_launches(monkeypatch):
     assert center.should_launch_center(["doctor"]) is False
 
 
-def test_fuzzy_palette_prefers_v2_verbs():
+def test_fuzzy_palette_lists_verbs():
     hits = center.fuzzy_palette("cognize")
     assert any("cognize" in h for h in hits)
-    legacy = center.fuzzy_palette("meditate")
-    assert any("legacy" in h for h in legacy)
+    assert center.fuzzy_palette("meditate") == []
 
 
 def test_cli_non_tty_bare_exits_help(monkeypatch, capsys):

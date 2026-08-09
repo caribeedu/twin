@@ -65,7 +65,7 @@ asserted by Cognize (LLM), not by embeddings alone. Types include
 Human-accepted, evidence-backed, temporally bounded, revisable **account**
 of a situation (actors, causality, goals, state change) — not fiction and
 not a styled summary. Optional soft `grain`: `episode` \| `arc` \|
-`domain`. May be marked **stale**. Durable product unit for Twin v2.
+`domain`. May be marked **stale**. Durable product unit.
 
 ## EpistemicState
 

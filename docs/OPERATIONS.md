@@ -6,8 +6,8 @@ to day-to-day sync, native sessions, review and recovery.
 
 **Invariants while you operate:**
 
-- Connectors and extract produce **candidates**. Humans confirm Memory.
-- Judgment is always human-gated (`twin judgment approve`).
+- Connectors and Cognize produce **candidates**. Humans confirm Narratives.
+- Stance is always human-gated (`twin stance approve`).
 - Episode semantic stages **defer** when the chat model is down — they
   never invent an arc from lexical rules.
 
@@ -28,7 +28,7 @@ GitHub **without** re-briefing, because Twin already formed understanding.
 
 Source systems in that demo: **Slack** + **GitHub** on
 [`caribeedu/dogwalker`](https://github.com/caribeedu/dogwalker). The host
-reasoning model in the video is Claude; Twin’s own extract/meditate model
+reasoning model in the video is Claude; Twin’s own Cognize model
 is whatever you chose in `twin init` (cloud frontier helps quality —
 [README — Runtime Philosophy](../README.md#runtime-philosophy)).
 
@@ -117,32 +117,32 @@ twin connector sync <slack_connector_id>
 ### 1.4 Form understanding
 
 ```bash
-# Atomic memories from percepts (candidates only)
-twin extract
+# Cognize pending percepts (candidates only; never auto-commits Narrative)
+twin cognize run
 
-# Optional: review atomic candidates before episode work
+# Optional: review candidates before further Cognize work
 twin review
 # or UI: twin serve   → http://127.0.0.1:8765
 
-# Episodes + trajectory reflect (+ optional judgment drafts)
-twin meditate --full
+# Re-run Cognize after review / more evidence
+twin cognize run
 ```
 
-What `meditate` runs in [ARCHITECTURE — CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
-Stage-by-stage alternative in [§ Correlation](#4-correlation-and-meditation).
+What Cognize runs in [ARCHITECTURE — CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
+Stage-by-stage alternative in [§ Cognize and episodes](#4-cognize-and-episodes).
 
 ```bash
 # Confirm trajectory / remaining candidates
 twin review
 # or UI: twin serve   → http://127.0.0.1:8765
 
-# Inspect what correlation built
+# Inspect what Cognize built
 twin episode list
 twin episode show <episode_id>
 ```
 
-Do **not** use `twin extract -A` unless you explicitly want auto-confirm
-for a throwaway sandbox — Judgment stays human-gated either way.
+Prefer `twin review` and `twin narrative commit` over auto-confirm paths —
+Stance stays human-gated either way.
 
 ### 1.5 Ask in a fresh conversation
 
@@ -172,12 +172,12 @@ meeting JSON under `examples/`:
 
 ```bash
 twin ingest examples/docs examples/transcripts examples/meetings
-twin extract
+twin cognize run
 twin review
 twin pack "What was decided about webhooks?" --domain technical
 ```
 
-Sensors turn files into percepts; extract still creates candidates only.
+Sensors turn files into percepts; Cognize still creates candidates only.
 Same human gates as above.
 
 ---
@@ -192,45 +192,44 @@ twin runtime start
 
 # terminal B — after new activity in sources
 twin connector sync-due                 # or: twin connector sync <id>
-twin extract
-twin meditate --incremental             # cheap path; dirty partitions only
+twin cognize run
 twin review
 ```
 
-Use `--full` on correlate/meditate as a **correctness oracle** after
+Re-run `twin cognize run` as a **correctness oracle** after
 schema/logic changes or when you suspect drift — not on every sync.
-Incremental details: [CLI.md — Correlation](CLI.md#correlation--episode-cognition).
+Details: [CLI.md — Correlation](CLI.md#correlation--episode-cognition).
 
 Scheduled consolidation (also needs runtime):
 
 ```bash
 twin consolidate daily                  # dry-run by default
 twin consolidate daily --apply
-twin consolidate weekly --apply         # + judgment drafts from patterns
+twin consolidate weekly --apply         # + Stance drafts from patterns
 ```
 
 ---
 
-## 4. Correlation and meditation
+## 4. Cognize and episodes
 
-Happy path is `twin meditate` (already used above). Stage-by-stage:
+Happy path is `twin cognize run` (already used above). Stage-by-stage:
 
 ```bash
-twin correlate --full                   # sensory → … → cortex (phases + edges)
+twin cognize run                        # Sense→Cognize; builds arcs when evidence allows
 twin episode list                       # consolidate=ready ⇒ ≥2 phases
 twin episode reflect <episode_id>       # trajectory MemoryCandidates
 twin episode reflect <episode_id> --dry-run
 twin review
-twin judgment propose-episode <episode_id>   # after trajectory memories confirmed
-twin judgment preview <proposal_id>
-# twin judgment approve …               # human only
+twin stance propose-episode <episode_id>   # after trajectory memories confirmed
+twin stance preview <proposal_id>
+# twin stance approve …                 # human only
 ```
 
 | Signal | Meaning |
 |---|---|
 | Stage **deferred** | Chat model unreachable — start/fix provider, re-run. Prior phases/edges kept. |
 | `extractor=heuristic` | Semantic episode stages blocked on purpose. |
-| Atomic review ≠ trajectory review | Extract candidates and reflect candidates are separate queues. |
+| Atomic review ≠ trajectory review | Cognize candidates and reflect candidates are separate queues. |
 
 ---
 
@@ -248,7 +247,7 @@ twin native bindings                    # inspect open bindings
 | SessionStart | Bind session; may inject pack if domain known |
 | UserPromptSubmit | Observe; search-vote domain; may inject pack |
 | PostToolUse / Stop | Observe (Stop ≠ end of Twin session) |
-| SessionEnd | Close binding; enqueue `session_complete` → summary percept → extract candidates |
+| SessionEnd | Close binding; enqueue `session_complete` → summary percept → Cognize candidates |
 
 Fail-open and deadlines: [NATIVE.md](NATIVE.md). Prefer native for
 lifecycle; keep MCP for mid-task tools (search, review, connectors).
@@ -328,9 +327,6 @@ pytest -q
 
 Install in [SETUP.md](SETUP.md). Interfaces in [INTERFACES.md](INTERFACES.md). Overview in [README](../README.md).
 
-## Command Center and v2 verbs
-
 Prefer `twin cognize run`, `twin narrative …`, `twin stance …`, `twin inject pack`.
-Legacy `extract` / `meditate` / `correlate` / `judgment` / `memory` warn and remain
-as aliases. On a TTY, bare `twin` opens the [Command Center](COMMAND_CENTER.md).
+On a TTY, bare `twin` opens the [Command Center](COMMAND_CENTER.md).
 

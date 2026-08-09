@@ -444,10 +444,9 @@ class McpScreen(Screen):
             "MCP\n\n"
             "Process identity: TWIN_MCP_CLIENT + TWIN_MCP_CLIENT_TOKEN\n"
             "Setup: twin setup mcp <client>\n"
-            "Preferred pack: inject_context_pack\n"
+            "Pack: inject_context_pack\n"
             "Narratives: narrative_list / narrative_show\n"
             "Stance: stance_list / stance_proposals\n"
-            "Legacy: memory_safe_context_pack (deprecated)\n"
         )
         self.query_one("#mcp-body", Static).update(body)
 
@@ -457,7 +456,7 @@ class PaletteScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Input(placeholder="fuzzy v2 verbs…", id="palette-input")
+        yield Input(placeholder="fuzzy verbs…", id="palette-input")
         yield ListView(id="palette-list")
         yield Footer()
 

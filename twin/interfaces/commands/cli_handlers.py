@@ -4,20 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import Optional
 
 from twin.workspace import Workspace
-
-
-def _legacy_warn(args, *, legacy: str, prefer: str) -> Optional[str]:
-    msg = f"deprecated: `twin {legacy}` — prefer `twin {prefer}`"
-    setattr(args, "_deprecation", msg)
-    if getattr(args, "json", False):
-        return msg
-    from twin.interfaces import ux
-
-    ux.print_warn(msg)
-    return msg
 
 
 def _print(data) -> None:
@@ -29,14 +17,8 @@ def _want_json(args) -> bool:
 
 
 def _emit(args, data, pretty) -> None:
-    """Machine path when ``--json`` is set, else the human ``pretty`` callable.
-
-    ``data`` is JSON-serialised (``_print``) for scripts; ``pretty`` renders the
-    branded human view. Keeps every ported command's ``--json`` branch uniform.
-    """
+    """Machine path when ``--json`` is set, else the human ``pretty`` callable."""
     if _want_json(args):
-        if isinstance(data, dict) and getattr(args, "_deprecation", None):
-            data = {**data, "deprecated": getattr(args, "_deprecation")}
         _print(data)
         return
     pretty()
@@ -107,7 +89,7 @@ def cmd_init(args) -> None:
     )
     ux.print_legend([
         ("1", "twin ingest <paths>  — sense docs / transcripts"),
-        ("2", "twin extract         — interpret into memories"),
+        ("2", "twin cognize run     — interpret pending percepts"),
         ("3", "twin review          — approve / reject candidates"),
         ("4", "twin doctor          — verify local setup"),
         ("5", "twin setup mcp cursor — wire MCP client"),
@@ -127,7 +109,7 @@ def cmd_ingest(args) -> None:
     ])
     ux.print_panel(
         "Sensors read files into percepts (raw observations).\n"
-        "Duplicates are skipped. Run twin extract next to interpret.",
+        "Duplicates are skipped. Run twin cognize run next.",
         title="what this does",
     )
     with ux.spinner(f"Sensing {len(paths)} path(s)…"):
@@ -151,7 +133,7 @@ def cmd_ingest(args) -> None:
         ux.print_dim("skipped: 0")
 
     ux.print_legend([
-        ("→", "twin extract   — interpret pending percepts"),
+        ("→", "twin cognize run   — interpret pending percepts"),
         ("→", "twin interpret status — see queue health"),
         ("→", "twin review    — after extract creates candidates"),
     ], title="next")
@@ -237,131 +219,11 @@ def cmd_interpret(args) -> None:
         ])
         pending = never + counts.get("deferred", 0) + counts.get("error", 0)
         if pending:
-            ux.print_next([("→", "twin extract   — interpret pending percepts")])
+            ux.print_next([("→", "twin cognize run   — interpret pending percepts")])
         else:
             ux.print_ok("nothing pending interpretation")
 
     _emit(args, data, pretty)
-
-
-def cmd_extract(args) -> None:
-    from twin.cognition import extract_pending
-    from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
-    from twin.cognize.gate import require_chat_llm
-    from twin.memory.models import MemoryStatus
-    from twin.interfaces import ux
-    import os
-
-    _legacy_warn(args, legacy="extract", prefer="cognize run")
-    ws = Workspace(args.home)
-    gate = require_chat_llm(
-        extractor=ws.cfg.extractor,
-        chat_provider=ws.cfg.normalized_llm_provider,
-        allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
-    )
-    if gate.halted:
-        ux.print_rule("extract")
-        ux.print_warn(
-            f"Cognize halted: {gate.halt_reason.value if gate.halt_reason else 'unknown'}"
-            f" — {gate.detail}"
-        )
-        ux.print_dim("Sense may still ingest; no cognitive writes without a chat LLM.")
-        if getattr(args, "json", False):
-            _emit(args, {
-                "ok": False,
-                "halted": True,
-                "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
-                "detail": gate.detail,
-            }, None)
-        return
-
-    pending = ws.store.percepts_pending_interpretation(
-        max_attempts=MAX_INTERPRETATION_ATTEMPTS,
-    )
-    ux.print_rule("extract")
-    if not pending:
-        ux.print_warn("nothing to interpret (all percepts already interpreted or deferred)")
-        return
-
-    auto = bool(getattr(args, "auto_approve", False))
-    if auto and getattr(args, "commit_narratives", False):
-        raise SystemExit(
-            "--auto-approve cannot commit Narratives; use twin narrative commit"
-        )
-    ux.print_dim(
-        f"{len(pending)} percept(s) · model={ws.cfg.resolved_llm_model} · "
-        f"provider={ws.cfg.normalized_llm_provider}"
-        + (" · auto-approve ON (memories only; never Narratives)" if auto else "")
-    )
-
-    details: list[str] = []
-
-    with ux.progress_bar(len(pending), description="Extracting") as advance:
-        def on_progress(done, total, percept, report) -> None:
-            short = percept.id[:10]
-            if report.deferred:
-                label = f"{short} deferred"
-                st = ws.store.get_interpretation(report.percept_id)
-                detail = (st.detail if st else "") or report.interpretation_status
-                fclass = (st.failure_class if st else "") or "-"
-                why = (
-                    "model unreachable — start Ollama / check TWIN_OLLAMA_URL"
-                    if report.interpretation_status == "deferred"
-                    else "interpreter call failed (timeout/schema/HTTP)"
-                )
-                details.append(
-                    f"{report.percept_id}: {report.interpretation_status.upper()} "
-                    f"({fclass}) — {why}"
-                )
-                if detail:
-                    details.append(f"  detail: {detail}")
-            else:
-                label = f"{short} +{len(report.inserted)}"
-                details.append(
-                    f"{report.percept_id}: {len(report.inserted)} memories via "
-                    f"{report.extractor} ({report.flagged_for_review} to review, "
-                    f"{report.duplicates} duplicates, "
-                    f"{report.pii_findings} PII findings masked)"
-                )
-            advance(label)
-
-        reports = extract_pending(
-            ws.store, ws.cfg, ws.embedder, on_progress=on_progress,
-        )
-
-    for line in details:
-        ux.print_dim(line) if line.startswith("  ") else print(line)
-
-    total = sum(len(r.inserted) for r in reports)
-    review = sum(r.flagged_for_review for r in reports)
-    dups = sum(r.duplicates for r in reports)
-    deferred = sum(1 for r in reports if r.deferred)
-    ux.print_ok(
-        f"total: {total} new, {review} queued for review, {dups} duplicates, "
-        f"{deferred} deferred"
-    )
-
-    if auto:
-        approved = 0
-        for r in reports:
-            for mid in r.inserted:
-                mem = ws.store.get_memory(mid)
-                if mem is None:
-                    continue
-                if mem.status.value in ("candidate", "confirmed"):
-                    # confirm candidates; leave already-confirmed alone
-                    if mem.status.value == "candidate":
-                        ws.store.set_status(mid, MemoryStatus.confirmed)
-                        approved += 1
-        ux.print_ok(f"auto-approved {approved} memory(ies) — skipped review queue")
-    elif review:
-        ux.print_dim("next: twin review   (or re-run with --auto-approve / -A)")
-
-    if deferred:
-        ux.print_dim(
-            "pending percepts stay eligible — inspect with "
-            "'twin interpret deferred' then re-run 'twin extract'"
-        )
 
 
 def cmd_review(args) -> None:
@@ -515,21 +377,20 @@ def cmd_review_batch(args) -> None:
         _emit(args, data, pretty)
 
 
-def cmd_memory(args) -> None:
+def _narrative_lifecycle(args) -> None:
     from twin.interfaces import ux
     from twin.memory.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
 
-    _legacy_warn(args, legacy="memory", prefer="narrative")
     from twin.memory.provenance import memory_provenance
 
     ws = Workspace(args.home)
-    if args.memory_command == "diff":
+    if args.narrative_command == "diff":
         a, b = ws.store.get_memory(args.id_a), ws.store.get_memory(args.id_b)
         if not a or not b:
             raise SystemExit("memory not found")
 
         def pretty():
-            ux.print_rule("memory diff")
+            ux.print_rule("narrative diff")
             ux.print_panel(f"{a.title}\n\n{a.summary}", title=f"A · {a.id}")
             ux.print_panel(f"{b.title}\n\n{b.summary}", title=f"B · {b.id}")
 
@@ -537,28 +398,28 @@ def cmd_memory(args) -> None:
             "a": {"id": a.id, "title": a.title, "summary": a.summary},
             "b": {"id": b.id, "title": b.title, "summary": b.summary},
         }, pretty)
-    elif args.memory_command == "merge":
+    elif args.narrative_command == "merge":
         result = merge_memories(ws.store, args.ids, embedder=ws.embedder)
         merged = result.extras.get("merged_id")
 
         def pretty():
-            ux.print_rule("memory merge")
+            ux.print_rule("narrative merge")
             ux.print_ok(f"merged {len(args.ids)} → {merged}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
         _emit(args, {"merged_id": merged, "operation_id": result.operation_id}, pretty)
-    elif args.memory_command == "split":
+    elif args.narrative_command == "split":
         parts = [{"title": p, "summary": p} for p in args.parts]
         result = split_memory(ws.store, args.memory_id, parts, embedder=ws.embedder)
         children = result.extras.get("children")
 
         def pretty():
-            ux.print_rule("memory split")
+            ux.print_rule("narrative split")
             ux.print_ok(f"split {args.memory_id} → {children}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
         _emit(args, {"children": children, "operation_id": result.operation_id}, pretty)
-    elif args.memory_command == "provenance":
+    elif args.narrative_command == "provenance":
         prov = memory_provenance(ws.store, args.memory_id)
 
         def pretty():
@@ -566,32 +427,32 @@ def cmd_memory(args) -> None:
             ux.print_panel(json.dumps(prov, indent=2, default=str), title="lineage")
 
         _emit(args, prov, pretty)
-    elif args.memory_command == "archive":
+    elif args.narrative_command == "archive":
         result = archive_memory(ws.store, args.memory_id)
 
         def pretty():
-            ux.print_rule("memory archive")
+            ux.print_rule("narrative archive")
             ux.print_ok(f"archived {args.memory_id}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
         _emit(args, {"archived": args.memory_id, "operation_id": result.operation_id}, pretty)
-    elif args.memory_command == "unsupported":
+    elif args.narrative_command == "unsupported":
         rows = [{"id": m.id, "title": m.title}
                 for m in ws.store.list_memories(status="unsupported", limit=200)]
 
         def pretty():
-            ux.print_rule("memory · unsupported")
+            ux.print_rule("narrative · unsupported")
             if not rows:
-                ux.print_ok("no unsupported memories")
+                ux.print_ok("no unsupported items")
                 return
-            ux.print_table(["memory", "title"], [[r["id"], r["title"]] for r in rows])
+            ux.print_table(["id", "title"], [[r["id"], r["title"]] for r in rows])
 
         _emit(args, {"unsupported": rows, "count": len(rows)}, pretty)
-    elif args.memory_command == "undo":
+    elif args.narrative_command == "undo":
         out = undo_operation(ws.store, args.operation_id)
 
         def pretty():
-            ux.print_rule("memory undo")
+            ux.print_rule("narrative undo")
             ux.print_ok(f"reverted operation {args.operation_id}")
             ux.print_panel(json.dumps(out, indent=2, default=str), title="result")
 
@@ -1251,17 +1112,17 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
         ux.print_panel(str(proposal["reason"]), title="why this proposal")
 
     token = preview.get("preview_token") or ""
-    approve = f"twin judgment approve {proposal_id} --token {token}"
+    approve = f"twin stance approve {proposal_id} --token {token}"
     if durable or stability == "constitutional":
         approve += " --constitutional"
     ux.print_next([
         ("→", approve),
-        ("→", f'twin judgment reject {proposal_id} --reason "…"'),
-        ("→", f"twin judgment defer {proposal_id}"),
+        ("→", f'twin stance reject {proposal_id} --reason "…"'),
+        ("→", f"twin stance defer {proposal_id}"),
     ])
 
 
-def cmd_judgment(args) -> None:
+def _stance_ops(args) -> None:
     from twin.interfaces import ux
     from twin.judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
     from twin.judgment.proposals import (
@@ -1272,32 +1133,31 @@ def cmd_judgment(args) -> None:
     from twin.judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
     from twin.judgment.versions import active_items
 
-    _legacy_warn(args, legacy="judgment", prefer="stance")
 
     ws = Workspace(args.home)
-    cmd = args.judgment_command
+    cmd = args.stance_command
     if cmd == "list":
         items = active_items(ws.store)
         rows = [{"id": i.id, "kind": i.kind.value, "statement": i.statement} for i in items]
 
         def pretty():
-            ux.print_rule("judgment · items")
+            ux.print_rule("stance · items")
             if not rows:
-                ux.print_warn("no active judgment items")
+                ux.print_warn("no active stance items")
                 return
             ux.print_table(
                 ["id", "kind", "statement"],
                 [[r["id"], r["kind"], (r["statement"] or "")[:80]] for r in rows],
             )
 
-        _emit(args, {"items": rows, "count": len(rows), "deprecated": "use twin stance list"}, pretty)
+        _emit(args, {"items": rows, "count": len(rows)}, pretty)
     elif cmd == "show":
         item = ws.store.get_judgment_item(args.judgment_id)
         if item is None:
             raise SystemExit("not found")
 
         def pretty():
-            ux.print_rule(f"judgment · {item.id}")
+            ux.print_rule(f"stance · {item.id}")
             ux.print_panel(item.model_dump_json(indent=2), title=item.kind.value)
 
         _emit(args, item.model_dump(mode="json"), pretty)
@@ -1311,7 +1171,7 @@ def cmd_judgment(args) -> None:
         ]
 
         def pretty():
-            ux.print_rule(f"judgment history · {args.judgment_id}")
+            ux.print_rule(f"stance history · {args.judgment_id}")
             ux.print_kv([("supersedes", str(item.supersedes or "—"))])
             if versions:
                 ux.print_table(
@@ -1328,7 +1188,7 @@ def cmd_judgment(args) -> None:
         ]
 
         def pretty():
-            ux.print_rule("judgment · versions")
+            ux.print_rule("stance · versions")
             if not rows:
                 ux.print_warn("no versions")
                 return
@@ -1399,7 +1259,7 @@ def cmd_judgment(args) -> None:
             ux.print_rule("judgment · propose")
             ux.print_ok(f"proposal {p.id}")
             ux.print_dim(p.reason)
-            ux.print_next([("→", f"twin judgment preview {p.id}")])
+            ux.print_next([("→", f"twin stance preview {p.id}")])
 
         _emit(args, {"id": p.id, "reason": p.reason}, pretty)
     elif cmd == "propose-episode":
@@ -1427,7 +1287,7 @@ def cmd_judgment(args) -> None:
             ux.print_rule("judgment · propose-episode")
             ux.print_ok(f"proposal {p.id}")
             ux.print_dim(p.reason)
-            ux.print_next([("→", f"twin judgment preview {p.id}")])
+            ux.print_next([("→", f"twin stance preview {p.id}")])
 
         _emit(args, {"id": p.id, "reason": p.reason, "episode_id": args.episode_id},
               pretty)
@@ -1783,7 +1643,7 @@ def cmd_connector(args) -> None:
             ux.print_next([
                 ("→", f"twin connector auth {inst.id}      — verify credential"),
                 ("→", f"twin connector sync {inst.id}      — first sync pass"),
-                ("→", "twin extract                        — interpret percepts"),
+                ("→", "twin cognize run                    — interpret percepts"),
                 ("→", "twin review                         — approve candidates"),
             ])
 
@@ -1876,7 +1736,7 @@ def cmd_connector(args) -> None:
             else:
                 ux.print_warn(f"sync finished with health={result.health.value}")
             if result.percepts:
-                ux.print_next([("→", "twin extract   — interpret the new percepts")])
+                ux.print_next([("→", "twin cognize run   — interpret the new percepts")])
 
         _emit(args, data, pretty)
     elif cmd == "github":
@@ -2916,7 +2776,7 @@ def _cognition_next_steps(report) -> list[tuple[str, str]]:
     if "jsondecode" in details or "schema" in details or "error:" in details:
         nexts.append((
             "→",
-            "model returned unusable output — re-run twin meditate "
+            "model returned unusable output — re-run twin cognize run "
             "(or try a smaller/stricter chat model via TWIN_LLM_MODEL)",
         ))
         return nexts
@@ -2926,223 +2786,6 @@ def _cognition_next_steps(report) -> list[tuple[str, str]]:
             "twin doctor   # confirm Ollama/chat model loads; then re-run",
         ))
     return nexts
-
-
-def cmd_correlate(args) -> None:
-    from twin.interfaces import ux
-    from twin.cognition.episode_pipeline import (
-        STAGE_ORDER,
-        BrainStage,
-        run_episode_cognition,
-    )
-
-    _legacy_warn(args, legacy="correlate", prefer="cognize run")
-    ws = Workspace(args.home)
-    mode = getattr(args, "mode", "full")
-    until = getattr(args, "until", "cortex") or "cortex"
-    try:
-        until_stage = BrainStage(until)
-    except ValueError:
-        raise SystemExit(
-            f"unknown --until stage '{until}'. choose one of: "
-            + ", ".join(s.value for s in STAGE_ORDER
-                        if s != BrainStage.hippocampus_consolidate
-                        and s != BrainStage.prefrontal)
-        )
-    chain = " → ".join(
-        s.value for s in STAGE_ORDER
-        if STAGE_ORDER.index(s) <= STAGE_ORDER.index(until_stage)
-    )
-    with _work_spinner(args, f"correlating ({mode}) · sensory→{until}…"):
-        report = run_episode_cognition(
-            ws.store, ws.cfg, ws.embedder,
-            connector_ids=args.connector or None,
-            detect_conflicts=not args.no_conflicts,
-            mode=mode,
-            until=until_stage,
-        )
-    corr = report.correlation
-    data = dict(report.to_dict())
-    data["records_scanned"] = corr.records_scanned if corr else 0
-
-    def pretty():
-        ux.print_rule(f"correlate · {mode}")
-        ux.print_dim(f"stages: {chain}")
-        ux.print_kv(_stage_status_line(report))
-        if report.episode_ids:
-            rows = []
-            for eid in report.episode_ids[:40]:
-                ep = ws.store.get_work_episode(eid)
-                if ep is None:
-                    continue
-                n_phases = len(ws.store.list_episode_phases(ep.id))
-                n_edges = len(ws.store.list_episode_edges(ep.id))
-                cons = "ready" if n_phases >= 2 else "—"
-                rows.append([
-                    ep.id,
-                    getattr(ep.status, "value", ep.status),
-                    _clip(ep.vault_id or "—", 16),
-                    str(n_phases),
-                    str(n_edges),
-                    cons,
-                    _clip(ep.title or "", 32),
-                ])
-            ux.print_table(
-                ["id", "status", "vault", "ph", "ed", "consolidate", "title"],
-                rows,
-            )
-            if len(report.episode_ids) > 40:
-                ux.print_dim(f"… {len(report.episode_ids) - 40} more episode(s)")
-        elif mode == "incremental" and data["records_scanned"] == 0:
-            ux.print_dim("nothing dirty — incremental pass was a no-op")
-        else:
-            ux.print_warn("no episodes touched this pass")
-
-        nexts = _cognition_next_steps(report)
-        if not nexts:
-            if until_stage != BrainStage.cortex and \
-                    STAGE_ORDER.index(until_stage) < STAGE_ORDER.index(BrainStage.cortex):
-                nexts.append(("→", "twin correlate   # continue to cortex "
-                                   "(phases + edges)"))
-            else:
-                nexts.append(("→", "twin episode list"))
-                nexts.append(("→", "twin meditate    # reflect → review → judgment"))
-        ux.print_next(nexts)
-
-    _emit(args, data, pretty)
-
-
-def cmd_meditate(args) -> None:
-    """Orchestrate the cognition chain up to the human gates.
-
-    sensory → amygdala → basal → hippocampus_bind → cortex →
-    hippocampus_consolidate → [optional review] → prefrontal (drafts only).
-    Never auto-confirms Memory nor auto-approves Judgment.
-    Prefer ``twin cognize`` for the Cognize pipeline.
-    """
-    import os
-    import sys
-
-    from twin.interfaces import ux
-    from twin.cognition.episode_pipeline import BrainStage, run_episode_cognition
-    from twin.cognize.gate import require_chat_llm
-
-    _legacy_warn(args, legacy="meditate", prefer="cognize run")
-    ws = Workspace(args.home)
-    gate = require_chat_llm(
-        extractor=ws.cfg.extractor,
-        chat_provider=ws.cfg.normalized_llm_provider,
-        allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
-    )
-    if gate.halted:
-        payload = {
-            "ok": False,
-            "halted": True,
-            "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
-            "detail": gate.detail,
-            "stages": [],
-            "review_ran": False,
-            "episode_ids": [],
-            "candidate_ids": [],
-            "proposal_ids": [],
-        }
-
-        def pretty_halt():
-            ux.print_rule("meditate · halted")
-            ux.print_warn(
-                f"Cognize halted: {gate.halt_reason.value if gate.halt_reason else 'unknown'}"
-                f" — {gate.detail}"
-            )
-
-        _emit(args, payload, pretty_halt)
-        return
-
-    mode = getattr(args, "mode", "full")
-    no_reflect = bool(getattr(args, "no_reflect", False))
-    no_propose = bool(getattr(args, "no_propose", False))
-    dry = bool(getattr(args, "dry_run", False))
-    limit = int(getattr(args, "limit", 50) or 50)
-    want_review = bool(getattr(args, "review", False))
-
-    # Stop the automated pass before prefrontal so a human review can slot in
-    # between consolidation and judgment drafting.
-    stop = BrainStage.cortex if no_reflect else BrainStage.hippocampus_consolidate
-    with _work_spinner(args, f"meditating ({mode}) · sensory→{stop.value}…"):
-        report = run_episode_cognition(
-            ws.store, ws.cfg, ws.embedder,
-            connector_ids=getattr(args, "connector", None) or None,
-            detect_conflicts=not getattr(args, "no_conflicts", False),
-            mode=mode, until=stop, reflect_limit=limit, dry_run=dry,
-        )
-
-    review_ran = False
-    is_tty = getattr(sys.stdin, "isatty", lambda: False)() and not getattr(args, "json", False)
-    if want_review and report.candidate_ids and not dry and is_tty:
-        shim = argparse.Namespace(
-            home=args.home, analyze=False, conflicts=False,
-            project=None, priority=None, json=False,
-        )
-        try:
-            cmd_review(shim)
-            review_ran = True
-        except SystemExit:
-            pass
-
-    # prefrontal: draft judgment proposals from now-confirmed trajectories.
-    proposal_ids: list[str] = []
-    if not no_reflect and not no_propose and not dry:
-        from twin.judgment.proposals import propose_from_episode
-
-        for eid in report.episode_ids:
-            try:
-                proposal = propose_from_episode(ws.store, eid)
-            except Exception:
-                continue
-            if proposal is not None:
-                proposal_ids.append(proposal.id)
-        report.proposal_ids = proposal_ids
-        pre = report.stage(BrainStage.prefrontal)
-        from twin.cognition.episode_pipeline import StageStatus as _SS
-        pre.status = _SS.ok
-        pre.detail = "drafts from confirmed trajectories"
-        if proposal_ids:
-            pre.counts["proposals"] = len(proposal_ids)
-
-    data = dict(report.to_dict())
-    data["review_ran"] = review_ran
-
-    def pretty():
-        ux.print_rule(f"meditate · {mode}")
-        chain = "sensory → amygdala → basal → hippocampus_bind → cortex"
-        if not no_reflect:
-            chain += " → hippocampus_consolidate"
-        if not no_reflect and not no_propose:
-            chain += " → prefrontal"
-        ux.print_dim(f"stages: {chain}")
-        ux.print_kv(_stage_status_line(report))
-        ux.print_kv([
-            ("episodes", str(len(report.episode_ids))),
-            ("candidates", str(len(report.candidate_ids))),
-            ("proposals", str(len(report.proposal_ids))),
-        ])
-        if report.candidate_ids:
-            ux.print_dim("new trajectory candidate(s): "
-                         + ", ".join(report.candidate_ids[:6])
-                         + (" …" if len(report.candidate_ids) > 6 else ""))
-        if report.proposal_ids:
-            ux.print_dim("judgment draft(s): " + ", ".join(report.proposal_ids[:6]))
-
-        nexts = _cognition_next_steps(report)
-        if not nexts:
-            if report.candidate_ids and not review_ran:
-                nexts.append(("→", "twin review      # confirm trajectory candidates"))
-            if report.proposal_ids:
-                nexts.append(("→", "twin judgment preview <proposal_id>"))
-            if not report.candidate_ids and not report.proposal_ids:
-                nexts.append(("→", "twin episode list"))
-        ux.print_next(nexts)
-
-    _emit(args, data, pretty)
 
 
 def cmd_episode(args) -> None:
@@ -3192,8 +2835,8 @@ def cmd_episode(args) -> None:
         def pretty():
             ux.print_rule("episode · list")
             if not rows:
-                ux.print_warn("no episodes — run twin correlate after connector sync")
-                ux.print_next([("→", "twin correlate")])
+                ux.print_warn("no episodes — run twin cognize run after connector sync")
+                ux.print_next([("→", "twin cognize run")])
                 return
             for r in rows:
                 print(
@@ -3207,12 +2850,12 @@ def cmd_episode(args) -> None:
                 ux.print_dim(f"{ready_n} consolidate-ready (cortex built ≥2 phases)")
             else:
                 ux.print_dim(
-                    "none consolidate-ready — run twin correlate so the cortex "
+                    "none consolidate-ready — run twin cognize run so the cortex "
                     "stage (LLM) builds phases; deferred if the model is down"
                 )
             ux.print_next([
                 ("→", "twin episode show <id>"),
-                ("→", "twin meditate                # reflect ready episodes"),
+                ("→", "twin cognize run                # reflect ready episodes"),
             ])
 
         _emit(args, {"episodes": rows, "count": len(rows)}, pretty)
@@ -3292,7 +2935,7 @@ def cmd_episode(args) -> None:
             else:
                 ux.print_warn(
                     "no phases — the cortex stage (LLM) builds them; "
-                    "run twin correlate (deferred if the model is down)"
+                    "run twin cognize run (deferred if the model is down)"
                 )
             if edges:
                 ux.print_table(
@@ -3314,7 +2957,7 @@ def cmd_episode(args) -> None:
             else:
                 nexts.append((
                     "→",
-                    "no arc yet — run twin correlate so cortex builds phases",
+                    "no arc yet — run twin cognize run so cortex builds phases",
                 ))
             if edges:
                 nexts.append(("→", "twin episode confirm-edge <edge_id>  "
@@ -3345,8 +2988,8 @@ def cmd_episode(args) -> None:
         def pretty():
             ux.print_rule(f"episode phases · {ep.id}")
             if not rows:
-                ux.print_warn("no phases — run twin correlate first")
-                ux.print_next([("→", "twin correlate")])
+                ux.print_warn("no phases — run twin cognize run first")
+                ux.print_next([("→", "twin cognize run")])
                 return
             for r in rows:
                 ux.print_kv([
@@ -3382,8 +3025,8 @@ def cmd_episode(args) -> None:
         def pretty():
             ux.print_rule(f"episode edges · {ep.id}")
             if not rows:
-                ux.print_warn("no edges — run twin correlate first")
-                ux.print_next([("→", "twin correlate")])
+                ux.print_warn("no edges — run twin cognize run first")
+                ux.print_next([("→", "twin cognize run")])
                 return
             ux.print_table(
                 ["id", "relation", "status", "conf", "from → to"],
@@ -3471,7 +3114,7 @@ def cmd_episode(args) -> None:
                     ])
                 else:
                     ux.print_next([
-                        ("→", "twin correlate   # run cortex to build the arc"),
+                        ("→", "twin cognize run   # run cortex to build the arc"),
                         ("→", "twin episode list"),
                     ])
                 return
@@ -3489,7 +3132,7 @@ def cmd_episode(args) -> None:
             if result.claims and not dry:
                 ux.print_next([
                     ("→", "twin review"),
-                    ("→", f"twin judgment propose-episode {ep.id}  "
+                    ("→", f"twin stance propose-episode {ep.id}  "
                           "# after confirming trajectory candidates"),
                 ])
 
@@ -3715,8 +3358,8 @@ def cmd_usage(args) -> None:
         ux.print_rule(f"usage · {span}")
         t = report["totals"]
         if not rows:
-            ux.print_warn("no usage recorded yet — any model call (extract, "
-                          "observe, correlate, meditate, reflect, pattern, cloud "
+            ux.print_warn("no usage recorded yet — any model call (cognize, "
+                          "observe, reflect, pattern, cloud "
                           "embeddings) is recorded here automatically")
             ux.print_dim(f"ledger: {default_ledger_path(ws.cfg.home)}")
             return
@@ -3852,6 +3495,9 @@ def cmd_narrative(args) -> None:
 
     ws = Workspace(args.home)
     sub = getattr(args, "narrative_command", None)
+    if sub in ("diff", "merge", "split", "provenance", "archive", "unsupported", "undo"):
+        _narrative_lifecycle(args)
+        return
     if sub == "show":
         data = cognize_cmd.narrative_show(ws, args)
     elif sub == "commit-preview":
@@ -3878,15 +3524,20 @@ def cmd_stance(args) -> None:
     from twin.interfaces import ux
     from twin.interfaces.commands import cognize_cmd
 
-    ws = Workspace(args.home)
-    data = cognize_cmd.stance_list(ws, args)
-    if getattr(args, "json", False):
-        _emit(args, data, None)
+    cmd = getattr(args, "stance_command", None) or "list"
+    if cmd == "list":
+        ws = Workspace(args.home)
+        data = cognize_cmd.stance_list(ws, args)
+        if getattr(args, "json", False):
+            _emit(args, data, None)
+            return
+        ux.print_rule("stance")
+        ux.print_ok(f"{data.get('count', 0)} stance(s)")
+        for s in data.get("stances") or []:
+            print(f"  [{s.get('status')}] {s.get('kind')}: {s.get('statement')[:120]}")
         return
-    ux.print_rule("stance")
-    ux.print_ok(f"{data.get('count', 0)} stance(s)")
-    for s in data.get("stances") or []:
-        print(f"  [{s.get('status')}] {s.get('kind')}: {s.get('statement')[:120]}")
+    args.stance_command = cmd
+    _stance_ops(args)
 
 
 def cmd_inject(args) -> None:

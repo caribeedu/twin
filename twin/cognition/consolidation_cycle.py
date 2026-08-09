@@ -5,11 +5,11 @@ cycles run on a logical window over the store — quality analysis, safe
 automation, temporal belief/goal refresh, closed-session inventory, open
 tasks, review backlog prep, cognitive change report, episode cortex
 (sensory→cortex) + episode reflect (both daily and weekly), and (weekly)
-optional judgment *proposals*. They never confirm Memory or Judgment.
+optional Stance *proposals*. They never confirm Memory or Stance.
 
-``twin meditate`` remains the human orchestrator (optional interactive review
-+ prefrontal drafts); daily/weekly automation only runs the non-interactive
-slices.
+Interactive review and Stance drafting stay on human CLI paths
+(``twin review``, ``twin stance``); daily/weekly automation only runs the
+non-interactive slices.
 
 Apply runs are idempotent per ``(kind, window_start, window_end)``. The durable
 runtime may enqueue these as jobs; this module remains the deterministic core.

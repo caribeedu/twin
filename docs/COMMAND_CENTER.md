@@ -19,7 +19,7 @@ enters the TUI.
 | `n` | Narratives | list with epistemic status / grain |
 | `t` | Stance | list + approve pending proposal (preview token) |
 | `m` | MCP | client env + narrative/stance tool names |
-| `/` | Palette | fuzzy over **v2 verbs** (legacy aliases labeled) |
+| `/` | Palette | fuzzy over Cognize / Narrative / Stance / Inject verbs |
 
 Screens call `twin.interfaces.center.actions` — same store/CLI functions, no duplicated logic.
 
@@ -30,5 +30,5 @@ Screens call `twin.interfaces.center.actions` — same store/CLI functions, no d
 ## Notes
 
 - Does not embed Cognize LLM work in the TUI process — triggers jobs / CLI.
-- Primary labels are v2-only (no “Memory” screen title).
+- Primary labels use Cognize / Narrative / Stance (no “Memory” screen title).
 - See [CLI.md](CLI.md), [ARCHITECTURE.md](ARCHITECTURE.md).

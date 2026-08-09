@@ -97,18 +97,11 @@ Workbench: `#narratives` panel.
 **Rule (dual-read):** confirmed memories map to provisional **Narratives**;
 candidates (and any `needs_review` rows) map to competing **Interpretations**.
 
-| Legacy | Cognize | Notes |
+| Prior row | Cognize | Notes |
 |---|---|---|
 | `MemoryStatus.confirmed` | `Narrative` + `EpistemicState` | `migrated_from_memory=true` |
 | `MemoryStatus.candidate` | `Interpretation` (`competing`) | Never auto-commit |
 | `needs_review=true` | `Interpretation` only | Even if status looks confirmed |
-| Judgment items | Stance (alias layer) | Store tables unchanged |
+| Judgment items | Stance | Store tables unchanged |
 
 CLI: `twin narrative backfill` (`--apply` idempotent on `metadata.memory_id`).
-
----
-
-## Legacy episode pipeline
-
-`twin correlate` / `twin meditate` remain aliases toward Cognize; they halt
-without a chat LLM. Prefer `twin cognize run`.

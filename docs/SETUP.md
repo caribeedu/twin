@@ -4,7 +4,7 @@ This document explains how you **install** Twin and complete the
 **first-run wizard** — packages, LLM/embedding providers, configuration
 and tests.
 
-How to operate Twin after install (demo scenario, connectors, meditate,
+How to operate Twin after install (demo scenario, connectors, Cognize,
 native, backup): [OPERATIONS.md](OPERATIONS.md). Surfaces:
 [INTERFACES.md](INTERFACES.md). Why Twin exists:
 [README](../README.md). Local vs cloud reasoning:
@@ -50,7 +50,7 @@ prompts). It:
 
 1. Creates `$TWIN_HOME` (default `~/.twin`).
 2. Copies default `policies.yaml`, `judgment.yaml` and source calibration.
-3. Asks which **chat LLM** to use for extract / observer / episode
+3. Asks which **chat LLM** to use for Cognize / observer / episode
    cognition, then configures **embeddings**.
 4. Writes `~/.twin/env` (loaded by every later Twin process).
 
@@ -68,7 +68,7 @@ reports status — it never blocks on prompts.
 
 When the wizard finishes it prints a **home ready** panel (db, policies,
 judgment, embedder) and a short **next steps** legend (`ingest` /
-`extract` / `review` / `doctor` / `setup mcp`). Full operating loops live
+`cognize` / `review` / `doctor` / `setup mcp`). Full operating loops live
 in [OPERATIONS.md](OPERATIONS.md).
 
 ### Re-run and helpers
@@ -92,7 +92,7 @@ in the shell. Useful knobs:
 | `TWIN_HOME` | `~/.twin` | config directory |
 | `TWIN_DB_URL` | `sqlite:///~/.twin/twin.db` | `postgresql://…` selects Postgres + pgvector |
 | `TWIN_LLM_PROVIDER` | `ollama` | `ollama`, `anthropic`/`claude`, `gemini`/`google`, `openai`/`openai_compatible`, or presets (`groq`, `openrouter`, `lmstudio`, …) |
-| `TWIN_LLM_BASE_URL` / `TWIN_LLM_MODEL` / `TWIN_LLM_API_KEY` | (provider defaults) | chat endpoint for extract, domain resolve, episode stages |
+| `TWIN_LLM_BASE_URL` / `TWIN_LLM_MODEL` / `TWIN_LLM_API_KEY` | (provider defaults) | chat endpoint for Cognize, domain resolve, episode stages |
 | `TWIN_OLLAMA_URL` | `http://127.0.0.1:11434` | local Ollama |
 | `TWIN_OLLAMA_MODEL` | `qwen3.6:latest` | local chat model |
 | `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text-v2-moe` | local embed model |

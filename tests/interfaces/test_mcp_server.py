@@ -30,29 +30,20 @@ async def test_tools_are_registered(server):
     assert {
         "memory_search", "memory_get", "memory_related", "memory_project_context",
         "memory_recent_decisions", "memory_user_preferences",
-        "memory_judgment_profile", "memory_safe_context_pack", "inject_context_pack",
+        "memory_judgment_profile", "inject_context_pack",
         "narrative_list", "narrative_show", "stance_list", "stance_proposals",
-        "memory_observe",
         "judgment_applicable", "judgment_simulate", "judgment_proposals",
         "judgment_proposal_preview", "judgment_proposal_approve",
         "judgment_proposal_reject", "judgment_conflicts", "judgment_version",
         "session_start", "session_observe", "session_complete", "session_feedback",
     } <= tools
+    assert "memory_safe_context_pack" not in tools
+    assert "memory_observe" not in tools
+    assert "get_context_pack" not in tools
 
 
 @pytest.mark.anyio
-async def test_safe_context_pack_tool(server):
-    result = await server.call_tool(
-        "memory_safe_context_pack",
-        {"query": "RFC sobre webhooks do Atlas", "target_domain": "technical"},
-    )
-    payload = json.loads(result[0][0].text)
-    assert "context_pack" in payload
-    assert "blocked" in payload
-    assert "narratives" in payload
-    assert "derived_confidence" in payload
-    assert "deprecated" in payload
-
+async def test_inject_context_pack_tool(server):
     preferred = await server.call_tool(
         "inject_context_pack",
         {"query": "RFC sobre webhooks do Atlas", "target_domain": "technical"},
@@ -60,7 +51,10 @@ async def test_safe_context_pack_tool(server):
     pref = json.loads(preferred[0][0].text)
     assert "deprecated" not in pref
     assert pref.get("tool") == "inject_context_pack"
+    assert "context_pack" in pref
     assert "open_reflections" in pref
+    assert "narratives" in pref
+    assert "derived_confidence" in pref
 
 
 @pytest.mark.anyio
@@ -198,7 +192,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
 
     # 10: another MCP process with the same env identity sees confirmed context
     other = create_server(str(home))
-    pack = await _call(other, "memory_safe_context_pack", {
+    pack = await _call(other, "inject_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
     pack_ids = {s["memory_id"] for s in pack["sources"]}
@@ -208,7 +202,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     # clearing env identity must not inherit local-cli / must not leak
     monkeypatch.delenv(MCP_CLIENT_ENV, raising=False)
     monkeypatch.delenv(MCP_TOKEN_ENV, raising=False)
-    restricted = await _call(other, "memory_safe_context_pack", {
+    restricted = await _call(other, "inject_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
     assert not (set(created) & {s["memory_id"] for s in restricted.get("sources") or []})
@@ -369,12 +363,12 @@ async def test_safe_pack_ignores_tool_supplied_credentials(tmp_path, monkeypatch
     ws.close()
     srv = create_server(str(home))
     tools = {t.name: t for t in await srv.list_tools()}
-    schema = tools["memory_safe_context_pack"].inputSchema
+    schema = tools["inject_context_pack"].inputSchema
     props = (schema or {}).get("properties") or {}
     assert "client" not in props
     assert "client_token" not in props
     # Without env → restricted (no leak via phantom args)
-    pack = await _call(srv, "memory_safe_context_pack", {
+    pack = await _call(srv, "inject_context_pack", {
         "query": "anything", "target_domain": "technical",
         "client": "cursor", "client_token": "ignored",
     })

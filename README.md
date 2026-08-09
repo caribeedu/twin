@@ -538,7 +538,7 @@ concepts without hiding them.
 | Doc | Source of truth for |
 |---|---|
 | **[SETUP.md](docs/SETUP.md)** | Install, first-run wizard, providers, config, tests |
-| **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, meditate, native, review, recovery |
+| **[OPERATIONS.md](docs/OPERATIONS.md)** | How to operate — demo scenario, connectors, cognize, native, review, recovery |
 | **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — Sense → Cognize → Inject, data model, threat model |
 | **[COGNIZE.md](docs/COGNIZE.md)** | Cognize pipeline stages (internal — not the public architecture) |
 | **[EPISTEMICS.md](docs/EPISTEMICS.md)** | Freshness, independence, ACL on derived claims, read-time confidence |
