@@ -103,9 +103,9 @@ Recommended ship order: **v2.0 → v2.1 → v2.2 → v2.3**. T-090 (Center MVP) 
 
 #### v2.2 — Consolidation & accessibility
 
-- [ ] T-051 T-052
-- [ ] T-112 T-113 T-115
-- [ ] `__version__ = 2.2.0` + CHANGELOG + tag `v2.2.0`
+- [x] T-051 T-052
+- [x] T-112 T-113 T-115
+- [x] `__version__ = 2.2.0` + CHANGELOG + tag `v2.2.0`
 
 #### v2.3 — Command Center
 
@@ -168,8 +168,8 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-040 | **v2.0** | P4 | Review queue for Interpretations + always-visible Open Reflections | done |
 | T-041 | **v2.0** | P4 | Stage 9 Commit Narrative + initial EpistemicState | done |
 | T-050 | **v2.1** | P5 | Stage 10 Stance drafts (LLM) + human approve path | done |
-| T-051 | **v2.2** | P5 | Stage 11 Consolidation judgment (nightly LLM, caps) | todo |
-| T-052 | **v2.2** | P5 | Stage 12 Fade / Remarkable + Trace ledger | todo |
+| T-051 | **v2.2** | P5 | Stage 11 Consolidation judgment (nightly LLM, caps) | done |
+| T-052 | **v2.2** | P5 | Stage 12 Fade / Remarkable + Trace ledger | done |
 | T-060 | **v2.0** | P6 | Deterministic stale mark on percept land | done |
 | T-061 | **v2.1** | P6 | Source-class + timestamp metadata for invalidation asymmetry | done |
 | T-070 | **v2.0** | P7 | Inject pack: attach EpistemicState; refuse stale-as-fresh | done |
@@ -188,10 +188,10 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-102 | **v2.1** | P10 | Native pack injection uses v2 pack contract | done |
 | T-110 | **v2.0** | P11 | Eval: stale injection (§9.3 #1) | done |
 | T-111 | **v2.1** | P11 | Eval: correlated-source independence collapse (§9.3 #3) | done |
-| T-112 | **v2.2** | P11 | Eval: disagreement vs agreement attention (§9.3 #4) | todo |
-| T-113 | **v2.2** | P11 | Eval: quiet reversal path (§9.3 #2) | todo |
+| T-112 | **v2.2** | P11 | Eval: disagreement vs agreement attention (§9.3 #4) | done |
+| T-113 | **v2.2** | P11 | Eval: quiet reversal path (§9.3 #2) | done |
 | T-114 | **v2.1** | P11 | Eval: ACL intersection (§9.3 #5) | done |
-| T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | todo |
+| T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | done |
 | T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | todo |
 | T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | todo |
 
@@ -1229,7 +1229,7 @@ Prompts must not treat Stance as factual Narrative.
 
 ## T-051 — Stage 11 Consolidation judgment (nightly LLM, caps)
 
-**Twin version:** `v2.2` · **Phase:** P5 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P5 · **Status:** `done`  
 **Depends on:** T-030, T-041  
 **Blocks:** none critical
 
@@ -1243,9 +1243,9 @@ Retarget `twin consolidate daily|weekly` to this stage (legacy schedule OK). Nev
 
 ### Exit criteria
 
-- [ ] Caps enforced and tested.
-- [ ] Idempotent window apply (`duplicated=True`) preserved.
-- [ ] Halt if no LLM — job retryable, no heuristic consolidation meaning.
+- [x] Caps enforced and tested.
+- [x] Idempotent window apply (`duplicated=True`) preserved.
+- [x] Halt if no LLM — job retryable, no heuristic consolidation meaning.
 
 ### Assumptions
 
@@ -1265,7 +1265,7 @@ Retarget `twin consolidate daily|weekly` to this stage (legacy schedule OK). Nev
 
 ## T-052 — Stage 12 Fade / Remarkable + Trace ledger
 
-**Twin version:** `v2.2` · **Phase:** P5 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P5 · **Status:** `done`  
 **Depends on:** T-041  
 **Blocks:** none critical
 
@@ -1277,9 +1277,9 @@ Retarget `twin consolidate daily|weekly` to this stage (legacy schedule OK). Nev
 
 ### Exit criteria
 
-- [ ] Trace written on pack serve.
-- [ ] Fade recommendations visible in Review/CLI.
-- [ ] Age-only deletion of Narratives does not exist as Cognize policy.
+- [x] Trace written on pack serve.
+- [x] Fade recommendations visible in Review/CLI.
+- [x] Age-only deletion of Narratives does not exist as Cognize policy.
 
 ### Assumptions
 
@@ -1979,7 +1979,7 @@ Use Relation overrides if LLM not in CI.
 
 ## T-112 — Eval: disagreement vs agreement attention (§9.3 #4)
 
-**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `done`  
 **Depends on:** T-037  
 **Blocks:** none
 
@@ -1989,8 +1989,8 @@ Single contradicting artifact (e.g. PR for Feature B while Narrative says Featur
 
 ### Exit criteria
 
-- [ ] Metric documented and asserted.
-- [ ] Echo-agreement control fixture included.
+- [x] Metric documented and asserted.
+- [x] Echo-agreement control fixture included.
 
 ### Assumptions
 
@@ -2008,7 +2008,7 @@ Single contradicting artifact (e.g. PR for Feature B while Narrative says Featur
 
 ## T-113 — Eval: quiet reversal path (§9.3 #2)
 
-**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `done`  
 **Depends on:** T-037, T-061  
 **Blocks:** none
 
@@ -2018,9 +2018,9 @@ Known-wrong Narrative invalidated by a quiet meeting percept with **little subse
 
 ### Exit criteria
 
-- [ ] Challenger Interpretation or open Reflection exists.
-- [ ] Prior Narrative retained (dissent) if superseded in fixture’s later step.
-- [ ] Eval distinguishes drift (lots of talk) vs quiet reversal fixtures.
+- [x] Challenger Interpretation or open Reflection exists.
+- [x] Prior Narrative retained (dissent) if superseded in fixture’s later step.
+- [x] Eval distinguishes drift (lots of talk) vs quiet reversal fixtures.
 
 ### Assumptions
 
@@ -2068,7 +2068,7 @@ Private Slack fact + public PR → derived Narrative must not be visible to a pr
 
 ## T-115 — Research logging: surprise / explanatory_delta (§9.3 #7)
 
-**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `done`  
 **Depends on:** T-037  
 **Blocks:** none
 
@@ -2082,9 +2082,9 @@ Not a ship gate for product, but required instrumentation:
 
 ### Exit criteria
 
-- [ ] Fields queryable from store/CLI.
-- [ ] RESEARCH.md hypothesis section updated.
-- [ ] No product dependency on this metric for Inject floor.
+- [x] Fields queryable from store/CLI.
+- [x] RESEARCH.md hypothesis section updated.
+- [x] No product dependency on this metric for Inject floor.
 
 ### Assumptions
 

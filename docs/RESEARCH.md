@@ -183,3 +183,17 @@ quality?
 Twin should progressively move from remembering events to understanding
 situations, and eventually to assisting human judgment while remaining
 governed and inspectable ([IDENTITY.md](IDENTITY.md)).
+
+## Hypothesis: explanatory power vs support accumulation
+
+**Claim.** Narrative Revision should prefer high *explanatory_delta* /
+disagreement attention over counting agreeing echoes as independent votes.
+
+**Instrumentation.** Stage 6 persists `surprise` and `explanatory_delta` on
+`NarrativeRevisionDecision` (export: `twin research revisions`). Inject floor
+does **not** depend on these fields.
+
+**Eval metric.** `attention_score(surprise, outcome)` — high surprise +
+contradict/supersede/branch beats low surprise + integrate (see
+`tests/evals/test_disagreement_attention.py`).
+

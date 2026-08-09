@@ -3860,6 +3860,8 @@ def cmd_narrative(args) -> None:
         data = cognize_cmd.narrative_commit(ws, args)
     elif sub == "backfill":
         data = cognize_cmd.narrative_backfill(ws, args)
+    elif sub == "accessibility":
+        data = cognize_cmd.narrative_accessibility(ws, args)
     else:
         data = cognize_cmd.narrative_search(ws, args)
     if getattr(args, "json", False):
@@ -3901,4 +3903,22 @@ def cmd_inject(args) -> None:
     n = len(data.get("narratives") or [])
     r = len(data.get("open_reflections") or [])
     ux.print_dim(f"narratives={n} open_reflections={r}")
+
+
+def cmd_research(args) -> None:
+    from twin.interfaces import ux
+    from twin.interfaces.commands import cognize_cmd
+
+    ws = Workspace(args.home)
+    data = cognize_cmd.research_revisions(ws, args)
+    if getattr(args, "json", False):
+        _emit(args, data, None)
+        return
+    ux.print_rule("research · revisions")
+    ux.print_ok(f"{data.get('count', 0)} revision(s)")
+    for row in data.get("revisions") or []:
+        print(
+            f"{row.get('id')} surprise={row.get('surprise')} "
+            f"outcome={row.get('outcome')} delta={row.get('explanatory_delta')!r}"
+        )
 

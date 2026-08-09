@@ -212,3 +212,30 @@ def inject_pack(ws, args) -> dict[str, Any]:
         max_tokens=int(getattr(args, "max_tokens", 1200) or 1200),
     )
     return pack.to_dict()
+
+
+def narrative_accessibility(ws, args) -> dict[str, Any]:
+    from twin.cognize.fade import (
+        list_accessibility_recommendations,
+        recommend_accessibility,
+    )
+
+    vault = getattr(args, "vault", None) or "default"
+    if getattr(args, "apply", False):
+        recs = recommend_accessibility(ws.store, vault_id=vault, dry_run=False)
+    else:
+        recs = list_accessibility_recommendations(ws.store, vault_id=vault)
+        if not recs:
+            recs = recommend_accessibility(ws.store, vault_id=vault, dry_run=True)
+    return {"ok": True, "count": len(recs), "recommendations": recs}
+
+
+def research_revisions(ws, args) -> dict[str, Any]:
+    from twin.cognize.research import list_revision_research_rows
+
+    rows = list_revision_research_rows(
+        ws.store,
+        getattr(args, "vault", None) or "",
+        limit=int(getattr(args, "limit", 200) or 200),
+    )
+    return {"ok": True, "count": len(rows), "revisions": rows}

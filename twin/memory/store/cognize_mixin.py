@@ -384,6 +384,30 @@ class CognizeStoreMixin:
         self._c_insert("cognize_traces", self._cog_enc_row(trace_to_row(obj)))
         return obj.id
 
+    def list_traces(
+        self,
+        vault_id: str = "",
+        *,
+        event_kind: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        limit: int = 500,
+    ) -> list[Trace]:
+        sql = "SELECT * FROM cognize_traces WHERE 1=1"
+        params: list[Any] = []
+        if vault_id:
+            sql += " AND vault_id = ?"
+            params.append(vault_id)
+        if event_kind:
+            sql += " AND event_kind = ?"
+            params.append(event_kind)
+        if resource_id:
+            sql += " AND resource_id = ?"
+            params.append(resource_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        rows = self._j_fetchall(sql, tuple(params))
+        return [row_to_trace(r, decrypt=self._cog_dec) for r in rows]
+
     def upsert_narrative_revision(self, obj: NarrativeRevisionDecision) -> str:
         self._cog_upsert(
             "cognize_narrative_revisions", obj.id, narrative_revision_to_row(obj)
@@ -397,6 +421,23 @@ class CognizeStoreMixin:
             "SELECT * FROM cognize_narrative_revisions WHERE id = ?", (rev_id,)
         )
         return row_to_narrative_revision(row, decrypt=self._cog_dec) if row else None
+
+    def list_narrative_revisions(
+        self, vault_id: str = "", *, limit: int = 500,
+    ) -> list[NarrativeRevisionDecision]:
+        if vault_id:
+            rows = self._j_fetchall(
+                "SELECT * FROM cognize_narrative_revisions WHERE vault_id = ?"
+                " ORDER BY id DESC LIMIT ?",
+                (vault_id, limit),
+            )
+        else:
+            rows = self._j_fetchall(
+                "SELECT * FROM cognize_narrative_revisions"
+                " ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+        return [row_to_narrative_revision(r, decrypt=self._cog_dec) for r in rows]
 
     def record_cognize_run(
         self,
