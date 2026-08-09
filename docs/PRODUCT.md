@@ -55,7 +55,7 @@ Action answers:
 - should I block a memory?
 - should I ask for explicit confirmation?
 
-The product boundary focuses mainly on memory + firewall + judgment. Autonomous action stays out of scope until later majors ([ROADMAP.md](ROADMAP.md)).
+The product boundary focuses mainly on narrative + firewall + judgment. Autonomous action stays out of scope until later majors ([ROADMAP.md](ROADMAP.md)).
 
 ## Domain separation
 

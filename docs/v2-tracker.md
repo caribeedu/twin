@@ -1,21 +1,25 @@
 # Twin v2 Tracker — implementable task inventory
 
-Working tracker for the redesign in [`docs/v2.md`](./v2.md).  
+Working tracker for the Twin **v2** product line redesign in [`docs/v2.md`](./v2.md).  
 Audience: an implementer (human or LLM) **with no prior chat context**. Every task is sized so another agent can pick it up, implement, and verify without guessing product intent.
 
 **Source of truth for product intent:** `docs/v2.md`  
 **Source of truth for current shipped behavior:** `docs/CHANGELOG.md`, `docs/ARCHITECTURE.md`, code under `twin/`  
-**This file does not redefine the redesign** — it decomposes it into tasks.
+**This file does not redefine the redesign** — it decomposes it into tasks and maps them to Twin package versions (`v2.0` … `v2.3`).
+
+> **Version wording:** `v2` / `v2.x` always mean the **Twin product version**. `docs/v2.md` is a filename for the redesign note, not a “documentation version.”
 
 ---
 
 ## How to use this document
 
 1. Read `docs/v2.md` §§0−, 0, 1, 2, 6, 11, 12 before starting any task.
-2. Pick the next task whose **Depends on** are all `done`.
-3. Do not invent entities, CLI verbs, or fallback cognition paths that contradict the invariants below.
-4. Prefer small PRs: one task (or a tightly coupled pair) per PR when possible.
-5. Mark status in the task header: `todo` | `in_progress` | `blocked` | `done` | `wontfix`.
+2. Prefer work that unblocks the **next unreleased Twin version** (see [Twin version map](#twin-version-map-package-releases)).
+3. Pick the next task whose **Depends on** are all `done`.
+4. Do not invent entities, CLI verbs, or fallback cognition paths that contradict the invariants below.
+5. Prefer small PRs: one task (or a tightly coupled pair) per PR when possible.
+6. Mark status in the task header: `todo` | `in_progress` | `blocked` | `done` | `wontfix`.
+7. When every required task for a version is `done` and the release gate passes, cut the package version and record it in `docs/CHANGELOG.md`.
 
 ### Status legend
 
@@ -46,7 +50,74 @@ Copy these into PR descriptions. Violating any of them fails the task regardless
 
 ---
 
-## Phase map (recommended order)
+## Twin version map (package releases)
+
+`v2.x` below are **Twin product / package versions** (`twin-cognition` / `__version__`), not documentation draft numbers. `docs/v2.md` is the redesign intent for the Twin **v2** line.
+
+A version ships only when **every required task** for that version is `done` and its release gate passes. Engineering phases (P0–P12) are implementation order; versions are the shippable product cuts.
+
+| Twin version | Codename / theme | Product bar (user-visible) | Required tasks | Release gate |
+|---|---|---|---|---|
+| **v2.0** | Narrative substrate | Sense → Cognize → Inject with committed **Narratives**; LLM-or-halt; human commit; deterministic stale floor; `twin cognize` / `narrative` / `stance` verbs; dual-read of legacy memories | T-000 T-001 T-002 · T-010–T-015 · T-020–T-023 · T-030–T-038 · T-040 T-041 · T-060 T-070 · T-080 T-081 · T-110 | `twin cognize run` halts without LLM; commit Narrative + pack with EpistemicState; stale-injection eval green; package `2.0.0` |
+| **v2.1** | Epistemics + host surfaces | Read-time confidence / independence; open Reflections in packs; ACL ∩ + revoke tombstone; Stance drafts; MCP / REST / Native serve v2 pack contract; legacy CLI aliases deprecated | T-050 · T-061 · T-071–T-074 · T-082 · T-100–T-102 · T-111 T-114 | Independence + ACL evals green; MCP/Native pack contract tests green; package `2.1.0` |
+| **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals; research logging for surprise | T-051 T-052 · T-112 T-113 T-115 | Consolidation never auto-commits; fade/trace tests green; package `2.2.0` |
+| **v2.3** | Command Center | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
+
+### Completing this tracker ≠ ROADMAP v3 “Extended Brain”
+
+[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.3** here completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + Command Center) and unblocks v3.
+
+### Version dependency
+
+```text
+v2.0  →  v2.1  →  v2.2
+              ↘
+               v2.3   (Command Center may start after v2.0 CLI extraction;
+                       full screens need v2.1 surfaces; ship after or with v2.2)
+```
+
+Recommended ship order: **v2.0 → v2.1 → v2.2 → v2.3**. T-090 (Center MVP) may be prototyped on a branch after v2.0, but the **v2.3** release must not ship before v2.1 pack/MCP contracts exist.
+
+### Per-version checklist (copy into CHANGELOG when cutting)
+
+#### v2.0 — Narrative substrate
+
+- [ ] T-000 T-001 T-002
+- [ ] T-010 T-011 T-012 T-013 T-014 T-015
+- [ ] T-020 T-021 T-022 T-023
+- [ ] T-030 T-031 T-032 T-033 T-034 T-035 T-036 T-037 T-038
+- [ ] T-040 T-041
+- [ ] T-060 T-070
+- [ ] T-080 T-081
+- [ ] T-110
+- [ ] `__version__ = 2.0.0` + CHANGELOG entry + PyPI tag `v2.0.0`
+
+#### v2.1 — Epistemics + host surfaces
+
+- [ ] T-050 T-061
+- [ ] T-071 T-072 T-073 T-074
+- [ ] T-082
+- [ ] T-100 T-101 T-102
+- [ ] T-111 T-114
+- [ ] `__version__ = 2.1.0` + CHANGELOG + tag `v2.1.0`
+
+#### v2.2 — Consolidation & accessibility
+
+- [ ] T-051 T-052
+- [ ] T-112 T-113 T-115
+- [ ] `__version__ = 2.2.0` + CHANGELOG + tag `v2.2.0`
+
+#### v2.3 — Command Center
+
+- [ ] T-090 T-091 T-092
+- [ ] T-120 T-121
+- [ ] `__version__ = 2.3.0` + CHANGELOG + tag `v2.3.0`
+
+---
+
+## Engineering phase map (implementation order)
+
+Phases are for dependency ordering inside a version — not alternate version numbers.
 
 ```text
 P0  Docs lock + vocabulary + architecture wording
@@ -70,59 +141,60 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 
 ## Task index
 
-| ID | Phase | Title | Status |
-|---|---|---|---|
-| T-000 | P0 | Lock vocabulary glossary + deprecate “memory” in product copy | todo |
-| T-001 | P0 | Rewrite ARCHITECTURE overview to Sense → Cognize → Inject walls | todo |
-| T-002 | P0 | Add stub COGNIZE.md / EPISTEMICS.md pointing at v2.md until split | todo |
-| T-010 | P1 | Define pydantic/dataclass contracts for v2 entities | todo |
-| T-011 | P1 | Store schema migration: tables/columns for v2 entities | todo |
-| T-012 | P1 | EpistemicState model without stored confidence scalar | todo |
-| T-013 | P1 | Relation types including `same_originating_decision` | todo |
-| T-014 | P1 | Migration plan MemoryItem → Narrative/Interpretation dual-read | todo |
-| T-015 | P1 | Judgment → Stance rename in store (alias layer) | todo |
-| T-020 | P2 | Cognize availability gate (`require_chat_llm`) | todo |
-| T-021 | P2 | Remove/disable heuristic meaning as production cognition | todo |
-| T-022 | P2 | Remove echo-as-production meaning path | todo |
-| T-023 | P2 | Episode pipeline: delete lexical semantic fallbacks; halt instead | todo |
-| T-030 | P3 | Cognize orchestrator skeleton + stage report | todo |
-| T-031 | P3 | Stage 0 Salience (LLM) | todo |
-| T-032 | P3 | Stage 1 Situate (LLM) | todo |
-| T-033 | P3 | Stage 2 Raise Reflections (LLM) | todo |
-| T-034 | P3 | Stage 3 Form Interpretations (LLM) | todo |
-| T-035 | P3 | Stage 4 Cross Reflections (LLM) | todo |
-| T-036 | P3 | Stage 5 Cross Interpretations (LLM) | todo |
-| T-037 | P3 | Stage 6 Narrative Revision (LLM) + retain dissent | todo |
-| T-038 | P3 | Stage 7 Evidence audit + independence Relations | todo |
-| T-040 | P4 | Review queue for Interpretations + always-visible Open Reflections | todo |
-| T-041 | P4 | Stage 9 Commit Narrative + initial EpistemicState | todo |
-| T-050 | P5 | Stage 10 Stance drafts (LLM) + human approve path | todo |
-| T-051 | P5 | Stage 11 Consolidation judgment (nightly LLM, caps) | todo |
-| T-052 | P5 | Stage 12 Fade / Remarkable + Trace ledger | todo |
-| T-060 | P6 | Deterministic stale mark on percept land | todo |
-| T-061 | P6 | Source-class + timestamp metadata for invalidation asymmetry | todo |
-| T-070 | P7 | Inject pack: attach EpistemicState; refuse stale-as-fresh | todo |
-| T-071 | P7 | Read-time confidence + independence display in packs | todo |
-| T-072 | P7 | Open Reflections section in packs | todo |
-| T-073 | P7 | ACL intersection on Narrative + synchronous revoke tombstone | todo |
-| T-074 | P7 | Inject Observer slot (interface reserved, stub OK) | todo |
-| T-080 | P8 | Extract CLI handlers to `twin/interfaces/commands/` | todo |
-| T-081 | P8 | Introduce `twin cognize` / `narrative` / `stance` / `inject pack` | todo |
-| T-082 | P8 | Deprecate aliases: extract, meditate, correlate, judgment, memory | todo |
-| T-090 | P9 | Command Center MVP: bare `twin` TUI Home + Services + palette | todo |
-| T-091 | P9 | Center: Connectors + Jobs screens | todo |
-| T-092 | P9 | Center: Cognize / Review / Narratives / Stance / MCP screens | todo |
-| T-100 | P10 | MCP tool rename + pack EpistemicState fields | todo |
-| T-101 | P10 | REST / Review workbench Narrative commit UX | todo |
-| T-102 | P10 | Native pack injection uses v2 pack contract | todo |
-| T-110 | P11 | Eval: stale injection (§9.3 #1) | todo |
-| T-111 | P11 | Eval: correlated-source independence collapse (§9.3 #3) | todo |
-| T-112 | P11 | Eval: disagreement vs agreement attention (§9.3 #4) | todo |
-| T-113 | P11 | Eval: quiet reversal path (§9.3 #2) | todo |
-| T-114 | P11 | Eval: ACL intersection (§9.3 #5) | todo |
-| T-115 | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | todo |
-| T-120 | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | todo |
-| T-121 | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | todo |
+| ID | Twin version | Phase | Title | Status |
+|---|---|---|---|---|
+| T-000 | **v2.0** | P0 | Lock vocabulary glossary + deprecate “memory” in product copy | todo |
+| T-001 | **v2.0** | P0 | Rewrite ARCHITECTURE overview to Sense → Cognize → Inject walls | todo |
+| T-002 | **v2.0** | P0 | Add stub COGNIZE.md / EPISTEMICS.md pointing at v2.md until split | todo |
+| T-010 | **v2.0** | P1 | Define pydantic/dataclass contracts for v2 entities | todo |
+| T-011 | **v2.0** | P1 | Store schema migration: tables/columns for v2 entities | todo |
+| T-012 | **v2.0** | P1 | EpistemicState model without stored confidence scalar | todo |
+| T-013 | **v2.0** | P1 | Relation types including `same_originating_decision` | todo |
+| T-014 | **v2.0** | P1 | Migration plan MemoryItem → Narrative/Interpretation dual-read | todo |
+| T-015 | **v2.0** | P1 | Judgment → Stance rename in store (alias layer) | todo |
+| T-020 | **v2.0** | P2 | Cognize availability gate (`require_chat_llm`) | todo |
+| T-021 | **v2.0** | P2 | Remove/disable heuristic meaning as production cognition | todo |
+| T-022 | **v2.0** | P2 | Remove echo-as-production meaning path | todo |
+| T-023 | **v2.0** | P2 | Episode pipeline: delete lexical semantic fallbacks; halt instead | todo |
+| T-030 | **v2.0** | P3 | Cognize orchestrator skeleton + stage report | todo |
+| T-031 | **v2.0** | P3 | Stage 0 Salience (LLM) | todo |
+| T-032 | **v2.0** | P3 | Stage 1 Situate (LLM) | todo |
+| T-033 | **v2.0** | P3 | Stage 2 Raise Reflections (LLM) | todo |
+| T-034 | **v2.0** | P3 | Stage 3 Form Interpretations (LLM) | todo |
+| T-035 | **v2.0** | P3 | Stage 4 Cross Reflections (LLM) | todo |
+| T-036 | **v2.0** | P3 | Stage 5 Cross Interpretations (LLM) | todo |
+| T-037 | **v2.0** | P3 | Stage 6 Narrative Revision (LLM) + retain dissent | todo |
+| T-038 | **v2.0** | P3 | Stage 7 Evidence audit + independence Relations | todo |
+| T-040 | **v2.0** | P4 | Review queue for Interpretations + always-visible Open Reflections | todo |
+| T-041 | **v2.0** | P4 | Stage 9 Commit Narrative + initial EpistemicState | todo |
+| T-050 | **v2.1** | P5 | Stage 10 Stance drafts (LLM) + human approve path | todo |
+| T-051 | **v2.2** | P5 | Stage 11 Consolidation judgment (nightly LLM, caps) | todo |
+| T-052 | **v2.2** | P5 | Stage 12 Fade / Remarkable + Trace ledger | todo |
+| T-060 | **v2.0** | P6 | Deterministic stale mark on percept land | todo |
+| T-061 | **v2.1** | P6 | Source-class + timestamp metadata for invalidation asymmetry | todo |
+| T-070 | **v2.0** | P7 | Inject pack: attach EpistemicState; refuse stale-as-fresh | todo |
+| T-071 | **v2.1** | P7 | Read-time confidence + independence display in packs | todo |
+| T-072 | **v2.1** | P7 | Open Reflections section in packs | todo |
+| T-073 | **v2.1** | P7 | ACL intersection on Narrative + synchronous revoke tombstone | todo |
+| T-074 | **v2.1** | P7 | Inject Observer slot (interface reserved, stub OK) | todo |
+| T-080 | **v2.0** | P8 | Extract CLI handlers to `twin/interfaces/commands/` | todo |
+| T-081 | **v2.0** | P8 | Introduce `twin cognize` / `narrative` / `stance` / `inject pack` | todo |
+| T-082 | **v2.1** | P8 | Deprecate aliases: extract, meditate, correlate, judgment, memory | todo |
+| T-090 | **v2.3** | P9 | Command Center MVP: bare `twin` TUI Home + Services + palette | todo |
+| T-091 | **v2.3** | P9 | Center: Connectors + Jobs screens | todo |
+| T-092 | **v2.3** | P9 | Center: Cognize / Review / Narratives / Stance / MCP screens | todo |
+| T-100 | **v2.1** | P10 | MCP tool rename + pack EpistemicState fields | todo |
+| T-101 | **v2.1** | P10 | REST / Review workbench Narrative commit UX | todo |
+| T-102 | **v2.1** | P10 | Native pack injection uses v2 pack contract | todo |
+| T-110 | **v2.0** | P11 | Eval: stale injection (§9.3 #1) | todo |
+| T-111 | **v2.1** | P11 | Eval: correlated-source independence collapse (§9.3 #3) | todo |
+| T-112 | **v2.2** | P11 | Eval: disagreement vs agreement attention (§9.3 #4) | todo |
+| T-113 | **v2.2** | P11 | Eval: quiet reversal path (§9.3 #2) | todo |
+| T-114 | **v2.1** | P11 | Eval: ACL intersection (§9.3 #5) | todo |
+| T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | todo |
+| T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | todo |
+| T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | todo |
+
 
 ---
 
@@ -132,7 +204,7 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 
 ## T-000 — Lock vocabulary glossary + deprecate “memory” in product copy
 
-**Phase:** P0 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P0 · **Status:** `todo`  
 **Depends on:** none  
 **Blocks:** T-001, T-010, T-081, T-100
 
@@ -175,7 +247,7 @@ Update `docs/GLOSSARY.md` and `docs/COGNITION.md` so the v2 entity names are can
 
 ## T-001 — Rewrite ARCHITECTURE overview to Sense → Cognize → Inject walls
 
-**Phase:** P0 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P0 · **Status:** `todo`  
 **Depends on:** T-000  
 **Blocks:** T-002, T-120
 
@@ -227,7 +299,7 @@ Update sequence diagrams that currently say “extract → meditate → pack” 
 
 ## T-002 — Add stub COGNIZE.md / EPISTEMICS.md pointing at v2.md
 
-**Phase:** P0 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P0 · **Status:** `todo`  
 **Depends on:** T-001  
 **Blocks:** T-120
 
@@ -266,7 +338,7 @@ Update `docs/RESEARCH.md` with a “v2 redesign hypotheses” subsection listing
 
 ## T-010 — Define pydantic/dataclass contracts for v2 entities
 
-**Phase:** P1 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P1 · **Status:** `todo`  
 **Depends on:** T-000  
 **Blocks:** T-011, T-012, T-013, T-030
 
@@ -319,7 +391,7 @@ Provide JSON-schema export or pydantic `.model_json_schema()` used by LLM stage 
 
 ## T-011 — Store schema migration: tables/columns for v2 entities
 
-**Phase:** P1 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P1 · **Status:** `todo`  
 **Depends on:** T-010  
 **Blocks:** T-014, T-030, T-040, T-060
 
@@ -366,7 +438,7 @@ Implement store mixins analogous to existing `correlation_mixin.py` / `judgment_
 
 ## T-012 — EpistemicState model without stored confidence scalar
 
-**Phase:** P1 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P1 · **Status:** `todo`  
 **Depends on:** T-010  
 **Blocks:** T-041, T-060, T-070, T-071
 
@@ -416,7 +488,7 @@ These helpers must **not** write a confidence float back onto the Narrative row.
 
 ## T-013 — Relation types including `same_originating_decision`
 
-**Phase:** P1 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P1 · **Status:** `todo`  
 **Depends on:** T-010, T-011  
 **Blocks:** T-035, T-036, T-037, T-038, T-071
 
@@ -454,7 +526,7 @@ Provide query helpers: neighbors by type, collapse independent-origin sets for I
 
 ## T-014 — Migration plan MemoryItem → Narrative/Interpretation dual-read
 
-**Phase:** P1 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P1 · **Status:** `todo`  
 **Depends on:** T-011, T-012  
 **Blocks:** T-040, T-081, T-100
 
@@ -498,7 +570,7 @@ Do **not** delete memory tables in this task.
 
 ## T-015 — Judgment → Stance rename in store (alias layer)
 
-**Phase:** P1 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P1 · **Status:** `todo`  
 **Depends on:** T-010  
 **Blocks:** T-050, T-082
 
@@ -539,7 +611,7 @@ Constitutional confirm flags and proposal preview tokens keep the same security 
 
 ## T-020 — Cognize availability gate (`require_chat_llm`)
 
-**Phase:** P2 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P2 · **Status:** `todo`  
 **Depends on:** none (can parallel P0/P1)  
 **Blocks:** T-021, T-030, T-081
 
@@ -594,7 +666,7 @@ Wire gate into future orchestrator and, temporarily, into existing `extract` / `
 
 ## T-021 — Remove/disable heuristic meaning as production cognition
 
-**Phase:** P2 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P2 · **Status:** `todo`  
 **Depends on:** T-020  
 **Blocks:** T-023, T-030
 
@@ -637,7 +709,7 @@ Update docs/SETUP: heuristic is not a cognition backend.
 
 ## T-022 — Remove echo-as-production meaning path
 
-**Phase:** P2 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P2 · **Status:** `todo`  
 **Depends on:** T-020  
 **Blocks:** T-030
 
@@ -674,7 +746,7 @@ Echo extractor/interpreter is a **test double**, not a production cognition back
 
 ## T-023 — Episode pipeline: delete lexical semantic fallbacks; halt instead
 
-**Phase:** P2 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P2 · **Status:** `todo`  
 **Depends on:** T-020, T-021  
 **Blocks:** T-030 (cleanup), T-082
 
@@ -714,7 +786,7 @@ This task is the bridge: either wrap the old pipeline behind the new gate or mar
 
 ## T-030 — Cognize orchestrator skeleton + stage report
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-011, T-020, T-021, T-022  
 **Blocks:** T-031–T-038, T-081
 
@@ -759,7 +831,7 @@ Wire runtime job kind `cognize_batch` (name flexible) in `twin/runtime/`.
 
 ## T-031 — Stage 0 Salience (LLM)
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-030  
 **Blocks:** T-032
 
@@ -796,7 +868,7 @@ No keyword classifier as authority. Prompt/schema versioned. Test override hook 
 
 ## T-032 — Stage 1 Situate (LLM)
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-031, T-011  
 **Blocks:** T-033
 
@@ -829,7 +901,7 @@ Persist Situation membership. Reuse lessons from WorkEpisode clustering but **do
 
 ## T-033 — Stage 2 Raise Reflections (LLM)
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-032  
 **Blocks:** T-034, T-035
 
@@ -865,7 +937,7 @@ Status `open` by default. Always visible in Review later (T-040).
 
 ## T-034 — Stage 3 Form Interpretations (LLM)
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-033  
 **Blocks:** T-036, T-037
 
@@ -901,7 +973,7 @@ Status starts `competing`. Multiple Interpretations per Reflection allowed.
 
 ## T-035 — Stage 4 Cross Reflections (LLM)
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-033, T-013  
 **Blocks:** T-037
 
@@ -931,7 +1003,7 @@ LLM links Reflections: `same-as` / `related` / conflict-of-asks. Collapse duplic
 
 ## T-036 — Stage 5 Cross Interpretations (LLM)
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-034, T-013  
 **Blocks:** T-037
 
@@ -961,7 +1033,7 @@ LLM relates Interpretations: `same-as` / `supports` / `contradicts` / evidence o
 
 ## T-037 — Stage 6 Narrative Revision (LLM) + retain dissent
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-035, T-036, T-012, T-013  
 **Blocks:** T-038, T-041, T-115
 
@@ -1002,7 +1074,7 @@ Does not itself commit Narrative (Stage 9 / human).
 
 ## T-038 — Stage 7 Evidence audit + independence Relations
 
-**Phase:** P3 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P3 · **Status:** `todo`  
 **Depends on:** T-037, T-013  
 **Blocks:** T-040, T-071
 
@@ -1041,7 +1113,7 @@ Rules:
 
 ## T-040 — Review queue for Interpretations + always-visible Open Reflections
 
-**Phase:** P4 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P4 · **Status:** `todo`  
 **Depends on:** T-038, T-014  
 **Blocks:** T-041, T-092, T-101
 
@@ -1084,7 +1156,7 @@ Remove product copy that says “confirm memory.”
 
 ## T-041 — Stage 9 Commit Narrative + initial EpistemicState
 
-**Phase:** P4 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P4 · **Status:** `todo`  
 **Depends on:** T-040, T-012  
 **Blocks:** T-050, T-070, T-110
 
@@ -1123,7 +1195,7 @@ Human accept applies:
 
 ## T-050 — Stage 10 Stance drafts (LLM) + human approve path
 
-**Phase:** P5 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P5 · **Status:** `todo`  
 **Depends on:** T-041, T-015  
 **Blocks:** T-082
 
@@ -1157,7 +1229,7 @@ Prompts must not treat Stance as factual Narrative.
 
 ## T-051 — Stage 11 Consolidation judgment (nightly LLM, caps)
 
-**Phase:** P5 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P5 · **Status:** `todo`  
 **Depends on:** T-030, T-041  
 **Blocks:** none critical
 
@@ -1193,7 +1265,7 @@ Retarget `twin consolidate daily|weekly` to this stage (legacy schedule OK). Nev
 
 ## T-052 — Stage 12 Fade / Remarkable + Trace ledger
 
-**Phase:** P5 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P5 · **Status:** `todo`  
 **Depends on:** T-041  
 **Blocks:** none critical
 
@@ -1226,7 +1298,7 @@ Retarget `twin consolidate daily|weekly` to this stage (legacy schedule OK). Nev
 
 ## T-060 — Deterministic stale mark on percept land
 
-**Phase:** P6 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P6 · **Status:** `todo`  
 **Depends on:** T-012, T-011  
 **Blocks:** T-070, T-110
 
@@ -1262,7 +1334,7 @@ When a Percept is committed by Sense into a domain/vault that overlaps a committ
 
 ## T-061 — Source-class + timestamp metadata for invalidation asymmetry
 
-**Phase:** P6 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P6 · **Status:** `todo`  
 **Depends on:** T-060  
 **Blocks:** T-113
 
@@ -1296,7 +1368,7 @@ Document the enum; map connectors → classes; forbid missing class on new write
 
 ## T-070 — Inject pack: attach EpistemicState; refuse stale-as-fresh
 
-**Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P7 · **Status:** `todo`  
 **Depends on:** T-041, T-060  
 **Blocks:** T-071, T-072, T-102, T-110
 
@@ -1334,7 +1406,7 @@ Update context pack assembly (`twin/cognition/context_pack.py`, pack_format/sele
 
 ## T-071 — Read-time confidence + independence display in packs
 
-**Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
 **Depends on:** T-070, T-012, T-038  
 **Blocks:** T-111
 
@@ -1371,7 +1443,7 @@ Never show a cached confidence scalar field from DB as authoritative.
 
 ## T-072 — Open Reflections section in packs
 
-**Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
 **Depends on:** T-070, T-033  
 **Blocks:** none
 
@@ -1402,7 +1474,7 @@ Settled decision (`v2.md` §10 #4): packs include Open Reflections in an uncerta
 
 ## T-073 — ACL intersection on Narrative + synchronous revoke tombstone
 
-**Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
 **Depends on:** T-041  
 **Blocks:** T-114
 
@@ -1437,7 +1509,7 @@ Settled decision (`v2.md` §10 #4): packs include Open Reflections in an uncerta
 
 ## T-074 — Inject Observer slot (interface reserved, stub OK)
 
-**Phase:** P7 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P7 · **Status:** `todo`  
 **Depends on:** T-070  
 **Blocks:** none
 
@@ -1476,7 +1548,7 @@ Do not implement full watcher yet unless explicitly expanding scope — redesign
 
 ## T-080 — Extract CLI handlers to `twin/interfaces/commands/`
 
-**Phase:** P8 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P8 · **Status:** `todo`  
 **Depends on:** none (can start early)  
 **Blocks:** T-081, T-090
 
@@ -1512,7 +1584,7 @@ No user-visible behavior change required in this task beyond optional import pat
 
 ## T-081 — Introduce `twin cognize` / `narrative` / `stance` / `inject pack`
 
-**Phase:** P8 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P8 · **Status:** `todo`  
 **Depends on:** T-080, T-030, T-015, T-014  
 **Blocks:** T-082, T-090, T-100
 
@@ -1557,7 +1629,7 @@ Scripted shape must support CI (`--json`).
 
 ## T-082 — Deprecate aliases: extract, meditate, correlate, judgment, memory
 
-**Phase:** P8 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P8 · **Status:** `todo`  
 **Depends on:** T-081, T-023  
 **Blocks:** T-092
 
@@ -1598,7 +1670,7 @@ Command Center must **not** list legacy names as primary (fuzzy match OK).
 
 ## T-090 — Command Center MVP: bare `twin` TUI Home + Services + palette
 
-**Phase:** P9 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `todo`  
 **Depends on:** T-080, T-081  
 **Blocks:** T-091, T-092
 
@@ -1645,7 +1717,7 @@ Stack suggestion: Textual (swap allowed if justified). Prefer panes over emoji c
 
 ## T-091 — Center: Connectors + Jobs screens
 
-**Phase:** P9 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `todo`  
 **Depends on:** T-090  
 **Blocks:** none
 
@@ -1683,7 +1755,7 @@ Share implementation with `twin connector …` / runtime enqueue.
 
 ## T-092 — Center: Cognize / Review / Narratives / Stance / MCP screens
 
-**Phase:** P9 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P9 · **Status:** `todo`  
 **Depends on:** T-090, T-081, T-040, T-082  
 **Blocks:** none
 
@@ -1724,7 +1796,7 @@ Primary labels are v2-only.
 
 ## T-100 — MCP tool rename + pack EpistemicState fields
 
-**Phase:** P10 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `todo`  
 **Depends on:** T-070, T-071, T-072, T-081  
 **Blocks:** T-102
 
@@ -1763,7 +1835,7 @@ Keep process-env client identity (`TWIN_MCP_CLIENT`).
 
 ## T-101 — REST / Review workbench Narrative commit UX
 
-**Phase:** P10 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `todo`  
 **Depends on:** T-040, T-041  
 **Blocks:** none
 
@@ -1803,7 +1875,7 @@ OpenAPI must reflect new resources (`/api/narratives`, `/api/reflections`, …) 
 
 ## T-102 — Native pack injection uses v2 pack contract
 
-**Phase:** P10 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P10 · **Status:** `todo`  
 **Depends on:** T-070, T-100  
 **Blocks:** none
 
@@ -1836,7 +1908,7 @@ Clarify in NATIVE.md: conversation uses Sense+Inject edges; no session “mode.�
 
 ## T-110 — Eval: stale injection (§9.3 #1)
 
-**Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.0` · **Phase:** P11 · **Status:** `todo`  
 **Depends on:** T-070, T-060  
 **Blocks:** none
 
@@ -1875,7 +1947,7 @@ Offline fixtures preferred; optional model layer gated by env.
 
 ## T-111 — Eval: correlated-source independence collapse (§9.3 #3)
 
-**Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P11 · **Status:** `todo`  
 **Depends on:** T-071, T-038  
 **Blocks:** none
 
@@ -1907,7 +1979,7 @@ Use Relation overrides if LLM not in CI.
 
 ## T-112 — Eval: disagreement vs agreement attention (§9.3 #4)
 
-**Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `todo`  
 **Depends on:** T-037  
 **Blocks:** none
 
@@ -1936,7 +2008,7 @@ Single contradicting artifact (e.g. PR for Feature B while Narrative says Featur
 
 ## T-113 — Eval: quiet reversal path (§9.3 #2)
 
-**Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `todo`  
 **Depends on:** T-037, T-061  
 **Blocks:** none
 
@@ -1966,7 +2038,7 @@ Known-wrong Narrative invalidated by a quiet meeting percept with **little subse
 
 ## T-114 — Eval: ACL intersection (§9.3 #5)
 
-**Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.1` · **Phase:** P11 · **Status:** `todo`  
 **Depends on:** T-073  
 **Blocks:** none
 
@@ -1996,7 +2068,7 @@ Private Slack fact + public PR → derived Narrative must not be visible to a pr
 
 ## T-115 — Research logging: surprise / explanatory_delta (§9.3 #7)
 
-**Phase:** P11 · **Status:** `todo`  
+**Twin version:** `v2.2` · **Phase:** P11 · **Status:** `todo`  
 **Depends on:** T-037  
 **Blocks:** none
 
@@ -2031,7 +2103,7 @@ Not a ship gate for product, but required instrumentation:
 
 ## T-120 — Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH
 
-**Phase:** P12 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P12 · **Status:** `todo`  
 **Depends on:** T-001, T-002, majority of P3–P7 `done`  
 **Blocks:** T-121
 
@@ -2074,7 +2146,7 @@ Update GLOSSARY/COGNITION/IDENTITY cross-links.
 
 ## T-121 — README stays architecture-layer only; add COMMAND_CENTER.md
 
-**Phase:** P12 · **Status:** `todo`  
+**Twin version:** `v2.3` · **Phase:** P12 · **Status:** `todo`  
 **Depends on:** T-120, T-090  
 **Blocks:** none (release documentation gate)
 
@@ -2126,17 +2198,19 @@ Unless a new tracker ID is added, do **not**:
 
 ## Suggested first slice (if starting cold)
 
-1. T-000, T-001, T-002 (docs lock)  
-2. T-010 → T-011 → T-012 → T-013 (schema)  
-3. T-020 → T-021 → T-022 → T-023 (LLM-or-halt)  
-4. T-030 → T-031…T-038 (pipeline)  
-5. T-060 early (stale latch) parallel to late P3  
-6. T-040 → T-041 → T-070…T-073 (commit + inject floor)  
-7. T-080 → T-081 → T-082 → T-090 (CLI + center)  
-8. P11 evals in §10 priority order  
+Aim at **Twin v2.0** first:
+
+1. T-000, T-001, T-002 (docs lock)
+2. T-010 → T-011 → T-012 → T-013 (schema) + T-014 / T-015
+3. T-020 → T-021 → T-022 → T-023 (LLM-or-halt)
+4. T-030 → T-031…T-038 (pipeline)
+5. T-060 early (stale latch) parallel to late P3
+6. T-040 → T-041 → T-070 (commit + inject floor)
+7. T-080 → T-081 + T-110 (CLI verbs + stale eval) → cut package **2.0.0**
+8. Then **v2.1** surfaces/epistemics → **v2.2** consolidation → **v2.3** Command Center
 
 ---
 
-*Tracker aligned to `docs/v2.md` — longitudinal narratives, architecture vs pipeline, CLI command center.*
+*Tracker for Twin package line **v2.0–v2.3** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, CLI command center).*
 
 ATTENTION: Do not mention task numbers in any Git resource (PR/release/commit).
