@@ -16,14 +16,14 @@ from pydantic import BaseModel, Field
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.models import (
+from .models import (
     Evidence,
     MemoryItem,
     MemoryOperation,
     MemoryStatus,
     MemoryType,
 )
-from twin.store.store.base import MemoryStore
+from .store.base import MemoryStore
 
 
 class FormationState(str, Enum):
@@ -317,7 +317,7 @@ def propose_or_corroborate(
     identity = mem.payload["formation_identity"]
     existing = find_by_formation_identity(store, identity)
     if existing is not None:
-        from twin.store.provenance import attach_corroborating_evidence
+        from .provenance import attach_corroborating_evidence
         attach_corroborating_evidence(
             store, existing.id, percept_id, evidence_quote,
             independence_group=independence_group or None,
@@ -358,7 +358,7 @@ def propose_or_corroborate(
         existing = store.get_memory(mem.id)
         if existing is None:
             raise
-        from twin.store.provenance import attach_corroborating_evidence
+        from .provenance import attach_corroborating_evidence
         attach_corroborating_evidence(
             store, existing.id, percept_id, evidence_quote,
             independence_group=independence_group or None,

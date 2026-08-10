@@ -43,7 +43,7 @@ from twin.store.models import (
 )
 from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
-from .context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
+from twin.inject.context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
 from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain
 from .pipeline import extract_percept
 from .task_profiles import infer_task_profile

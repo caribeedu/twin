@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config, load_config
-from .judgment.firewall import Firewall
+from .privacy.firewall import Firewall
 from .store.crypto import build_codec
 from .store.embeddings import Embedder, get_embedder_for_config
 from .store.store import MemoryStore, create_store
@@ -35,7 +35,7 @@ class Workspace:
     def ingest(self, paths: list[str | Path]) -> tuple[list[str], list[str]]:
         """Sense external signals and persist the resulting percepts.
         Returns (new_percept_ids, skipped)."""
-        from .sensory import sense_paths
+        from .sense.sensory import sense_paths
 
         percepts, skipped = sense_paths(paths)
         new_ids: list[str] = []

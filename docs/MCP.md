@@ -56,7 +56,14 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `narrative_show` | `narrative_id` | One Narrative + EpistemicState |
 | `stance_list` | — | Active Stances |
 | `stance_proposals` | `status=pending` | Pending Stance drafts (human approve) |
+| `stance_applicable` | `domain`, `task_profile`, … | Stance items applicable to this context |
+| `stance_simulate` | `query`, `domain`, … | Simulate Stance influence without writing |
+| `stance_profile` | — | Active Stance items + YAML bootstrap |
+| `stance_proposal_preview` / `_approve` / `_reject` | … | Human-gated Stance mutations |
+| `stance_conflicts` / `stance_version` | … | Conflicts and version metadata |
 | `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable Stance |
+
+Legacy `judgment_*` and `memory_judgment_profile` remain as **deprecated aliases** of the Stance tools above.
 
 ## Retrieve (legacy dual-read)
 
@@ -113,20 +120,22 @@ Prefer Narrative tools above when the account is committed.
 | `memory_neighbors` | `memory_id` | Nearby memories for side-by-side review. |
 | `memory_provenance` | `memory_id` | Chain memory, evidence, percept, artifact. |
 
-## Stance governance (tool ids still `judgment_*`)
+## Stance governance
 
-Tool *names* remain `judgment_*` until package/MCP migration (v2.5). Semantics are Stance.
+Primary tools use the `stance_*` prefix. `judgment_*` names remain as
+deprecated aliases for one migration window.
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `judgment_applicable` | `domain="technical"`, `task_profile="general"`, `project?`, `query=""` | Stance items applicable to this context. |
-| `judgment_simulate` | `query`, `domain="technical"`, `task_profile="architecture"`, `project?` | Simulate which Stance would fire without writing. |
-| `judgment_proposals` | `status="pending"` | List Stance change proposals. |
-| `judgment_proposal_preview` | `proposal_id` | Preview + token required for approve. |
-| `judgment_proposal_approve` | `proposal_id`, `preview_token`, `confirm=false`, `confirm_constitutional=false` | Human-gated approve. |
-| `judgment_proposal_reject` | `proposal_id`, `confirm=false`, `reason=""` | Reject a proposal. |
-| `judgment_conflicts` | `status="open"` | Open Stance conflicts. |
-| `judgment_version` | — | Current Stance store version metadata. |
+| `stance_applicable` | `domain="technical"`, `task_profile="general"`, `project?`, `query=""` | Stance items applicable to this context. |
+| `stance_simulate` | `query`, `domain="technical"`, `task_profile="architecture"`, `project?` | Simulate which Stance would fire without writing. |
+| `stance_proposals` | `status="pending"` | List Stance change proposals. |
+| `stance_proposal_preview` | `proposal_id` | Preview + token required for approve. |
+| `stance_proposal_approve` | `proposal_id`, `preview_token`, `confirm=false`, `confirm_constitutional=false` | Human-gated approve. |
+| `stance_proposal_reject` | `proposal_id`, `confirm=false`, `reason=""` | Reject a proposal. |
+| `stance_conflicts` | `status="open"` | Open Stance conflicts. |
+| `stance_version` | — | Current Stance store version metadata. |
+| `stance_profile` | — | Active Stance items + YAML bootstrap. |
 
 ## Privacy
 

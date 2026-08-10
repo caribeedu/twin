@@ -5,11 +5,13 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
-### v2.5.0 — Package walls (in progress)
+### v2.5.0 — Package walls
 
 Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,
-privacy, interfaces). Product docs retarget Narrative / Stance vocabulary;
-`twin.cognition` / `twin.memory` / `twin.judgment` split by pipeline function.
+privacy, interfaces). Fold cognition into cognize.services and judgment into
+cognize.stance_engine; Domain Firewall under privacy; MCP prefers
+``stance_*`` tools (``judgment_*`` kept as deprecated aliases). Transitional
+import shims at old package roots removed.
 
 ### v2.4.1 — Web Center exit-criteria hardening
 

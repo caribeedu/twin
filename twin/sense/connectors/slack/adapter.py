@@ -177,7 +177,7 @@ class SlackConnector:
         """
         if not hints:
             return
-        from twin.interfaces.runtime import SyncHintConflict
+        from twin.sense.connectors.runtime import SyncHintConflict
 
         ok = store.consume_connector_sync_hints_cas(self.instance.id, hints)
         if not ok:

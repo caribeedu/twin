@@ -167,8 +167,7 @@ def create_server(home: Optional[str] = None):
 
     @mcp.tool()
     def memory_judgment_profile() -> str:
-        """Active judgment items (DB) plus YAML bootstrap. Prefer judgment_applicable
-        for scoped injection into a task."""
+        """Deprecated alias — use ``stance_profile``."""
         payload = dict(load_profile(ws.cfg.judgment_path))
         if hasattr(ws.store, "list_judgment_items"):
             payload["items"] = [
@@ -480,6 +479,8 @@ def create_server(home: Optional[str] = None):
             "tools": [
                 "inject_context_pack",
                 "narrative_list", "narrative_show", "stance_list", "stance_proposals",
+                "stance_applicable", "stance_simulate", "stance_profile",
+                "stance_proposal_preview", "stance_proposal_approve",
                 "get_active_session", "get_attention", "append_session_delta",
                 "session_start", "session_complete", "provide_feedback",
                 "workspace_tick", "consolidate_cycle", "health", "capabilities",
@@ -800,12 +801,12 @@ def create_server(home: Optional[str] = None):
         return json.dumps({"children": result.extras.get("children"),
                            "operation_id": result.operation_id})
 
-    # -- judgment (read tools + gated mutations) ----------------------
+    # -- Stance (primary) + judgment_* aliases (legacy dual-read names) --
 
     @mcp.tool()
-    def judgment_applicable(domain: str = "technical", task_profile: str = "general",
+    def stance_applicable(domain: str = "technical", task_profile: str = "general",
                             project: Optional[str] = None, query: str = "") -> str:
-        """Return only judgment items applicable to this domain/task — not the full profile."""
+        """Return only Stance items applicable to this domain/task — not the full profile."""
         from twin.cognize.stance_engine.application import applicable_pack
         pack = applicable_pack(
             ws.store, domain=domain, task_profile=task_profile,
@@ -814,10 +815,10 @@ def create_server(home: Optional[str] = None):
         return json.dumps(pack, ensure_ascii=False)
 
     @mcp.tool()
-    def judgment_simulate(query: str, domain: str = "technical",
+    def stance_simulate(query: str, domain: str = "technical",
                           task_profile: str = "architecture",
                           project: Optional[str] = None) -> str:
-        """Explain how active judgment would influence a recommendation (no side effects)."""
+        """Explain how active Stance would influence a recommendation (no side effects)."""
         from twin.cognize.stance_engine.simulate import simulate
         return json.dumps(simulate(
             ws.store, query, domain=domain, task_profile=task_profile,
@@ -825,16 +826,8 @@ def create_server(home: Optional[str] = None):
         ), ensure_ascii=False, default=str)
 
     @mcp.tool()
-    def judgment_proposals(status: str = "pending") -> str:
-        """List judgment proposals awaiting human review."""
-        return json.dumps(
-            [p.model_dump(mode="json") for p in ws.store.list_judgment_proposals(status=status)],
-            ensure_ascii=False,
-        )
-
-    @mcp.tool()
-    def judgment_proposal_preview(proposal_id: str) -> str:
-        """Preview a proposal and obtain a state-aware preview_token for approval."""
+    def stance_proposal_preview(proposal_id: str) -> str:
+        """Preview a Stance proposal and obtain a state-aware preview_token for approval."""
         from twin.cognize.stance_engine.proposals import preview_proposal
         try:
             return json.dumps(preview_proposal(ws.store, proposal_id), ensure_ascii=False)
@@ -842,10 +835,10 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def judgment_proposal_approve(proposal_id: str, preview_token: str,
+    def stance_proposal_approve(proposal_id: str, preview_token: str,
                                   confirm: bool = False,
                                   confirm_constitutional: bool = False) -> str:
-        """Approve a judgment proposal (creates a new version). Requires confirm=true."""
+        """Approve a Stance proposal (creates a new version). Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
         from twin.cognize.stance_engine.proposals import approve_proposal
@@ -858,7 +851,7 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def judgment_proposal_reject(proposal_id: str, confirm: bool = False,
+    def stance_proposal_reject(proposal_id: str, confirm: bool = False,
                                  reason: str = "") -> str:
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
@@ -870,16 +863,76 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def judgment_conflicts(status: str = "open") -> str:
+    def stance_conflicts(status: str = "open") -> str:
         return json.dumps(
             [c.model_dump(mode="json") for c in ws.store.list_judgment_conflicts(status=status)],
             ensure_ascii=False,
         )
 
     @mcp.tool()
-    def judgment_version() -> str:
+    def stance_version() -> str:
         v = ws.store.get_active_judgment_version()
         return json.dumps(v.model_dump(mode="json") if v else None, ensure_ascii=False)
+
+    @mcp.tool()
+    def stance_profile() -> str:
+        """Active Stance items (DB) plus YAML bootstrap. Prefer stance_applicable
+        for scoped injection into a task."""
+        payload = dict(load_profile(ws.cfg.judgment_path))
+        if hasattr(ws.store, "list_judgment_items"):
+            payload["items"] = [
+                i.model_dump(mode="json")
+                for i in ws.store.list_judgment_items(status="active")
+            ]
+        return json.dumps(payload, ensure_ascii=False)
+
+    @mcp.tool()
+    def judgment_applicable(domain: str = "technical", task_profile: str = "general",
+                            project: Optional[str] = None, query: str = "") -> str:
+        """Deprecated alias — use ``stance_applicable``."""
+        return stance_applicable(domain, task_profile, project, query)
+
+    @mcp.tool()
+    def judgment_simulate(query: str, domain: str = "technical",
+                          task_profile: str = "architecture",
+                          project: Optional[str] = None) -> str:
+        """Deprecated alias — use ``stance_simulate``."""
+        return stance_simulate(query, domain, task_profile, project)
+
+    @mcp.tool()
+    def judgment_proposals(status: str = "pending") -> str:
+        """Deprecated alias — use ``stance_proposals``."""
+        return stance_proposals(status)
+
+    @mcp.tool()
+    def judgment_proposal_preview(proposal_id: str) -> str:
+        """Deprecated alias — use ``stance_proposal_preview``."""
+        return stance_proposal_preview(proposal_id)
+
+    @mcp.tool()
+    def judgment_proposal_approve(proposal_id: str, preview_token: str,
+                                  confirm: bool = False,
+                                  confirm_constitutional: bool = False) -> str:
+        """Deprecated alias — use ``stance_proposal_approve``."""
+        return stance_proposal_approve(
+            proposal_id, preview_token, confirm, confirm_constitutional,
+        )
+
+    @mcp.tool()
+    def judgment_proposal_reject(proposal_id: str, confirm: bool = False,
+                                 reason: str = "") -> str:
+        """Deprecated alias — use ``stance_proposal_reject``."""
+        return stance_proposal_reject(proposal_id, confirm, reason)
+
+    @mcp.tool()
+    def judgment_conflicts(status: str = "open") -> str:
+        """Deprecated alias — use ``stance_conflicts``."""
+        return stance_conflicts(status)
+
+    @mcp.tool()
+    def judgment_version() -> str:
+        """Deprecated alias — use ``stance_version``."""
+        return stance_version()
 
     @mcp.tool()
     def privacy_evaluate(

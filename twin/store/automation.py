@@ -10,11 +10,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from ..clock import now_iso
-from ..memory.calibration import DEFAULT_CALIBRATION
-from ..memory.lifecycle import archive_memory
-from ..memory.models import MemoryStatus, Sensitivity
-from ..memory.provenance import attach_corroborating_evidence
-from ..memory.store.base import MemoryStore
+from .calibration import DEFAULT_CALIBRATION
+from .lifecycle import archive_memory
+from .models import MemoryStatus, Sensitivity
+from .provenance import attach_corroborating_evidence
+from .store.base import MemoryStore
 from twin.cognize.services.quality import build_duplicate_groups
 
 _SENS_ORDER = ["public", "internal", "private", "restricted"]

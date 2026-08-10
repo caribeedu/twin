@@ -3,8 +3,8 @@
 Public architecture wall: Sense → Cognize → Inject.
 """
 
-from .context_pack import PackDeadlineExceeded, build_context_pack
-from .inject_observer import (
+from twin.inject.context_pack import PackDeadlineExceeded, build_context_pack
+from twin.inject.inject_observer import (
     InjectObserver,
     InjectObserverDecision,
     NoOpInjectObserver,

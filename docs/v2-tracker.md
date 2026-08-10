@@ -120,9 +120,8 @@ v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package
 #### v2.5 — Package walls
 
 - [x] T-140 T-141 T-142 T-143 T-144
-- [x] T-145 T-146 T-147 T-148
-- [ ] T-149
-- [ ] `__version__ = 2.5.0` + CHANGELOG + tag `v2.5.0` (awaiting approval)
+- [x] T-145 T-146 T-147 T-148 T-149
+- [x] `__version__ = 2.5.0` + CHANGELOG (tag after merge approval)
 
 ---
 
@@ -226,7 +225,7 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-146 | **v2.5** | P14 | Split `twin.judgment` → cognize Stance + privacy | done |
 | T-147 | **v2.5** | P14 | `privacy` owns Firewall / PII / guardrails | done |
 | T-148 | **v2.5** | P14 | `interfaces` absorbs runtime + sovereignty | done |
-| T-149 | **v2.5** | P14 | QA gate — imports, MCP names, package `2.5.0` | todo |
+| T-149 | **v2.5** | P14 | QA gate — imports, MCP names, package `2.5.0` | done |
 
 
 ---
@@ -2798,7 +2797,7 @@ Move `twin/runtime/` and `twin/sovereignty/` under `twin/interfaces/`
 
 ## T-149 — QA gate — imports, MCP names, package `2.5.0`
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140–T-148  
 **Blocks:** none (release gate)
 
@@ -2809,8 +2808,8 @@ aliases, CHANGELOG + tag `v2.5.0`.
 
 ### Exit criteria
 
-- [ ] CI green on interfaces + cognize + store slices.
-- [ ] Package `2.5.0` recorded; old package roots only as shims if any.
+- [x] CI green on interfaces + cognize + store slices.
+- [x] Package `2.5.0` recorded; old package roots removed (no shims).
 
 ---
 

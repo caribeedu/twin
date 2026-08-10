@@ -86,9 +86,10 @@ this is unfinished v2 work, not optional cosmetics.
 | **`privacy`** | Domain Firewall, PII, disclosure guardrails | `twin.privacy` (+ Firewall / PII) |
 | **`interfaces`** | CLI, MCP, REST, web, TUI Center, workers, export/backup | `twin.interfaces` (+ `runtime`, `sovereignty`) |
 
-Transitional shims remain at `twin.memory`, `twin.judgment`, `twin.cognition`,
-`twin.connectors`, `twin.sensory`, `twin.runtime`, `twin.sovereignty` for one
-migration window.
+Transitional shims at old package roots have been removed; import the target
+packages above. Dual-read `MemoryItem` rows and `judgment_*` table names may
+remain in the store until data migration finishes — product copy must not call
+them Memory or Judgment.
 
 Inventory and cuts: [v2-tracker.md](v2-tracker.md) (v2.5 Package walls) ·
 [ROADMAP.md](ROADMAP.md).

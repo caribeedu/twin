@@ -30,7 +30,7 @@ from twin.store.models import (
 )
 from twin.store.store.base import MemoryStore
 from twin.store.store.host_binding_mixin import is_unique_violation
-from .context_pack import ContextPack, build_context_pack
+from twin.inject.context_pack import ContextPack, build_context_pack
 from .sessions import SessionStart, complete_session, observe_session, start_session
 
 logger = logging.getLogger("twin.cognize.services.host_session")

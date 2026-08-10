@@ -1,11 +1,6 @@
 """Stance engine — evaluative posture (ex-``twin.judgment``).
 
-Firewall/PII live in ``twin.privacy``. Public product name is Stance.
-"""
-"""Judgment System — transitional Stance / evaluative engine.
-
-Domain Firewall and PII live in ``twin.privacy``. Stance proposals,
-revisions and versions remain here until folded into ``twin.cognize``.
+Firewall and PII live in ``twin.privacy``. Public product name is Stance.
 """
 
 from .application import applicable_pack, render_applicable
