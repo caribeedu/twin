@@ -2625,7 +2625,7 @@ Unless a new tracker ID is added, do **not**:
 
 ## T-140 — Docs lock — package target layout + vocabulary
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `doing`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-139  
 **Blocks:** T-141–T-149
 
@@ -2650,7 +2650,7 @@ tables, COGNITION/COGNIZE frontiers aligned.
 
 ## T-141 — `twin.sense` — connectors + sensory
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140  
 **Blocks:** T-149
 
@@ -2661,14 +2661,14 @@ leave thin re-exports only where needed for one release.
 
 ### Exit criteria
 
-- [ ] `twin.sense` is the import path for connectors + sensory.
-- [ ] Tests that touch connectors/sensors green.
+- [x] `twin.sense` is the import path for connectors + sensory.
+- [x] Tests that touch connectors/sensors green.
 
 ---
 
 ## T-142 — `twin.llm` — provider adapters
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140  
 **Blocks:** T-145, T-149
 
@@ -2679,14 +2679,14 @@ no product LLM logic inside store or interfaces.
 
 ### Exit criteria
 
-- [ ] `from twin.llm` works for providers + usage.
-- [ ] No new code imports `twin.cognition.llm`.
+- [x] `from twin.llm` works for providers + usage.
+- [x] No new code imports `twin.cognition.llm`.
 
 ---
 
 ## T-143 — `twin.store` — persistence facade
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140  
 **Blocks:** T-145, T-146, T-149
 
@@ -2698,14 +2698,14 @@ is store. Retire `MemoryStore` name when safe, or alias during transition.
 
 ### Exit criteria
 
-- [ ] Persistence imported via `twin.store`.
-- [ ] Dual-read tables still work; export/backup green.
+- [x] Persistence imported via `twin.store`.
+- [x] Dual-read tables still work; export/backup green.
 
 ---
 
 ## T-144 — `twin.inject` — packs + Observer slot
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140, T-142  
 **Blocks:** T-145, T-149
 
@@ -2716,14 +2716,14 @@ Move context pack, inject observer, and related Inject surfaces out of
 
 ### Exit criteria
 
-- [ ] `build_context_pack` and Observer slot live under `twin.inject`.
-- [ ] MCP `inject_context_pack` still works.
+- [x] `build_context_pack` and Observer slot live under `twin.inject`.
+- [x] MCP `inject_context_pack` still works.
 
 ---
 
 ## T-145 — Fold `twin.cognition` into `twin.cognize`
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-142, T-143, T-144  
 **Blocks:** T-149
 
@@ -2735,14 +2735,14 @@ imports are gone.
 
 ### Exit criteria
 
-- [ ] No required runtime import of `twin.cognition` except deprecated shim.
-- [ ] Cognize orchestrator + late stages still halt without LLM.
+- [x] No required runtime import of `twin.cognition` except deprecated shim.
+- [x] Cognize orchestrator + late stages still halt without LLM.
 
 ---
 
 ## T-146 — Split `twin.judgment` → cognize Stance + privacy
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-143, T-147  
 **Blocks:** T-149
 
@@ -2754,14 +2754,14 @@ Stance models, proposals, revisions, versions → `twin.cognize` (or
 
 ### Exit criteria
 
-- [ ] Stance code lives under cognize; firewall under privacy.
-- [ ] CLI `twin stance` and approve preview still work.
+- [x] Stance code lives under cognize; firewall under privacy.
+- [x] CLI `twin stance` and approve preview still work.
 
 ---
 
 ## T-147 — `privacy` owns Firewall / PII / guardrails
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140  
 **Blocks:** T-146, T-149
 
@@ -2772,14 +2772,14 @@ guardrails used by Inject.
 
 ### Exit criteria
 
-- [ ] Inject imports Firewall from `twin.privacy`.
-- [ ] Policy YAML paths unchanged for operators.
+- [x] Inject imports Firewall from `twin.privacy`.
+- [x] Policy YAML paths unchanged for operators.
 
 ---
 
 ## T-148 — `interfaces` absorbs runtime + sovereignty
 
-**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `todo`  
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
 **Depends on:** T-140  
 **Blocks:** T-149
 
@@ -2790,8 +2790,8 @@ Move `twin/runtime/` and `twin/sovereignty/` under `twin/interfaces/`
 
 ### Exit criteria
 
-- [ ] Runtime and sovereignty import paths are under interfaces.
-- [ ] `twin serve` / workers / export smoke green.
+- [x] Runtime and sovereignty import paths are under interfaces.
+- [x] `twin serve` / workers / export smoke green.
 
 ---
 
