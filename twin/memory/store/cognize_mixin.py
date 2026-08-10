@@ -270,6 +270,12 @@ class CognizeStoreMixin:
             )
         return [row_to_relation(r, decrypt=self._cog_dec) for r in rows]
 
+    def get_relation(self, rel_id: str) -> Optional[Relation]:
+        row = self._j_fetchone(
+            "SELECT * FROM cognize_relations WHERE id = ?", (rel_id,)
+        )
+        return row_to_relation(row, decrypt=self._cog_dec) if row else None
+
     # --- EpistemicState ---
 
     def upsert_epistemic_state(self, obj: EpistemicState) -> str:
@@ -380,6 +386,12 @@ class CognizeStoreMixin:
             out = [a for a in out if a.target_id == target_id]
         return out
 
+    def get_evidence_anchor(self, anchor_id: str) -> Optional[EvidenceAnchor]:
+        row = self._j_fetchone(
+            "SELECT * FROM cognize_evidence_anchors WHERE id = ?", (anchor_id,)
+        )
+        return row_to_evidence_anchor(row, decrypt=self._cog_dec) if row else None
+
     def append_trace(self, obj: Trace) -> str:
         self._c_insert("cognize_traces", self._cog_enc_row(trace_to_row(obj)))
         return obj.id
@@ -407,6 +419,12 @@ class CognizeStoreMixin:
         params.append(limit)
         rows = self._j_fetchall(sql, tuple(params))
         return [row_to_trace(r, decrypt=self._cog_dec) for r in rows]
+
+    def get_trace(self, trace_id: str) -> Optional[Trace]:
+        row = self._j_fetchone(
+            "SELECT * FROM cognize_traces WHERE id = ?", (trace_id,)
+        )
+        return row_to_trace(row, decrypt=self._cog_dec) if row else None
 
     def upsert_narrative_revision(self, obj: NarrativeRevisionDecision) -> str:
         self._cog_upsert(

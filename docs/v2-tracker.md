@@ -112,9 +112,9 @@ v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web Command Center)
 
 #### v2.4 — Web Command Center
 
-- [ ] T-130 T-131 T-132 T-133 T-134
-- [ ] T-135 T-136 T-137 T-138 T-139
-- [ ] `__version__ = 2.4.0` + CHANGELOG + tag `v2.4.0`
+- [x] T-130 T-131 T-132 T-133 T-134
+- [x] T-135 T-136 T-137 T-138 T-139
+- [x] `__version__ = 2.4.0` + CHANGELOG + tag `v2.4.0`
 
 ---
 
@@ -198,16 +198,16 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | done |
 | T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | done |
 | T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | done |
-| T-130 | **v2.4** | P13 | Web Command Center shell — single route, rail IA | todo |
-| T-131 | **v2.4** | P13 | REST list/show for all §2.2 entities | todo |
-| T-132 | **v2.4** | P13 | Narrative + EpistemicState purpose UI | todo |
-| T-133 | **v2.4** | P13 | Reflection / Interpretation / Situation purpose UI | todo |
-| T-134 | **v2.4** | P13 | Stance / Evidence / Relation / Trace purpose UI | todo |
-| T-135 | **v2.4** | P13 | Sense strip — Percepts + Connectors + Jobs in web | todo |
-| T-136 | **v2.4** | P13 | Unify Review + Commit inside web Center | todo |
-| T-137 | **v2.4** | P13 | Visual language — entity-coherent design system | todo |
-| T-138 | **v2.4** | P13 | Docs: WEB_CENTER + REST/COMMAND_CENTER sync | todo |
-| T-139 | **v2.4** | P13 | QA gate — entity routes, no Memory product UI | todo |
+| T-130 | **v2.4** | P13 | Web Command Center shell — single route, rail IA | done |
+| T-131 | **v2.4** | P13 | REST list/show for all §2.2 entities | done |
+| T-132 | **v2.4** | P13 | Narrative + EpistemicState purpose UI | done |
+| T-133 | **v2.4** | P13 | Reflection / Interpretation / Situation purpose UI | done |
+| T-134 | **v2.4** | P13 | Stance / Evidence / Relation / Trace purpose UI | done |
+| T-135 | **v2.4** | P13 | Sense strip — Percepts + Connectors + Jobs in web | done |
+| T-136 | **v2.4** | P13 | Unify Review + Commit inside web Center | done |
+| T-137 | **v2.4** | P13 | Visual language — entity-coherent design system | done |
+| T-138 | **v2.4** | P13 | Docs: WEB_CENTER + REST/COMMAND_CENTER sync | done |
+| T-139 | **v2.4** | P13 | QA gate — entity routes, no Memory product UI | done |
 
 
 ---
@@ -2196,7 +2196,7 @@ Update GLOSSARY/COGNITION/IDENTITY cross-links.
 
 ## T-130 — Web Command Center shell — single route, rail IA
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-092, T-101, T-121  
 **Blocks:** T-132–T-137, T-139
 
@@ -2219,10 +2219,10 @@ Replace the fragmented hash workbench (`#home` / `#review` / `#memories` / …) 
 
 ### Exit criteria
 
-- [ ] `twin serve` loads a single shell; all panes switch without full reload.
-- [ ] Nav has no “Memories” product entry.
-- [ ] Rail includes Explore + Review + Cognize + Sense + Inject + Ops (names may shorten; purposes fixed).
-- [ ] Deep-link to a Narrative id opens Explore detail in-shell.
+- [x] `twin serve` loads a single shell; all panes switch without full reload.
+- [x] Nav has no “Memories” product entry.
+- [x] Rail includes Explore + Review + Cognize + Sense + Inject + Ops (names may shorten; purposes fixed).
+- [x] Deep-link to a Narrative id opens Explore detail in-shell.
 
 ### Assumptions
 
@@ -2243,7 +2243,7 @@ Replace the fragmented hash workbench (`#home` / `#review` / `#memories` / …) 
 
 ## T-131 — REST list/show for all §2.2 entities
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-010, T-011, T-012, T-013  
 **Blocks:** T-132–T-135, T-139
 
@@ -2273,9 +2273,9 @@ Rules:
 
 ### Exit criteria
 
-- [ ] Each entity above has documented list+show in `docs/REST.md`.
-- [ ] Contract tests cover 200 shapes and empty lists.
-- [ ] Narrative show includes epistemic status + evidence_ids + grain when present.
+- [x] Each entity above has documented list+show in `docs/REST.md`.
+- [x] Contract tests cover 200 shapes and empty lists.
+- [x] Narrative show includes epistemic status + evidence_ids + grain when present.
 
 ### Assumptions
 
@@ -2294,7 +2294,7 @@ Rules:
 
 ## T-132 — Narrative + EpistemicState purpose UI
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130, T-131, T-070, T-071  
 **Blocks:** T-139
 
@@ -2313,9 +2313,9 @@ Explore → Narrative must look like a **governed account**, not a memory card:
 
 ### Exit criteria
 
-- [ ] List + detail for Narratives in Explore.
-- [ ] Stale Narrative never presented as fresh (badge + copy).
-- [ ] Evidence and relations reachable from detail without leaving shell.
+- [x] List + detail for Narratives in Explore.
+- [x] Stale Narrative never presented as fresh (badge + copy).
+- [x] Evidence and relations reachable from detail without leaving shell.
 
 ### Assumptions
 
@@ -2334,7 +2334,7 @@ Explore → Narrative must look like a **governed account**, not a memory card:
 
 ## T-133 — Reflection / Interpretation / Situation purpose UI
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130, T-131, T-040  
 **Blocks:** T-136, T-139
 
@@ -2352,9 +2352,9 @@ Default Explore landing may spotlight **open Reflections** (operator attention),
 
 ### Exit criteria
 
-- [ ] Each of the three has list + detail with fields matching §2.2 lifecycle language.
-- [ ] From Interpretation detail, one click to Review/commit path (T-136).
-- [ ] Open Reflections always visible from Home and Explore.
+- [x] Each of the three has list + detail with fields matching §2.2 lifecycle language.
+- [x] From Interpretation detail, one click to Review/commit path (T-136).
+- [x] Open Reflections always visible from Home and Explore.
 
 ### Assumptions
 
@@ -2372,7 +2372,7 @@ Default Explore landing may spotlight **open Reflections** (operator attention),
 
 ## T-134 — Stance / Evidence / Relation / Trace purpose UI
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130, T-131, T-050, T-052  
 **Blocks:** T-139
 
@@ -2389,9 +2389,9 @@ Stance approve uses the same preview-token discipline as CLI/TUI.
 
 ### Exit criteria
 
-- [ ] Stance proposals approvable from web with preview token.
-- [ ] Evidence and Relations browsable from Explore and from Narrative detail.
-- [ ] Trace list for a Narrative or vault (read-only).
+- [x] Stance proposals approvable from web with preview token.
+- [x] Evidence and Relations browsable from Explore and from Narrative detail.
+- [x] Trace list for a Narrative or vault (read-only).
 
 ### Assumptions
 
@@ -2410,7 +2410,7 @@ Stance approve uses the same preview-token discipline as CLI/TUI.
 
 ## T-135 — Sense strip — Percepts + Connectors + Jobs in web
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130, T-131, T-091  
 **Blocks:** T-139
 
@@ -2426,9 +2426,9 @@ Keeps Sense vs Cognize wall visible: this pane is **I/O and queue**, not meaning
 
 ### Exit criteria
 
-- [ ] Percept list+show in Explore or Sense pane.
-- [ ] Connectors and Jobs visible without leaving `/`.
-- [ ] UI copy never calls percepts “memories.”
+- [x] Percept list+show in Explore or Sense pane.
+- [x] Connectors and Jobs visible without leaving `/`.
+- [x] UI copy never calls percepts “memories.”
 
 ### Assumptions
 
@@ -2446,7 +2446,7 @@ Keeps Sense vs Cognize wall visible: this pane is **I/O and queue**, not meaning
 
 ## T-136 — Unify Review + Commit inside web Center
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130, T-133, T-041, T-101  
 **Blocks:** T-139
 
@@ -2461,9 +2461,9 @@ Fold today’s Review workbench + `#narratives` commit into the Center:
 
 ### Exit criteria
 
-- [ ] Operator can review → commit Narrative entirely in `/` without the old Memories flow.
-- [ ] Open Reflections visible on Review pane at all times.
-- [ ] Commit requires preview token when `--require-token` semantics apply.
+- [x] Operator can review → commit Narrative entirely in `/` without the old Memories flow.
+- [x] Open Reflections visible on Review pane at all times.
+- [x] Commit requires preview token when `--require-token` semantics apply.
 
 ### Assumptions
 
@@ -2481,7 +2481,7 @@ Fold today’s Review workbench + `#narratives` commit into the Center:
 
 ## T-137 — Visual language — entity-coherent design system
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130  
 **Blocks:** T-139
 
@@ -2497,9 +2497,9 @@ One composition for the web Center (not a dashboard of unrelated cards):
 
 ### Exit criteria
 
-- [ ] Documented token map in `docs/WEB_CENTER.md` (or CSS comment block referenced from docs).
-- [ ] Each entity type visually distinguishable by purpose, not only by icon tint.
-- [ ] Lighthouse/a11y smoke: focus order, contrast on badges.
+- [x] Documented token map in `docs/WEB_CENTER.md` (or CSS comment block referenced from docs).
+- [x] Each entity type visually distinguishable by purpose, not only by icon tint.
+- [x] Lighthouse/a11y smoke: focus order, contrast on badges.
 
 ### Assumptions
 
@@ -2517,7 +2517,7 @@ One composition for the web Center (not a dashboard of unrelated cards):
 
 ## T-138 — Docs: WEB_CENTER + REST/COMMAND_CENTER sync
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130, T-131  
 **Blocks:** T-139
 
@@ -2531,9 +2531,9 @@ One composition for the web Center (not a dashboard of unrelated cards):
 
 ### Exit criteria
 
-- [ ] WEB_CENTER.md exists and links from COMMAND_CENTER + REST + OPERATIONS.
-- [ ] No doc teaches Memories tab as product UI.
-- [ ] README stays architecture-layer only (link to WEB_CENTER, no stage dump).
+- [x] WEB_CENTER.md exists and links from COMMAND_CENTER + REST + OPERATIONS.
+- [x] No doc teaches Memories tab as product UI.
+- [x] README stays architecture-layer only (link to WEB_CENTER, no stage dump).
 
 ### Assumptions
 
@@ -2552,7 +2552,7 @@ One composition for the web Center (not a dashboard of unrelated cards):
 
 ## T-139 — QA gate — entity routes, no Memory product UI
 
-**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `todo`  
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
 **Depends on:** T-130–T-138  
 **Blocks:** none (release gate for `2.4.0`)
 
@@ -2567,9 +2567,9 @@ Release checklist for package `2.4.0`:
 
 ### Exit criteria
 
-- [ ] All T-130–T-138 exit criteria checked off.
-- [ ] CI green on entity REST + web smoke.
-- [ ] Package `2.4.0` recorded in CHANGELOG.
+- [x] All T-130–T-138 exit criteria checked off.
+- [x] CI green on entity REST + web smoke.
+- [x] Package `2.4.0` recorded in CHANGELOG.
 
 ### Assumptions
 

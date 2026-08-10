@@ -5,6 +5,13 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.4.0 — Web Command Center
+
+Single-route web cockpit (`twin serve`): Explore every Cognize entity with
+purpose-shaped UI; Review/commit; Sense and Inject panes; REST list/show for
+Situations, Interpretations, Relations, Evidence, Traces, Stances; no Memories
+product tab.
+
 ### v2.3.2
 
 Removed legacy argv aliases `extract` / `meditate` / `correlate` /
