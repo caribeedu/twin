@@ -273,6 +273,25 @@ class NarrativeCommitRequest(BaseModel):
     dissent_ids: list[str] = Field(default_factory=list)
 
 
+class StancePreviewBody(BaseModel):
+    edits: Optional[dict[str, Any]] = None
+
+
+class StanceApproveBody(BaseModel):
+    preview_token: str
+    confirm_constitutional: bool = False
+
+
+class ProposalPreviewRequest(BaseModel):
+    edits: Optional[dict[str, Any]] = None
+
+
+class ProposalApproveRequest(BaseModel):
+    preview_token: str
+    edits: Optional[dict[str, Any]] = None
+    confirm_constitutional: bool = False
+
+
 def create_app(home: Optional[str] = None) -> FastAPI:
     ws = Workspace(home)
     app = FastAPI(title="twin", description="Personal Cognitive OS — local API")
@@ -532,6 +551,84 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         )
         out = nar.model_dump(mode="json")
         out["epistemic"] = eps.model_dump(mode="json") if eps else None
+
+        from twin.cognize.models import (
+            EpistemicStatus,
+            RelationType,
+            derive_confidence,
+        )
+
+        evid = list(nar.evidence_ids or [])
+        evid_set = set(evid)
+        groups: list[list[str]] = []
+        support_count = 0
+        contradict_count = 0
+        relations_out: list[dict[str, Any]] = []
+        if hasattr(ws.store, "list_relations"):
+            vault = nar.vault_id or "default"
+            for rel in ws.store.list_relations(vault):
+                dump = rel.model_dump(mode="json")
+                touches = (
+                    rel.from_id == nar.id
+                    or rel.to_id == nar.id
+                    or rel.from_id in evid_set
+                    or rel.to_id in evid_set
+                )
+                if touches:
+                    relations_out.append(dump)
+                rtype = rel.type.value if hasattr(rel.type, "value") else str(rel.type)
+                if rtype == RelationType.same_originating_decision.value:
+                    groups.append([rel.from_id, rel.to_id])
+                if rtype == RelationType.supports.value and (
+                    rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
+                ):
+                    support_count += 1
+                if rtype == RelationType.contradicts.value and (
+                    rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
+                ):
+                    contradict_count += 1
+        out["relations"] = relations_out
+
+        eps_status = eps.status if eps else EpistemicStatus.fresh
+        derived = derive_confidence(
+            evidence_ids=evid,
+            same_originating_decision_groups=groups,
+            support_count=support_count,
+            contradict_count=contradict_count,
+            epistemic_status=eps_status,
+        )
+        out["derived_confidence"] = {
+            **derived.model_dump(mode="json"),
+            "derived": True,
+            "supports": support_count,
+            "contradicts": contradict_count,
+        }
+
+        evidence_rows: list[dict[str, Any]] = []
+        if hasattr(ws.store, "list_evidence_anchors"):
+            for a in ws.store.list_evidence_anchors(
+                nar.vault_id or "default",
+                target_kind="narrative",
+                target_id=nar.id,
+            ):
+                evidence_rows.append(a.model_dump(mode="json"))
+            for eid in evid:
+                if any(r.get("id") == eid for r in evidence_rows):
+                    continue
+                if hasattr(ws.store, "get_evidence_anchor"):
+                    got = ws.store.get_evidence_anchor(eid)
+                    if got is not None:
+                        evidence_rows.append(got.model_dump(mode="json"))
+        out["evidence"] = evidence_rows
+
+        open_refs: list[dict[str, Any]] = []
+        if hasattr(ws.store, "list_open_reflections"):
+            for ref in ws.store.list_open_reflections(nar.vault_id or "default"):
+                ref_domain = (ref.metadata or {}).get("domain") or getattr(ref, "domain", "") or ""
+                if nar.domain and ref_domain and ref_domain != nar.domain:
+                    continue
+                open_refs.append(ref.model_dump(mode="json"))
+        out["open_reflections"] = open_refs
         return out
 
     @app.get("/api/reflections")
@@ -688,6 +785,33 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             for p in props
         ]
 
+    @app.post("/api/stances/proposals/{proposal_id}/preview")
+    def api_stance_proposal_preview(
+        proposal_id: str, req: StancePreviewBody = StancePreviewBody(),
+    ):
+        from ..judgment.proposals import preview_proposal
+
+        try:
+            return preview_proposal(ws.store, proposal_id, edits=req.edits)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/stances/proposals/{proposal_id}/approve")
+    def api_stance_proposal_approve(proposal_id: str, req: StanceApproveBody):
+        from ..judgment.proposals import approve_proposal
+
+        if not (req.preview_token or "").strip():
+            raise HTTPException(400, "preview_token required")
+        try:
+            return approve_proposal(
+                ws.store,
+                proposal_id,
+                preview_token=req.preview_token,
+                confirm_constitutional=req.confirm_constitutional,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.get("/api/stances/{stance_id}")
     def api_stance(stance_id: str, vault: str = "default"):
         from twin.cognize.stance import judgment_to_stance
@@ -742,6 +866,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, "evidence_ids required")
         if not (req.actor or "").strip():
             raise HTTPException(400, "actor required")
+        if not (req.preview_token or "").strip():
+            raise HTTPException(400, "preview_token required — call commit-preview first")
         token = preview_commit_token(
             account=req.account,
             evidence_ids=req.evidence_ids,
@@ -750,7 +876,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             dissent_interpretation_ids=req.dissent_ids,
             domain=req.domain,
         )
-        if req.preview_token is not None and req.preview_token != token:
+        if req.preview_token != token:
             raise HTTPException(400, "preview_token mismatch — re-preview")
         try:
             nar = commit_narrative(
@@ -762,7 +888,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 interpretation_ids=req.interpretation_ids,
                 dissent_interpretation_ids=req.dissent_ids,
                 domain=req.domain,
-                preview_token=req.preview_token or token,
+                preview_token=req.preview_token,
                 require_preview_token=True,
             )
         except CommitError as exc:
@@ -1626,14 +1752,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     class JudgmentImportRequest(BaseModel):
         apply: bool = False
-
-    class ProposalApproveRequest(BaseModel):
-        preview_token: str
-        edits: Optional[dict[str, Any]] = None
-        confirm_constitutional: bool = False
-
-    class ProposalPreviewRequest(BaseModel):
-        edits: Optional[dict[str, Any]] = None
 
     class JudgmentSimulateRequest(BaseModel):
         query: str

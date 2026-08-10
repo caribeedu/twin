@@ -62,7 +62,7 @@ A version ships only when **every required task** for that version is `done` and
 | **v2.1** | Epistemics + host surfaces | Read-time confidence / independence; open Reflections in packs; ACL ∩ + revoke tombstone; Stance drafts; MCP / REST / Native serve v2 pack contract; legacy CLI aliases deprecated | T-050 · T-061 · T-071–T-074 · T-082 · T-100–T-102 · T-111 T-114 | Independence + ACL evals green; MCP/Native pack contract tests green; package `2.1.0` |
 | **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals; research logging for surprise | T-051 T-052 · T-112 T-113 T-115 | Consolidation never auto-commits; fade/trace tests green; package `2.2.0` |
 | **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
-| **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): browse **all** Cognize entities with purpose-shaped UI; operator panes aligned with TUI Center; retire Memory-as-product UI | T-130–T-139 | Every §2.2 entity list+detail reachable; no Memory nav; REST contract tests green; package `2.4.0` |
+| **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): browse **all** Cognize entities with purpose-shaped UI; operator panes aligned with TUI Center; retire Memory-as-product UI | T-130–T-139 | Every §2.2 entity list+detail reachable; no Memory nav; REST contract tests green; package `2.4.0` (+ exit-criteria hardening in `2.4.1`) |
 
 ### Completing this tracker ≠ ROADMAP v3 “Extended Brain”
 
@@ -2574,10 +2574,12 @@ Release checklist for package `2.4.0`:
 ### Assumptions
 
 - Patch releases after 2.4.0 use normal hardening PRs, not new tracker versions unless scope expands.
+- **`2.4.1`** closed exit-criteria gaps that were marked done too early at `2.4.0`: Narrative derived confidence/relations/open Reflections, Situation purpose UI, Stance Ops preview→approve, commit requiring preview token, empty-list REST contracts, WEB_CENTER visual token map.
 
 ### Expected QA
 
 - Full `pytest` slice for interfaces/web + REST entity contracts + `tests/evals` still green.
+- Hardening contracts in `tests/interfaces/test_web_center_hardening.py`.
 
 ### Resources
 

@@ -329,4 +329,6 @@ Install in [SETUP.md](SETUP.md). Interfaces in [INTERFACES.md](INTERFACES.md). O
 
 Prefer `twin cognize run`, `twin narrative …`, `twin stance …`, `twin inject pack`.
 On a TTY, bare `twin` opens the [Command Center](COMMAND_CENTER.md).
+Web visibility of every Cognize entity: [WEB_CENTER.md](WEB_CENTER.md)
+(`twin serve` → `/`).
 

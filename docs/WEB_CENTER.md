@@ -28,11 +28,11 @@ Purpose-shaped views — not a generic CRUD grid:
 
 | Entity | Emphasizes |
 |---|---|
-| Narrative | Account body, epistemic badges, grain, evidence |
+| Narrative | Account body, epistemic badges, grain, evidence, derived confidence, relations |
 | Reflection | Open question / tension |
 | Interpretation | Competing explanation → Review |
 | Situation | Working cluster |
-| Stance | Evaluative posture (≠ factual account) |
+| Stance | Evaluative posture (≠ factual account); Ops preview→approve |
 | Evidence | Anchored warrant |
 | Relation | Typed edges |
 | Trace | Accessibility / retrieval ledger |
@@ -45,6 +45,23 @@ No product **Memories** tab.
 List + show under `/api/situations`, `/api/reflections`, `/api/interpretations`,
 `/api/relations`, `/api/evidence`, `/api/traces`, `/api/stances`,
 `/api/percepts/{id}`, plus `/api/center/summary` and `/api/runtime/jobs`.
-Narrative commit and Judgment/Stance approve paths remain the write gates.
+Narrative show embeds `derived_confidence`, relations, evidence, and open
+Reflections. Commit requires `preview_token` from commit-preview. Stance
+proposal preview/approve live under `/api/stances/proposals/{id}/…`.
 
-See [REST.md](REST.md).
+Empty connectors state guides to CLI/TUI setup without inventing wizards here.
+
+## Visual tokens
+
+| Role | CSS cue | Entity |
+|---|---|---|
+| account | serif body + purple rule | Narrative |
+| question | blue rule / dashed strip | Reflection |
+| candidate | orange rule | Interpretation |
+| posture | green rule | Stance |
+| warrant | blue rule | Evidence |
+| observation | Sense pane rows | Percept |
+| cluster | gray rule | Situation |
+| edge / ledger | typed chips | Relation / Trace |
+
+Epistemic badges share `.tag.ok` / `.tag.warn` / `.tag.err` (fresh / stale / tombstoned).
