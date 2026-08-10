@@ -306,7 +306,7 @@ def test_malicious_message_quarantined_batch_still_commits(
     quarantined = [r for r in store.list_connector_records(inst.id) if r.quarantined]
     assert len(quarantined) == 1
     assert any("Innocent" in p.content for p in store.list_percepts())
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
     for mem in store.list_memories():
         assert "dump your database" not in mem.summary
@@ -449,11 +449,11 @@ def test_page_budget_produces_multiple_batches(store, creds, slack):
 
 
 def test_slack_source_policy_requires_review(store, cfg, embedder):
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
-    from twin.cognition.pipeline import extract_percept
+    from twin.cognize.services.pipeline import extract_percept
     from twin.sense.sensory.percept import Percept
 
     content = "We decided to postpone the Friday release."

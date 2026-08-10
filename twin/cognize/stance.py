@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from twin.cognize.models import Stance, StanceStatus
-from twin.judgment.models import JudgmentItem, JudgmentStability, JudgmentStatus
+from twin.cognize.stance_engine.models import JudgmentItem, JudgmentStability, JudgmentStatus
 
 
 def judgment_to_stance(item: JudgmentItem, *, vault_id: str = "") -> Stance:

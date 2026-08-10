@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tests.paths import EXAMPLES
 
-from twin.cognition import extract_percept
+from twin.cognize.services import extract_percept
 from twin.store.metrics import compute_metrics
 from twin.store.models import MemoryStatus
 from twin.sense.sensory import sense_paths
@@ -24,7 +24,7 @@ def test_metrics_empty_store(store):
 
 
 def test_session_and_product_metrics(store, cfg, embedder):
-    from twin.cognition.sessions import (
+    from twin.cognize.services.sessions import (
         complete_session,
         record_feedback,
         start_session,
@@ -70,7 +70,7 @@ def test_memory_usage_rate_counts_session_memory_pairs(store, cfg, embedder):
     """A memory supplied in two sessions counts twice in the denominator
     and once per session where it was marked useful — pairs on both sides."""
     from twin import ids
-    from twin.cognition.sessions import record_feedback, start_session
+    from twin.cognize.services.sessions import record_feedback, start_session
     from twin.store.models import MemoryItem
 
     mem = MemoryItem(id=ids.memory_id(), type="decision", title="Use FastAPI",

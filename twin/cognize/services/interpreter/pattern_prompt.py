@@ -2,7 +2,7 @@
 
 Where episode reflection reads one unit of work, pattern reflection reads a
 *window* of activity (a day / week, optionally scoped to a project) via an
-:class:`~twin.cognition.analysis_dossier.AnalysisDossier` and mines for
+:class:`~twin.cognize.services.analysis_dossier.AnalysisDossier` and mines for
 persistent, cross-domain patterns: preferences, procedures/habits and standing
 constraints revealed by repeated choices — the "Edu writes ``if`` without
 parentheses" / "Edu applies DRY on project X" class of memory, and equally the
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ...config import ALL_DOMAINS
+from twin.config import ALL_DOMAINS
 from twin.store.models import MemoryType
 
 if TYPE_CHECKING:

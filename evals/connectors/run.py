@@ -296,8 +296,8 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
             # outranks (trust scales confidence), nothing auto-confirms. The
             # interpretation is authored ground truth (recorded LLM output for
             # these exact bodies), keyed to the fixture content — not lexical.
-            from twin.cognition import extract_pending, set_interpreter_override
-            from twin.cognition.interpreter.schema import (
+            from twin.cognize.services import extract_pending, set_interpreter_override
+            from twin.cognize.services.interpreter.schema import (
                 CognitiveAct, InterpretationResult, InterpretationStatus,
                 InterpretedItem,
             )
@@ -376,7 +376,7 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
             if bot.source_metadata.get("lineage_root") != exp["lineage_root"]:
                 return False, "bot comment lost the lineage root it references"
 
-            from twin.cognition import extract_pending
+            from twin.cognize.services import extract_pending
             from twin.config import Config
             from twin.store.embeddings import get_embedder
             cfg = Config(home=Path(tmp) / "twin-home")
@@ -810,11 +810,11 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
 
 def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     """PR + Slack → WorkEpisode; shared independence; temporal conflict."""
-    from twin.cognition.correlation import (
+    from twin.cognize.services.correlation import (
         independence_group_for,
         run_correlation_pass,
     )
-    from twin.cognition.sessions import ensure_project
+    from twin.cognize.services.sessions import ensure_project
     from twin.sense.connectors.models import (
         ConnectorInstance,
         ConnectorRecord,

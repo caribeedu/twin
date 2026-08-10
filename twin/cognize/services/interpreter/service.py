@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ...config import Config
+from twin.config import Config
 from twin.sense.sensory.percept import Percept
 from . import echo, ollama_interpreter
 from .schema import InterpretationResult, InterpretationStatus
@@ -86,7 +86,7 @@ class InterpretationRuntime:
     chat client reused across Percepts, closed at the end."""
 
     def __init__(self, cfg: Config):
-        from ..llm import get_chat_client
+        from twin.llm import get_chat_client
 
         self.cfg = cfg
         self._chat = None
@@ -119,7 +119,7 @@ class InterpretationRuntime:
             return _deferred("cognitive interpreter unavailable (model unreachable)",
                              failure_class="unavailable")
         try:
-            from ..llm.usage import usage_context
+            from twin.llm.usage import usage_context
             with usage_context(stage="interpret", role="llm"):
                 return ollama_interpreter.interpret(
                     percept, masked_text, chat=self._chat,
@@ -146,7 +146,7 @@ class InterpretationRuntime:
 def interpreter_available(cfg: Config) -> bool:
     if _OVERRIDE is not None or cfg.extractor == "echo":
         return True
-    from ..llm import llm_available
+    from twin.llm import llm_available
     return llm_available(cfg)
 
 

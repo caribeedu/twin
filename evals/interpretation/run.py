@@ -18,13 +18,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from twin.cognition import set_interpreter_override
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services import set_interpreter_override
+from twin.cognize.services.interpreter.schema import (
     InterpretationResult,
     InterpretationStatus,
     InterpretedItem,
 )
-from twin.cognition.pipeline import extract_percept
+from twin.cognize.services.pipeline import extract_percept
 from twin.config import Config
 from twin.store.embeddings import get_embedder
 from twin.store.store.sqlite import SqliteStore

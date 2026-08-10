@@ -11,8 +11,8 @@ import hashlib
 import re
 from typing import Optional
 
-from ... import ids
-from ...clock import now_iso
+from twin import ids
+from twin.clock import now_iso
 from twin.store.models import (
     FindingStatus,
     FindingType,

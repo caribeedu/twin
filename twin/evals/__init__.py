@@ -13,8 +13,8 @@ from typing import Any, Optional
 
 from .. import ids
 from twin.inject.context_pack import build_context_pack
-from ..cognition.pipeline import extract_percept
-from ..cognition.retrieval import retrieve
+from twin.cognize.services.pipeline import extract_percept
+from twin.cognize.services.retrieval import retrieve
 from ..clock import now_iso
 from ..config import Config
 from twin.privacy.firewall import Firewall
@@ -441,8 +441,8 @@ def default_eval_root() -> Path:
 
 def run_judgment_eval(store, cfg, dataset_dir: Path) -> EvalRun:
     """Scope/precedence/constraint checks against judgment fixtures."""
-    from ..judgment.simulate import simulate
-    from ..judgment.yaml_io import apply_yaml_import, preview_yaml_import
+    from twin.cognize.stance_engine.simulate import simulate
+    from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
 
     cases = _load_cases(dataset_dir)
     results: list[EvalCaseResult] = []

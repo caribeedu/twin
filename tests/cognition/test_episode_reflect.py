@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from twin.cognition import (
+from twin.cognize.services import (
     BrainStage,
     run_episode_cognition,
     set_reflect_override,
     set_stage_override,
 )
-from twin.cognition.episode_reflect import (
+from twin.cognize.services.episode_reflect import (
     TrajectoryClaim,
     build_episode_brief,
     reflect_episode,
@@ -371,7 +371,7 @@ def test_reflect_allows_divergent_pr_commit_pair(store, cfg, embedder):
 def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
     """Consolidate retrieves confirmed/candidate/rejected neighbors."""
     from twin import ids
-    from twin.cognition.episode_reflect import gather_related_memories
+    from twin.cognize.services.episode_reflect import gather_related_memories
     from twin.store.models import MemoryItem
 
     acc, inst = _acct(store, account_id="acct_rel")
@@ -427,8 +427,8 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
 
 def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
     """Open-session observe notes surface before vault neighbors."""
-    from twin.cognition.episode_reflect import gather_related_memories
-    from twin.cognition.sessions import observe_session, start_session
+    from twin.cognize.services.episode_reflect import gather_related_memories
+    from twin.cognize.services.sessions import observe_session, start_session
 
     acc, inst = _acct(store, account_id="acct_sesart")
     ep = _pivot_episode(store, cfg, embedder, acc, inst)
@@ -483,7 +483,7 @@ def test_llm_reflector_defers_on_model_error(store, cfg, embedder):
     """
     import json
 
-    from twin.cognition.episode_reflect import _make_llm_reflector
+    from twin.cognize.services.episode_reflect import _make_llm_reflector
 
     acc, inst = _acct(store, account_id="acct_boom")
     ep = _pivot_episode(store, cfg, embedder, acc, inst)

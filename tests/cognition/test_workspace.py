@@ -1,20 +1,20 @@
-"""Workspace evaluation tick (twin.cognition.workspace)."""
+"""Workspace evaluation tick (twin.cognize.services.workspace)."""
 
 from dataclasses import dataclass, field
 
 import pytest
 
 from twin import ids
-from twin.cognition import set_interpreter_override
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services import set_interpreter_override
+from twin.cognize.services.interpreter.schema import (
     CognitiveAct,
     InterpretationResult,
     InterpretationStatus,
     InterpretedItem,
 )
-from twin.cognition.observer import ObserverReading, ObserverSuggestion
-from twin.cognition.salience import SalienceScores
-from twin.cognition.workspace import workspace_tick
+from twin.cognize.services.observer import ObserverReading, ObserverSuggestion
+from twin.cognize.services.salience import SalienceScores
+from twin.cognize.services.workspace import workspace_tick
 from twin.store.models import MemoryItem, MemoryStatus
 
 
@@ -107,10 +107,10 @@ def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
             inferred_domain="technical",
         )
 
-    monkeypatch.setattr("twin.cognition.workspace.read_context", lambda *_a, **_k: _Reading())
-    monkeypatch.setattr("twin.cognition.workspace.observe", fake_observe)
+    monkeypatch.setattr("twin.cognize.services.workspace.read_context", lambda *_a, **_k: _Reading())
+    monkeypatch.setattr("twin.cognize.services.workspace.observe", fake_observe)
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores(
             by_memory={"mem_a": 0.9, "mem_b": 0.4},
             novelty={"mem_a": 0.99, "mem_b": 0.1},
@@ -126,14 +126,14 @@ def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
 
 def test_observe_score_reaches_recall_item(store, cfg, embedder, monkeypatch):
     monkeypatch.setattr(
-        "twin.cognition.workspace.read_context",
+        "twin.cognize.services.workspace.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="technical", task_profile="coding",
             confidences={"domain": 1.0, "task_profile": 1.0, "project": 0.0},
         ),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.observe",
+        "twin.cognize.services.workspace.observe",
         lambda *_a, **_k: ObserverSuggestion(
             suggested_context=[{
                 "memory_id": "mem_x",
@@ -148,7 +148,7 @@ def test_observe_score_reaches_recall_item(store, cfg, embedder, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores(
             by_memory={"mem_x": 0.5}, novelty={"mem_x": 0.2}, contradiction_ids=[],
         ),
@@ -268,7 +268,7 @@ def test_snapshot_interpret_does_not_create_percept(store, cfg, embedder):
 
 def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monkeypatch):
     monkeypatch.setattr(
-        "twin.cognition.workspace.read_context",
+        "twin.cognize.services.workspace.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="unclassified",
             confidences={"domain": 0.0, "task_profile": 0.0, "project": 0.0},
@@ -276,11 +276,11 @@ def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monk
         ),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.observe",
+        "twin.cognize.services.workspace.observe",
         lambda *_a, **_k: ObserverSuggestion(inferred_domain="unclassified"),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores({}, {}, []),
     )
     result = workspace_tick(
@@ -292,7 +292,7 @@ def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monk
 
 
 def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
-    from twin.cognition.workspace import text_content_hash
+    from twin.cognize.services.workspace import text_content_hash
     from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     cfg.extractor = "auto"
@@ -336,7 +336,7 @@ def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
 
 def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedder, monkeypatch):
     monkeypatch.setattr(
-        "twin.cognition.workspace.read_context",
+        "twin.cognize.services.workspace.read_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom observe path")),
     )
     with pytest.raises(RuntimeError):
@@ -378,7 +378,7 @@ def test_second_retry_claim_is_blocked_concurrent(store, cfg, embedder):
         session_id="ses_retry_race",
         sequence=1,
         content_hash=__import__(
-            "twin.cognition.workspace", fromlist=["text_content_hash"]
+            "twin.cognize.services.workspace", fromlist=["text_content_hash"]
         ).text_content_hash(text),
         input_mode="delta",
         interpret=True,
@@ -403,13 +403,13 @@ def test_second_retry_claim_is_blocked_concurrent(store, cfg, embedder):
 
 
 def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, embedder, monkeypatch):
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct,
         InterpretationResult,
         InterpretationStatus,
         InterpretedItem,
     )
-    from twin.cognition.pipeline import extract_percept as real_extract
+    from twin.cognize.services.pipeline import extract_percept as real_extract
 
     cfg.extractor = "auto"
     span = "We decided to use FastAPI for the Twin HTTP API."
@@ -438,7 +438,7 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
         )
 
     set_interpreter_override(scripted)
-    monkeypatch.setattr("twin.cognition.workspace.extract_percept", flaky_extract)
+    monkeypatch.setattr("twin.cognize.services.workspace.extract_percept", flaky_extract)
 
     with pytest.raises(RuntimeError):
         workspace_tick(
@@ -485,8 +485,8 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
 
 
 def test_workspace_retry_can_complete_after_transient_failure(store, cfg, embedder, monkeypatch):
-    from twin.cognition.observer import ObserverReading, ObserverSuggestion
-    from twin.cognition.salience import SalienceScores
+    from twin.cognize.services.observer import ObserverReading, ObserverSuggestion
+    from twin.cognize.services.salience import SalienceScores
 
     blows = {"n": 0}
 
@@ -499,13 +499,13 @@ def test_workspace_retry_can_complete_after_transient_failure(store, cfg, embedd
             confidences={"domain": 1.0, "task_profile": 1.0, "project": 0.0},
         )
 
-    monkeypatch.setattr("twin.cognition.workspace.read_context", flaky_read)
+    monkeypatch.setattr("twin.cognize.services.workspace.read_context", flaky_read)
     monkeypatch.setattr(
-        "twin.cognition.workspace.observe",
+        "twin.cognize.services.workspace.observe",
         lambda *_a, **_k: ObserverSuggestion(inferred_domain="technical"),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores({}, {}, []),
     )
 

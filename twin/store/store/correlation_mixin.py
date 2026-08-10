@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from twin.cognition.correlation.models import (
+from twin.cognize.services.correlation.models import (
     EpisodeEdge,
     EpisodeLink,
     EpisodePhase,
@@ -13,7 +13,7 @@ from twin.cognition.correlation.models import (
     ProjectLink,
     WorkEpisode,
 )
-from twin.cognition.correlation.persistence import (
+from twin.cognize.services.correlation.persistence import (
     episode_edge_to_row,
     episode_link_to_row,
     episode_phase_to_row,

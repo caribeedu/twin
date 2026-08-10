@@ -150,7 +150,7 @@ def _load_percepts(store: Any, percept_ids: Optional[list[str]], limit: int) -> 
                 out.append(p)
         return out
     if hasattr(store, "percepts_pending_interpretation"):
-        from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+        from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
 
         return store.percepts_pending_interpretation(
             max_attempts=MAX_INTERPRETATION_ATTEMPTS,

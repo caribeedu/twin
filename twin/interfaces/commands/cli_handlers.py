@@ -143,7 +143,7 @@ def cmd_interpret(args) -> None:
     from collections import Counter
 
     from twin.interfaces import ux
-    from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+    from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
 
     ws = Workspace(args.home)
     if args.interpret_command == "deferred":
@@ -227,7 +227,7 @@ def cmd_interpret(args) -> None:
 
 
 def cmd_review(args) -> None:
-    from twin.cognition.quality import analyze_candidates, review_queue
+    from twin.cognize.services.quality import analyze_candidates, review_queue
     from twin.store.models import MemoryStatus
     from twin.interfaces import ux
 
@@ -686,7 +686,7 @@ def cmd_pack(args) -> None:
 
 def cmd_observe(args) -> None:
     from twin.interfaces import ux
-    from twin.cognition.observer import observe
+    from twin.cognize.services.observer import observe
 
     ws = Workspace(args.home)
     ux_domain = args.domain or "(inferred)"
@@ -716,7 +716,7 @@ def cmd_observe(args) -> None:
 
 def cmd_workspace(args) -> None:
     from twin.interfaces import ux
-    from twin.cognition.workspace import workspace_tick
+    from twin.cognize.services.workspace import workspace_tick
 
     ws = Workspace(args.home)
     if args.workspace_command != "tick":
@@ -746,7 +746,7 @@ def cmd_workspace(args) -> None:
 
 def cmd_consolidate(args) -> None:
     from twin.interfaces import ux
-    from twin.cognition.consolidation_cycle import run_consolidation_cycle
+    from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
 
     ws = Workspace(args.home)
     kind = args.consolidate_command
@@ -960,7 +960,7 @@ def cmd_reindex(args) -> None:
 
 def cmd_promote(args) -> None:
     from twin.interfaces import ux
-    from twin.judgment.profile import promote_memory
+    from twin.cognize.stance_engine.profile import promote_memory
 
     ws = Workspace(args.home)
     mem = ws.store.get_memory(args.memory_id)
@@ -1124,14 +1124,14 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
 
 def _stance_ops(args) -> None:
     from twin.interfaces import ux
-    from twin.judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
-    from twin.judgment.proposals import (
+    from twin.cognize.stance_engine.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
+    from twin.cognize.stance_engine.proposals import (
         approve_proposal, defer_proposal, preview_proposal, propose_from_episode,
         propose_from_memory, propose_from_pattern, reject_proposal,
     )
-    from twin.judgment.simulate import counterfactual, simulate
-    from twin.judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
-    from twin.judgment.versions import active_items
+    from twin.cognize.stance_engine.simulate import counterfactual, simulate
+    from twin.cognize.stance_engine.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
+    from twin.cognize.stance_engine.versions import active_items
 
 
     ws = Workspace(args.home)
@@ -2374,7 +2374,7 @@ def cmd_backup(args) -> None:
 
 def cmd_export(args) -> None:
     from twin.interfaces import ux
-    from twin.judgment.profile import load_profile
+    from twin.cognize.stance_engine.profile import load_profile
 
     ws = Workspace(args.home)
     memories = ws.store.list_memories(limit=100000)
@@ -2404,7 +2404,7 @@ def cmd_export(args) -> None:
 
 
 def cmd_session_start(args) -> None:
-    from twin.cognition.sessions import start_session
+    from twin.cognize.services.sessions import start_session
 
     ws = Workspace(args.home)
     started = start_session(
@@ -2428,7 +2428,7 @@ def cmd_session_start(args) -> None:
 
 
 def cmd_session_observe(args) -> None:
-    from twin.cognition.sessions import observe_session
+    from twin.cognize.services.sessions import observe_session
 
     ws = Workspace(args.home)
     artifact = {"kind": args.kind}
@@ -2441,7 +2441,7 @@ def cmd_session_observe(args) -> None:
 
 
 def cmd_session_complete(args) -> None:
-    from twin.cognition.sessions import complete_session
+    from twin.cognize.services.sessions import complete_session
 
     ws = Workspace(args.home)
     # a summary typed at the CLI comes from the human: origin "user"
@@ -2459,7 +2459,7 @@ def cmd_session_complete(args) -> None:
 
 
 def cmd_session_feedback(args) -> None:
-    from twin.cognition.sessions import record_feedback
+    from twin.cognize.services.sessions import record_feedback
 
     ws = Workspace(args.home)
     ses = record_feedback(ws.store, args.session_id, args.verdict,
@@ -2469,7 +2469,7 @@ def cmd_session_feedback(args) -> None:
 
 
 def cmd_session_cleanup(args) -> None:
-    from twin.cognition.sessions import abandon_stale_sessions
+    from twin.cognize.services.sessions import abandon_stale_sessions
 
     ws = Workspace(args.home)
     abandoned = abandon_stale_sessions(ws.store, args.max_idle_hours)
@@ -2482,7 +2482,7 @@ def cmd_session_cleanup(args) -> None:
 def cmd_project(args) -> None:
     ws = Workspace(args.home)
     if args.project_command == "add":
-        from twin.cognition.sessions import ensure_project
+        from twin.cognize.services.sessions import ensure_project
 
         # idempotent: repos/aliases merge into an existing project
         project = ensure_project(ws.store, args.name,
@@ -2492,8 +2492,8 @@ def cmd_project(args) -> None:
             ws.store.update_project(project)
         print(f"{project.id}: {project.name} (repos: {', '.join(project.repos) or '—'})")
     elif args.project_command == "link":
-        from twin.cognition.correlation.projects import link_project
-        from twin.cognition.sessions import ensure_project
+        from twin.cognize.services.correlation.projects import link_project
+        from twin.cognize.services.sessions import ensure_project
 
         project = ensure_project(ws.store, args.name)
         link = link_project(
@@ -2510,8 +2510,8 @@ def cmd_project(args) -> None:
             f"(status={status})"
         )
     elif args.project_command in ("reject", "historical", "confirm"):
-        from twin.cognition.correlation.projects import set_project_link_status
-        from twin.cognition.correlation.models import ProjectLinkStatus
+        from twin.cognize.services.correlation.projects import set_project_link_status
+        from twin.cognize.services.correlation.models import ProjectLinkStatus
 
         mapping = {
             "reject": ProjectLinkStatus.rejected,
@@ -2524,7 +2524,7 @@ def cmd_project(args) -> None:
         print(f"{link.id} status={link.status.value}")
     elif args.project_command == "explain":
         import json as _json
-        from twin.cognition.correlation.explain import explain_project_link
+        from twin.cognize.services.correlation.explain import explain_project_link
         print(_json.dumps(explain_project_link(ws.store, args.link_id),
                           indent=2, default=str))
     elif args.project_command == "links":
@@ -2743,7 +2743,7 @@ def _clip(text: object, n: int = 28) -> str:
 
 def _stage_status_line(report) -> list[tuple[str, str]]:
     """KV rows summarizing each brain stage's status + counts."""
-    from twin.cognition.episode_pipeline import STAGE_ORDER
+    from twin.cognize.services.episode_pipeline import STAGE_ORDER
 
     rows: list[tuple[str, str]] = []
     for st in STAGE_ORDER:
@@ -3051,7 +3051,7 @@ def cmd_episode(args) -> None:
               pretty)
 
     elif cmd in ("confirm-edge", "reject-edge"):
-        from twin.cognition.correlation.edges import confirm_edge, reject_edge
+        from twin.cognize.services.correlation.edges import confirm_edge, reject_edge
 
         action = "confirm" if cmd == "confirm-edge" else "reject"
         ed = (confirm_edge if action == "confirm" else reject_edge)(
@@ -3079,7 +3079,7 @@ def cmd_episode(args) -> None:
         _emit(args, data, pretty)
 
     elif cmd == "reflect":
-        from twin.cognition.episode_reflect import reflect_episode
+        from twin.cognize.services.episode_reflect import reflect_episode
 
         ep = _require(args.episode_id)
         dry = bool(args.dry_run)
@@ -3139,7 +3139,7 @@ def cmd_episode(args) -> None:
         _emit(args, data, pretty)
 
     elif cmd == "explain":
-        from twin.cognition.correlation.explain import explain_episode
+        from twin.cognize.services.correlation.explain import explain_episode
 
         data = explain_episode(ws.store, args.episode_id)
         if data.get("error"):
@@ -3170,23 +3170,23 @@ def cmd_identity(args) -> None:
                 f"signals={','.join(link.signals)}"
             )
     elif args.identity_command == "confirm":
-        from twin.cognition.correlation.identity import confirm_identity_link
+        from twin.cognize.services.correlation.identity import confirm_identity_link
 
         link = confirm_identity_link(
             ws.store, args.link_id, entity_id=args.entity,
         )
         print(f"confirmed {link.id} status={link.status.value}")
     elif args.identity_command == "unconfirm":
-        from twin.cognition.correlation.identity import unconfirm_identity_link
+        from twin.cognize.services.correlation.identity import unconfirm_identity_link
         link = unconfirm_identity_link(ws.store, args.link_id)
         print(f"unconfirmed {link.id} status={link.status.value}")
     elif args.identity_command == "reject":
-        from twin.cognition.correlation.identity import reject_identity_link
+        from twin.cognize.services.correlation.identity import reject_identity_link
         link = reject_identity_link(ws.store, args.link_id)
         print(f"rejected {link.id} status={link.status.value}")
     elif args.identity_command == "why":
         import json as _json
-        from twin.cognition.correlation.explain import explain_identity_link
+        from twin.cognize.services.correlation.explain import explain_identity_link
         print(_json.dumps(explain_identity_link(ws.store, args.link_id),
                           indent=2, default=str))
     else:
@@ -3200,7 +3200,7 @@ def cmd_identity(args) -> None:
 def cmd_watch(args) -> None:
     import time
 
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
 
     ws = Workspace(args.home)
     print(f"watching {', '.join(args.paths)} every {args.interval}s (Ctrl+C to stop)")

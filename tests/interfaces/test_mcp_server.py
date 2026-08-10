@@ -14,7 +14,7 @@ def server(tmp_path, monkeypatch):
     home = tmp_path / "twin-home"
     srv = create_server(str(home))
     # populate through the same workspace path
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     from twin.workspace import Workspace
 
     ws = Workspace(str(home))
@@ -83,7 +83,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
 
     # existing state: a known project and one confirmed prior decision
     from twin import ids
-    from twin.cognition.sessions import ensure_project
+    from twin.cognize.services.sessions import ensure_project
     from twin.store.models import MemoryItem, MemoryStatus
     from twin.workspace import Workspace
 

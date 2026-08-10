@@ -81,7 +81,7 @@ def _seed_memory(store, embedder, *, title: str, summary: str, domain: str = "te
 
 def _assert_no_vendor_coupling() -> tuple[bool, str]:
     """Generic modules must not import adapters or branch on Claude."""
-    import twin.cognition.host_session as hs
+    import twin.cognize.services.host_session as hs
     import twin.interfaces.native.service as ns
 
     for mod in (hs, ns):

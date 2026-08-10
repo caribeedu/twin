@@ -15,8 +15,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from ... import ids
-from ...clock import now_iso
+from twin import ids
+from twin.clock import now_iso
 
 
 class IdentityStatus(str, Enum):

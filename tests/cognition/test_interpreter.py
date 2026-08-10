@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from twin.cognition import extract_percept, extract_pending, set_interpreter_override
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services import extract_percept, extract_pending, set_interpreter_override
+from twin.cognize.services.interpreter.schema import (
     CognitiveAct,
     InterpretationResult,
     InterpretationStatus,
@@ -406,7 +406,7 @@ def test_invalid_domain_goes_to_review_as_unknown_not_technical(store,
 
 def test_to_extracted_rejects_invalid_type_and_domain():
     import pytest
-    from twin.cognition.interpreter.schema import CognitiveAct, InterpretedItem
+    from twin.cognize.services.interpreter.schema import CognitiveAct, InterpretedItem
 
     bad_type = InterpretedItem(
         memory_type="not_a_type", cognitive_act=CognitiveAct.statement,
@@ -469,7 +469,7 @@ def test_invented_speaker_is_flagged_unresolved(store, interpreting_cfg, embedde
 
 
 def test_parse_model_json_strips_think_tags_and_fences():
-    from twin.cognition.interpreter.ollama_interpreter import _parse_model_json
+    from twin.cognize.services.interpreter.ollama_interpreter import _parse_model_json
 
     data = _parse_model_json(
         '<think>noise</think>\n```json\n{"items":[],"unresolved_references":[]}\n```'
@@ -478,7 +478,7 @@ def test_parse_model_json_strips_think_tags_and_fences():
 
 
 def test_coerce_item_tolerates_messy_llm_fields():
-    from twin.cognition.interpreter.ollama_interpreter import _items_from_payload
+    from twin.cognize.services.interpreter.ollama_interpreter import _items_from_payload
 
     items, dropped = _items_from_payload({
         "items": [

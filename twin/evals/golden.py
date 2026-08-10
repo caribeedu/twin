@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from twin.cognition.session_lifecycle import (
+from twin.cognize.services.session_lifecycle import (
     append_session_delta,
     close_session_structured,
 )
-from twin.cognition.sessions import start_session
+from twin.cognize.services.sessions import start_session
 from twin.clock import now_iso
 from twin.config import Config
 from twin.privacy.firewall import Firewall

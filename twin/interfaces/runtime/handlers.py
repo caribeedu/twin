@@ -23,8 +23,8 @@ Handler = Callable[[MemoryStore, Config, Embedder, RuntimeJob], dict[str, Any]]
 def handle_interpret_percept(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    from twin.cognition.pipeline import extract_percept
-    from twin.cognition.interpreter import service as interp_service
+    from twin.cognize.services.pipeline import extract_percept
+    from twin.cognize.services.interpreter import service as interp_service
 
     percept_id = (job.payload or {}).get("percept_id")
     if not percept_id:
@@ -58,7 +58,7 @@ def handle_interpret_percept(
 def handle_workspace_tick(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    from twin.cognition.workspace import workspace_tick
+    from twin.cognize.services.workspace import workspace_tick
 
     p = job.payload or {}
     text = p.get("text") or p.get("current_text") or ""
@@ -80,7 +80,7 @@ def handle_workspace_tick(
 def handle_consolidate_daily(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    from twin.cognition.consolidation_cycle import (
+    from twin.cognize.services.consolidation_cycle import (
         ConsolidationInvariantError,
         run_consolidation_cycle,
     )
@@ -101,7 +101,7 @@ def handle_consolidate_daily(
 def handle_consolidate_weekly(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    from twin.cognition.consolidation_cycle import (
+    from twin.cognize.services.consolidation_cycle import (
         ConsolidationInvariantError,
         run_consolidation_cycle,
     )
@@ -164,7 +164,7 @@ def handle_cognize_batch(
 def handle_attention_evaluate(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    from twin.cognition.attention import evaluate_attention
+    from twin.cognize.services.attention import evaluate_attention
 
     p = job.payload or {}
     session_id = p.get("session_id") or ""
@@ -280,8 +280,8 @@ def handle_session_domain_resolve(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     """Background domain freeze from multi-message session evidence (LLM)."""
-    from twin.cognition.host_session import apply_background_domain_resolve
-    from twin.cognition.interpreter import service as interp_service
+    from twin.cognize.services.host_session import apply_background_domain_resolve
+    from twin.cognize.services.interpreter import service as interp_service
 
     p = job.payload or {}
     binding_id = p.get("binding_id") or ""
@@ -311,8 +311,8 @@ def handle_session_complete(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     """Background session consolidation + extract after native SessionEnd."""
-    from twin.cognition.sessions import complete_session
-    from twin.cognition.interpreter import service as interp_service
+    from twin.cognize.services.sessions import complete_session
+    from twin.cognize.services.interpreter import service as interp_service
 
     p = job.payload or {}
     session_id = p.get("session_id") or ""

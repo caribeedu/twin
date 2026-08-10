@@ -28,7 +28,7 @@ _PROTO_DENY_EXTRAS = frozenset({
 })
 
 from twin.inject.context_pack import PackDeadlineExceeded
-from ...cognition.host_session import (
+from twin.cognize.services.host_session import (
     BindingScopeError,
     NativeSessionStart,
     bind_and_start,
@@ -270,7 +270,7 @@ class NativeHostService:
             # Parallel workspace tick: confidence-aware spontaneous recall.
             # Silent when nothing clears the bar; blocked stay ids-only.
             try:
-                from ...cognition.workspace import workspace_tick
+                from twin.cognize.services.workspace import workspace_tick
                 tick = workspace_tick(
                     self.store, self.cfg, self.embedder, event.text or "",
                     session_id=binding.cognitive_session_id,

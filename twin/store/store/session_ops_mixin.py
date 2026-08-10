@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from twin.clock import now_iso
-from twin.cognition.session_lifecycle import (
+from twin.cognize.services.session_lifecycle import (
     SessionCheckpoint,
     SessionClosure,
     SessionEvent,

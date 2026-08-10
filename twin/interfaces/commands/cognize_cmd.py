@@ -25,7 +25,7 @@ def cognize_status(ws, args) -> dict[str, Any]:
     import os
 
     from twin.cognize.gate import require_chat_llm
-    from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+    from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
     from twin.llm import llm_available
 
     pending = []

@@ -246,7 +246,7 @@ def test_dispatch_missing_handler_payload(store, cfg, embedder):
 
 
 def test_session_complete_job_consolidates(store, cfg, embedder):
-    from twin.cognition.sessions import observe_session, start_session
+    from twin.cognize.services.sessions import observe_session, start_session
     from twin.store.models import ConsolidationStatus
 
     ses = start_session(
@@ -277,9 +277,9 @@ def test_session_complete_job_consolidates(store, cfg, embedder):
 
 
 def test_session_domain_resolve_job_freezes_from_dialogue(store, cfg, embedder, monkeypatch):
-    from twin.cognition.host_session import bind_and_start
-    from twin.cognition.observer import ObserverReading
-    from twin.cognition.sessions import observe_session
+    from twin.cognize.services.host_session import bind_and_start
+    from twin.cognize.services.observer import ObserverReading
+    from twin.cognize.services.sessions import observe_session
 
     started = bind_and_start(
         store, cfg, embedder,
@@ -295,7 +295,7 @@ def test_session_domain_resolve_job_freezes_from_dialogue(store, cfg, embedder, 
     })
 
     monkeypatch.setattr(
-        "twin.cognition.observer.read_context",
+        "twin.cognize.services.observer.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="work", task_profile="meeting_prep", mode="llm",
             confidences={"domain": 0.9, "task_profile": 0.8, "project": 0.0},

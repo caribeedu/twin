@@ -29,7 +29,7 @@ from typing import Any, Optional
 
 from ..config import Config
 from twin.privacy.firewall import Firewall
-from ..judgment.profile import load_profile
+from twin.cognize.stance_engine.profile import load_profile
 from twin.store.embeddings import Embedder
 from twin.store.search import SearchHit
 from twin.store.store.base import MemoryStore
@@ -43,8 +43,8 @@ from twin.inject.pack_select import (
     project_goals,
     screen_injection,
 )
-from twin.cognition.retrieval import Reranker, retrieve
-from twin.cognition.task_profiles import get_profile
+from twin.cognize.services.retrieval import Reranker, retrieve
+from twin.cognize.services.task_profiles import get_profile
 
 
 class PackDeadlineExceeded(Exception):
@@ -234,9 +234,9 @@ def build_context_pack(
         judgment_text = ""
         pack_j: dict = {}
         if hasattr(store, "list_judgment_items"):
-            from ..judgment.application import applicable_pack, render_applicable
-            from ..judgment.models import AppliedRevisionRef, JudgmentItem
-            from ..judgment.versions import make_snapshot
+            from twin.cognize.stance_engine.application import applicable_pack, render_applicable
+            from twin.cognize.stance_engine.models import AppliedRevisionRef, JudgmentItem
+            from twin.cognize.stance_engine.versions import make_snapshot
             from ..privacy.engine import evaluate_judgment_items
             active = store.list_judgment_items(status="active", limit=1)
             if active:

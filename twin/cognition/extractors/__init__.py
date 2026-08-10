@@ -1,3 +1,1 @@
-from . import heuristic, ollama
-
-__all__ = ["heuristic", "ollama"]
+from twin.cognize.services.extractors import *  # noqa: F403

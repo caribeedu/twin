@@ -1,7 +1,7 @@
-"""Multi-stage retrieval pipeline (twin.cognition.retrieval)."""
+"""Multi-stage retrieval pipeline (twin.cognize.services.retrieval)."""
 
 from twin import ids
-from twin.cognition.retrieval import retrieve
+from twin.cognize.services.retrieval import retrieve
 from twin.store.models import Evidence, MemoryItem
 from twin.sense.sensory.percept import Percept
 
@@ -103,7 +103,7 @@ def test_reranker_failure_is_observable(store, embedder, caplog):
     def broken(query, hits):
         raise RuntimeError("model gone")
 
-    with caplog.at_level("WARNING", logger="twin.cognition.retrieval"):
+    with caplog.at_level("WARNING", logger="twin.cognize.services.retrieval"):
         result = retrieve(store, embedder, "webhooks", reranker=broken)
     assert result.diagnostics["reranker"] == {
         "attempted": True, "succeeded": False, "error_type": "RuntimeError",

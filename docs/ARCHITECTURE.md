@@ -78,19 +78,17 @@ this is unfinished v2 work, not optional cosmetics.
 
 | Target package | Owns | Absorbs from today |
 |---|---|---|
-| **`sense`** | Capture, normalize, connector I/O, percepts | `twin/connectors/`, `twin/sensory/` |
-| **`cognize`** | Narrative pipeline, interpret/reflect services, Stance drafting & versioned evaluative model | `twin/cognize/` + **`twin/cognition/`** (fold in) + Stance/proposal logic from `twin/judgment/` |
-| **`inject`** | Pack render, Observer slot, stale-as-fresh refusal | Pack / observer pieces of `twin/cognition/` |
-| **`store`** | Persistence, search indexes, embeddings, migrations | Data layer of `twin/memory/` (`MemoryStore` → store facade) |
-| **`llm`** | Provider adapters and usage accounting | `twin/cognition/llm/` |
-| **`privacy`** | Domain Firewall, PII, disclosure guardrails | `twin/privacy/` + `twin/judgment/firewall.py` / `pii.py` |
-| **`interfaces`** | CLI, MCP, REST, web, TUI Center, workers, export/backup | `twin/interfaces/` + `twin/runtime/` + `twin/sovereignty/` |
+| **`sense`** | Capture, normalize, connector I/O, percepts | `twin.sense.connectors`, `twin.sense.sensory` (shims at old roots) |
+| **`cognize`** | Narrative pipeline + services + Stance engine | `twin.cognize` + `twin.cognize.services` + `twin.cognize.stance_engine` |
+| **`inject`** | Pack render, Observer slot, stale-as-fresh refusal | `twin.inject` |
+| **`store`** | Persistence, search indexes, embeddings, migrations | `twin.store` (`MemoryStore` name transitional) |
+| **`llm`** | Provider adapters and usage accounting | `twin.llm` |
+| **`privacy`** | Domain Firewall, PII, disclosure guardrails | `twin.privacy` (+ Firewall / PII) |
+| **`interfaces`** | CLI, MCP, REST, web, TUI Center, workers, export/backup | `twin.interfaces` (+ `runtime`, `sovereignty`) |
 
-**`twin/memory/`** and **`twin/judgment/`** are transitional: split by
-pipeline function into `store` / `cognize` / `privacy` / `inject` as
-migration proceeds. Dual-read `MemoryItem` rows and `judgment_*` tables
-may remain until data migration finishes — product copy must not call them
-Memory or Judgment.
+Transitional shims remain at `twin.memory`, `twin.judgment`, `twin.cognition`,
+`twin.connectors`, `twin.sensory`, `twin.runtime`, `twin.sovereignty` for one
+migration window.
 
 Inventory and cuts: [v2-tracker.md](v2-tracker.md) (v2.5 Package walls) ·
 [ROADMAP.md](ROADMAP.md).

@@ -22,7 +22,7 @@ from .schema import (
     InterpretedItem,
 )
 from ..schema import SENSITIVITIES
-from ...config import ALL_DOMAINS
+from twin.config import ALL_DOMAINS
 
 PROMPT_VERSION = "interpret-v3"
 SCHEMA_VERSION = "1"
@@ -397,7 +397,7 @@ def interpret(percept: Percept, text: str, *,
     ``model`` / ``client`` still build an Ollama chat client.
     """
     if chat is None:
-        from ..llm import OllamaChatClient
+        from twin.llm import OllamaChatClient
         chat = OllamaChatClient(base_url, model, client=client)
 
     data = chat.complete_json(

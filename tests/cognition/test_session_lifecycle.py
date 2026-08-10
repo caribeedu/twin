@@ -1,6 +1,6 @@
 """Closed cognitive sessions — deltas, checkpoints, closure, pause/reopen."""
 
-from twin.cognition.session_lifecycle import (
+from twin.cognize.services.session_lifecycle import (
     append_session_delta,
     archive_session,
     checkpoint_session,
@@ -9,7 +9,7 @@ from twin.cognition.session_lifecycle import (
     reopen_session,
     resume_session,
 )
-from twin.cognition.sessions import start_session
+from twin.cognize.services.sessions import start_session
 from twin.store.models import SessionStatus
 
 

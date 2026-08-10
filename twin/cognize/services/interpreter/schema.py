@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from ...config import ALL_DOMAINS
+from twin.config import ALL_DOMAINS
 from ..schema import MEMORY_TYPES, SENSITIVITIES, ExtractedMemory, ExtractedRelation
 
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from ...config import Config
+from twin.config import Config
 from twin.sense.sensory.percept import Percept
 from .schema import (
     CognitiveAct,

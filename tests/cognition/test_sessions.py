@@ -1,4 +1,4 @@
-"""Cognitive session lifecycle + projects (twin.cognition.sessions)."""
+"""Cognitive session lifecycle + projects (twin.cognize.services.sessions)."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ from tests.paths import EXAMPLES
 
 import pytest
 
-from twin.cognition.sessions import (
+from twin.cognize.services.sessions import (
     abandon_stale_sessions,
     complete_session,
     ensure_project,
@@ -136,10 +136,10 @@ def test_start_session_explicit_alias_resolves(store, cfg, embedder):
 
 
 def test_start_session_infers_task_profile(store, cfg, embedder, monkeypatch):
-    from twin.cognition.observer import ObserverReading
+    from twin.cognize.services.observer import ObserverReading
 
     monkeypatch.setattr(
-        "twin.cognition.sessions.resolve_context_domain",
+        "twin.cognize.services.sessions.resolve_context_domain",
         lambda *_a, **_k: ObserverReading(
             domain="technical", task_profile="debugging",
             confidences={"domain": 0.9, "task_profile": 0.9, "project": 0.0},
@@ -331,7 +331,7 @@ def test_consolidation_failure_is_diagnosable_and_retryable(store, cfg, embedder
     retry consolidates without duplicating percepts or memories."""
     session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
 
-    import twin.cognition.sessions as sessions_mod
+    import twin.cognize.services.sessions as sessions_mod
 
     def boom(*args, **kwargs):
         raise RuntimeError("extractor exploded")
@@ -365,7 +365,7 @@ def test_completed_consolidation_is_idempotent_on_memories(store, cfg, embedder,
     dedup key prevents duplicate memories."""
     session = start_session(store, cfg, embedder, "task", domain="technical", client="cli").session
 
-    import twin.cognition.sessions as sessions_mod
+    import twin.cognize.services.sessions as sessions_mod
     real_extract = sessions_mod.extract_percept
     calls = {"n": 0}
 

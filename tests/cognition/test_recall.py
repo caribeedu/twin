@@ -1,6 +1,6 @@
-"""Confidence-aware spontaneous recall (twin.cognition.recall)."""
+"""Confidence-aware spontaneous recall (twin.cognize.services.recall)."""
 
-from twin.cognition.recall import RecallPolicy, apply_recall_policy
+from twin.cognize.services.recall import RecallPolicy, apply_recall_policy
 
 
 def test_recall_policy_silence_when_under_bar():

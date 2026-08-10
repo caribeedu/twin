@@ -78,8 +78,8 @@ def test_private_individual_caps_restrict(store):
 def test_explain_judgment_snapshot(store):
     from twin import ids
     from twin.clock import now_iso
-    from twin.judgment.explain import explain_judgment_snapshot
-    from twin.judgment.models import AppliedRevisionRef, JudgmentSnapshot
+    from twin.cognize.stance_engine.explain import explain_judgment_snapshot
+    from twin.cognize.stance_engine.models import AppliedRevisionRef, JudgmentSnapshot
 
     ensure_local_identity(store)
     snap = JudgmentSnapshot(

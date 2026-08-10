@@ -2,9 +2,9 @@ from pathlib import Path
 
 from tests.paths import EXAMPLES
 
-from twin.cognition import extract_pending
+from twin.cognize.services import extract_pending
 from twin.inject.context_pack import build_context_pack
-from twin.cognition.observer import observe
+from twin.cognize.services.observer import observe
 from twin.privacy.firewall import Firewall
 from twin.store.search import search
 from twin.sense.sensory import sense_paths
@@ -128,7 +128,7 @@ def test_pack_includes_confirmed(store, cfg, embedder):
 
 def test_pack_is_sectioned_with_evidence(store, cfg, embedder):
     from tests.authored import corpus_interpreter
-    from twin.cognition import extract_percept, set_interpreter_override
+    from twin.cognize.services import extract_percept, set_interpreter_override
     from twin.store.models import MemoryStatus
 
     # authored interpretation of the standup (a decision + a task) — the pack
@@ -153,7 +153,7 @@ def test_pack_evidence_survives_tight_budgets(store, cfg, embedder):
     """Evidence space is reserved before memory sections are packed, so a
     full pack can never silently squeeze the quotes out — and the flags say
     exactly what happened."""
-    from twin.cognition import extract_percept
+    from twin.cognize.services import extract_percept
     from twin.store.models import MemoryStatus
 
     percepts, _ = sense_paths([EXAMPLES / "transcripts"])

@@ -1,7 +1,7 @@
 """Safe quality automation and batch apply (twin.store.automation)."""
 
 from twin import ids
-from twin.cognition.quality import (
+from twin.cognize.services.quality import (
     analyze_memory,
     build_duplicate_groups,
     select_canonical_survivor,

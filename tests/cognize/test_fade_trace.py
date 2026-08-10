@@ -6,7 +6,7 @@ from twin.cognize.commit import commit_narrative
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.models import NarrativeStatus
 from twin.inject.context_pack import build_context_pack
-from twin.judgment.proposals import propose_from_narrative
+from twin.cognize.stance_engine.proposals import propose_from_narrative
 from twin.store.embeddings import HashEmbedder
 
 

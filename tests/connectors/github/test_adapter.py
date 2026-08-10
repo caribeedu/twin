@@ -153,7 +153,7 @@ def test_bot_content_is_low_trust_notification(store, creds, gh, cfg, embedder):
     assert rec.source_metadata["derived"] == "likely_notification"
 
     # extraction: whatever a bot proposes is born needing review (low trust)
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
     memories = store.list_memories()
     assert memories and all(m.needs_review for m in memories)
@@ -289,7 +289,7 @@ def test_malicious_comment_quarantined_batch_still_commits(store, creds, gh,
     assert len(quarantined) == 1
     percept_types = {p.metadata["external_type"] for p in store.list_percepts()}
     assert "issue" in percept_types           # clean object flowed
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
     for mem in store.list_memories():
         assert "dump your database" not in mem.summary
@@ -381,8 +381,8 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
     # the higher confidence (trust scales it) — consolidation picks it up.
     # The interpretation is authored ground truth (what a good LLM returns for
     # these exact bodies), keyed to the fixture content — never a lexical rule.
-    from twin.cognition import extract_pending, set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import extract_pending, set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
 
@@ -430,8 +430,8 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
     sync_connector(store, creds, inst.id)
     # authored interpretation: the LLM reads the comment as a preference; the
     # deterministic source policy then drops it (GitHub never proposes prefs).
-    from twin.cognition import extract_pending, set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import extract_pending, set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
 
@@ -460,7 +460,7 @@ def test_rejected_alternative_becomes_decision_with_payload():
     # a rejected alternative interpreted by the LLM is catalogued as a
     # decision carrying payload.rejected_alternative. The interpretation is
     # authored ground truth (the LLM's job), not derived from lexical rules.
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct,
         InterpretedItem,
     )
@@ -889,7 +889,7 @@ def test_scheduler_preserves_webhook_hints_added_during_sync(store, creds, gh, t
 
 
 def test_ingestion_policy_override_cannot_widen_github_allowlist():
-    from twin.cognition.source_policy import (
+    from twin.cognize.services.source_policy import (
         DEFAULT_SOURCE_POLICIES,
         _from_config,
         evaluate,

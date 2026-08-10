@@ -12,7 +12,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from ...clock import now_iso
+from twin.clock import now_iso
 
 log = logging.getLogger(__name__)
 from .independence import evidence_directness_for, independence_group_for

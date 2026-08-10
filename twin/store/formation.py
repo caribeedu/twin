@@ -310,7 +310,7 @@ def propose_or_corroborate(
     Returns ``(memory, action)`` where action is ``created`` | ``corroborated``.
     Never confirms.
     """
-    from twin.cognition.evidence_text import sanitize_evidence_quote
+    from twin.cognize.services.evidence_text import sanitize_evidence_quote
 
     evidence_quote = sanitize_evidence_quote(evidence_quote)
     mem = apply_formation_policy(mem)

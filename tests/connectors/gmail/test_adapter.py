@@ -303,11 +303,11 @@ def test_backfill_preview_lists_partitions(store, creds, gmail):
 
 
 def test_gmail_source_policy_requires_review(store, cfg, embedder):
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
-    from twin.cognition.pipeline import extract_percept
+    from twin.cognize.services.pipeline import extract_percept
     from twin.sense.sensory.percept import Percept
 
     content = "We decided to postpone the Friday release."

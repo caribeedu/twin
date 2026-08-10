@@ -16,19 +16,19 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from ..cognition import extract_pending
+from twin.cognize.services import extract_pending
 from twin.inject.context_pack import build_context_pack
-from ..cognition.observer import observe
-from ..cognition.sessions import (
+from twin.cognize.services.observer import observe
+from twin.cognize.services.sessions import (
     complete_session,
     ensure_project,
     observe_session,
     record_feedback,
     start_session,
 )
-from ..cognition.workspace import workspace_tick
+from twin.cognize.services.workspace import workspace_tick
 from ..config import ALL_DOMAINS, UNCLASSIFIED_DOMAIN
-from ..judgment.profile import load_profile
+from twin.cognize.stance_engine.profile import load_profile
 from twin.store.models import (
     FeedbackVerdict,
     FindingStatus,
@@ -220,7 +220,7 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
     data["sensitivity"] = mem.sensitivity.value
     data["status"] = mem.status.value
     try:
-        from ..cognition.quality import memory_altitude
+        from twin.cognize.services.quality import memory_altitude
         data["altitude"] = (mem.payload or {}).get("altitude") or memory_altitude(mem)
     except Exception:
         data["altitude"] = (mem.payload or {}).get("altitude") or "ground"
@@ -789,7 +789,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_stance_proposal_preview(
         proposal_id: str, req: StancePreviewBody = StancePreviewBody(),
     ):
-        from ..judgment.proposals import preview_proposal
+        from twin.cognize.stance_engine.proposals import preview_proposal
 
         try:
             return preview_proposal(ws.store, proposal_id, edits=req.edits)
@@ -798,7 +798,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/stances/proposals/{proposal_id}/approve")
     def api_stance_proposal_approve(proposal_id: str, req: StanceApproveBody):
-        from ..judgment.proposals import approve_proposal
+        from twin.cognize.stance_engine.proposals import approve_proposal
 
         if not (req.preview_token or "").strip():
             raise HTTPException(400, "preview_token required")
@@ -989,7 +989,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/cleanup")
     def api_sessions_cleanup(max_idle_hours: float = 24.0):
-        from ..cognition.sessions import abandon_stale_sessions
+        from twin.cognize.services.sessions import abandon_stale_sessions
 
         return {"abandoned": abandon_stale_sessions(ws.store, max_idle_hours)}
 
@@ -1024,7 +1024,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memories/{memory_id}/promote")
     def api_promote(memory_id: str):
-        from ..judgment.profile import promote_memory
+        from twin.cognize.stance_engine.profile import promote_memory
 
         mem = ws.store.get_memory(memory_id)
         if mem is None:
@@ -1089,7 +1089,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/consolidate/{kind}")
     def api_consolidate(kind: str, req: ConsolidationRequest):
-        from ..cognition.consolidation_cycle import run_consolidation_cycle
+        from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
         if kind not in ("daily", "weekly"):
             raise HTTPException(400, "kind must be daily or weekly")
         result = run_consolidation_cycle(
@@ -1229,7 +1229,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/events")
     def api_session_event(session_id: str, req: SessionEventRequest):
-        from ..cognition.session_lifecycle import append_session_delta
+        from twin.cognize.services.session_lifecycle import append_session_delta
         try:
             ev = append_session_delta(
                 ws.store, session_id,
@@ -1243,7 +1243,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/sessions/{session_id}/attention")
     def api_session_attention(session_id: str, evaluate: bool = False):
-        from ..cognition.attention import evaluate_attention
+        from twin.cognize.services.attention import evaluate_attention
         if evaluate:
             outcomes = evaluate_attention(
                 ws.store, ws.cfg, ws.embedder, session_id,
@@ -1260,7 +1260,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/attention/{emission_id}/feedback")
     def api_attention_feedback(emission_id: str, req: AttentionFeedbackRequest):
-        from ..cognition.attention import feedback_attention
+        from twin.cognize.services.attention import feedback_attention
         em = feedback_attention(ws.store, emission_id, verdict=req.verdict)
         if em is None:
             raise HTTPException(404, "emission not found")
@@ -1268,7 +1268,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/checkpoint")
     def api_session_checkpoint(session_id: str, req: SessionCheckpointRequest):
-        from ..cognition.session_lifecycle import checkpoint_session
+        from twin.cognize.services.session_lifecycle import checkpoint_session
         try:
             cp = checkpoint_session(
                 ws.store, session_id,
@@ -1282,7 +1282,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/close")
     def api_session_close(session_id: str, req: SessionCloseRequest):
-        from ..cognition.session_lifecycle import close_session_structured
+        from twin.cognize.services.session_lifecycle import close_session_structured
         try:
             session, closure = close_session_structured(
                 ws.store, ws.cfg, ws.embedder, session_id,
@@ -1300,7 +1300,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/reopen")
     def api_session_reopen(session_id: str):
-        from ..cognition.session_lifecycle import reopen_session
+        from twin.cognize.services.session_lifecycle import reopen_session
         try:
             session = reopen_session(ws.store, session_id)
         except ValueError as exc:
@@ -1309,7 +1309,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/pause")
     def api_session_pause(session_id: str):
-        from ..cognition.session_lifecycle import pause_session
+        from twin.cognize.services.session_lifecycle import pause_session
         try:
             return pause_session(ws.store, session_id).model_dump(mode="json")
         except ValueError as exc:
@@ -1317,7 +1317,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/resume")
     def api_session_resume(session_id: str):
-        from ..cognition.session_lifecycle import resume_session
+        from twin.cognize.services.session_lifecycle import resume_session
         try:
             return resume_session(ws.store, session_id).model_dump(mode="json")
         except ValueError as exc:
@@ -1325,7 +1325,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/sessions/{session_id}/closure")
     def api_session_closure(session_id: str):
-        from ..cognition.session_lifecycle import get_session_closure
+        from twin.cognize.services.session_lifecycle import get_session_closure
         closure = get_session_closure(ws.store, session_id)
         if closure is None:
             raise HTTPException(404, "closure not found")
@@ -1343,7 +1343,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         conflicts: bool = False,
         limit: int = 100,
     ):
-        from ..cognition.quality import review_queue
+        from twin.cognize.services.quality import review_queue
         project_id = _resolve_project_id(project) if project else None
         queue = review_queue(
             ws.store, project_id=project_id, domain=domain, type_=type,
@@ -1429,7 +1429,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/memories/{memory_id}/neighbors")
     def api_neighbors(memory_id: str):
-        from ..cognition.quality import discover_neighbors
+        from twin.cognize.services.quality import discover_neighbors
         mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
@@ -1441,7 +1441,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/memories/{memory_id}/quality")
     def api_quality(memory_id: str, refresh: bool = False):
-        from ..cognition.quality import analyze_memory
+        from twin.cognize.services.quality import analyze_memory
         mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
@@ -1449,7 +1449,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         if not refresh and hasattr(ws.store, "get_findings"):
             stored = ws.store.get_findings(memory_id, unresolved_only=True)
             if stored:
-                from ..cognition.quality import memory_altitude
+                from twin.cognize.services.quality import memory_altitude
                 return {
                     "memory_id": memory_id,
                     "quality_score": mem.quality_score,
@@ -1789,7 +1789,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/versions/{version_id}/restore")
     def api_judgment_restore(version_id: str):
-        from ..judgment.versions import restore_version
+        from twin.cognize.stance_engine.versions import restore_version
         try:
             ver = restore_version(ws.store, version_id, actor="api")
         except ValueError as exc:
@@ -1798,7 +1798,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/judgment/snapshots/{snapshot_id}/explain")
     def api_judgment_snapshot_explain(snapshot_id: str):
-        from ..judgment.explain import explain_judgment_snapshot
+        from twin.cognize.stance_engine.explain import explain_judgment_snapshot
         try:
             return explain_judgment_snapshot(ws.store, snapshot_id)
         except ValueError as exc:
@@ -1816,12 +1816,12 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/proposals/generate")
     def api_generate_proposals(domain: str = "technical"):
-        from ..judgment.proposals import propose_from_pattern
+        from twin.cognize.stance_engine.proposals import propose_from_pattern
         return [p.model_dump(mode="json") for p in propose_from_pattern(ws.store, domain=domain)]
 
     @app.post("/api/judgment/proposals/{proposal_id}/preview")
     def api_preview_proposal(proposal_id: str, req: ProposalPreviewRequest = ProposalPreviewRequest()):
-        from ..judgment.proposals import preview_proposal
+        from twin.cognize.stance_engine.proposals import preview_proposal
         try:
             return preview_proposal(ws.store, proposal_id, edits=req.edits)
         except ValueError as exc:
@@ -1829,7 +1829,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/proposals/{proposal_id}/approve")
     def api_approve_proposal(proposal_id: str, req: ProposalApproveRequest):
-        from ..judgment.proposals import approve_proposal
+        from twin.cognize.stance_engine.proposals import approve_proposal
         try:
             return approve_proposal(
                 ws.store, proposal_id, preview_token=req.preview_token,
@@ -1840,7 +1840,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/proposals/{proposal_id}/reject")
     def api_reject_proposal(proposal_id: str, reason: str = ""):
-        from ..judgment.proposals import reject_proposal
+        from twin.cognize.stance_engine.proposals import reject_proposal
         try:
             return reject_proposal(ws.store, proposal_id, reason=reason).model_dump(mode="json")
         except ValueError as exc:
@@ -1848,7 +1848,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/import")
     def api_judgment_import(req: JudgmentImportRequest):
-        from ..judgment.yaml_io import apply_yaml_import, preview_yaml_import
+        from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
         preview = preview_yaml_import(ws.cfg.judgment_path)
         if not req.apply:
             return {"preview": preview, "count": len(preview)}
@@ -1856,7 +1856,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/applicable")
     def api_judgment_applicable(req: JudgmentApplicableRequest):
-        from ..judgment.application import applicable_pack
+        from twin.cognize.stance_engine.application import applicable_pack
         return applicable_pack(
             ws.store, domain=req.domain, persona=req.persona,
             task_profile=req.task_profile, project_id=req.project_id,
@@ -1866,7 +1866,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/simulate")
     def api_judgment_simulate(req: JudgmentSimulateRequest):
-        from ..judgment.simulate import simulate
+        from twin.cognize.stance_engine.simulate import simulate
         return simulate(
             ws.store, req.query, domain=req.domain, task_profile=req.task_profile,
             project_id=req.project_id, options=req.options,

@@ -13,8 +13,8 @@ only need "some grounded memory" can rely on the default ``echo`` mode.
 
 from __future__ import annotations
 
-from twin.cognition.interpreter import echo
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services.interpreter import echo
+from twin.cognize.services.interpreter.schema import (
     CognitiveAct,
     InterpretationResult,
     InterpretationStatus,

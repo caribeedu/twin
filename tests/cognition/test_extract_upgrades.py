@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import twin.llm as llm_mod
-from twin.cognition.interpreter import ollama_interpreter as oi
-from twin.cognition.interpreter.service import InterpretationRuntime
+from twin.cognize.services.interpreter import ollama_interpreter as oi
+from twin.cognize.services.interpreter.service import InterpretationRuntime
 from twin.sense.sensory.percept import Percept
 
 

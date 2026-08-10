@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from twin import ids
-from twin.judgment.proposals import (
+from twin.cognize.stance_engine.proposals import (
     propose_from_episode,
     propose_from_episode_patterns,
 )

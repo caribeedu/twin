@@ -14,9 +14,9 @@ import tempfile
 from pathlib import Path
 
 from twin import ids
-from twin.cognition.consolidation_cycle import run_consolidation_cycle
-from twin.cognition.recall import RecallPolicy, apply_recall_policy
-from twin.cognition.workspace import workspace_tick
+from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
+from twin.cognize.services.recall import RecallPolicy, apply_recall_policy
+from twin.cognize.services.workspace import workspace_tick
 from twin.config import Config
 from twin.store.embeddings import get_embedder
 from twin.store.models import MemoryItem

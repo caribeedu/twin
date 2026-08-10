@@ -565,7 +565,7 @@ def test_malicious_content_quarantined_never_extracted(store, creds, cfg, embedd
     assert store.list_quarantine(status="quarantined")
 
     # extraction has nothing to chew on → no memories
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
     assert store.list_memories() == []
 
@@ -1121,7 +1121,7 @@ _POLICY_AUTHORED = {
 
 
 def _authored_policy_interp(percept, text, _cfg):
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
     items = [
@@ -1142,8 +1142,8 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
     """A connector-fed percept only proposes memory types its source policy
     allows: preferences/beliefs are dropped, review-required types come in
     flagged, and local (non-connector) percepts are unaffected."""
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.pipeline import extract_percept
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.pipeline import extract_percept
     from twin.sense.sensory.percept import Percept
 
     set_interpreter_override(_authored_policy_interp)
@@ -1179,8 +1179,8 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
 def test_source_policy_instance_override(store, cfg, embedder):
     """ingestion_policy on the percept metadata (from instance config)
     narrows the connector-type default — never widens it."""
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.pipeline import extract_percept
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.pipeline import extract_percept
     from twin.sense.sensory.percept import Percept
 
     set_interpreter_override(_authored_policy_interp)

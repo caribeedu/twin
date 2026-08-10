@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from twin.cognition import BrainStage, run_episode_cognition, set_stage_override
-from twin.cognition.correlation.edges import confirm_edge
-from twin.cognition.correlation.explain import explain_episode
-from twin.cognition.correlation.models import (
+from twin.cognize.services import BrainStage, run_episode_cognition, set_stage_override
+from twin.cognize.services.correlation.edges import confirm_edge
+from twin.cognize.services.correlation.explain import explain_episode
+from twin.cognize.services.correlation.models import (
     EpisodeEdgeRelation,
     EpisodeEdgeStatus,
     EpisodePhaseKind,
 )
-from twin.cognition.correlation.service import run_correlation_pass
+from twin.cognize.services.correlation.service import run_correlation_pass
 from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,

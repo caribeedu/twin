@@ -2,7 +2,7 @@
 
  correlates at ``ConnectorRecord`` metadata / artifact_refs level.
  promotes strong keys into ``WorkEpisode`` via
-``twin.cognition.correlation`` (fingerprints remain weak until corroborated).
+``twin.cognize.services.correlation`` (fingerprints remain weak until corroborated).
 """
 
 from __future__ import annotations

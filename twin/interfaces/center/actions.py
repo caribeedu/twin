@@ -86,7 +86,7 @@ def stance_overview(ws: Workspace) -> dict[str, Any]:
 
 
 def approve_stance_proposal(ws: Workspace, proposal_id: str) -> dict[str, Any]:
-    from twin.judgment.proposals import approve_proposal, preview_proposal
+    from twin.cognize.stance_engine.proposals import approve_proposal, preview_proposal
 
     preview = preview_proposal(ws.store, proposal_id)
     token = preview.get("preview_token") if isinstance(preview, dict) else getattr(preview, "preview_token", None)

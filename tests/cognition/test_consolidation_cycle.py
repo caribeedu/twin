@@ -1,15 +1,15 @@
-"""Daily/weekly consolidation cycles (twin.cognition.consolidation_cycle)."""
+"""Daily/weekly consolidation cycles (twin.cognize.services.consolidation_cycle)."""
 
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from twin import ids
-from twin.cognition.consolidation_cycle import (
+from twin.cognize.services.consolidation_cycle import (
     refresh_temporal_beliefs_and_goals,
     run_consolidation_cycle,
 )
-from twin.cognition.sessions import ensure_project
+from twin.cognize.services.sessions import ensure_project
 from twin.store.models import MemoryItem, MemoryStatus
 
 
@@ -141,7 +141,7 @@ def test_cycle_never_confirms_memory_or_judgment(store, cfg, embedder):
 
 
 def test_cycle_invariant_violation_fails_run(store, cfg, embedder, monkeypatch):
-    from twin.cognition.consolidation_cycle import ConsolidationInvariantError
+    from twin.cognize.services.consolidation_cycle import ConsolidationInvariantError
 
     as_of = datetime(2026, 8, 1, tzinfo=timezone.utc)
 
@@ -155,7 +155,7 @@ def test_cycle_invariant_violation_fails_run(store, cfg, embedder, monkeypatch):
         return {"mem_fake_confirmed"}, set()
 
     monkeypatch.setattr(
-        "twin.cognition.consolidation_cycle._confirmed_snapshot",
+        "twin.cognize.services.consolidation_cycle._confirmed_snapshot",
         poison_snapshot,
     )
     with pytest.raises(ConsolidationInvariantError):
@@ -188,7 +188,7 @@ def test_consolidation_retry_claim_blocks_second_executor(store, cfg, embedder, 
         raise RuntimeError("analyze boom")
 
     monkeypatch.setattr(
-        "twin.cognition.consolidation_cycle.analyze_candidates", boom,
+        "twin.cognize.services.consolidation_cycle.analyze_candidates", boom,
     )
     with pytest.raises(RuntimeError):
         run_consolidation_cycle(
@@ -220,7 +220,7 @@ def test_consolidation_retry_can_complete_after_transient_failure(store, cfg, em
         return []
 
     monkeypatch.setattr(
-        "twin.cognition.consolidation_cycle.analyze_candidates",
+        "twin.cognize.services.consolidation_cycle.analyze_candidates",
         flaky_analyze,
     )
     with pytest.raises(RuntimeError):
@@ -239,7 +239,7 @@ def test_consolidation_retry_can_complete_after_transient_failure(store, cfg, em
 
 
 def test_operational_stages_and_replay_report(store, cfg, embedder):
-    from twin.cognition.sessions import start_session, complete_session
+    from twin.cognize.services.sessions import start_session, complete_session
 
     started = start_session(store, cfg, embedder, "consolidate me", client="cli")
     complete_session(store, cfg, embedder, started.session.id, summary="shipped runtime")

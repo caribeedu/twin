@@ -17,8 +17,8 @@ import os
 import sys
 from pathlib import Path
 
-from twin.cognition.interpreter import ollama_interpreter
-from twin.cognition.interpreter.grounding import evidence_span_is_grounded
+from twin.cognize.services.interpreter import ollama_interpreter
+from twin.cognize.services.interpreter.grounding import evidence_span_is_grounded
 from twin.config import Config
 from twin.sense.sensory.percept import Percept
 

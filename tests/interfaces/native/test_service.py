@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 
 from twin import ids
-from twin.cognition.host_session import recommend_intervention
-from twin.cognition.sessions import start_session
+from twin.cognize.services.host_session import recommend_intervention
+from twin.cognize.services.sessions import start_session
 from twin.interfaces.native.claude_code import (
     OBSERVATION_PROFILES,
     MissingExternalSessionId,
@@ -1029,7 +1029,7 @@ def test_user_message_pack_skipped_over_budget(store, cfg, embedder, monkeypatch
 
 def test_session_start_stamps_stable_host_instance(store, cfg, embedder):
     """host_instance is stable per (home, host, user) and never a raw path."""
-    from twin.cognition.host_session import host_instance_id
+    from twin.cognize.services.host_session import host_instance_id
 
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
@@ -1153,7 +1153,7 @@ def test_hot_path_user_message_never_calls_llm(store, cfg, embedder, monkeypatch
         calls["n"] += 1
         raise AssertionError("read_context must not run on native hot path")
 
-    monkeypatch.setattr("twin.cognition.observer.read_context", boom)
+    monkeypatch.setattr("twin.cognize.services.observer.read_context", boom)
     svc = NativeHostService(store, cfg, embedder)
     svc.handle(HostEvent(
         kind="session_start", host_type="claude-code",
@@ -1169,7 +1169,7 @@ def test_hot_path_user_message_never_calls_llm(store, cfg, embedder, monkeypatch
 
 
 def test_pending_context_pack_emitted_on_next_user_message(store, cfg, embedder, monkeypatch):
-    from twin.cognition.observer import ObserverReading
+    from twin.cognize.services.observer import ObserverReading
     from twin.interfaces.runtime.handlers import handle_session_domain_resolve
     from twin.interfaces.runtime.models import JobKind, RuntimeJob
 
@@ -1187,7 +1187,7 @@ def test_pending_context_pack_emitted_on_next_user_message(store, cfg, embedder,
     ))
     assert msg.extras.get("domain_resolve_job_id")
     monkeypatch.setattr(
-        "twin.cognition.observer.read_context",
+        "twin.cognize.services.observer.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="technical", task_profile="coding", mode="llm",
             confidences={"domain": 0.9, "task_profile": 0.8, "project": 0.0},

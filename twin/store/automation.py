@@ -15,7 +15,7 @@ from ..memory.lifecycle import archive_memory
 from ..memory.models import MemoryStatus, Sensitivity
 from ..memory.provenance import attach_corroborating_evidence
 from ..memory.store.base import MemoryStore
-from ..cognition.quality import build_duplicate_groups
+from twin.cognize.services.quality import build_duplicate_groups
 
 _SENS_ORDER = ["public", "internal", "private", "restricted"]
 

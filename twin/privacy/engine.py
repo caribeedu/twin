@@ -521,7 +521,7 @@ def evaluate_judgment_items(
     persist: bool = True,
 ) -> dict[str, Any]:
     """Run governance over judgment items (as classified resources)."""
-    from ..judgment.models import JudgmentItem
+    from twin.cognize.stance_engine.models import JudgmentItem
 
     synthetic: list[MemoryItem] = []
     for it in items:

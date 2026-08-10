@@ -28,13 +28,13 @@ import json
 from typing import Any, Optional
 
 from twin.inject.context_pack import build_context_pack
-from ..cognition.sessions import (
+from twin.cognize.services.sessions import (
     complete_session,
     observe_session,
     record_feedback,
     start_session,
 )
-from ..judgment.profile import load_profile
+from twin.cognize.stance_engine.profile import load_profile
 from twin.store.search import search
 from ..workspace import Workspace
 from .mcp_auth import MCP_CLIENT_ENV, mcp_process_identity, resolve_mcp_access
@@ -344,7 +344,7 @@ def create_server(home: Optional[str] = None):
         external_session_id: str = "",
     ) -> str:
         """Append an ordered session delta (enqueues attention evaluate job)."""
-        from ..cognition.session_lifecycle import append_session_delta as _append
+        from twin.cognize.services.session_lifecycle import append_session_delta as _append
         try:
             ev = _append(
                 ws.store, session_id, text=text, sequence=sequence,
@@ -366,7 +366,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def get_attention(session_id: str, evaluate: bool = False) -> str:
         """List or re-evaluate attention outcomes for a session (prefer silence)."""
-        from ..cognition.attention import evaluate_attention
+        from twin.cognize.services.attention import evaluate_attention
         if evaluate:
             outcomes = evaluate_attention(
                 ws.store, ws.cfg, ws.embedder, session_id,
@@ -391,7 +391,7 @@ def create_server(home: Optional[str] = None):
     ) -> str:
         """Feedback on attention emission or session usefulness."""
         if emission_id:
-            from ..cognition.attention import feedback_attention
+            from twin.cognize.services.attention import feedback_attention
             em = feedback_attention(ws.store, emission_id, verdict=verdict)
             if em is None:
                 return json.dumps({"error": "emission not found"})
@@ -640,7 +640,7 @@ def create_server(home: Optional[str] = None):
         """Workspace evaluation tick : reading → recall → optional
         delta interpretation (candidates only). Idempotent via session+sequence
         or idempotency_key. Never confirms Memory or Judgment."""
-        from ..cognition.workspace import workspace_tick as _tick
+        from twin.cognize.services.workspace import workspace_tick as _tick
         if input_mode not in ("snapshot", "delta"):
             return json.dumps({"error": "input_mode must be snapshot or delta"})
         result = _tick(
@@ -660,7 +660,7 @@ def create_server(home: Optional[str] = None):
         """Run a daily or weekly consolidation cycle (quality, safe automation,
         temporal belief/goal refresh; weekly may propose judgment). Default
         dry-run; set apply=true to write. Never confirms Memory/Judgment."""
-        from ..cognition.consolidation_cycle import run_consolidation_cycle
+        from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
         if kind not in ("daily", "weekly"):
             return json.dumps({"error": "kind must be daily or weekly"})
         result = run_consolidation_cycle(
@@ -675,14 +675,14 @@ def create_server(home: Optional[str] = None):
     def memory_quality(memory_id: str) -> str:
         """Analyze a memory for duplicates, conflicts, merge/split suggestions
         and review priority."""
-        from ..cognition.quality import analyze_memory
+        from twin.cognize.services.quality import analyze_memory
         report = analyze_memory(ws.store, ws.embedder, memory_id)
         return json.dumps(report.model_dump(mode="json"), ensure_ascii=False)
 
     @mcp.tool()
     def memory_neighbors(memory_id: str) -> str:
         """Find semantically/entity-related neighbor memories for side-by-side review."""
-        from ..cognition.quality import discover_neighbors
+        from twin.cognize.services.quality import discover_neighbors
         mem = ws.store.get_memory(memory_id)
         if mem is None:
             return json.dumps({"error": "not found"})
@@ -701,7 +701,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def review_queue(limit: int = 20, conflicts_only: bool = False) -> str:
         """Priority-ordered review queue (risk × impact, not FIFO)."""
-        from ..cognition.quality import review_queue as rq
+        from twin.cognize.services.quality import review_queue as rq
         queue = rq(ws.store, conflicts_only=conflicts_only, limit=limit)
         return json.dumps([_memory_to_dict(m) for m in queue], ensure_ascii=False)
 
@@ -717,7 +717,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def review_suggest_action(memory_id: str) -> str:
         """Suggest a curation action without applying it (safe for external clients)."""
-        from ..cognition.quality import analyze_memory
+        from twin.cognize.services.quality import analyze_memory
         report = analyze_memory(ws.store, ws.embedder, memory_id, persist=False)
         return json.dumps({
             "memory_id": memory_id,
@@ -806,7 +806,7 @@ def create_server(home: Optional[str] = None):
     def judgment_applicable(domain: str = "technical", task_profile: str = "general",
                             project: Optional[str] = None, query: str = "") -> str:
         """Return only judgment items applicable to this domain/task — not the full profile."""
-        from ..judgment.application import applicable_pack
+        from twin.cognize.stance_engine.application import applicable_pack
         pack = applicable_pack(
             ws.store, domain=domain, task_profile=task_profile,
             project_id=_resolve_project_id(project), query=query,
@@ -818,7 +818,7 @@ def create_server(home: Optional[str] = None):
                           task_profile: str = "architecture",
                           project: Optional[str] = None) -> str:
         """Explain how active judgment would influence a recommendation (no side effects)."""
-        from ..judgment.simulate import simulate
+        from twin.cognize.stance_engine.simulate import simulate
         return json.dumps(simulate(
             ws.store, query, domain=domain, task_profile=task_profile,
             project_id=_resolve_project_id(project),
@@ -835,7 +835,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def judgment_proposal_preview(proposal_id: str) -> str:
         """Preview a proposal and obtain a state-aware preview_token for approval."""
-        from ..judgment.proposals import preview_proposal
+        from twin.cognize.stance_engine.proposals import preview_proposal
         try:
             return json.dumps(preview_proposal(ws.store, proposal_id), ensure_ascii=False)
         except ValueError as exc:
@@ -848,7 +848,7 @@ def create_server(home: Optional[str] = None):
         """Approve a judgment proposal (creates a new version). Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..judgment.proposals import approve_proposal
+        from twin.cognize.stance_engine.proposals import approve_proposal
         try:
             return json.dumps(approve_proposal(
                 ws.store, proposal_id, preview_token=preview_token,
@@ -862,7 +862,7 @@ def create_server(home: Optional[str] = None):
                                  reason: str = "") -> str:
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..judgment.proposals import reject_proposal
+        from twin.cognize.stance_engine.proposals import reject_proposal
         try:
             p = reject_proposal(ws.store, proposal_id, reason=reason)
             return json.dumps(p.model_dump(mode="json"), ensure_ascii=False)

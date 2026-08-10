@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from twin.cognition import (
+from twin.cognize.services import (
     BrainStage,
     run_episode_cognition,
     set_reflect_override,
     set_stage_override,
 )
-from twin.cognition.episode_pipeline import STAGE_ORDER
+from twin.cognize.services.episode_pipeline import STAGE_ORDER
 from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
@@ -56,7 +56,7 @@ def _understand(phases, quotes, cfg):
 
 
 def _sqs_reflector(brief, cfg):
-    from twin.cognition.episode_reflect import TrajectoryClaim
+    from twin.cognize.services.episode_reflect import TrajectoryClaim
 
     if len(brief.phases) < 2:
         return []

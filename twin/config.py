@@ -4,9 +4,9 @@ Layered architecture:
 
  External World
  ↓ twin.sense.sensory (sensors → normalized percepts)
- ↓ twin.cognition (extraction, dedupe, recall, attention)
+ ↓ twin.cognize.services (extraction, dedupe, recall, attention)
  ↕ twin.store (stores, embeddings, search)
- ↕ twin.judgment (PII, domain firewall, judgment profile)
+ ↕ twin.cognize.stance_engine (PII, domain firewall, judgment profile)
  ↑ twin.interfaces (CLI, HTTP API, MCP)
 
 Config files live under a single home directory (default ``~/.twin`` or

@@ -8,7 +8,7 @@ confidence. In ``TWIN_EXTRACTOR=heuristic`` the pipeline records
 
 from tests.paths import EXAMPLES
 
-from twin.cognition import extract_pending, extract_percept
+from twin.cognize.services import extract_pending, extract_percept
 from twin.sense.sensory import sense_paths
 
 
@@ -57,7 +57,7 @@ def test_heuristic_detection_is_terminal_not_reinterpreted(store, cfg, embedder)
 
 def test_scan_detects_rejected_alternatives():
     """The rejected-alternative detector still fires — as a hint, not a memory."""
-    from twin.cognition.extractors.heuristic import scan
+    from twin.cognize.services.extractors.heuristic import scan
 
     hits = scan("Instead of Redis we will use PostgreSQL advisory locks. "
                 "We also decided against MongoDB because of licensing.")

@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from twin.cognition.sessions import start_session
+from twin.cognize.services.sessions import start_session
 from twin.config import Config
 from twin.interfaces.native.claude_code import (
     MissingExternalSessionId,

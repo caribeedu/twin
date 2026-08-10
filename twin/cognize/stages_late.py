@@ -12,7 +12,7 @@ from typing import Any, Callable, Optional
 
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.gate import require_chat_llm
-from twin.judgment.proposals import propose_from_narrative
+from twin.cognize.stance_engine.proposals import propose_from_narrative
 
 _LATE_OVERRIDES: dict[str, Callable[..., Any]] = {}
 

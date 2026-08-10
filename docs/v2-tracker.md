@@ -119,9 +119,10 @@ v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package
 
 #### v2.5 — Package walls
 
-- [ ] T-140 T-141 T-142 T-143 T-144
-- [ ] T-145 T-146 T-147 T-148 T-149
-- [ ] `__version__ = 2.5.0` + CHANGELOG + tag `v2.5.0`
+- [x] T-140 T-141 T-142 T-143 T-144
+- [x] T-145 T-146 T-147 T-148
+- [ ] T-149
+- [ ] `__version__ = 2.5.0` + CHANGELOG + tag `v2.5.0` (awaiting approval)
 
 ---
 
@@ -216,15 +217,15 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-137 | **v2.4** | P13 | Visual language — entity-coherent design system | done |
 | T-138 | **v2.4** | P13 | Docs: WEB_CENTER + REST/COMMAND_CENTER sync | done |
 | T-139 | **v2.4** | P13 | QA gate — entity routes, no Memory product UI | done |
-| T-140 | **v2.5** | P14 | Docs lock — package target layout + vocabulary | doing |
-| T-141 | **v2.5** | P14 | `twin.sense` — connectors + sensory | todo |
-| T-142 | **v2.5** | P14 | `twin.llm` — provider adapters | todo |
-| T-143 | **v2.5** | P14 | `twin.store` — persistence facade (ex-memory data layer) | todo |
-| T-144 | **v2.5** | P14 | `twin.inject` — packs + Observer slot | todo |
-| T-145 | **v2.5** | P14 | Fold `twin.cognition` into `twin.cognize` | todo |
-| T-146 | **v2.5** | P14 | Split `twin.judgment` → cognize Stance + privacy | todo |
-| T-147 | **v2.5** | P14 | `privacy` owns Firewall / PII / guardrails | todo |
-| T-148 | **v2.5** | P14 | `interfaces` absorbs runtime + sovereignty | todo |
+| T-140 | **v2.5** | P14 | Docs lock — package target layout + vocabulary | done |
+| T-141 | **v2.5** | P14 | `twin.sense` — connectors + sensory | done |
+| T-142 | **v2.5** | P14 | `twin.llm` — provider adapters | done |
+| T-143 | **v2.5** | P14 | `twin.store` — persistence facade (ex-memory data layer) | done |
+| T-144 | **v2.5** | P14 | `twin.inject` — packs + Observer slot | done |
+| T-145 | **v2.5** | P14 | Fold `twin.cognition` into `twin.cognize` | done |
+| T-146 | **v2.5** | P14 | Split `twin.judgment` → cognize Stance + privacy | done |
+| T-147 | **v2.5** | P14 | `privacy` owns Firewall / PII / guardrails | done |
+| T-148 | **v2.5** | P14 | `interfaces` absorbs runtime + sovereignty | done |
 | T-149 | **v2.5** | P14 | QA gate — imports, MCP names, package `2.5.0` | todo |
 
 

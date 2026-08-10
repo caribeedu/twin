@@ -152,7 +152,7 @@ def _resolve_record_project(store, record: ConnectorRecord) -> Optional[str]:
     blocked by correlation wiring.
     """
     try:
-        from twin.cognition.correlation.projects import resolve_project_for_record
+        from twin.cognize.services.correlation.projects import resolve_project_for_record
 
         project_id, _ = resolve_project_for_record(store, record)
         return project_id

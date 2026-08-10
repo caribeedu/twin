@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from twin.cognition.extractors import ollama as ollama_extractor
+from twin.cognize.services.extractors import ollama as ollama_extractor
 from twin.store.embeddings import OllamaEmbedder, get_embedder
 from twin.sense.sensory.percept import Percept
 
@@ -88,7 +88,7 @@ def test_pipeline_defers_when_interpreter_unavailable(store, cfg, embedder):
     """v0.7: extractor='ollama' routes through the cognitive interpreter; when
     the model is unreachable the Percept is DEFERRED (retryable), never
     silently handed to lexical rules to fabricate conclusions."""
-    from twin.cognition.pipeline import extract_percept
+    from twin.cognize.services.pipeline import extract_percept
 
     cfg.extractor = "ollama"
     cfg.ollama_url = "http://127.0.0.1:1"  # unreachable → defer, not fall back

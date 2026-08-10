@@ -6,7 +6,7 @@ import json
 from typing import Any, Optional
 
 from twin.clock import now_iso
-from twin.cognition.attention import AttentionKind, AttentionOutcome
+from twin.cognize.services.attention import AttentionKind, AttentionOutcome
 
 
 ATTENTION_OPS_SCHEMA = """

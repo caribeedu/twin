@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from twin.cognition.correlation import (
+from twin.cognize.services.correlation import (
     independence_group_for,
     run_correlation_pass,
 )
-from twin.cognition.correlation.conflicts import detect_temporal_conflicts
-from twin.cognition.correlation.episodes import correlate_records, extract_github_refs
-from twin.cognition.correlation.identity import (
+from twin.cognize.services.correlation.conflicts import detect_temporal_conflicts
+from twin.cognize.services.correlation.episodes import correlate_records, extract_github_refs
+from twin.cognize.services.correlation.identity import (
     confirm_identity_link,
     propose_identity_links,
     upsert_external_identity,
 )
-from twin.cognition.correlation.independence import evidence_directness_for
-from twin.cognition.correlation.models import EpisodeLinkStatus
-from twin.cognition.correlation.projects import link_project, resolve_project_for_record
-from twin.cognition.sessions import ensure_project
+from twin.cognize.services.correlation.independence import evidence_directness_for
+from twin.cognize.services.correlation.models import EpisodeLinkStatus
+from twin.cognize.services.correlation.projects import link_project, resolve_project_for_record
+from twin.cognize.services.sessions import ensure_project
 from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
@@ -200,7 +200,7 @@ def test_confirm_identity_cross_vault_rejected(store):
         email="x@acme.com", vault_id="vault_personal",
     )
     # Manually insert a cross-domain candidate (policy path)
-    from twin.cognition.correlation.models import IdentityLink, IdentityStatus
+    from twin.cognize.services.correlation.models import IdentityLink, IdentityStatus
     link = IdentityLink(
         left_identity_id=min(a.id, b.id),
         right_identity_id=max(a.id, b.id),

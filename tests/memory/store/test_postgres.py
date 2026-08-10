@@ -52,7 +52,7 @@ def test_percept_roundtrip_and_dedup(pg_store):
 
 
 def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     from twin.privacy.firewall import Firewall
     from twin.store.search import search
     from twin.sense.sensory import sense_paths
@@ -102,7 +102,7 @@ def test_pgvector_server_side_similarity(pg_store, embedder):
 
 
 def test_projects_and_sessions_on_postgres(pg_store, cfg, embedder):
-    from twin.cognition.sessions import (
+    from twin.cognize.services.sessions import (
         complete_session,
         ensure_project,
         observe_session,
@@ -426,11 +426,11 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
     """The v0.7 interpretation spine holds on Postgres: an unavailable
     interpreter defers (nothing catalogued, retryable), and a later run
     interprets the same percept and marks it terminal."""
-    from twin.cognition import (
+    from twin.cognize.services import (
         extract_percept,
         set_interpreter_override,
     )
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct,
         InterpretationResult,
         InterpretationStatus,
@@ -478,7 +478,7 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
 
 def test_detection_signals_on_postgres(pg_store, cfg, embedder):
     """Heuristic mode records DetectionSignals (never memories) on Postgres."""
-    from twin.cognition import extract_percept
+    from twin.cognize.services import extract_percept
     from twin.sense.sensory.percept import Percept
 
     cfg.extractor = "heuristic"
@@ -497,7 +497,7 @@ def test_detection_signals_on_postgres(pg_store, cfg, embedder):
 
 
 def test_workspace_tick_running_blocks_on_postgres(pg_store, cfg, embedder):
-    from twin.cognition.workspace import text_content_hash, workspace_tick
+    from twin.cognize.services.workspace import text_content_hash, workspace_tick
     from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     text = "postgres concurrent tick must not double-run"
@@ -525,7 +525,7 @@ def test_workspace_tick_running_blocks_on_postgres(pg_store, cfg, embedder):
 def test_consolidation_window_unique_on_postgres(pg_store, cfg, embedder):
     from datetime import datetime, timezone
 
-    from twin.cognition.consolidation_cycle import run_consolidation_cycle
+    from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
 
     as_of = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
     first = run_consolidation_cycle(

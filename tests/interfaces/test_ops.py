@@ -23,7 +23,7 @@ def test_doctor_reports_all_areas(cfg):
 
 def test_doctor_flags_review_backlog(cfg, store, embedder):
     from tests.paths import EXAMPLES
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     from twin.sense.sensory import sense_paths
 
     percepts, _ = sense_paths([EXAMPLES])

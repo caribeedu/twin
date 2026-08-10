@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from twin import ids
-from twin.cognition.condense import condense_near_duplicates
-from twin.cognition.interpreter.reflect_prompt import _coerce_claim_type
-from twin.cognition.quality import analyze_memory, memory_altitude
+from twin.cognize.services.condense import condense_near_duplicates
+from twin.cognize.services.interpreter.reflect_prompt import _coerce_claim_type
+from twin.cognize.services.quality import analyze_memory, memory_altitude
 from twin.store.models import FindingType, MemoryItem, ReviewFinding
 
 

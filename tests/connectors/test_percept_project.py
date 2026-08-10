@@ -38,7 +38,7 @@ def test_build_percept_project_id_defaults_none():
 def test_resolve_record_project_delegates(monkeypatch):
     _, _, rec = _fixtures()
 
-    import twin.cognition.correlation.projects as proj
+    import twin.cognize.services.correlation.projects as proj
 
     monkeypatch.setattr(
         proj, "resolve_project_for_record", lambda store, r: ("proj_xyz", None)
@@ -49,7 +49,7 @@ def test_resolve_record_project_delegates(monkeypatch):
 def test_resolve_record_project_swallows_errors(monkeypatch):
     _, _, rec = _fixtures()
 
-    import twin.cognition.correlation.projects as proj
+    import twin.cognize.services.correlation.projects as proj
 
     def boom(store, r):
         raise RuntimeError("no store")

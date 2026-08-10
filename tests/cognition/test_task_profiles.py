@@ -1,8 +1,8 @@
-"""Task-aware pack profiles (twin.cognition.task_profiles + context_pack)."""
+"""Task-aware pack profiles (twin.cognize.services.task_profiles + context_pack)."""
 
 from twin import ids
 from twin.inject.context_pack import build_context_pack
-from twin.cognition.task_profiles import PROFILES, get_profile, infer_task_profile
+from twin.cognize.services.task_profiles import PROFILES, get_profile, infer_task_profile
 from twin.store.models import MemoryItem
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set

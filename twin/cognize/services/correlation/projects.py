@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ...clock import now_iso
+from twin.clock import now_iso
 from .models import ProjectLink, ProjectLinkStatus
 from .partition import account_meta
 

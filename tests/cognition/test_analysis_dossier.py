@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from twin.cognition import BrainStage, run_episode_cognition
-from twin.cognition.analysis_dossier import (
+from twin.cognize.services import BrainStage, run_episode_cognition
+from twin.cognize.services.analysis_dossier import (
     compile_episode_dossier,
     compile_window_dossier,
 )

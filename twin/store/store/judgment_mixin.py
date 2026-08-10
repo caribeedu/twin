@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from twin.judgment.models import (
+from twin.cognize.stance_engine.models import (
     JudgmentConflict,
     JudgmentItem,
     JudgmentProposal,
@@ -17,7 +17,7 @@ from twin.judgment.models import (
     JudgmentTrace,
     JudgmentVersion,
 )
-from twin.judgment.persistence import (
+from twin.cognize.stance_engine.persistence import (
     conflict_to_row,
     item_to_row,
     proposal_to_row,

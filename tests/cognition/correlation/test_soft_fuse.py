@@ -1,9 +1,9 @@
 """PR-lineage singletons + Slack↔GitHub soft-fuse."""
 from __future__ import annotations
 
-from twin.cognition.correlation.episodes import correlate_records
-from twin.cognition.correlation.projects import link_project
-from twin.cognition.sessions import ensure_project
+from twin.cognize.services.correlation.episodes import correlate_records
+from twin.cognize.services.correlation.projects import link_project
+from twin.cognize.services.sessions import ensure_project
 from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,

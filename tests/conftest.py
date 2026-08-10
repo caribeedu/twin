@@ -19,7 +19,7 @@ def cfg(tmp_path):
 def _reset_interpreter_override():
     """Guarantee no scripted interpreter override leaks between tests — a test
     that authors an interpretation (set_interpreter_override) is isolated."""
-    from twin.cognition import (
+    from twin.cognize.services import (
         clear_stage_overrides,
         set_interpreter_override,
         set_reflect_override,

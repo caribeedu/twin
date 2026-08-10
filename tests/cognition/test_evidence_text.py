@@ -1,7 +1,7 @@
 """Session-summary fold labels and evidence quote hygiene."""
 
 from twin.clock import now_iso
-from twin.cognition.evidence_text import fold_summary_line, sanitize_evidence_quote
+from twin.cognize.services.evidence_text import fold_summary_line, sanitize_evidence_quote
 from twin.store.formation import propose_or_corroborate
 from twin.store.models import MemoryItem, MemoryType
 from twin.sense.sensory.percept import Percept

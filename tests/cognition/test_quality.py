@@ -1,7 +1,7 @@
-"""Memory quality analysis and review priority (twin.cognition.quality)."""
+"""Memory quality analysis and review priority (twin.cognize.services.quality)."""
 
 from twin import ids
-from twin.cognition.quality import (
+from twin.cognize.services.quality import (
     _looks_conflict,
     analyze_memory,
     review_priority,

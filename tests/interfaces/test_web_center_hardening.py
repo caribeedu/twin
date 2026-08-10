@@ -22,7 +22,7 @@ from twin.cognize.models import (
 from twin import ids
 from twin.clock import now_iso
 from twin.interfaces.api import create_app
-from twin.judgment.models import JudgmentKind, JudgmentProposal, ProposalAction, ProposalStatus
+from twin.cognize.stance_engine.models import JudgmentKind, JudgmentProposal, ProposalAction, ProposalStatus
 from twin.workspace import Workspace
 
 

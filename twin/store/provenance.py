@@ -329,7 +329,7 @@ def attach_corroborating_evidence(
     bump_confidence: bool = True,
 ) -> Evidence:
     """Paraphrase/corroboration: same memory, additional evidence, capped confidence."""
-    from twin.cognition.evidence_text import sanitize_evidence_quote
+    from twin.cognize.services.evidence_text import sanitize_evidence_quote
 
     mem = store.get_memory(memory_id)
     if mem is None:

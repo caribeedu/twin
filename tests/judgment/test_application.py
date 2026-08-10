@@ -7,13 +7,13 @@ from twin.clock import now_iso
 from twin.inject.context_pack import build_context_pack
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
-from twin.judgment.application import applicable_pack
-from twin.judgment.conflicts import (
+from twin.cognize.stance_engine.application import applicable_pack
+from twin.cognize.stance_engine.conflicts import (
     detect_behavior_conflicts,
     detect_judgment_conflicts,
     resolve_conflict,
 )
-from twin.judgment.models import (
+from twin.cognize.stance_engine.models import (
     ExceptionEffect,
     JudgmentException,
     JudgmentItem,
@@ -26,17 +26,17 @@ from twin.judgment.models import (
     ProposalAction,
     ProposalStatus,
 )
-from twin.judgment.proposals import (
+from twin.cognize.stance_engine.proposals import (
     approve_proposal,
     preview_proposal,
     propose_from_memory,
     propose_from_pattern,
     reject_proposal,
 )
-from twin.judgment.revisions import commit_new_item
-from twin.judgment.simulate import counterfactual, evaluate, simulate
-from twin.judgment.versions import active_items, create_version, restore_version
-from twin.judgment.yaml_io import apply_yaml_import, preview_yaml_import
+from twin.cognize.stance_engine.revisions import commit_new_item
+from twin.cognize.stance_engine.simulate import counterfactual, evaluate, simulate
+from twin.cognize.stance_engine.versions import active_items, create_version, restore_version
+from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
 from twin.store.models import MemoryItem
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
@@ -555,7 +555,7 @@ def test_constitutional_requires_extra_confirm(store, cfg):
 
 
 def test_promote_creates_proposal(store, cfg, embedder):
-    from twin.judgment.profile import promote_memory
+    from twin.cognize.stance_engine.profile import promote_memory
     mem = _mem(store, embedder, type="preference", title="ADRs",
                summary="Prefere ADRs no repo.")
     section = promote_memory(cfg.judgment_path, mem, store=store)
