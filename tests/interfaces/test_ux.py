@@ -87,7 +87,7 @@ def test_print_table_empty_prints_nothing(capsys):
 
 
 def test_print_next_uses_next_title(capsys):
-    ux.print_next([("→", "twin extract")])
+    ux.print_next([("→", "twin cognize run")])
     out = capsys.readouterr().out
     assert "next" in out
-    assert "twin extract" in out
+    assert "twin cognize run" in out

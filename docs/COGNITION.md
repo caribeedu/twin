@@ -48,9 +48,9 @@ a Memory row.
 | **Reflection** | Open question / tension Cognize is holding |
 | **Interpretation** | Competing candidate explanation |
 | **Narrative** | Human-committed, evidence-backed, revisable account |
-| **Stance** | How similar cases should be evaluated later (ex-Judgment) |
+| **Stance** | How similar cases should be evaluated later |
 | **Understanding** | Emergent state over the above — not a table |
-| Memory *(legacy)* | Deprecated product term; code dual-reads `MemoryItem` during migration |
+| Memory | Code dual-reads `MemoryItem` during Narrative migration |
 
 ### Example
 
@@ -78,8 +78,8 @@ Twin uses **Situations** as the working container while Cognize raises
 Reflections and Interpretations — before a human commits a Narrative.
 Older docs say **Situation Model**; the runtime may still expose related
 structure as `WorkEpisode` (phases + edges) until Situate fully replaces
-it — see [ARCHITECTURE.md](ARCHITECTURE.md) (legacy Cognize / episode
-pipeline) and [COGNIZE.md](COGNIZE.md).
+it — see [ARCHITECTURE.md](ARCHITECTURE.md) (episode pipeline) and
+[COGNIZE.md](COGNIZE.md).
 
 Hypothesis under test:
 [RESEARCH.md](RESEARCH.md#hypothesis-2-situation-models-are-the-correct-cognitive-primitive).
@@ -98,7 +98,7 @@ A Situation may include:
 - outcomes;
 - unresolved questions (often surfaced as **Reflections**).
 
-### Lifecycle (v2 target)
+### Lifecycle
 
 ```text
 Artifacts → Percepts → Situate → Reflections → Interpretations

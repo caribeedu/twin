@@ -9,7 +9,7 @@ Cognitive concepts: [COGNITION.md](COGNITION.md) ·
 [COGNIZE.md](COGNIZE.md) · [v2.md](v2.md) §2. Epistemics:
 [EPISTEMICS.md](EPISTEMICS.md). Academic inspirations (appendix):
 [FOUNDATIONS.md](FOUNDATIONS.md). Product: [PRODUCT.md](PRODUCT.md).
-Interfaces: [INTERFACES.md](INTERFACES.md). Twin v2 cuts:
+Interfaces: [INTERFACES.md](INTERFACES.md). Cuts / tracker:
 [ROADMAP.md](ROADMAP.md) · [v2-tracker.md](v2-tracker.md).
 
 ## Sense → Cognize → Inject
@@ -72,7 +72,7 @@ See [v2.md](v2.md) §0.
 
 ## Brain analogies
 
-*(Engineering metaphors and the pre-v2 episode CLI stage map. Target Cognize
+*(Engineering metaphors and the episode CLI stage map. Target Cognize
 stages live in [COGNIZE.md](COGNIZE.md); do not expand the public diagram
 above into Salience→…→Fade.)*
 
@@ -122,32 +122,31 @@ Memory Observer (parallel suggestions)
 
 If a feature blurs these boundaries — e.g. treating raw text as confirmed memory, or bypassing the firewall “for convenience” — it fights the architecture, not just a style preference.
 
-### Brain analogies and CLI stages (legacy episode pipeline)
+### Brain analogies and CLI stages (episode pipeline)
 
-Episode cognition (pre–Twin v2 primary UX) turns connector records into
-trajectory structure as a chain of stages named for brain regions. Twin v2
-retargets the happy path to Cognize ([COGNIZE.md](COGNIZE.md));
-`twin correlate` / `twin meditate` remain transitional. The `sensory`
-scaffold and `hippocampus_bind` are structural (explicit anchors, exact
-identity/project, membership); `basal` is report-only lifecycle. Stages that
-*interpret* (`amygdala`, `cortex` edges/phases, `hippocampus_consolidate`
-reflect) use an LLM (or a deterministic test override) and **halt / defer**
-when the model is missing — they never invent an arc from lexical rules.
-`extractor=heuristic` blocks those semantic stages. `twin correlate` runs up
-to `cortex`; `twin meditate` orchestrates the whole chain up to the human
-gates (`twin review`, `twin judgment approve` / Stance).
+Episode cognition turns connector records into trajectory structure as a
+chain of stages named for brain regions. The happy path is Cognize
+([COGNIZE.md](COGNIZE.md)); `twin episode reflect` remains for trajectory
+candidates from a built arc. The `sensory` scaffold and `hippocampus_bind`
+are structural (explicit anchors, exact identity/project, membership);
+`basal` is report-only lifecycle. Stages that *interpret* (`amygdala`,
+`cortex` edges/phases, `hippocampus_consolidate` reflect) use an LLM (or a
+deterministic test override) and **halt / defer** when the model is missing
+— they never invent an arc from lexical rules. `extractor=heuristic` blocks
+those semantic stages. `twin cognize run` drives the pipeline through human
+gates (`twin review`, `twin stance approve`).
 
 | # | Stage id (`brain_stage`) | Brain region | Job | Writes | CLI |
 |---|---|---|---|---|---|
-| 0 | `sensory` | encoding substrate | vault / dirty / ID anchors | partitions, membership | `twin correlate --until sensory` |
-| 1 | `amygdala` | Amygdala (salience) | classify member role + salience | phase roles (`proposed`) | `twin correlate` |
-| 2 | `basal` | Basal ganglia | read episode lifecycle | lifecycle (report-only) | `twin correlate` |
-| 3 | `hippocampus_bind` | Hippocampus (binding) | membership consolidation | links | `twin correlate` |
-| 4 | `cortex` | Cortex (semantic) | understand arc: phases + edges | phases/edges (`method=llm`) | `twin correlate` |
-| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | MemoryCandidates | `twin episode reflect` / `twin meditate` |
-| 6 | `prefrontal` | Prefrontal cortex | draft judgment | pending `JudgmentProposal` | `twin judgment propose-episode` / `twin meditate` |
+| 0 | `sensory` | encoding substrate | vault / dirty / ID anchors | partitions, membership | `twin cognize run` |
+| 1 | `amygdala` | Amygdala (salience) | classify member role + salience | phase roles (`proposed`) | `twin cognize run` |
+| 2 | `basal` | Basal ganglia | read episode lifecycle | lifecycle (report-only) | `twin cognize run` |
+| 3 | `hippocampus_bind` | Hippocampus (binding) | membership consolidation | links | `twin cognize run` |
+| 4 | `cortex` | Cortex (semantic) | understand arc: phases + edges | phases/edges (`method=llm`) | `twin cognize run` |
+| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | MemoryCandidates | `twin episode reflect` |
+| 6 | `prefrontal` | Prefrontal cortex | draft Stance | pending Stance proposal | `twin stance propose-episode` |
 
-Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin judgment approve` is the executive gate for durable judgment. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
+Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin stance approve` is the executive gate for durable Stance. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
 
 ## Runtime sequences
 
@@ -183,27 +182,27 @@ sequenceDiagram
     Conn->>Store: Percept (normalized observation)
     Note over Store: Percept ≠ Memory.<br/>Evidence is preserved for audit.
 
-    Client->>ExtLLM: twin extract
+    Client->>ExtLLM: twin cognize run
     ExtLLM->>Store: read pending percepts
     ExtLLM->>PII: mask before any cloud LLM
     ExtLLM->>Store: atomic MemoryCandidates + evidence
     ExtLLM->>Human: selective review queue
 
-    Client->>Corr: twin meditate / correlate
+    Client->>Corr: twin cognize run
     Corr->>Store: WorkEpisode membership, phases, edges
     Note over Corr: Structural scaffold never invents an arc.<br/>Semantic stages defer without a model.
     Corr->>ACC: consolidate-ready episodes
     ACC->>Store: trajectory MemoryCandidates
-    ACC->>Human: review (+ optional judgment drafts)
+    ACC->>Human: review (+ optional Stance drafts)
 
     Human->>Store: confirm / reject / merge / resolve
     Note over Human,Store: Only confirmed memories<br/>are pack-eligible by default.
 
-    Client->>Pack: pack / session_start / get_context_pack
+    Client->>Pack: pack / session_start / inject_context_pack
     Pack->>Store: hybrid search (FTS + vectors + graph)
     Pack->>FW: privacy + domain + persona before content
     FW-->>Pack: allow / redact / deny
-    Pack->>Pack: judgment slice + budget + dedupe
+    Pack->>Pack: Stance slice + budget + dedupe
     Pack-->>Client: Safe context pack
     Note over Client: Understanding enters the tool<br/>without re-briefing the user.
 ```
@@ -260,9 +259,9 @@ sequenceDiagram
     Native-->>Host: ok (fail-open if configured)
     Runtime->>Sess: fold dialogue + deliberate notes
     Runtime->>Store: session_summary Percept
-    Runtime->>ExtLLM: extract → MemoryCandidates
+    Runtime->>ExtLLM: cognize → MemoryCandidates
     ExtLLM->>Store: candidates for human review
-    Note over Host,Store: Inject governed understanding at the start;<br/>absorb the session as evidence at the end.<br/>Humans still confirm durable Memory / Judgment.
+    Note over Host,Store: Inject governed understanding at the start;<br/>absorb the session as evidence at the end.<br/>Humans still confirm durable Narrative / Stance.
 ```
 
 Reference: Claude Code hooks
@@ -299,8 +298,8 @@ sequenceDiagram
     Orch->>LLM: judge dossier → trajectory / pattern claims
     LLM-->>Orch: claims with evidence refs
     Orch->>Store: MemoryCandidates only<br/>(needs_review, never auto-confirm)
-    Orch->>Review: twin review / judgment gates
-    Note over Orch,Review: Model proposes understanding<br/>humans constitute Memory and Judgment
+    Orch->>Review: twin review / Stance gates
+    Note over Orch,Review: Model proposes understanding<br/>humans constitute Narrative and Stance
 ```
 
 ## Architecture Principles
@@ -625,7 +624,7 @@ Still open: richer automatic validity inference and a full belief timeline.
 
 ## Ingestion and extraction pipeline
 
-End-to-end runtime (connectors → extract → meditate → pack) is in
+End-to-end runtime (connectors → Cognize → pack) is in
 [Runtime sequences](#runtime-sequences). The short ingest spine:
 
 ```text

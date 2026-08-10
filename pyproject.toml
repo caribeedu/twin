@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "twin-cognition"
-version = "2.3.1"
+version = "2.3.2"
 description = " A governed cognitive layer that transforms distributed observations into reusable understanding across models and interfaces."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -60,7 +60,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `memory_user_preferences` | `context=""` | Stable preference memories for the given context string. |
 | `memory_judgment_profile` | — | Active judgment items (DB) plus YAML bootstrap view. |
 
-## Context packs & observer
+## Context packs
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -68,10 +68,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `narrative_show` | `narrative_id` | One Narrative + EpistemicState |
 | `stance_list` | — | Active Stances |
 | `stance_proposals` | `status=pending` | Pending Stance drafts (human approve) |
-| `inject_context_pack` | same shape as legacy pack | **Preferred**: EpistemicState, open reflections, derived confidence/independence, applicable stance. |
-| `memory_safe_context_pack` | `query`, `target_domain="technical`, … | **Legacy** alias — response includes `deprecated`; prefer `inject_context_pack`. |
-| `get_context_pack` | same shape | Lower-level pack builder (prefer `inject_context_pack`). |
-| `memory_observe` | `current_text`, `target_domain?` | Parallel “what might be relevant?” suggestion for the current text/task. |
+| `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable stance. |
 
 ## Sessions
 
@@ -259,7 +256,7 @@ Any MCP stdio-compatible client works with:
 
 #### One-shot context and exploration
 
-1. **`memory_safe_context_pack`** returns the same pack without opening a
+1. **`inject_context_pack`** returns a governed pack without opening a
    session: pass the task in `query`, the correct `target_domain`
    (`technical`, `work`, `personal_preferences`, `assistant_preferences`),
    and optionally `task_profile` (`coding`, `architecture`, `debugging`,
@@ -276,8 +273,6 @@ Any MCP stdio-compatible client works with:
    before proposing architecture changes.
 5. Cite the `memory_id` when using specific content — every memory has
    traceable verbatim evidence.
-6. `memory_observe` is for suggesting context during an ongoing
-   conversation; it never answers the user, it only remembers.
 
 #### Troubleshooting
 

@@ -18,13 +18,12 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 | `twin setup postgres` | Verify / prepare Postgres + pgvector. |
 | `twin setup mcp <client>` | Write/merge MCP server entry (`cursor`, `claude-code`, `claude-desktop`). |
 
-## Ingest, extract, review
+## Ingest & review
 
 | Command | What it does |
 |---|---|
 | `twin ingest <paths…>` | Run sensors over files/dirs (docs, transcripts, exports). |
-| `twin extract` | Interpret pending percepts into memory candidates. |
-| `twin extract -A` / `--auto-approve` | **Advanced / demos only:** extract and immediately confirm new *memory* candidates (skip queue). Not the recommended path — Judgment stays human-gated; prefer `twin review`. |
+| `twin cognize run` | Form / revise understanding from pending percepts (**LLM-or-halt**; never commits Narrative). |
 | `twin interpret status\|deferred\|signals` | Cognitive interpretation diagnostics (deferred queue, heuristic signals). |
 | `twin review` | Interactive priority review queue. |
 | `twin review --analyze` | Run quality analyzer on candidates first. |
@@ -39,25 +38,25 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 |---|---|
 | `twin search <query>` | Hybrid search (optional `--domain`). |
 | `twin pack <query> --domain <domain>` | Build a safe context pack (candidates off unless flagged). |
-| `twin inject pack <query> --domain <domain>` | Twin v2 Inject pack (EpistemicState + Narratives + open Reflections). |
+| `twin inject pack <query> --domain <domain>` | Inject pack (EpistemicState + Narratives + open Reflections). |
 | `twin observe <text>` | Memory observer suggestion for current text. |
 
-## Cognize (Twin v2)
+## Cognize
 
 | Command | What it does |
 |---|---|
 | `twin cognize run [--until <stage>]` | Cognize pipeline Salience→Evidence audit (**LLM-or-halt**; never commits Narrative). |
 | `twin cognize status` | Pending percepts, open Reflections, halt reason. |
+| `twin cognize review` | Open Reflections and competing Interpretations. |
 | `twin narrative search\|show\|commit\|backfill` | Narrative ops + dual-read memory backfill. |
-| `twin stance list` | Stance surface (Judgment alias). |
+| `twin stance list` | List active Stances. |
 
-Legacy `twin extract` / `twin meditate` / `twin correlate` still exist but halt without a chat LLM; prefer `twin cognize`.
-
-## Memory lifecycle
+## Narrative lifecycle
 
 | Command | What it does |
 |---|---|
-| `twin memory merge\|split\|provenance\|archive\|diff\|undo` | Consolidation ops on memory ids. |
+| `twin narrative merge\|split\|provenance\|archive\|diff\|undo` | Consolidation ops on narrative / memory ids. |
+| `twin narrative unsupported` | List ops not yet mapped on the Narrative surface. |
 | `twin supersede <new> <old>` | Mark newer memory as superseding older. |
 | `twin contradict <a> <b>` | Record contradiction between memories. |
 | `twin undo <op_id>` | Undo a recorded memory operation. |
@@ -66,42 +65,41 @@ Legacy `twin extract` / `twin meditate` / `twin correlate` still exist but halt 
 | `twin delete-source …` | Propagate deletion from an upstream source system. |
 | `twin stats` | Memory / connector quality metrics. |
 
-## Judgment
+## Stance
 
 | Command | What it does |
 |---|---|
-| `twin promote <mem_id>` | Open a judgment proposal from a memory (does **not** auto-write). |
-| `twin judgment import\|export\|list\|show\|history\|versions` | Bootstrap and inspect judgment store. |
-| `twin judgment proposals\|propose\|preview\|approve\|reject\|defer` | Proposal lifecycle (approve needs preview token). |
-| `twin judgment propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory memories (`provenance.source=episode_pattern`; human approval only). |
-| `twin judgment simulate <query> --domain …` | Simulate applicable judgment. |
-| `twin judgment conflicts [--refresh]` | List / refresh conflicts. |
-| `twin judgment explain <trace_id>` | Explain a judgment application trace. |
+| `twin promote <mem_id>` | Open a Stance proposal from a memory (does **not** auto-write). |
+| `twin stance import\|export\|list\|show\|history\|versions` | Bootstrap and inspect Stance store. |
+| `twin stance proposals\|propose\|preview\|approve\|reject\|defer` | Proposal lifecycle (approve needs preview token). |
+| `twin stance propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory memories (`provenance.source=episode_pattern`; human approval only). |
+| `twin stance simulate <query> --domain …` | Simulate applicable Stance. |
+| `twin stance conflicts [--refresh]` | List / refresh conflicts. |
+| `twin stance explain <trace_id>` | Explain a Stance application trace. |
 
 ## Correlation & Episode cognition
 
-Correlation proposes revisable structure over connector evidence — never Memory or Judgment. Semantic episode cognition runs as an LLM chain whose stages are named for their brain analogy (see [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages)). A missing model **defers** an interpreting stage — it never falls back to lexical rules, and `extractor=heuristic` blocks those stages with a clear message.
+Correlation proposes revisable structure over connector evidence — never Narrative or Stance. Semantic episode cognition runs as an LLM chain whose stages are named for their brain analogy (see [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages)). A missing model **defers** an interpreting stage — it never falls back to lexical rules, and `extractor=heuristic` blocks those stages with a clear message. Happy path: `twin cognize run`.
 
 | Stage | Brain analogy | CLI surface |
 |---|---|---|
-| `sensory` | encoding substrate | `twin correlate --until sensory` (structural scaffold only) |
-| `amygdala` | salience / role | `twin correlate` (classify member roles) |
-| `basal` | action selection | `twin correlate` (episode lifecycle read) |
-| `hippocampus_bind` | binding | `twin correlate` (membership consolidation) |
-| `cortex` | semantic memory | `twin correlate` (phases + narrative edges) |
-| `hippocampus_consolidate` | consolidation | `twin episode reflect` / `twin meditate` |
-| `prefrontal` | executive control | `twin judgment propose-episode` / `twin meditate` |
+| `sensory` | encoding substrate | `twin cognize run` (structural scaffold) |
+| `amygdala` | salience / role | `twin cognize run` (classify member roles) |
+| `basal` | action selection | `twin cognize run` (episode lifecycle read) |
+| `hippocampus_bind` | binding | `twin cognize run` (membership consolidation) |
+| `cortex` | semantic memory | `twin cognize run` (phases + narrative edges) |
+| `hippocampus_consolidate` | consolidation | `twin episode reflect` |
+| `prefrontal` | executive control | `twin stance propose-episode` |
 
 | Command | What it does |
 |---|---|
-| `twin meditate [--full\|--incremental] [--no-reflect] [--no-propose] [--review] [--limit N] [--dry-run]` | **Orchestrator**: runs `sensory…cortex` → `hippocampus_consolidate` (reflect) → optional interactive `review` → `prefrontal` (judgment drafts). Never auto-confirms Memory nor auto-approves Judgment. The post-sync happy path. |
-| `twin correlate [--full\|--incremental] [--until <stage>]` | Runs `sensory → amygdala → basal → hippocampus_bind → cortex` (phases + edges). `--full` (default) rescans all records; `--incremental` re-correlates only dirty records; `--until sensory` stops at the structural scaffold (debug). |
-| `twin episode list [--vault] [--limit]` | List episodes with phase/edge counts and `consolidate=ready` (cortex built ≥2 phases). Empty until `twin correlate` has run. |
+| `twin cognize run [--until <stage>] [--limit N] [--dry-run]` | **Orchestrator**: Sense→Cognize pipeline through evidence audit; optional stage stop via `--until`. Never auto-commits Narrative nor auto-approves Stance. The post-sync happy path. |
+| `twin episode list [--vault] [--limit]` | List episodes with phase/edge counts and `consolidate=ready` (cortex built ≥2 phases). Empty until Cognize has built arcs. |
 | `twin episode show\|explain <id>` | Summary + phases + edges (`method=llm`, `brain_stage=…`); `explain` is the full anchors/links dump (`--json` for scripts). |
 | `twin episode phases <id>` | List the `goal → decision → execution → outcome` arc phases (built by the `amygdala`/`cortex` stages). |
 | `twin episode edges <id>` | List proposed causal/narrative edges (`motivated\|superseded\|resolved\|continues\|contradicts`) from the `cortex` stage. |
 | `twin episode confirm-edge\|reject-edge <edge_id>` | Human decision on an edge (survives cortex rebuilds). |
-| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Defers if the model is unavailable. Does **not** replace `twin extract`. |
+| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Defers if the model is unavailable. Complements `twin cognize run`. |
 
 ## Native
 
@@ -214,8 +212,8 @@ Empty roots leave the instance `awaiting_configuration` until roots are set.
 
 | Step | Command |
 |---|---|
-| Extract atomic candidates | `twin extract` |
-| Episode cognition (happy path) | `twin meditate` (or `twin correlate` then `twin episode reflect`) |
+| Cognize (happy path) | `twin cognize run` |
+| Trajectory reflect (optional) | `twin episode reflect <id>` |
 | Human review | `twin review` |
 | Scheduler | `twin connector due` then `twin connector sync-due` |
 
@@ -224,7 +222,7 @@ Empty roots leave the instance `awaiting_configuration` until roots are set.
 | Command | What it does |
 |---|---|
 | `twin workspace tick …` | Parallel-memory observation/interpret tick. |
-| `twin consolidate daily\|weekly [--apply]` | Consolidation cycle (dry-run by default). Both include `episode_cortex` (sensory→cortex, incremental) then `episode_reflect` (candidates only). Weekly also drafts judgment proposals. Never auto-confirms. |
+| `twin consolidate daily\|weekly [--apply]` | Consolidation cycle (dry-run by default). Both include `episode_cortex` (sensory→cortex, incremental) then `episode_reflect` (candidates only). Weekly also drafts Stance proposals. Never auto-confirms. |
 | `twin eval extraction\|retrieval\|golden\|…` | Benchmarks and golden work-loop. |
 | `twin source …` | Show source-trust calibration. |
 | `twin export` | Export portable dump of the cognitive store. |
@@ -258,7 +256,7 @@ On an interactive TTY (with `rich` installed), `start` refreshes a panel of queu
 
 | Kind | Role |
 |---|---|
-| `interpret_percept` | Extract one percept (`payload.percept_id`) |
+| `interpret_percept` | Cognize one percept (`payload.percept_id`) |
 | `workspace_tick` | Parallel-memory tick |
 | `attention_evaluate` | Session attention evaluation |
 | `consolidate_daily` / `consolidate_weekly` | Consolidation cycle |
@@ -267,7 +265,7 @@ On an interactive TTY (with `rich` installed), `start` refreshes a panel of queu
 | `connector_reconcile` | Run due connector syncs |
 | `backfill_partition` | Advance one month of a connector historical backfill (`payload.backfill_job_id`) — scheduled while a backfill is in progress; not continuous sync |
 | `session_domain_resolve` | Background LLM domain freeze from multi-message dialogue (`payload.binding_id`, optional `cwd`) — enqueued by native UserPromptSubmit when search cannot name a domain |
-| `session_complete` | Background session consolidation + extract (`payload.session_id`, optional `summary` / `abandoned` / `summary_origin`) — enqueued by native SessionEnd |
+| `session_complete` | Background session consolidation + Cognize (`payload.session_id`, optional `summary` / `abandoned` / `summary_origin`) — enqueued by native SessionEnd |
 
 `session_domain_resolve` and `session_complete` are model-gated: when the chat model is unavailable they stay pending/retry and do not burn into the dead letter queue. Manual enqueue examples:
 
@@ -288,25 +286,5 @@ Without a running runtime, native SessionEnd falls back to in-process `complete_
 
 ---
 
----
-
 Quickstart narrative in [README.md](../README.md). Install/config in [SETUP.md](SETUP.md). Ops in [OPERATIONS.md](OPERATIONS.md).
-
-## Legacy aliases
-
-Prefer Cognize / Narrative / Stance / Inject verbs. These argv names remain as
-aliases through the next minor after v2 and print a deprecation warning
-(stderr), or a `deprecated` field with `--json`. Planned removal: next minor
-after the Twin v2 line ships.
-
-| Legacy | Prefer |
-|---|---|
-| `twin extract` | `twin cognize run` (interpret / Sense→Cognize enqueue) |
-| `twin extract -A` | Confirms **memories** only — cannot commit Narratives; use `twin narrative commit` |
-| `twin meditate` | `twin cognize run` |
-| `twin correlate` | `twin cognize run` |
-| `twin judgment …` | `twin stance …` |
-| `twin memory …` | `twin narrative …` (where mapped) |
-
-Command Center (v2.3) must not list legacy names as primary palette entries.
 

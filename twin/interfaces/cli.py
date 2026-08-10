@@ -2,7 +2,7 @@
 
  twin init create ~/.twin + guided Ollama/model setup
  twin ingest <paths...> run sensors over docs/transcripts/meetings/slack exports
- twin extract [--auto-approve|-A] interpret pending percepts (+ optional auto-confirm)
+ twin cognize run|status|review Cognize pipeline
  twin review interactive review (single-key a/r/s/q)
  twin search "query" [--domain d] hybrid search
  twin pack "task" [--domain d] build a safe context pack (confirmed only;
@@ -12,7 +12,7 @@
  twin consolidate daily|weekly scheduled consolidation cycle
  twin runtime start|status|enqueue|job|retry|cancel durable cognitive runtime
  (live processing panel on start; session_domain_resolve / session_complete)
- twin promote <memory_id> promote a memory into the judgment profile
+ twin promote <memory_id> propose promoting into Stance
  twin supersede <new_id> <old_id> new memory replaces the old one
  twin contradict <id_a> <id_b> flag two memories as contradictory
  twin stats memory + product quality metrics
@@ -28,7 +28,7 @@
  twin serve [--port 8765] local API + review UI
  twin mcp MCP server over stdio
  twin native event|install|bindings host-native observation
- twin export dump memories/entities/judgment as JSON
+ twin export dump store as JSON
 """
 
 from __future__ import annotations
@@ -44,10 +44,8 @@ from .commands.cli_handlers import (  # noqa: E402
     cmd_init,
     cmd_ingest,
     cmd_interpret,
-    cmd_extract,
     cmd_review,
     cmd_review_batch,
-    cmd_memory,
     cmd_eval,
     cmd_source,
     cmd_retention,
@@ -61,7 +59,6 @@ from .commands.cli_handlers import (  # noqa: E402
     cmd_runtime,
     cmd_reindex,
     cmd_promote,
-    cmd_judgment,
     cmd_privacy,
     cmd_connector,
     cmd_supersede,
@@ -78,8 +75,6 @@ from .commands.cli_handlers import (  # noqa: E402
     cmd_session_cleanup,
     cmd_project,
     cmd_native,
-    cmd_correlate,
-    cmd_meditate,
     cmd_episode,
     cmd_identity,
     cmd_watch,
@@ -152,17 +147,6 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_ingest)
 
-    p = sub.add_parser(
-        "extract",
-        help="interpret pending percepts into memories",
-    )
-    p.add_argument(
-        "--auto-approve", "-A",
-        action="store_true",
-        help="confirm newly extracted memories immediately (skip review queue)",
-    )
-    p.set_defaults(func=cmd_extract)
-
     pi = sub.add_parser("interpret", help="cognitive interpretation status ")
     pis = pi.add_subparsers(dest="interpret_command", required=True)
     pistatus = pis.add_parser("status", help="counts by interpretation status")
@@ -191,31 +175,6 @@ def main(argv: list[str] | None = None) -> None:
     pbr = rb.add_parser("resume")
     pbr.add_argument("batch_id")
     pbr.set_defaults(func=cmd_review_batch)
-    _add_json_flag_tree(p)
-
-    p = sub.add_parser("memory", help="memory consolidation ops")
-    ms = p.add_subparsers(dest="memory_command", required=True)
-    pd = ms.add_parser("diff")
-    pd.add_argument("id_a")
-    pd.add_argument("id_b")
-    pd.set_defaults(func=cmd_memory)
-    pm = ms.add_parser("merge")
-    pm.add_argument("ids", nargs="+")
-    pm.set_defaults(func=cmd_memory)
-    psp = ms.add_parser("split")
-    psp.add_argument("memory_id")
-    psp.add_argument("parts", nargs="+")
-    psp.set_defaults(func=cmd_memory)
-    ppv = ms.add_parser("provenance")
-    ppv.add_argument("memory_id")
-    ppv.set_defaults(func=cmd_memory)
-    pa = ms.add_parser("archive")
-    pa.add_argument("memory_id")
-    pa.set_defaults(func=cmd_memory)
-    ms.add_parser("unsupported").set_defaults(func=cmd_memory, memory_command="unsupported")
-    pu = ms.add_parser("undo")
-    pu.add_argument("operation_id")
-    pu.set_defaults(func=cmd_memory)
     _add_json_flag_tree(p)
 
     p = sub.add_parser("eval", help="run extraction/retrieval benchmarks")
@@ -367,49 +326,6 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("memory_id")
     _add_json_flag(p)
     p.set_defaults(func=cmd_promote)
-
-    p = sub.add_parser("judgment", help="evolving judgment model")
-    js = p.add_subparsers(dest="judgment_command", required=True)
-    js.add_parser("list").set_defaults(func=cmd_judgment)
-    pshow = js.add_parser("show"); pshow.add_argument("judgment_id"); pshow.set_defaults(func=cmd_judgment)
-    phist = js.add_parser("history"); phist.add_argument("judgment_id"); phist.set_defaults(func=cmd_judgment)
-    js.add_parser("versions").set_defaults(func=cmd_judgment)
-    js.add_parser("import-preview").set_defaults(func=cmd_judgment)
-    js.add_parser("import").set_defaults(func=cmd_judgment)
-    js.add_parser("export").set_defaults(func=cmd_judgment)
-    pprop = js.add_parser("proposals"); pprop.add_argument("--status"); pprop.set_defaults(func=cmd_judgment)
-    ppr = js.add_parser("propose")
-    ppr.add_argument("--from-memory"); ppr.add_argument("--domain", default="technical")
-    ppr.set_defaults(func=cmd_judgment)
-    ppe = js.add_parser(
-        "propose-episode",
-        help="seed a judgment proposal from an episode's confirmed trajectory",
-    )
-    ppe.add_argument("episode_id")
-    ppe.add_argument("--domain", default=None)
-    ppe.set_defaults(func=cmd_judgment)
-    ppv = js.add_parser("preview"); ppv.add_argument("proposal_id"); ppv.set_defaults(func=cmd_judgment)
-    pap = js.add_parser("approve")
-    pap.add_argument("proposal_id"); pap.add_argument("--token", required=True)
-    pap.add_argument("--constitutional", action="store_true")
-    pap.set_defaults(func=cmd_judgment)
-    prej = js.add_parser("reject"); prej.add_argument("proposal_id"); prej.add_argument("--reason")
-    prej.set_defaults(func=cmd_judgment)
-    pdf = js.add_parser("defer"); pdf.add_argument("proposal_id"); pdf.set_defaults(func=cmd_judgment)
-    psim = js.add_parser("simulate")
-    psim.add_argument("query"); psim.add_argument("--domain", default="technical")
-    psim.add_argument("--project"); psim.add_argument("--profile", default="architecture")
-    psim.set_defaults(func=cmd_judgment)
-    pex = js.add_parser("explain"); pex.add_argument("trace_id"); pex.set_defaults(func=cmd_judgment)
-    pcf = js.add_parser("counterfactual")
-    pcf.add_argument("query"); pcf.add_argument("judgment_id"); pcf.add_argument("--domain", default="technical")
-    pcf.set_defaults(func=cmd_judgment)
-    pco = js.add_parser("conflicts"); pco.add_argument("--status"); pco.add_argument("--refresh", action="store_true")
-    pco.set_defaults(func=cmd_judgment)
-    prc = js.add_parser("resolve-conflict")
-    prc.add_argument("conflict_id"); prc.add_argument("--resolution")
-    prc.set_defaults(func=cmd_judgment)
-    _add_json_flag_tree(p)
 
     p = sub.add_parser("privacy", help="persona-aware privacy & governance")
     ps = p.add_subparsers(dest="privacy_command", required=True)
@@ -674,67 +590,12 @@ def main(argv: list[str] | None = None) -> None:
     pp.set_defaults(func=cmd_project)
 
     p = sub.add_parser(
-        "correlate",
-        help="cognition: sensory scaffold → amygdala → basal → hippocampus_bind "
-             "→ cortex (phases + edges). Needs an interpreting extractor.",
-    )
-    p.add_argument("--connector", action="append",
-                   help="limit to connector instance id (repeatable)")
-    p.add_argument("--no-conflicts", action="store_true")
-    p.add_argument(
-        "--until", default="cortex",
-        choices=["sensory", "amygdala", "basal", "hippocampus_bind", "cortex"],
-        help="stop after this brain stage (default: cortex). "
-             "--until sensory = structural scaffold only (debug).",
-    )
-    mode_grp = p.add_mutually_exclusive_group()
-    mode_grp.add_argument(
-        "--full", dest="mode", action="store_const", const="full",
-        help="full rebuild (correctness oracle; default)",
-    )
-    mode_grp.add_argument(
-        "--incremental", dest="mode", action="store_const", const="incremental",
-        help="only re-correlate records marked dirty since last pass",
-    )
-    p.set_defaults(func=cmd_correlate, mode="full")
-    _add_json_flag(p)
-
-    p = sub.add_parser(
-        "meditate",
-        help="orchestrate the full cognition chain up to the human gates: "
-             "correlate → reflect → (review) → judgment drafts. Never "
-             "auto-confirms Memory or auto-approves Judgment.",
-    )
-    p.add_argument("--connector", action="append",
-                   help="limit to connector instance id (repeatable)")
-    p.add_argument("--no-conflicts", action="store_true")
-    p.add_argument("--no-reflect", action="store_true",
-                   help="stop after cortex (skip hippocampus_consolidate)")
-    p.add_argument("--no-propose", action="store_true",
-                   help="skip prefrontal judgment drafting")
-    p.add_argument("--review", action="store_true",
-                   help="step through the review queue between consolidate and "
-                        "prefrontal (interactive TTY only)")
-    p.add_argument("--limit", type=int, default=50,
-                   help="max episodes to reflect this pass (default: 50)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="reflect without persisting candidates")
-    mmode = p.add_mutually_exclusive_group()
-    mmode.add_argument("--full", dest="mode", action="store_const", const="full",
-                       help="full rebuild (default)")
-    mmode.add_argument("--incremental", dest="mode", action="store_const",
-                       const="incremental",
-                       help="only re-correlate dirty records (day-to-day path)")
-    p.set_defaults(func=cmd_meditate, mode="full")
-    _add_json_flag(p)
-
-    p = sub.add_parser(
         "episode",
         help="inspect WorkEpisodes, phases/edges, and reflect trajectory candidates",
     )
     ep_sub = p.add_subparsers(dest="episode_command", required=True)
     ep = ep_sub.add_parser(
-        "list", help="list episodes (run twin correlate first after sync)",
+        "list", help="list episodes (after connector sync + cognize)",
     )
     ep.add_argument("--limit", type=int, default=50)
     ep.add_argument("--vault", default=None, help="filter by vault id")
@@ -919,7 +780,7 @@ def main(argv: list[str] | None = None) -> None:
     _add_json_flag(pexport)
     pexport.set_defaults(func=cmd_export)
 
-    pc = sub.add_parser("cognize", help="run Cognize pipeline (halts without chat LLM)")
+    pc = sub.add_parser("cognize", help="run Cognize pipeline")
     pcs = pc.add_subparsers(dest="cognize_command")
     pcr = pcs.add_parser("run", help="Salience→…→Evidence audit; never commits Narrative")
     pcr.add_argument("--until", default=None, help="stop after stage id")
@@ -979,6 +840,27 @@ def main(argv: list[str] | None = None) -> None:
     pnsb.add_argument("--vault", default="default")
     pnsb.add_argument("--limit", type=int, default=10_000)
     pnsb.set_defaults(func=cmd_narrative)
+    pnd = pns.add_parser("diff")
+    pnd.add_argument("id_a")
+    pnd.add_argument("id_b")
+    pnd.set_defaults(func=cmd_narrative)
+    pnm = pns.add_parser("merge")
+    pnm.add_argument("ids", nargs="+")
+    pnm.set_defaults(func=cmd_narrative)
+    pnsp = pns.add_parser("split")
+    pnsp.add_argument("memory_id")
+    pnsp.add_argument("parts", nargs="+")
+    pnsp.set_defaults(func=cmd_narrative)
+    pnpv = pns.add_parser("provenance")
+    pnpv.add_argument("memory_id")
+    pnpv.set_defaults(func=cmd_narrative)
+    pna = pns.add_parser("archive")
+    pna.add_argument("memory_id")
+    pna.set_defaults(func=cmd_narrative)
+    pns.add_parser("unsupported").set_defaults(func=cmd_narrative, narrative_command="unsupported")
+    pnu = pns.add_parser("undo")
+    pnu.add_argument("operation_id")
+    pnu.set_defaults(func=cmd_narrative)
     pnsa = pns.add_parser(
         "accessibility",
         help="list/apply Fade·Remarkable recommendations (never auto-deletes)",
@@ -988,11 +870,48 @@ def main(argv: list[str] | None = None) -> None:
     pnsa.set_defaults(func=cmd_narrative)
     _add_json_flag_tree(pn)
 
-    pst = sub.add_parser("stance", help="Stance (ex-Judgment) surface")
-    psts = pst.add_subparsers(dest="stance_command")
-    pstl = psts.add_parser("list")
-    pstl.set_defaults(func=cmd_stance)
-    pst.set_defaults(func=cmd_stance)
+    pst = sub.add_parser("stance", help="Stance surface")
+    js = pst.add_subparsers(dest="stance_command")
+    js.add_parser("list").set_defaults(func=cmd_stance)
+    pshow = js.add_parser("show"); pshow.add_argument("judgment_id"); pshow.set_defaults(func=cmd_stance)
+    phist = js.add_parser("history"); phist.add_argument("judgment_id"); phist.set_defaults(func=cmd_stance)
+    js.add_parser("versions").set_defaults(func=cmd_stance)
+    js.add_parser("import-preview").set_defaults(func=cmd_stance)
+    js.add_parser("import").set_defaults(func=cmd_stance)
+    js.add_parser("export").set_defaults(func=cmd_stance)
+    pprop = js.add_parser("proposals"); pprop.add_argument("--status"); pprop.set_defaults(func=cmd_stance)
+    ppr = js.add_parser("propose")
+    ppr.add_argument("--from-memory"); ppr.add_argument("--domain", default="technical")
+    ppr.set_defaults(func=cmd_stance)
+    ppe = js.add_parser(
+        "propose-episode",
+        help="seed a Stance proposal from an episode trajectory",
+    )
+    ppe.add_argument("episode_id")
+    ppe.add_argument("--domain", default=None)
+    ppe.set_defaults(func=cmd_stance)
+    ppv = js.add_parser("preview"); ppv.add_argument("proposal_id"); ppv.set_defaults(func=cmd_stance)
+    pap = js.add_parser("approve")
+    pap.add_argument("proposal_id"); pap.add_argument("--token", required=True)
+    pap.add_argument("--constitutional", action="store_true")
+    pap.set_defaults(func=cmd_stance)
+    prej = js.add_parser("reject"); prej.add_argument("proposal_id"); prej.add_argument("--reason")
+    prej.set_defaults(func=cmd_stance)
+    pdf = js.add_parser("defer"); pdf.add_argument("proposal_id"); pdf.set_defaults(func=cmd_stance)
+    psim = js.add_parser("simulate")
+    psim.add_argument("query"); psim.add_argument("--domain", default="technical")
+    psim.add_argument("--project"); psim.add_argument("--profile", default="architecture")
+    psim.set_defaults(func=cmd_stance)
+    pex = js.add_parser("explain"); pex.add_argument("trace_id"); pex.set_defaults(func=cmd_stance)
+    pcf = js.add_parser("counterfactual")
+    pcf.add_argument("query"); pcf.add_argument("judgment_id"); pcf.add_argument("--domain", default="technical")
+    pcf.set_defaults(func=cmd_stance)
+    pco = js.add_parser("conflicts"); pco.add_argument("--status"); pco.add_argument("--refresh", action="store_true")
+    pco.set_defaults(func=cmd_stance)
+    prc = js.add_parser("resolve-conflict")
+    prc.add_argument("conflict_id"); prc.add_argument("--resolution")
+    prc.set_defaults(func=cmd_stance)
+    pst.set_defaults(func=cmd_stance, stance_command="list")
     _add_json_flag_tree(pst)
 
     pin = sub.add_parser("inject", help="Inject-facing helpers")

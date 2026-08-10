@@ -394,7 +394,7 @@ def reflect_episode(
     if not _has_arc(brief):
         return ReflectResult(
             episode_id=episode_id,
-            skipped_reason="no arc yet (run cortex: twin correlate)",
+            skipped_reason="no arc yet (run cortex via consolidate / episode pipeline)",
         )
 
     # Analysis Context Compiler: budgeted primary + soft cross-sense + retrieve

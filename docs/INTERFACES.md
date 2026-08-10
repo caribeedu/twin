@@ -57,13 +57,13 @@ Terminal and HTTP surfaces: [CLI.md](CLI.md) · [REST.md](REST.md).
 
 Connectors are **source adapters**, not LLM clients. They pull GitHub, Slack, mail, calendars, meetings and folders into Twin. Client sessions are documented under [Native](NATIVE.md) and [MCP](MCP.md).
 
-Connectors are how Twin **obtains** ongoing evidence from professional systems. Each adapter fetches and normalizes into the same Artifact-to-Percept path as `twin ingest`. They do **not** confirm Memory or Judgment — you still run `twin extract` and `twin review`.
+Connectors are how Twin **obtains** ongoing evidence from professional systems. Each adapter fetches and normalizes into the same Artifact-to-Percept path as `twin ingest`. They do **not** confirm Narrative or Stance — you still run `twin cognize run` and `twin review`.
 
 Ownership (`--source-owner`) and vault labels keep employer and personal data separable. End-to-end operating loops (sync, backfill, DLQ, backup) in [OPERATIONS.md](OPERATIONS.md).
 
 ### What each connector extracts
 
-Every connector uses an **allowlist** (repos, channels, labels, folders, calendars, or disk roots) — never “ingest the whole workspace by default.” Attachments are metadata-oriented unless noted. After any sync: `twin extract` then `twin review`.
+Every connector uses an **allowlist** (repos, channels, labels, folders, calendars, or disk roots) — never “ingest the whole workspace by default.” Attachments are metadata-oriented unless noted. After any sync: `twin cognize run` then `twin review`.
 
 | Connector | Identifier | Pulls into Twin | Does not pull | Notes |
 |---|---|---|---|---|
@@ -72,7 +72,7 @@ Every connector uses an **allowlist** (repos, channels, labels, folders, calenda
 | **Gmail** | `gmail` | Messages under chosen labels: subject, From/To/Cc, authored body (quotes/signatures split), snippet, label membership | Attachment **bodies** (metadata refs only by default). Spam/promotions unless you include those labels | OAuth read-only. HTML kept as an untrusted stub, not safe UI HTML. |
 | **Outlook** | `outlook` | Same mail cognitive model as Gmail, via Microsoft Graph folders you choose | Attachment bodies (same metadata rule). Write scopes | Folder discovery before sync. Delta sync; removals become tombstones. |
 | **Google Calendar** | `calendar` | Events on chosen calendars: title, when, status, location, organizer, attendees, description (capped) | Attachments. In **free/busy** mode: no title, attendees, or description — busy windows only | Correlate later with meeting transcripts when ids / links match. Match vault to personal vs work. |
-| **Fireflies** | `fireflies` | Meeting **manifest**, speaker-labeled **transcript chunks**, optional provider **summary** | Audio / video bytes; signed media URLs (flags only that media existed) | Chunks never split mid-utterance. Summary marked derived. Still extract + human review; PII policies apply. |
+| **Fireflies** | `fireflies` | Meeting **manifest**, speaker-labeled **transcript chunks**, optional provider **summary** | Audio / video bytes; signed media URLs (flags only that media existed) | Chunks never split mid-utterance. Summary marked derived. Still Cognize + human review; PII policies apply. |
 | **Local folder** | `folder` | Watched roots: text docs (default `md` / `txt` / `rst`, …) as manifest + revision **chunks**; deletes as tombstones | Binary file bodies; absolute paths in the cognitive payload | Content-hash skips unchanged files. Oversized / unsupported files stay metadata-only. No auth — path access is the trust boundary. |
 
 Connectors reference in [CLI.md → Connectors](CLI.md#connectors). MCP tools in [MCP.md → Connectors and meta](MCP.md#connectors--meta). HTTP webhooks in [REST.md](REST.md).

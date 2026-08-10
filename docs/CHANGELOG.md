@@ -5,6 +5,12 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.3.2
+
+Removed legacy argv aliases `extract` / `meditate` / `correlate` /
+`judgment` / `memory`; Stance and Narrative absorb those surfaces. MCP pack
+tool is `inject_context_pack` only.
+
 ### v2.3.1 — Exit-criteria hardening
 
 Closes gaps found after the v2.3 cut: Command Center Jobs/Connectors use

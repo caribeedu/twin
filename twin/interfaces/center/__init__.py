@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from twin.workspace import Workspace
 
-V2_VERBS = [
+PALETTE_VERBS = [
     "cognize run",
     "narrative search",
     "narrative commit",
@@ -30,13 +30,6 @@ V2_VERBS = [
     "serve",
     "doctor",
     "research revisions",
-]
-LEGACY_ALIASES = [
-    "extract",
-    "meditate",
-    "correlate",
-    "judgment list",
-    "memory unsupported",
 ]
 
 
@@ -123,7 +116,7 @@ def home_snapshot(ws: Workspace) -> dict[str, Any]:
 
 def fuzzy_palette(query: str) -> list[str]:
     q = (query or "").strip().lower()
-    pool = list(V2_VERBS) + [f"(legacy) {a}" for a in LEGACY_ALIASES]
+    pool = list(PALETTE_VERBS)
     if not q:
         return pool[:12]
     return [p for p in pool if q in p.lower()][:20]
