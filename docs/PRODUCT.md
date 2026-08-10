@@ -1,6 +1,6 @@
 # Product
 
-This document explains what Twin delivers — memory / judgment / action
+This document explains what Twin delivers — Narrative / Stance / Inject
 layers, domain separation, product shape, related projects and success
 criteria.
 
@@ -13,29 +13,37 @@ Architecture: [ARCHITECTURE.md](ARCHITECTURE.md). Releases:
 [CHANGELOG.md](CHANGELOG.md). Roadmap: [ROADMAP.md](ROADMAP.md).
 Destination: [README](../README.md).
 
-## Central concept: memory is not enough
+## Central concept: retrieval is not enough
 
-A memory store can help an LLM retrieve facts. But that does not guarantee it acts as an extension of the user.
+A store that retrieves facts can help an LLM. That does not make Twin an
+extension of the user’s understanding.
 
-The project needs three layers:
+The product loop is three hard modules:
 
 ```text
-memory → judgment → action
+Sense → Cognize → Inject
 ```
 
-### Memory
+Inside Cognize and Inject, three durable concerns stay distinct:
 
-Memory answers:
+```text
+Narrative → Stance → governed action (Inject)
+```
+
+### Narrative
+
+Narrative answers:
 
 - what happened?
 - what was decided?
 - who participated?
-- which source proves it?
+- which evidence proves it?
 - when was it true?
+- is this account still fresh?
 
-### Judgment
+### Stance
 
-Judgment answers:
+Stance answers:
 
 - how does the user think?
 - which trade-offs do they value?
@@ -44,18 +52,21 @@ Judgment answers:
 - when does privacy beat convenience?
 - when does simplicity beat elegant architecture?
 
-### Action
+### Inject (governed action)
 
-Action answers:
+Inject answers:
 
 - should I suggest something?
 - should I produce a draft?
 - should I remind the user?
 - should I stay silent?
-- should I block a memory?
+- should I block this account from the pack?
 - should I ask for explicit confirmation?
 
-The product boundary focuses mainly on narrative + firewall + judgment. Autonomous action stays out of scope until later majors ([ROADMAP.md](ROADMAP.md)).
+The product boundary focuses mainly on Narrative + Domain Firewall + Stance.
+Autonomous action stays out of scope until later majors
+([ROADMAP.md](ROADMAP.md)). Older docs said “memory → judgment → action”;
+those nouns are retired as product terms — see [GLOSSARY.md](GLOSSARY.md).
 
 ## Domain separation
 
@@ -67,22 +78,23 @@ Examples of serious failure:
 - using health context in a technical task;
 - mixing professional problems into a family conversation;
 - exposing third-party data to a cloud LLM;
-- turning a false candidate memory into a confirmed fact.
+- turning a competing Interpretation into a committed Narrative.
 
-That is why every memory carries:
+That is why every durable claim carries identity and policy fields such as:
 
 ```text
-type
+type / kind
 + domain
 + persona
 + sensitivity
-+ confidence
 + status
-+ valid_from/valid_until
++ valid_from / valid_until (when applicable)
 + evidence
 ```
 
-The Domain Firewall decides whether a memory may enter a given context.
+Confidence is derived at read / Inject time — not stored as an incrementable
+scalar on Narratives. The Domain Firewall decides whether an account may
+enter a given context.
 
 Example:
 
@@ -90,7 +102,7 @@ Example:
 rules:
   - name: relationship_not_allowed_outside_own_domain
     if:
-      memory_domain: [relationship, family, health, emotional]
+      content_domain: [relationship, family, health, emotional]
       target_domain: [work, technical, assistant_preferences, general]
     action: block
 ```
@@ -101,38 +113,42 @@ The rule must not be "retrieve everything and trust the LLM". The correct approa
 
 The core delivery loop:
 
-> Reduce context re-explanation in technical work, without leaking domains, using structured memory, revisable episode structure, a temporal graph, vectors, FTS and Native/MCP/CLI/API surfaces.
+> Reduce context re-explanation in technical work, without leaking domains, using committed Narratives, revisable Situations, typed Relations, Evidence, hybrid search and Native/MCP/CLI/API surfaces.
 
 ```text
 sources (connectors + files: docs, meetings, Slack, GitHub, mail, …)
-        │  ingestion + normalization
+        │  Sense — ingestion + normalization
         ▼
-PII filter ──────────────► nothing sensitive leaves for the cloud unmasked
-        │  extract and/or correlate → reflect
+PII / privacy gates ──────► nothing sensitive leaves for the cloud unmasked
+        │  Cognize — LLM-or-halt (or hard stop)
         ▼
-candidates (atomic + trajectory) ──► selective review
-        │  human approval when needed
+Reflections + Interpretations ──► selective Review
+        │  human commit / Stance approve when needed
         ▼
-store (Postgres+pgvector primary | SQLite local): memories + entities + relations + evidence + embeddings + FTS
+store: Narratives + EpistemicState + Stance + Evidence + Relations
+      (+ embeddings + FTS as indexes)
         │
         ▼
-hybrid search ──► Domain Firewall ──► compact context pack
+hybrid search ──► Domain Firewall ──► Inject context pack
         │                                    ▲
         ▼                                    │
-Native / MCP / CLI / API           judgment store (DB) + YAML bootstrap/export
+Native / MCP / CLI / API           Stance store + YAML bootstrap/export
 ```
+
+Code packages are being reorganized to match these walls — see
+[ARCHITECTURE.md — Code packages](ARCHITECTURE.md#code-packages-target-layout).
 
 ## Product boundary
 
 In scope:
 
-- technical / professional memory;
+- technical / professional Narratives and Evidence;
 - connectors and file ingest for work sources (docs, meetings, Slack, GitHub, mail, calendar, …);
-- decisions, tasks, preferences;
-- WorkEpisode correlation and trajectory candidates;
+- decisions, tasks, preferences (as Narratives / Stance);
+- Situation / WorkEpisode correlation while Cognize situates;
 - temporal graph + hybrid search;
 - Native / MCP / CLI / local API;
-- selective review and evolving judgment.
+- selective Review and evolving Stance.
 
 Explicitly out of scope:
 
@@ -150,21 +166,21 @@ Explicitly out of scope:
 
 ### Graphiti / Zep
 
-Relevant for temporal graphs, agent memory, invalidation of old facts and search combining graph, text and vectors.
+Relevant for temporal graphs, agent continuity, invalidation of old facts and search combining graph, text and vectors.
 
 A possible evolution of the graph backend.
 
 ### Mem0
 
-Relevant for memory consolidation and the "does this deserve to become a memory?" decision. Inspires lifecycle, extraction and multi-session retrieval.
+Relevant for consolidation and the "does this deserve to become durable?" decision. Inspires lifecycle, extraction and multi-session retrieval — mapped in Twin to Cognize + human commit, not to a product “memory” noun.
 
 ### Letta / MemGPT
 
-Relevant for stateful agents, working vs long-term memory and architectures where the agent manages its own memory.
+Relevant for stateful agents, working vs long-term substrate and architectures where the agent manages its own continuity.
 
 ### Meetily
 
-Relevant for local meeting capture, transcription and privacy. Can feed the episodic layer.
+Relevant for local meeting capture, transcription and privacy. Can feed the episodic / Sense layer.
 
 ### Fireflies
 
@@ -187,11 +203,11 @@ The product is successful if it:
 - identifies and catalogues real decisions from docs and meetings;
 - distinguishes decisions from proposals, questions, hypotheses and rejected alternatives;
 - attributes claims to the correct participant or source;
-- produces evidence for every memory;
-- retrieves useful context via MCP;
+- produces evidence for every committed Narrative;
+- retrieves useful context via Inject / MCP;
 - does not leak sensitive domains;
 - reduces re-explanation in technical tasks;
-- enables practical human review;
+- enables practical human Review;
 - keeps data exportable.
 
 ### Possible metrics
@@ -202,7 +218,7 @@ The product is successful if it:
 - speaker and participant attribution accuracy;
 - evidence-span accuracy;
 - duplicate rate;
-- useless-memory rate;
+- useless-candidate rate;
 - correct-block rate;
 - deferred-interpretation recovery rate;
 - average context pack size;

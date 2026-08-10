@@ -11,6 +11,13 @@ It does not specify the full Cognize stage pipeline
 Architecture walls: [ARCHITECTURE.md](ARCHITECTURE.md). Destination:
 [README](../README.md).
 
+**Package note:** conceptual “cognition” here is product language. The code
+package `twin/cognition/` is transitional — its services (interpret, packs,
+episodes, LLM adapters) fold into **`twin/cognize/`**, **`twin/inject/`**,
+and **`twin/llm/`** per
+[ARCHITECTURE — Code packages](ARCHITECTURE.md#code-packages-target-layout).
+Prefer [COGNIZE.md](COGNIZE.md) for pipeline implementation.
+
 ---
 
 ## Understanding
@@ -50,7 +57,7 @@ a Memory row.
 | **Narrative** | Human-committed, evidence-backed, revisable account |
 | **Stance** | How similar cases should be evaluated later |
 | **Understanding** | Emergent state over the above — not a table |
-| Memory | Code dual-reads `MemoryItem` during Narrative migration |
+| Memory | Transitional dual-read `MemoryItem` during store migration — not a product noun |
 
 ### Example
 

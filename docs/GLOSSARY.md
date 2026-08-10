@@ -124,14 +124,16 @@ same person over time rather than repeatedly starting from zero. See
 
 | Deprecated (avoid in product / CLI / MCP copy) | Prefer |
 |---|---|
-| **Memory** (as product noun / `twin memory`) | **Narrative** (+ Relations); code may still use `Memory*` until dual-read migration finishes |
-| **Judgment** (public name) | **Stance** (`twin stance`; `judgment` remains a deprecated alias) |
+| **Memory** (as product noun / `twin memory`) | **Narrative** (+ Relations) |
+| **Judgment** (public name) | **Stance** (`twin stance`) |
 | **Situation Model** (as sole label) | **Situation** (+ Narrative as the durable account) |
 | Understanding as a stored row / table | Understanding as **emergent** (above) |
+| Package names `twin.memory` / `twin.judgment` / `twin.cognition` as product architecture | Target packages in [ARCHITECTURE — Code packages](ARCHITECTURE.md#code-packages-target-layout) |
 
 Academic citations may still say “memory” (paper titles). Everyday speech
 (“Twin remembers”) is fine in conversation; commands, schema, and product
 docs should not.
 
-Code note: internal `MemoryItem` / `WorkEpisode` types remain until Cognize
-store migration completes — see [v2-tracker.md](v2-tracker.md).
+Code note: internal `MemoryItem` / `WorkEpisode` / `judgment_*` tables remain
+until store and package migration completes — see [v2-tracker.md](v2-tracker.md)
+(v2.5 Package walls).

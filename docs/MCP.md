@@ -1,7 +1,7 @@
 # MCP
 
 This document explains the universal tool surface — packs, search,
-sessions, review, judgment and connector ops over stdio.
+sessions, review, Stance and connector ops over stdio.
 
 > **MCP everywhere.** Use it when the host has no native surface, and
 > alongside [native](NATIVE.md) for mid-conversation tools.
@@ -44,23 +44,11 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 1. Prefer `inject_context_pack` or `session_start` at the beginning of a technical task.
 2. Always pass a truthful `target_domain`.
 3. Treat `blocked` as authoritative — do not ask the model to “ignore” the firewall.
-4. Do not treat `candidate` memories as established fact.
-5. Cite memory ids / evidence when using specific claims.
-6. Mutating tools require `confirm=true` (and stronger flags for constitutional judgment changes).
+4. Prefer `narrative_*` / `stance_*` tools for durable substrate; treat legacy `memory_*` rows as dual-read, not established Narrative.
+5. Cite Narrative / Evidence ids when using specific claims.
+6. Mutating tools require `confirm=true` (and stronger flags for constitutional Stance changes).
 
-## Retrieve
-
-| Tool | Arguments | What it does |
-|---|---|---|
-| `memory_search` | `query`, `domain="technical"`, `type?`, `limit=10` | Hybrid search (vector + FTS + graph boosts) filtered by domain. |
-| `memory_get` | `memory_id` | Single memory with evidence links. |
-| `memory_related` | `entity` | Graph neighborhood around an entity name/id. |
-| `memory_project_context` | `project_name` | Memories scoped to a project. |
-| `memory_recent_decisions` | `project_name?`, `limit=10` | Recent `decision` memories. |
-| `memory_user_preferences` | `context=""` | Stable preference memories for the given context string. |
-| `memory_judgment_profile` | — | Active judgment items (DB) plus YAML bootstrap view. |
-
-## Context packs
+## Prefer (v2 substrate)
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -68,7 +56,28 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `narrative_show` | `narrative_id` | One Narrative + EpistemicState |
 | `stance_list` | — | Active Stances |
 | `stance_proposals` | `status=pending` | Pending Stance drafts (human approve) |
-| `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable stance. |
+| `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable Stance |
+
+## Retrieve (legacy dual-read)
+
+These `memory_*` tools still serve dual-read store rows during migration.
+Prefer Narrative tools above when the account is committed.
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `memory_search` | `query`, `domain="technical"`, `type?`, `limit=10` | Hybrid search (vector + FTS + graph boosts) filtered by domain. |
+| `memory_get` | `memory_id` | Single dual-read row with evidence links. |
+| `memory_related` | `entity` | Graph neighborhood around an entity name/id. |
+| `memory_project_context` | `project_name` | Rows scoped to a project. |
+| `memory_recent_decisions` | `project_name?`, `limit=10` | Recent `decision` dual-read rows. |
+| `memory_user_preferences` | `context=""` | Stable preference rows for the given context string. |
+| `memory_judgment_profile` | — | Active Stance items (DB) plus YAML bootstrap view. |
+
+## Context packs
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `inject_context_pack` | `query`, `target_domain="technical"`, … | Same as Prefer table — primary Inject tool. |
 
 ## Sessions
 
@@ -104,18 +113,20 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `memory_neighbors` | `memory_id` | Nearby memories for side-by-side review. |
 | `memory_provenance` | `memory_id` | Chain memory, evidence, percept, artifact. |
 
-## Judgment governance
+## Stance governance (tool ids still `judgment_*`)
+
+Tool *names* remain `judgment_*` until package/MCP migration (v2.5). Semantics are Stance.
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `judgment_applicable` | `domain="technical"`, `task_profile="general"`, `project?`, `query=""` | Judgment items applicable to this context. |
-| `judgment_simulate` | `query`, `domain="technical"`, `task_profile="architecture"`, `project?` | Simulate which judgment would fire without writing. |
-| `judgment_proposals` | `status="pending"` | List judgment change proposals. |
+| `judgment_applicable` | `domain="technical"`, `task_profile="general"`, `project?`, `query=""` | Stance items applicable to this context. |
+| `judgment_simulate` | `query`, `domain="technical"`, `task_profile="architecture"`, `project?` | Simulate which Stance would fire without writing. |
+| `judgment_proposals` | `status="pending"` | List Stance change proposals. |
 | `judgment_proposal_preview` | `proposal_id` | Preview + token required for approve. |
 | `judgment_proposal_approve` | `proposal_id`, `preview_token`, `confirm=false`, `confirm_constitutional=false` | Human-gated approve. |
 | `judgment_proposal_reject` | `proposal_id`, `confirm=false`, `reason=""` | Reject a proposal. |
-| `judgment_conflicts` | `status="open"` | Open judgment conflicts. |
-| `judgment_version` | — | Current judgment store version metadata. |
+| `judgment_conflicts` | `status="open"` | Open Stance conflicts. |
+| `judgment_version` | — | Current Stance store version metadata. |
 
 ## Privacy
 

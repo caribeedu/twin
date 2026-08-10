@@ -1,12 +1,20 @@
-"""Cognitive Core — turns percepts into memory and memory into context.
+"""Cognitive Core — interpret, packs, episodes (transitional package).
 
-- interpretation: percepts → grounded, act-aware candidate memories
- via a local LLM cognitive interpreter; when no interpreter is available the
- percept is deferred and retried, never guessed at by lexical rules. An
- explicit heuristic mode remains for fully offline detection.
+Public walls are Sense → Cognize → Inject. This package is folding into:
+
+- ``twin.cognize`` — narrative pipeline + interpret/reflect services
+- ``twin.inject`` — governed packs + Observer slot (target)
+- ``twin.llm`` — provider adapters (target)
+
+See docs/ARCHITECTURE.md § Code packages. Prefer Narrative / Stance vocabulary
+in product surfaces; do not treat ``Memory*`` as the durable product noun.
+
+Services still hosted here today:
+
+- interpretation: percepts → grounded, act-aware candidates (LLM-or-defer)
 - dedupe: duplicate / contradiction detection
-- observer: attention — suggests memories for the current task
-- context_pack: recall — compact, firewall-filtered context for external LLMs
+- observer / inject_observer: attention slot toward the host conversation
+- context_pack: Inject recall — compact, firewall-filtered pack for hosts
 """
 
 from .interpreter import (

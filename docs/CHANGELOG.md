@@ -5,6 +5,12 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.5.0 — Package walls (in progress)
+
+Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,
+privacy, interfaces). Product docs retarget Narrative / Stance vocabulary;
+`twin.cognition` / `twin.memory` / `twin.judgment` split by pipeline function.
+
 ### v2.4.1 — Web Center exit-criteria hardening
 
 Narrative show returns derived confidence, relations, evidence, and open
