@@ -80,7 +80,7 @@ def detect_behavior_conflicts(
         i for i in active_items(store)
         if i.domain == domain and i.kind.value in ("principle", "heuristic", "constraint")
     ]
-    decisions = store.list_memories(type_="decision", status="confirmed", limit=1000)
+    decisions = store.list_claims(type_="decision", status="confirmed", limit=1000)
     decisions = [m for m in decisions if m.domain == domain]
     found: list[JudgmentConflict] = []
 
@@ -102,7 +102,7 @@ def detect_behavior_conflicts(
         conf = JudgmentConflict(
             id=ids.judgment_conflict_id(),
             judgment_id=item.id,
-            memory_ids=opposing_mems,
+            claim_ids=opposing_mems,
             type=ConflictType.drift,
             confidence=min(0.9, 0.5 + 0.05 * len(opposing_mems)),
             status=ConflictStatus.open,

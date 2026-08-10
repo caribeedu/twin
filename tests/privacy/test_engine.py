@@ -4,7 +4,7 @@ import pytest
 from twin import ids
 from twin.clock import now_iso
 from twin.inject.context_pack import build_context_pack
-from twin.store.models import MemoryItem
+from twin.store.models import StoreClaim
 from twin.privacy.canaries import place_canary, scan_for_canaries
 from twin.privacy.engine import evaluate_access, explain_decision
 from twin.privacy.grants import consume_grant, create_grant
@@ -15,15 +15,15 @@ from twin.privacy.yaml_io import bootstrap_policy_set
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="fact", title="t", summary="s",
+        id=ids.claim_id(), type="fact", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         sensitivity="internal", persona="individual",
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -439,16 +439,16 @@ def test_deletion_full_manifest_not_capped(store, embedder):
     for i in range(60):
         m = _mem(store, embedder, domain="technical", title=f"m{i}", summary=f"s{i}")
         ids_list.append(m.id)
-    req = preview_deletion(store, {"memory_ids": ids_list})
+    req = preview_deletion(store, {"claim_ids": ids_list})
     assert req.preview["matched_memory_count"] == 60
-    assert len(req.preview["matched_memory_ids_sample"]) == 50
+    assert len(req.preview["matched_claim_ids_sample"]) == 50
     assert len(req.manifest["memories_delete"]) == 60
     out = execute_deletion(store, req.id, confirm=True, preview_token=req.preview_token)
     assert out.status.value in ("completed", "completed_with_residuals")
     assert (out.preview or {}).get("deleted_count") == 60
     # fresh preview + wrong token invalidates
     alive = [_mem(store, embedder, domain="technical", title="x", summary="y")]
-    req2 = preview_deletion(store, {"memory_ids": [alive[0].id]})
+    req2 = preview_deletion(store, {"claim_ids": [alive[0].id]})
     with pytest.raises(ValueError, match="token|stale|invalid"):
         execute_deletion(store, req2.id, confirm=True, preview_token="wrong")
     assert store.get_deletion_request(req2.id).status.value == "invalidated"
@@ -549,7 +549,7 @@ def test_artifact_delete_preserves_partial_memory(store, embedder):
         p.seal()
         store.insert_percept(p)
         store.insert_evidence(Evidence(
-            id=ids.new_id("ev"), memory_id=mem.id, quote=quote,
+            id=ids.new_id("ev"), claim_id=mem.id, quote=quote,
             artifact_id=aid, percept_id=pid,
             independence_group=aid,
         ))
@@ -558,7 +558,7 @@ def test_artifact_delete_preserves_partial_memory(store, embedder):
     assert mem.id not in req.manifest["memories_delete"]
     out = execute_deletion(store, req.id, confirm=True, preview_token=req.preview_token)
     assert out.status.value in ("completed", "completed_with_residuals")
-    still = store.get_memory(mem.id)
+    still = store.get_claim(mem.id)
     assert still is not None and not still.deleted_at
 
 
@@ -676,7 +676,7 @@ def test_retry_deletion_residuals(store, embedder):
     )
     from twin.privacy.models import DeletionStatus
     m = _mem(store, embedder, domain="technical", title="gone", summary="x")
-    req = preview_deletion(store, {"memory_ids": [m.id]})
+    req = preview_deletion(store, {"claim_ids": [m.id]})
     out = execute_deletion(store, req.id, confirm=True, preview_token=req.preview_token)
     # Force residual state then retry
     store.update_deletion_request(

@@ -27,7 +27,7 @@ from typing import Callable, Optional
 from twin.clock import now_iso
 from twin.privacy.firewall import Firewall
 from twin.store.embeddings import Embedder
-from twin.store.models import INACTIVE_STATUSES, MemoryItem, MemoryStatus
+from twin.store.models import INACTIVE_STATUSES, StoreClaim, ClaimStatus
 from twin.store.search import BlockedHit, SearchHit, SearchResult, search
 from twin.store.store.base import MemoryStore
 
@@ -58,7 +58,7 @@ class RetrievalResult:
 
 @dataclass
 class _Expansion:
-    memory: MemoryItem
+    claim: StoreClaim
     score: float
     via_entity: str
 
@@ -71,14 +71,14 @@ def _graph_expand(store: MemoryStore, hits: list[SearchHit],
     Relevance is not assumed from mere co-mention: the expansion score is a
     fraction of the origin hit's score scaled by entity specificity, and
     ``why`` records which entity carried the connection."""
-    seen = {h.memory.id for h in hits}
+    seen = {h.claim.id for h in hits}
     expanded: list[_Expansion] = []
     for hit in hits[:5]:
-        for name in hit.memory.entities[:5]:
+        for name in hit.claim.entities[:5]:
             entity = store.get_entity_by_name(name)
             if entity is None:
                 continue
-            adjacent = store.memories_for_entity(entity.id)
+            adjacent = store.claims_for_entity(entity.id)
             specificity = min(1.0, GRAPH_SPECIFIC_DEGREE / max(len(adjacent), 1))
             score = round(hit.score * GRAPH_ORIGIN_SHARE * specificity, 4)
             if score < GRAPH_MIN_SCORE:
@@ -89,13 +89,13 @@ def _graph_expand(store: MemoryStore, hits: list[SearchHit],
                 if mem.status.value in INACTIVE_STATUSES:
                     continue
                 seen.add(mem.id)
-                expanded.append(_Expansion(memory=mem, score=score, via_entity=name))
+                expanded.append(_Expansion(claim=mem, score=score, via_entity=name))
                 if len(expanded) >= limit:
                     return expanded
     return expanded
 
 
-def _avg_source_trust(store: MemoryStore, mem: MemoryItem) -> float:
+def _avg_source_trust(store: MemoryStore, mem: StoreClaim) -> float:
     trusts = []
     for pid in mem.percept_ids[:5]:
         percept = store.get_percept(pid)
@@ -130,30 +130,30 @@ def retrieve(
     # 3. graph expansion + temporal filtering
     as_of = now_iso()
     for exp in _graph_expand(store, hits, limit=10):
-        mem = exp.memory
+        mem = exp.claim
         st = mem.status.value
         if st in INACTIVE_STATUSES:
-            if not (include_rejected and st == MemoryStatus.rejected.value):
+            if not (include_rejected and st == ClaimStatus.rejected.value):
                 continue
-        elif not include_candidates and st != MemoryStatus.confirmed.value:
+        elif not include_candidates and st != ClaimStatus.confirmed.value:
             continue
         if firewall is not None:
             verdict = firewall.evaluate(mem, target_domain, as_of=as_of)
             if not verdict.allowed:
-                blocked.append(BlockedHit(memory_id=mem.id, rule=verdict.rule,
+                blocked.append(BlockedHit(claim_id=mem.id, rule=verdict.rule,
                                           reason=verdict.reason))
                 continue
-        hits.append(SearchHit(memory=mem, score=exp.score,
+        hits.append(SearchHit(claim=mem, score=exp.score,
                               why=f"graph expansion via {exp.via_entity}"))
     hits = [h for h in hits
-            if not (h.memory.valid_until and h.memory.valid_until < as_of)]
+            if not (h.claim.valid_until and h.claim.valid_until < as_of)]
     stages["after_graph"] = len(hits)
 
     # 4. source-trust weighting + project boost
     for hit in hits:
-        trust = _avg_source_trust(store, hit.memory)
+        trust = _avg_source_trust(store, hit.claim)
         hit.score = round(hit.score * (TRUST_FLOOR + (1 - TRUST_FLOOR) * trust), 4)
-        if project_id and hit.memory.project_id == project_id:
+        if project_id and hit.claim.project_id == project_id:
             hit.score = round(hit.score + PROJECT_BOOST, 4)
             hit.why = f"{hit.why}, project match"
     hits.sort(key=lambda h: h.score, reverse=True)

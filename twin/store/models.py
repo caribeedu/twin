@@ -1,10 +1,9 @@
-"""Store dual-read data model — legacy claim rows, entities, relations, evidence.
+"""Store claim data model — durable claim rows, entities, relations, evidence.
 
 Product durable units are **Narrative** / **Interpretation** / **Evidence**
-([GLOSSARY.md](../../docs/GLOSSARY.md)). Class and column names still say
-``Memory*`` / ``memory_id`` because they are the dual-read schema; Cognize
-maps confirmed rows toward Narratives and candidates toward Interpretations.
-Do not treat these types as the product noun “memory.”
+([GLOSSARY.md](../../docs/GLOSSARY.md)). ``StoreClaim`` rows are the store's
+dual-read claim vocabulary; Cognize maps confirmed rows toward Narratives and
+candidates toward Interpretations.
 
 Percept (Sense input) lives in ``twin.sense.sensory.percept``.
 """
@@ -19,8 +18,8 @@ from pydantic import BaseModel, Field
 from twin import ids
 
 
-class MemoryType(str, Enum):
-    """Claim kind on a dual-read row (not a Narrative grain)."""
+class ClaimType(str, Enum):
+    """Claim kind on a store row (not a Narrative grain)."""
 
     event = "event"
     fact = "fact"
@@ -41,8 +40,8 @@ class Sensitivity(str, Enum):
     restricted = "restricted"
 
 
-class MemoryStatus(str, Enum):
-    """Lifecycle of a dual-read claim row."""
+class ClaimStatus(str, Enum):
+    """Lifecycle of a store claim row."""
 
     candidate = "candidate"
     confirmed = "confirmed"
@@ -60,15 +59,15 @@ class MemoryStatus(str, Enum):
 
 # Statuses that must not appear in default retrieval / packs.
 INACTIVE_STATUSES = frozenset({
-    MemoryStatus.rejected.value,
-    MemoryStatus.deprecated.value,
-    MemoryStatus.contradicted.value,
-    MemoryStatus.merged.value,
-    MemoryStatus.split.value,
-    MemoryStatus.archived.value,
-    MemoryStatus.unsupported.value,
-    MemoryStatus.stale.value,
-    MemoryStatus.deleted.value,
+    ClaimStatus.rejected.value,
+    ClaimStatus.deprecated.value,
+    ClaimStatus.contradicted.value,
+    ClaimStatus.merged.value,
+    ClaimStatus.split.value,
+    ClaimStatus.archived.value,
+    ClaimStatus.unsupported.value,
+    ClaimStatus.stale.value,
+    ClaimStatus.deleted.value,
 })
 
 
@@ -82,7 +81,7 @@ class EvidenceType(str, Enum):
 
 class Evidence(BaseModel):
     id: str
-    memory_id: str  # dual-read claim id (FK)
+    claim_id: str
     percept_id: str
     quote: str
     evidence_type: EvidenceType = EvidenceType.verbatim
@@ -106,17 +105,17 @@ class Entity(BaseModel):
 
 class Relation(BaseModel):
     id: str
-    subject_id: str  # entity id or dual-read claim id
+    subject_id: str  # entity id or claim id
     predicate: str  # works_on | prefers | affects | produced | supersedes | contradicts | merged_into | split_into | ...
-    object_id: str  # entity id or dual-read claim id
-    memory_id: Optional[str] = None  # dual-read claim that asserted this relation
+    object_id: str  # entity id or claim id
+    claim_id: Optional[str] = None  # claim that asserted this relation
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     created_at: str = ""
 
 
 class CanonicalClaim(BaseModel):
-    """Propositional core of a dual-read claim — separate from wording."""
+    """Propositional core of a store claim — separate from wording."""
 
     subject: str = ""
     predicate: str = ""
@@ -191,18 +190,18 @@ class PerceptInterpretation(BaseModel):
     updated_at: str = ""
 
 
-class MemoryItem(BaseModel):
-    """Dual-read claim row — prefer Narrative / Interpretation in product surfaces."""
+class StoreClaim(BaseModel):
+    """Store claim row — prefer Narrative / Interpretation in product surfaces."""
 
     id: str
-    type: MemoryType
+    type: ClaimType
     title: str
     summary: str
     domain: str = "technical"
     persona: str = "individual"
     sensitivity: Sensitivity = Sensitivity.internal
     confidence: float = 0.5
-    status: MemoryStatus = MemoryStatus.candidate
+    status: ClaimStatus = ClaimStatus.candidate
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     created_at: str = ""
@@ -252,8 +251,8 @@ class FindingType(str, Enum):
 
 class DuplicateGroup(BaseModel):
     id: str
-    memory_ids: list[str] = Field(default_factory=list)
-    canonical_memory_id: str = ""
+    claim_ids: list[str] = Field(default_factory=list)
+    canonical_claim_id: str = ""
     reason: str = ""
     created_at: str = ""
 
@@ -282,9 +281,9 @@ class FindingStatus(str, Enum):
 
 class ReviewFinding(BaseModel):
     id: str
-    memory_id: str
+    claim_id: str
     type: FindingType
-    related_memory_id: Optional[str] = None
+    related_claim_id: Optional[str] = None
     confidence: float = 0.5
     reason: str = ""
     suggested_action: SuggestedAction = SuggestedAction.none
@@ -299,7 +298,7 @@ class ReviewFinding(BaseModel):
 
 
 class QualityReport(BaseModel):
-    memory_id: str
+    claim_id: str
     quality_score: float
     review_priority: float
     impact: str = "medium"
@@ -333,7 +332,7 @@ class ReviewBatch(BaseModel):
     id: str
     name: str
     query: dict[str, Any] = Field(default_factory=dict)
-    memory_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
     created_at: str = ""
     completed_at: Optional[str] = None
     progress_total: int = 0
@@ -341,7 +340,7 @@ class ReviewBatch(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class MemoryOperation(BaseModel):
+class ClaimOperation(BaseModel):
     """Auditable, optionally reversible curation mutation."""
 
     id: str
@@ -403,7 +402,7 @@ class SessionStatus(str, Enum):
 
 
 class ConsolidationStatus(str, Enum):
-    """Whether the session's work has been turned into percepts/memories.
+    """Whether the session's work has been turned into percepts/claims.
 
     Cognitive completion ("the work is done") is not the same event as
     consolidation ("twin learned from it") — a completed session can carry a
@@ -417,14 +416,14 @@ class ConsolidationStatus(str, Enum):
     skipped = "skipped"      # nothing to consolidate (abandoned / no summary)
 
 
-FEEDBACK_SCOPES = ("session", "pack", "memory")
+FEEDBACK_SCOPES = ("session", "pack", "claim")
 
 
 class CognitiveSession(BaseModel):
     """One unit of real work done with an external LLM/IDE on top of twin.
 
     Closes the loop: context supplied → work performed → new percepts →
-    candidate memories → feedback.
+    candidate claims → feedback.
 
     ``artifacts`` and ``feedback`` live in their own store tables
     (append-only, safe under concurrent writers); they are materialized
@@ -441,11 +440,11 @@ class CognitiveSession(BaseModel):
     started_at: str = ""
     ended_at: Optional[str] = None
     last_activity_at: str = ""       # bumped by observe/feedback — stale detection
-    supplied_memory_ids: list[str] = Field(default_factory=list)
+    supplied_claim_ids: list[str] = Field(default_factory=list)
     pack_chars: int = 0              # size of the supplied context pack
     artifacts: list[dict[str, Any]] = Field(default_factory=list)  # observed refs/notes
-    created_memory_ids: list[str] = Field(default_factory=list)
-    feedback: list[dict[str, Any]] = Field(default_factory=list)   # {scope, verdict, memory_id?, note, at}
+    created_claim_ids: list[str] = Field(default_factory=list)
+    feedback: list[dict[str, Any]] = Field(default_factory=list)   # {scope, verdict, claim_id?, note, at}
     consolidation_status: ConsolidationStatus = ConsolidationStatus.none
     consolidation_error: Optional[str] = None   # error type/summary, never content
     summary_percept_id: Optional[str] = None    # deterministic idempotency anchor

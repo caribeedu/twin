@@ -18,16 +18,16 @@ from twin import ids
 from twin.clock import now_iso
 from .models import (
     Evidence,
-    MemoryItem,
-    MemoryOperation,
-    MemoryStatus,
-    MemoryType,
+    StoreClaim,
+    ClaimOperation,
+    ClaimStatus,
+    ClaimType,
 )
 from .store.base import MemoryStore
 
 
 class FormationState(str, Enum):
-    """Logical formation stage (may overlay MemoryStatus + flags)."""
+    """Logical formation stage (may overlay ClaimStatus + flags)."""
 
     candidate = "candidate"
     corroborating = "corroborating"
@@ -41,48 +41,48 @@ class FormationState(str, Enum):
 
 # Per-type confirmation / review defaults (formation policy).
 FORMATION_POLICY: dict[str, dict[str, Any]] = {
-    MemoryType.fact.value: {
+    ClaimType.fact.value: {
         "auto_confirm": False, "require_review_below": 0.75, "expires": False,
     },
-    MemoryType.event.value: {
+    ClaimType.event.value: {
         "auto_confirm": False, "require_review_below": 0.7, "expires": False,
     },
-    MemoryType.decision.value: {
+    ClaimType.decision.value: {
         "auto_confirm": False, "require_review_below": 0.85, "expires": False,
     },
-    MemoryType.task.value: {
+    ClaimType.task.value: {
         "auto_confirm": False, "require_review_below": 0.65, "expires": True,
     },
-    MemoryType.constraint.value: {
+    ClaimType.constraint.value: {
         "auto_confirm": False, "require_review_below": 0.8, "expires": False,
     },
-    MemoryType.preference.value: {
+    ClaimType.preference.value: {
         "auto_confirm": False, "require_review_below": 0.8, "expires": False,
     },
-    MemoryType.belief.value: {
+    ClaimType.belief.value: {
         "auto_confirm": False, "require_review_below": 0.0, "expires": False,
         "always_review": True,
     },
-    MemoryType.procedure.value: {
+    ClaimType.procedure.value: {
         "auto_confirm": False, "require_review_below": 0.0, "expires": False,
         "always_review": True,
     },
-    MemoryType.relationship.value: {
+    ClaimType.relationship.value: {
         "auto_confirm": False, "require_review_below": 0.75, "expires": False,
     },
-    MemoryType.communication_act.value: {
+    ClaimType.communication_act.value: {
         "auto_confirm": False, "require_review_below": 0.7, "expires": False,
     },
 }
 
 
 class MemoryCandidate(BaseModel):
-    """Formation-facing view over a MemoryItem (not a second store)."""
+    """Formation-facing view over a StoreClaim (not a second store)."""
 
     id: str
     formation_identity: str
     formation_state: FormationState
-    memory: MemoryItem
+    claim: StoreClaim
     evidence_count: int = 0
     interpretation_percept_ids: list[str] = Field(default_factory=list)
     reject_reason: str = ""
@@ -119,26 +119,26 @@ def formation_identity(
     return f"fid_{digest}"
 
 
-def memory_id_for_identity(identity: str) -> str:
-    """Stable MemoryItem.id derived from formation identity."""
+def claim_id_for_identity(identity: str) -> str:
+    """Stable StoreClaim.id derived from formation identity."""
     digest = identity.removeprefix("fid_")
     return f"mem_f{digest}"
 
 
-def derive_formation_state(mem: MemoryItem) -> FormationState:
+def derive_formation_state(mem: StoreClaim) -> FormationState:
     st = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
-    if st == MemoryStatus.confirmed.value:
+    if st == ClaimStatus.confirmed.value:
         return FormationState.confirmed
-    if st == MemoryStatus.rejected.value:
+    if st == ClaimStatus.rejected.value:
         return FormationState.rejected
-    if st in (MemoryStatus.deprecated.value, "superseded"):
+    if st in (ClaimStatus.deprecated.value, "superseded"):
         return FormationState.superseded
-    if st in (MemoryStatus.archived.value, "expired") and (
+    if st in (ClaimStatus.archived.value, "expired") and (
         (mem.payload or {}).get("formation_state") == "expired"
         or st == "expired"
     ):
         return FormationState.expired
-    if st == MemoryStatus.contradicted.value or "conflict" in (mem.quality_flags or []):
+    if st == ClaimStatus.contradicted.value or "conflict" in (mem.quality_flags or []):
         return FormationState.conflicting
     if mem.needs_review:
         return FormationState.awaiting_review
@@ -150,7 +150,7 @@ def derive_formation_state(mem: MemoryItem) -> FormationState:
     return FormationState.candidate
 
 
-def as_candidate(store: MemoryStore, mem: MemoryItem) -> MemoryCandidate:
+def as_candidate(store: MemoryStore, mem: StoreClaim) -> MemoryCandidate:
     evidence = store.get_evidence(mem.id) if hasattr(store, "get_evidence") else []
     payload = mem.payload or {}
     identity = payload.get("formation_identity") or formation_identity(
@@ -171,7 +171,7 @@ def as_candidate(store: MemoryStore, mem: MemoryItem) -> MemoryCandidate:
         id=mem.id,
         formation_identity=identity,
         formation_state=state,
-        memory=mem,
+        claim=mem,
         evidence_count=len(evidence),
         interpretation_percept_ids=list(payload.get("interpretation_percept_ids") or []),
         reject_reason=str(payload.get("reject_reason") or mem.review_reason or ""),
@@ -181,7 +181,7 @@ def as_candidate(store: MemoryStore, mem: MemoryItem) -> MemoryCandidate:
 
 
 def _explain(
-    mem: MemoryItem, state: FormationState, evidence_n: int, policy: dict,
+    mem: StoreClaim, state: FormationState, evidence_n: int, policy: dict,
 ) -> str:
     parts = [
         f"state={state.value}",
@@ -200,7 +200,7 @@ def _explain(
 def _record_op(
     store: MemoryStore,
     operation: str,
-    memory_id: str,
+    claim_id: str,
     before: dict,
     after: dict,
     *,
@@ -209,13 +209,13 @@ def _record_op(
 ) -> Optional[str]:
     if not hasattr(store, "insert_operation"):
         return None
-    op = MemoryOperation(
+    op = ClaimOperation(
         id=ids.operation_id(),
         operation=operation,
         actor=actor,
         at=now_iso(),
-        inputs=[memory_id],
-        output=memory_id,
+        inputs=[claim_id],
+        output=claim_id,
         before=before,
         after=after,
         undoable=undoable,
@@ -225,8 +225,8 @@ def _record_op(
 
 
 def apply_formation_policy(
-    mem: MemoryItem, *, review_reason: Optional[str] = None,
-) -> MemoryItem:
+    mem: StoreClaim, *, review_reason: Optional[str] = None,
+) -> StoreClaim:
     """Annotate candidate with formation identity + policy review gates.
 
     Never confirms. May force ``needs_review``.
@@ -261,9 +261,9 @@ def apply_formation_policy(
             f"formation policy: confidence {mem.confidence:.2f} < {threshold}"
         )
 
-    # Stable MemoryItem.id from formation identity (idempotent proposes).
+    # Stable StoreClaim.id from formation identity (idempotent proposes).
     if payload.pop("use_deterministic_id", True):
-        mem.id = memory_id_for_identity(identity)
+        mem.id = claim_id_for_identity(identity)
 
     mem.payload = payload
     if reason:
@@ -272,23 +272,23 @@ def apply_formation_policy(
         payload["formation_state"] = FormationState.awaiting_review.value
         mem.payload = payload
     # Invariant: formation never confirms
-    if mem.status == MemoryStatus.confirmed:
-        mem.status = MemoryStatus.candidate
+    if mem.status == ClaimStatus.confirmed:
+        mem.status = ClaimStatus.candidate
     return mem
 
 
 def find_by_formation_identity(
     store: MemoryStore, identity: str,
-) -> Optional[MemoryItem]:
-    mid = memory_id_for_identity(identity)
-    mem = store.get_memory(mid)
+) -> Optional[StoreClaim]:
+    mid = claim_id_for_identity(identity)
+    mem = store.get_claim(mid)
     if mem is not None:
         return mem
     # Fallback scan for legacy rows that stored identity only in payload
-    for m in store.list_memories(status=MemoryStatus.candidate.value, limit=500):
+    for m in store.list_claims(status=ClaimStatus.candidate.value, limit=500):
         if (m.payload or {}).get("formation_identity") == identity:
             return m
-    for m in store.list_memories(status=MemoryStatus.confirmed.value, limit=500):
+    for m in store.list_claims(status=ClaimStatus.confirmed.value, limit=500):
         if (m.payload or {}).get("formation_identity") == identity:
             return m
     return None
@@ -296,7 +296,7 @@ def find_by_formation_identity(
 
 def propose_or_corroborate(
     store: MemoryStore,
-    mem: MemoryItem,
+    mem: StoreClaim,
     *,
     percept_id: str,
     evidence_quote: str,
@@ -304,7 +304,7 @@ def propose_or_corroborate(
     source_trust: float = 0.8,
     directness: float = 1.0,
     artifact_id: Optional[str] = None,
-) -> tuple[MemoryItem, str]:
+) -> tuple[StoreClaim, str]:
     """Insert a new candidate or corroborate an existing one.
 
     Returns ``(memory, action)`` where action is ``created`` | ``corroborated``.
@@ -330,10 +330,10 @@ def propose_or_corroborate(
         if percept_id and percept_id not in pids:
             pids.append(percept_id)
         payload["interpretation_percept_ids"] = pids
-        store.update_memory(existing.id, payload=payload)
+        store.update_claim(existing.id, payload=payload)
         if existing.needs_review or "conflict" in (existing.quality_flags or []):
             pass
-        reloaded = store.get_memory(existing.id)
+        reloaded = store.get_claim(existing.id)
         assert reloaded is not None
         _record_op(
             store, "formation_corroborate", existing.id,
@@ -350,12 +350,12 @@ def propose_or_corroborate(
         pids.append(percept_id)
     payload["interpretation_percept_ids"] = pids
     mem.payload = payload
-    mem.status = MemoryStatus.candidate
+    mem.status = ClaimStatus.candidate
     try:
-        store.insert_memory(mem)
+        store.insert_claim(mem)
     except Exception:
         # Race: another writer inserted the same deterministic id — corroborate.
-        existing = store.get_memory(mem.id)
+        existing = store.get_claim(mem.id)
         if existing is None:
             raise
         from .provenance import attach_corroborating_evidence
@@ -367,14 +367,14 @@ def propose_or_corroborate(
         payload = dict(existing.payload or {})
         payload["corroboration_count"] = int(payload.get("corroboration_count") or 0) + 1
         payload["formation_state"] = FormationState.corroborating.value
-        store.update_memory(existing.id, payload=payload)
-        reloaded = store.get_memory(existing.id)
+        store.update_claim(existing.id, payload=payload)
+        reloaded = store.get_claim(existing.id)
         assert reloaded is not None
         return reloaded, "corroborated"
 
     store.insert_evidence(Evidence(
         id=ids.evidence_id(),
-        memory_id=mem.id,
+        claim_id=mem.id,
         percept_id=percept_id,
         quote=evidence_quote,
         source_trust=source_trust,
@@ -394,42 +394,42 @@ def propose_or_corroborate(
 
 def confirm_candidate(
     store: MemoryStore,
-    memory_id: str,
+    claim_id: str,
     *,
     actor: str = "user",
     note: str = "",
 ) -> MemoryCandidate:
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     st = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
     if st not in (
-        MemoryStatus.candidate.value,
-        MemoryStatus.contradicted.value,  # human may still confirm after review
+        ClaimStatus.candidate.value,
+        ClaimStatus.contradicted.value,  # human may still confirm after review
     ):
-        if st == MemoryStatus.confirmed.value:
+        if st == ClaimStatus.confirmed.value:
             return as_candidate(store, mem)
-        raise ValueError(f"memory {memory_id} is {st}, not confirmable")
-    evidence = store.get_evidence(memory_id)
+        raise ValueError(f"memory {claim_id} is {st}, not confirmable")
+    evidence = store.get_evidence(claim_id)
     if not evidence:
-        raise ValueError(f"memory {memory_id} has no evidence — cannot confirm")
+        raise ValueError(f"memory {claim_id} has no evidence — cannot confirm")
     before = mem.model_dump(mode="json")
     payload = dict(mem.payload or {})
     payload["formation_state"] = FormationState.confirmed.value
     if note:
         payload["confirm_note"] = note
-    store.update_memory(
-        memory_id,
-        status=MemoryStatus.confirmed.value,
+    store.update_claim(
+        claim_id,
+        status=ClaimStatus.confirmed.value,
         needs_review=False,
         review_reason=None,
         reviewed_at=now_iso(),
         payload=payload,
     )
-    after = store.get_memory(memory_id)
+    after = store.get_claim(claim_id)
     assert after is not None
     _record_op(
-        store, "formation_confirm", memory_id,
+        store, "formation_confirm", claim_id,
         before=before, after=after.model_dump(mode="json"), actor=actor,
     )
     return as_candidate(store, after)
@@ -437,37 +437,37 @@ def confirm_candidate(
 
 def reject_candidate(
     store: MemoryStore,
-    memory_id: str,
+    claim_id: str,
     *,
     reason: str,
     actor: str = "user",
 ) -> MemoryCandidate:
     if not (reason or "").strip():
         raise ValueError("reject requires a non-empty reason")
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     st = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
-    if st == MemoryStatus.rejected.value:
+    if st == ClaimStatus.rejected.value:
         return as_candidate(store, mem)
-    if st == MemoryStatus.confirmed.value:
+    if st == ClaimStatus.confirmed.value:
         raise ValueError("refuse to reject confirmed memory without supersede/archive")
     before = mem.model_dump(mode="json")
     payload = dict(mem.payload or {})
     payload["formation_state"] = FormationState.rejected.value
     payload["reject_reason"] = reason.strip()
-    store.update_memory(
-        memory_id,
-        status=MemoryStatus.rejected.value,
+    store.update_claim(
+        claim_id,
+        status=ClaimStatus.rejected.value,
         needs_review=False,
         review_reason=reason.strip(),
         reviewed_at=now_iso(),
         payload=payload,
     )
-    after = store.get_memory(memory_id)
+    after = store.get_claim(claim_id)
     assert after is not None
     _record_op(
-        store, "formation_reject", memory_id,
+        store, "formation_reject", claim_id,
         before=before, after=after.model_dump(mode="json"), actor=actor,
     )
     return as_candidate(store, after)
@@ -475,17 +475,17 @@ def reject_candidate(
 
 def restore_candidate(
     store: MemoryStore,
-    memory_id: str,
+    claim_id: str,
     *,
     actor: str = "user",
 ) -> MemoryCandidate:
     """Restore a rejected candidate back to awaiting_review / candidate."""
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     st = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
-    if st != MemoryStatus.rejected.value:
-        raise ValueError(f"memory {memory_id} is {st}, not rejected")
+    if st != ClaimStatus.rejected.value:
+        raise ValueError(f"memory {claim_id} is {st}, not rejected")
     before = mem.model_dump(mode="json")
     payload = dict(mem.payload or {})
     reason = payload.pop("reject_reason", None)
@@ -493,18 +493,18 @@ def restore_candidate(
     payload["restored_from_reject"] = True
     if reason:
         payload["prior_reject_reason"] = reason
-    store.update_memory(
-        memory_id,
-        status=MemoryStatus.candidate.value,
+    store.update_claim(
+        claim_id,
+        status=ClaimStatus.candidate.value,
         needs_review=True,
         review_reason="restored from reject — re-review required",
         reviewed_at=None,
         payload=payload,
     )
-    after = store.get_memory(memory_id)
+    after = store.get_claim(claim_id)
     assert after is not None
     _record_op(
-        store, "formation_restore", memory_id,
+        store, "formation_restore", claim_id,
         before=before, after=after.model_dump(mode="json"), actor=actor,
     )
     return as_candidate(store, after)
@@ -512,19 +512,19 @@ def restore_candidate(
 
 def edit_candidate(
     store: MemoryStore,
-    memory_id: str,
+    claim_id: str,
     *,
     title: Optional[str] = None,
     summary: Optional[str] = None,
     domain: Optional[str] = None,
     actor: str = "user",
 ) -> MemoryCandidate:
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     st = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
-    if st not in (MemoryStatus.candidate.value, MemoryStatus.rejected.value):
-        raise ValueError(f"memory {memory_id} is {st}, not editable via formation")
+    if st not in (ClaimStatus.candidate.value, ClaimStatus.rejected.value):
+        raise ValueError(f"memory {claim_id} is {st}, not editable via formation")
     before = mem.model_dump(mode="json")
     fields: dict[str, Any] = {}
     if title is not None:
@@ -537,33 +537,33 @@ def edit_candidate(
         return as_candidate(store, mem)
     fields["needs_review"] = True
     fields["review_reason"] = mem.review_reason or "edited — re-review required"
-    store.update_memory(memory_id, **fields)
-    after = store.get_memory(memory_id)
+    store.update_claim(claim_id, **fields)
+    after = store.get_claim(claim_id)
     assert after is not None
     _record_op(
-        store, "formation_edit", memory_id,
+        store, "formation_edit", claim_id,
         before=before, after=after.model_dump(mode="json"), actor=actor,
     )
     return as_candidate(store, after)
 
 
-def mark_conflicting(store: MemoryStore, memory_id: str, *, reason: str = "") -> MemoryCandidate:
-    mem = store.get_memory(memory_id)
+def mark_conflicting(store: MemoryStore, claim_id: str, *, reason: str = "") -> MemoryCandidate:
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     flags = list(mem.quality_flags or [])
     if "conflict" not in flags:
         flags.append("conflict")
     payload = dict(mem.payload or {})
     payload["formation_state"] = FormationState.conflicting.value
-    store.update_memory(
-        memory_id,
+    store.update_claim(
+        claim_id,
         quality_flags=flags,
         needs_review=True,
         review_reason=reason or mem.review_reason or "formation conflict",
         payload=payload,
     )
-    after = store.get_memory(memory_id)
+    after = store.get_claim(claim_id)
     assert after is not None
     return as_candidate(store, after)
 
@@ -574,10 +574,10 @@ def list_candidates(
     state: Optional[str] = None,
     limit: int = 100,
 ) -> list[MemoryCandidate]:
-    rows = store.list_memories(status=MemoryStatus.candidate.value, limit=limit * 2)
+    rows = store.list_claims(status=ClaimStatus.candidate.value, limit=limit * 2)
     # also surface rejected awaiting restore in review queues when asked
     if state in (None, FormationState.rejected.value):
-        rows = rows + store.list_memories(status=MemoryStatus.rejected.value, limit=limit)
+        rows = rows + store.list_claims(status=ClaimStatus.rejected.value, limit=limit)
     out: list[MemoryCandidate] = []
     for mem in rows:
         cand = as_candidate(store, mem)
@@ -589,10 +589,10 @@ def list_candidates(
     return out
 
 
-def explain_memory(store: MemoryStore, memory_id: str) -> dict[str, Any]:
-    mem = store.get_memory(memory_id)
+def explain_memory(store: MemoryStore, claim_id: str) -> dict[str, Any]:
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     cand = as_candidate(store, mem)
     evidence = [
         {
@@ -602,18 +602,18 @@ def explain_memory(store: MemoryStore, memory_id: str) -> dict[str, Any]:
             "supports": e.supports,
             "independence_group": e.independence_group,
         }
-        for e in store.get_evidence(memory_id)
+        for e in store.get_evidence(claim_id)
     ]
     history: list[dict[str, Any]] = []
     if hasattr(store, "list_operations_for"):
         history = [
             {"id": op.id, "operation": op.operation, "actor": op.actor, "at": op.at}
-            for op in store.list_operations_for(memory_id, limit=50)  # type: ignore[attr-defined]
+            for op in store.list_operations_for(claim_id, limit=50)  # type: ignore[attr-defined]
         ]
     elif hasattr(store, "get_operations"):
         pass
     return {
-        "memory_id": memory_id,
+        "claim_id": claim_id,
         "formation_identity": cand.formation_identity,
         "formation_state": cand.formation_state.value,
         "status": mem.status.value if hasattr(mem.status, "value") else str(mem.status),

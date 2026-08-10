@@ -28,18 +28,19 @@ def server(tmp_path, monkeypatch):
 async def test_tools_are_registered(server):
     tools = {t.name for t in await server.list_tools()}
     assert {
-        "memory_search", "memory_get", "memory_related", "memory_project_context",
-        "memory_recent_decisions", "memory_user_preferences",
-        "memory_judgment_profile", "inject_context_pack",
+        "claim_search", "claim_get", "claim_related", "claim_project_context",
+        "claim_recent_decisions", "claim_user_preferences",
+        "inject_context_pack",
         "narrative_list", "narrative_show", "stance_list", "stance_proposals",
         "stance_applicable", "stance_simulate", "stance_profile",
         "stance_proposal_preview", "stance_proposal_approve",
         "stance_proposal_reject", "stance_conflicts", "stance_version",
-        "judgment_applicable", "judgment_simulate", "judgment_proposals",
-        "judgment_proposal_preview", "judgment_proposal_approve",
-        "judgment_proposal_reject", "judgment_conflicts", "judgment_version",
         "session_start", "session_observe", "session_complete", "session_feedback",
     } <= tools
+    assert "memory_search" not in tools
+    assert "memory_get" not in tools
+    assert "memory_judgment_profile" not in tools
+    assert "judgment_applicable" not in tools
     assert "memory_safe_context_pack" not in tools
     assert "memory_observe" not in tools
     assert "get_context_pack" not in tools
@@ -63,7 +64,7 @@ async def test_inject_context_pack_tool(server):
 @pytest.mark.anyio
 async def test_search_tool(server):
     result = await server.call_tool(
-        "memory_search", {"query": "FastAPI webhooks", "domain": "technical"}
+        "claim_search", {"query": "FastAPI webhooks", "domain": "technical"}
     )
     payload = json.loads(result[0][0].text)
     assert "hits" in payload
@@ -87,18 +88,18 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     # existing state: a known project and one confirmed prior decision
     from twin import ids
     from twin.cognize.services.sessions import ensure_project
-    from twin.store.models import MemoryItem, MemoryStatus
+    from twin.store.models import StoreClaim, ClaimStatus
     from twin.workspace import Workspace
 
     ws = Workspace(str(home))
     project = ensure_project(ws.store, "Atlas", repos=["atlas-api"])
-    prior = MemoryItem(id=ids.memory_id(), type="decision",
+    prior = StoreClaim(id=ids.claim_id(), type="decision",
                        title="Use FastAPI for webhooks",
                        summary="Decision: the webhook backend runs on FastAPI.",
                        domain="technical", confidence=0.9, status="confirmed",
                        project_id=project.id)
-    ws.store.insert_memory(prior)
-    ws.store.store_embedding(prior.id, "memory", ws.embedder.name,
+    ws.store.insert_claim(prior)
+    ws.store.store_embedding(prior.id, "claim", ws.embedder.name,
                              ws.embedder.embed(f"{prior.title}\n{prior.summary}"))
     # Authenticated Cursor binding required — tool name alone is not enough
     from twin.privacy.identity import ensure_local_identity, register_client_binding
@@ -137,7 +138,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     assert started["project_id"] == project.id
     assert started["task_profile"] == "coding"
     assert "FastAPI" in started["context_pack"]
-    assert any(s["memory_id"] == prior.id for s in started["sources"])
+    assert any(s["claim_id"] == prior.id for s in started["sources"])
     session_id = started["session_id"]
 
     # explicit-but-unknown project is an error, never silently re-inferred
@@ -166,30 +167,30 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     })
     assert completed["status"] == "completed"
     assert completed["consolidation_status"] == "completed"
-    assert completed["created_memory_ids"]
+    assert completed["created_claim_ids"]
 
     # 8: the human reviews and confirms the new candidate(s)
     ws = Workspace(str(home))
-    created = completed["created_memory_ids"]
+    created = completed["created_claim_ids"]
     new_id = created[0]
-    assert ws.store.get_memory(new_id).status.value == "candidate"
+    assert ws.store.get_claim(new_id).status.value == "candidate"
     for mid in created:
-        ws.store.set_status(mid, MemoryStatus.confirmed)
+        ws.store.set_status(mid, ClaimStatus.confirmed)
         # ensure confirmed memories clear the firewall confidence gate
-        mem = ws.store.get_memory(mid)
+        mem = ws.store.get_claim(mid)
         if mem and mem.confidence < 0.5:
-            ws.store.update_memory(mid, confidence=0.85)
+            ws.store.update_claim(mid, confidence=0.85)
     ws.close()
 
     # 9: feedback is recorded against the session; a memory that was not
     # part of the session is rejected
     feedback = await _call(ide, "session_feedback", {
         "session_id": session_id, "verdict": "useful",
-        "memory_id": prior.id, "note": "pack had the FastAPI decision",
+        "claim_id": prior.id, "note": "pack had the FastAPI decision",
     })
     assert feedback["feedback_count"] == 1
     rejected = await _call(ide, "session_feedback", {
-        "session_id": session_id, "verdict": "useful", "memory_id": "mem_ghost",
+        "session_id": session_id, "verdict": "useful", "claim_id": "mem_ghost",
     })
     assert "not found" in rejected["error"]
 
@@ -198,7 +199,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     pack = await _call(other, "inject_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
-    pack_ids = {s["memory_id"] for s in pack["sources"]}
+    pack_ids = {s["claim_id"] for s in pack["sources"]}
     assert set(created) & pack_ids, f"expected one of {created} in pack {pack_ids}"
     assert pack["project_id"] == project.id
 
@@ -208,7 +209,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     restricted = await _call(other, "inject_context_pack", {
         "query": "webhook retries backoff", "project": "Atlas",
     })
-    assert not (set(created) & {s["memory_id"] for s in restricted.get("sources") or []})
+    assert not (set(created) & {s["claim_id"] for s in restricted.get("sources") or []})
 
 
 @pytest.fixture
@@ -239,35 +240,35 @@ def _bootstrap_connector_reader(store):
 
 
 @pytest.mark.anyio
-async def test_memory_get_and_related(server):
+async def test_claim_get_and_related(server):
     memories = json.loads(
-        (await server.call_tool("memory_search", {"query": "webhooks", "domain": "technical"}))[0][0].text
+        (await server.call_tool("claim_search", {"query": "webhooks", "domain": "technical"}))[0][0].text
     )
     assert memories["hits"]
     mid = memories["hits"][0]["id"]
     got = json.loads(
-        (await server.call_tool("memory_get", {"memory_id": mid}))[0][0].text
+        (await server.call_tool("claim_get", {"claim_id": mid}))[0][0].text
     )
     assert got["id"] == mid
     assert "evidence" in got
     missing = json.loads(
-        (await server.call_tool("memory_get", {"memory_id": "mem_missing"}))[0][0].text
+        (await server.call_tool("claim_get", {"claim_id": "mem_missing"}))[0][0].text
     )
     assert missing["error"] == "not found"
 
 
 @pytest.mark.anyio
-async def test_memory_recent_decisions_and_preferences(server):
+async def test_claim_recent_decisions_and_preferences(server):
     decisions = json.loads(
-        (await server.call_tool("memory_recent_decisions", {"limit": 5}))[0][0].text
+        (await server.call_tool("claim_recent_decisions", {"limit": 5}))[0][0].text
     )
     assert isinstance(decisions, list)
     prefs = json.loads(
-        (await server.call_tool("memory_user_preferences", {"context": "code style"}))[0][0].text
+        (await server.call_tool("claim_user_preferences", {"context": "code style"}))[0][0].text
     )
     assert isinstance(prefs, list)
     profile = json.loads(
-        (await server.call_tool("memory_judgment_profile", {}))[0][0].text
+        (await server.call_tool("stance_profile", {}))[0][0].text
     )
     assert "principles" in profile or "items" in profile
 

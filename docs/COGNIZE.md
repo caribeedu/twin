@@ -94,16 +94,16 @@ Workbench: `#narratives` panel.
 
 ---
 
-## Migration ADR — MemoryItem → Narrative / Interpretation
+## Migration ADR — StoreClaim (ex-MemoryItem) → Narrative / Interpretation
 
 **Rule (dual-read):** confirmed memories map to provisional **Narratives**;
 candidates (and any `needs_review` rows) map to competing **Interpretations**.
 
 | Prior row | Cognize | Notes |
 |---|---|---|
-| `MemoryStatus.confirmed` | `Narrative` + `EpistemicState` | `migrated_from_memory=true` |
-| `MemoryStatus.candidate` | `Interpretation` (`competing`) | Never auto-commit |
+| `ClaimStatus.confirmed` | `Narrative` + `EpistemicState` | `migrated_from_memory=true` |
+| `ClaimStatus.candidate` | `Interpretation` (`competing`) | Never auto-commit |
 | `needs_review=true` | `Interpretation` only | Even if status looks confirmed |
 | Judgment items | Stance | Store tables unchanged |
 
-CLI: `twin narrative backfill` (`--apply` idempotent on `metadata.memory_id`).
+CLI: `twin narrative backfill` (`--apply` idempotent on `metadata.claim_id`).

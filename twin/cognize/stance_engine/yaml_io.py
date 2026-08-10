@@ -89,14 +89,14 @@ def preview_yaml_import(path: Path | str) -> list[dict[str, Any]]:
         for entry in value:
             if isinstance(entry, dict):
                 text = entry.get("text") or entry.get("statement") or str(entry)
-                mem_id = entry.get("memory_id")
+                mem_id = entry.get("claim_id")
             else:
                 text = str(entry)
                 mem_id = None
             c = classify_yaml_entry(section, text)
             c["id"] = ids.judgment_id()
             if mem_id:
-                c["memory_ids"] = [mem_id]
+                c["claim_ids"] = [mem_id]
                 c["source"] = "promoted_memory"
             else:
                 c["source"] = "yaml_import"
@@ -135,7 +135,7 @@ def apply_yaml_import(
             approved_by=actor if activate else None,
             scope=JudgmentScope(domains=[raw.get("domain", "technical")]),
             provenance=JudgmentProvenance(
-                memory_ids=list(raw.get("memory_ids") or []),
+                claim_ids=list(raw.get("claim_ids") or []),
                 source=raw.get("source", "yaml_import"),
             ),
             metadata={"yaml_section": raw.get("source_section")},

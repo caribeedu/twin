@@ -26,7 +26,7 @@ def job_display_label(job: RuntimeJob) -> str:
     payload = job.payload or {}
     for key in (
         "backfill_job_id", "partition_key", "binding_id", "session_id",
-        "percept_id", "memory_id", "text",
+        "percept_id", "claim_id", "text",
     ):
         val = payload.get(key)
         if val:

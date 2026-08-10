@@ -419,7 +419,7 @@ def _run_semantic_stages(
             try:
                 from .condense import condense_near_duplicates
                 cr = condense_near_duplicates(
-                    store, embedder, memory_ids=list(report.candidate_ids),
+                    store, embedder, claim_ids=list(report.candidate_ids),
                 )
                 con = report.stage(BrainStage.hippocampus_consolidate)
                 if cr.merged:
@@ -458,8 +458,8 @@ def _run_consolidate(store, cfg, embedder, episodes, report, *, reflect_limit, d
             reflected += 1
             for c in result.claims:
                 con.bump("candidates")
-                if c.get("memory_id") and c.get("created"):
-                    report.candidate_ids.append(c["memory_id"])
+                if c.get("claim_id") and c.get("created"):
+                    report.candidate_ids.append(c["claim_id"])
         elif result.skipped_reason:
             low = result.skipped_reason.lower()
             if "deferred" in low or "unavailable" in low or "model" in low:

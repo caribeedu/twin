@@ -13,7 +13,7 @@ from .store.base import MemoryStore
 
 
 def compute_metrics(store: MemoryStore) -> dict[str, Any]:
-    memories = store.list_memories(limit=1_000_000)
+    memories = store.list_claims(limit=1_000_000)
     percepts = store.list_percepts()
     unprocessed = store.unprocessed_percepts()
 
@@ -51,12 +51,12 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
     # the ratio: a memory supplied in ten sessions counts ten times in the
     # denominator and up to ten times in the numerator — never a mix of
     # unique ids against occurrences
-    supplied_pairs = sum(len(set(s_.supplied_memory_ids)) for s_ in sessions)
+    supplied_pairs = sum(len(set(s_.supplied_claim_ids)) for s_ in sessions)
     used_pairs = len({
-        (s_.id, fb["memory_id"])
+        (s_.id, fb["claim_id"])
         for s_ in sessions for fb in s_.feedback
-        if fb.get("memory_id") and fb["verdict"] in ("useful", "partially_useful")
-        and fb["memory_id"] in s_.supplied_memory_ids
+        if fb.get("claim_id") and fb["verdict"] in ("useful", "partially_useful")
+        and fb["claim_id"] in s_.supplied_claim_ids
     })
 
     return {
@@ -65,7 +65,7 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
             "unprocessed": len(unprocessed),
             "by_sensor": _count(percepts, lambda p: p.source_sensor),
         },
-        "memories": {
+        "claims": {
             "total": total,
             "by_status": by_status,
             "by_type": by_type,
@@ -118,7 +118,7 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
             "avg_pack_tokens": round(
                 sum(s_.pack_chars for s_ in sessions) / len(sessions) / 4
             ) if sessions else 0,
-            "memories_created": sum(len(s_.created_memory_ids) for s_ in sessions),
+            "memories_created": sum(len(s_.created_claim_ids) for s_ in sessions),
         },
         # The central product question: how often did the user need to
         # explain something twin should already have known?

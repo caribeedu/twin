@@ -3,7 +3,7 @@
   "kind": "recall_policy",
   "suggested": [
     {
-      "memory_id": "mem_weak",
+      "claim_id": "mem_weak",
       "summary": "weak",
       "why_relevant": "x",
       "confidence": 0.2,
@@ -11,7 +11,7 @@
     }
   ],
   "blocked": [
-    {"memory_id": "mem_blocked", "reason": "domain_gate"}
+    {"claim_id": "mem_blocked", "reason": "domain_gate"}
   ],
   "expected": {
     "silent": true,

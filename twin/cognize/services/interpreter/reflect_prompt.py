@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from twin.config import ALL_DOMAINS
-from twin.store.models import MemoryType
+from twin.store.models import ClaimType
 
 if TYPE_CHECKING:  # avoid import cycle at module load
     from ..episode_reflect import EpisodeBrief, TrajectoryClaim
@@ -21,7 +21,7 @@ if TYPE_CHECKING:  # avoid import cycle at module load
 PROMPT_VERSION = "8"
 SCHEMA_VERSION = "1"
 
-_MEMORY_TYPES = [t.value for t in MemoryType]
+_CLAIM_TYPES = [t.value for t in ClaimType]
 _DOMAINS = list(ALL_DOMAINS)
 
 _SYSTEM = """\
@@ -77,7 +77,7 @@ Hard negatives — return an empty claims array for these:
 - re-stating related context without new evidence from this episode.
 
 Catalog — pick the best Memory type and domain for each claim:
-- types: """ + " | ".join(_MEMORY_TYPES) + """
+- types: """ + " | ".join(_CLAIM_TYPES) + """
 - domains: """ + " | ".join(_DOMAINS) + """
 
 Type discriminators (do not confuse these):
@@ -105,7 +105,7 @@ Respond with JSON only, matching the schema. Field names MUST be exactly:
 - domain: one of the domains above
 - title, summary: strings
 - evidence_quotes: array of strings (optional)
-- related_memory_ids: ids from RELATED context you used (optional)
+- related_claim_ids: ids from RELATED context you used (optional)
 - cross_sense_refs: the exact ref(s) (e.g. 'slack:channel_message:123') from the
   CROSS-SENSE block that this claim genuinely connects — list one ONLY when the
   claim actually links that neighbor to the primary work. These become
@@ -123,14 +123,14 @@ _SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": _MEMORY_TYPES},
+                    "type": {"type": "string", "enum": _CLAIM_TYPES},
                     "domain": {"type": "string", "enum": _DOMAINS},
                     "title": {"type": "string"},
                     "summary": {"type": "string"},
                     "evidence_quotes": {
                         "type": "array", "items": {"type": "string"},
                     },
-                    "related_memory_ids": {
+                    "related_claim_ids": {
                         "type": "array", "items": {"type": "string"},
                     },
                     "cross_sense_refs": {
@@ -269,7 +269,7 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
         if domain not in ALL_DOMAINS:
             domain = "technical"
         mem_type = str(rc.get("type") or "decision")
-        if mem_type not in _MEMORY_TYPES:
+        if mem_type not in _CLAIM_TYPES:
             mem_type = "decision"
         mem_type = _coerce_claim_type(
             mem_type,
@@ -277,7 +277,7 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
             summary=str(rc.get("summary") or ""),
         )
         used_related = [
-            str(i) for i in (rc.get("related_memory_ids") or [])
+            str(i) for i in (rc.get("related_claim_ids") or [])
             if i in related_ids
         ]
         used_cross = [
@@ -292,7 +292,7 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
             evidence_quotes=[
                 str(q) for q in (rc.get("evidence_quotes") or []) if q
             ][:6],
-            related_memory_ids=used_related,
+            related_claim_ids=used_related,
             valid_from=valid_from,
             valid_until=brief.valid_until,
             confidence=float(rc.get("confidence") or 0.55),

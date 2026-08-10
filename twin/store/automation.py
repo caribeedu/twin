@@ -12,7 +12,7 @@ from typing import Any, Optional
 from ..clock import now_iso
 from .calibration import DEFAULT_CALIBRATION
 from .lifecycle import archive_memory
-from .models import MemoryStatus, Sensitivity
+from .models import ClaimStatus, Sensitivity
 from .provenance import attach_corroborating_evidence
 from .store.base import MemoryStore
 from twin.cognize.services.quality import build_duplicate_groups
@@ -51,24 +51,24 @@ def apply_safe_automations(
     rule = policy.get("exact_duplicate", {})
     if rule.get("action") == "reject":
         pool = [
-            m for m in store.list_memories(limit=10_000)
+            m for m in store.list_claims(limit=10_000)
             if "exact_duplicate" in m.quality_flags
             and m.status.value not in ("rejected", "merged", "split", "deleted", "archived")
         ]
         for group in build_duplicate_groups(store, pool):
-            survivor = store.get_memory(group.canonical_memory_id)
+            survivor = store.get_claim(group.canonical_claim_id)
             if survivor is None:
                 continue
             if not _sens_ok(survivor.sensitivity.value, rule.get("max_sensitivity", "internal")):
                 actions.append({
-                    "group": group.memory_ids, "action": "skip",
+                    "group": group.claim_ids, "action": "skip",
                     "reason": "sensitivity_gate",
                 })
                 continue
-            for mid in group.memory_ids:
+            for mid in group.claim_ids:
                 if mid == survivor.id or mid in rejected_this_run:
                     continue
-                other = store.get_memory(mid)
+                other = store.get_claim(mid)
                 if other is None:
                     continue
                 actions.append({
@@ -85,11 +85,11 @@ def apply_safe_automations(
                         source_trust=ev.source_trust,
                         bump_confidence=True,
                     )
-                store.set_status(mid, MemoryStatus.rejected)
+                store.set_status(mid, ClaimStatus.rejected)
                 rejected_this_run.add(mid)
             actions.append({
                 "id": survivor.id, "action": "keep", "reason": "canonical_survivor",
-                "group": group.memory_ids,
+                "group": group.claim_ids,
             })
 
     # --- expired tasks (policy-gated) ------------------------------------
@@ -99,7 +99,7 @@ def apply_safe_automations(
         require_valid_until = bool(task_rule.get("require_valid_until", True))
         allowed = set(task_rule.get("allowed_terminal_states", ["completed", "cancelled"]))
         now = datetime.now(timezone.utc)
-        for mem in store.list_memories(type_="task", limit=5_000):
+        for mem in store.list_claims(type_="task", limit=5_000):
             if mem.status.value in ("archived", "deleted", "rejected", "merged", "split"):
                 continue
             terminal = mem.payload.get("status")
@@ -132,7 +132,7 @@ def apply_safe_automations(
     }
 
 
-def _memory_version_slice(m) -> dict[str, Any]:
+def _claim_version_slice(m) -> dict[str, Any]:
     """Stable per-memory state included in preview tokens (TOCTOU guard)."""
     import hashlib
 
@@ -162,7 +162,7 @@ def compute_preview_token(action: str, memories: list) -> str:
         "action": action,
         "count": len(memories),
         "memories": sorted(
-            (_memory_version_slice(m) for m in memories),
+            (_claim_version_slice(m) for m in memories),
             key=lambda row: row["id"],
         ),
     }
@@ -172,7 +172,7 @@ def compute_preview_token(action: str, memories: list) -> str:
 
 def batch_preview(
     store: MemoryStore,
-    memory_ids: list[str],
+    claim_ids: list[str],
     action: str,
 ) -> dict[str, Any]:
     memories = []
@@ -180,8 +180,8 @@ def batch_preview(
     sensitive = 0
     conflicts = 0
     domains: set[str] = set()
-    for mid in memory_ids:
-        m = store.get_memory(mid)
+    for mid in claim_ids:
+        m = store.get_claim(mid)
         if m is None:
             continue
         memories.append(m)
@@ -207,14 +207,14 @@ def batch_preview(
         "sensitive_memories": sensitive,
         "conflicts_detected": conflicts,
         "requires_individual_review": individual_only,
-        "memory_ids": [m.id for m in memories],
+        "claim_ids": [m.id for m in memories],
         "preview_token": compute_preview_token(action, memories),
     }
 
 
 def batch_apply(
     store: MemoryStore,
-    memory_ids: list[str],
+    claim_ids: list[str],
     action: str,
     *,
     force: bool = False,
@@ -229,7 +229,7 @@ def batch_apply(
     The token covers selection *and* reviewed memory state (updated_at, status,
     domain, sensitivity, content, project, quality flags).
     """
-    preview = batch_preview(store, memory_ids, action)
+    preview = batch_preview(store, claim_ids, action)
     if require_preview_token:
         if not preview_token:
             return {**preview, "applied": 0, "error": "preview_token_required"}
@@ -241,27 +241,27 @@ def batch_apply(
         return {**preview, "applied": 0, "error": "requires_individual_review"}
 
     applied = []
-    for mid in preview["memory_ids"]:
-        m = store.get_memory(mid)
+    for mid in preview["claim_ids"]:
+        m = store.get_claim(mid)
         if m is None:
             continue
         if action == "confirm":
             if m.type.value in ("belief",) and not force:
                 continue
-            store.set_status(mid, MemoryStatus.confirmed)
-            store.update_memory(mid, reviewed_at=now_iso())
+            store.set_status(mid, ClaimStatus.confirmed)
+            store.update_claim(mid, reviewed_at=now_iso())
             applied.append(mid)
         elif action == "reject":
-            store.set_status(mid, MemoryStatus.rejected)
-            store.update_memory(mid, reviewed_at=now_iso())
+            store.set_status(mid, ClaimStatus.rejected)
+            store.update_claim(mid, reviewed_at=now_iso())
             applied.append(mid)
         elif action == "archive":
             archive_memory(store, mid, actor=actor)
             applied.append(mid)
         elif action == "defer":
-            store.update_memory(mid, needs_review=True, review_reason="deferred")
+            store.update_claim(mid, needs_review=True, review_reason="deferred")
             applied.append(mid)
         else:
             return {**preview, "applied": 0, "error": f"unsupported batch action: {action}"}
 
-    return {**preview, "applied": len(applied), "memory_ids_applied": applied}
+    return {**preview, "applied": len(applied), "claim_ids_applied": applied}

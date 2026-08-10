@@ -31,7 +31,7 @@ def _offline_embedder(monkeypatch):
         (("connector", "adapters", "--json"), ("adapters",)),
         (("connector", "list", "--json"), ("connectors", "count")),
         (("interpret", "status", "--json"), ("never_interpreted", "interpreted")),
-        (("stats", "--json"), ("percepts", "memories")),
+        (("stats", "--json"), ("percepts", "claims")),
         (("stance", "list", "--json"), ("stances", "count")),
         (("narrative", "unsupported", "--json"), ("unsupported", "count")),
         (("cognize", "status", "--json"), ("pending_percepts", "gate_ok")),

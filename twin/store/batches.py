@@ -15,12 +15,12 @@ def create_batch(
     name: str,
     *,
     query: Optional[dict[str, Any]] = None,
-    memory_ids: Optional[list[str]] = None,
+    claim_ids: Optional[list[str]] = None,
 ) -> ReviewBatch:
     query = query or {}
-    ids_list = list(memory_ids or [])
+    ids_list = list(claim_ids or [])
     if not ids_list:
-        memories = store.list_memories(
+        memories = store.list_claims(
             status=query.get("status", "candidate"),
             domain=query.get("domain"),
             type_=query.get("type"),
@@ -45,7 +45,7 @@ def create_batch(
         id=ids.review_batch_id(),
         name=name,
         query=query,
-        memory_ids=ids_list,
+        claim_ids=ids_list,
         created_at=now_iso(),
         progress_total=len(ids_list),
         progress_reviewed=0,
@@ -53,7 +53,7 @@ def create_batch(
     if hasattr(store, "insert_review_batch"):
         store.insert_review_batch(batch)  # type: ignore[attr-defined]
         for mid in ids_list:
-            store.update_memory(mid, review_batch_id=batch.id)
+            store.update_claim(mid, review_batch_id=batch.id)
     return batch
 
 
@@ -63,11 +63,11 @@ def get_batch(store: MemoryStore, batch_id: str) -> Optional[ReviewBatch]:
     return store.get_review_batch(batch_id)  # type: ignore[attr-defined]
 
 
-def mark_reviewed(store: MemoryStore, batch_id: str, memory_id: str) -> Optional[ReviewBatch]:
+def mark_reviewed(store: MemoryStore, batch_id: str, claim_id: str) -> Optional[ReviewBatch]:
     batch = get_batch(store, batch_id)
     if batch is None:
         return None
-    store.update_memory(memory_id, reviewed_at=now_iso(), review_batch_id=batch_id)
+    store.update_claim(claim_id, reviewed_at=now_iso(), review_batch_id=batch_id)
     reviewed = batch.progress_reviewed + 1
     completed = now_iso() if reviewed >= batch.progress_total else None
     if hasattr(store, "update_review_batch"):

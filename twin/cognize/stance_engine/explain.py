@@ -44,11 +44,11 @@ def explain_judgment_snapshot(
         revisions.append(entry)
 
     influenced: list[dict[str, Any]] = []
-    for mem in store.list_memories(limit=500):
+    for mem in store.list_claims(limit=500):
         payload = mem.payload or {}
         if payload.get("judgment_snapshot_id") == snapshot_id:
             influenced.append({
-                "memory_id": mem.id,
+                "claim_id": mem.id,
                 "status": mem.status.value if hasattr(mem.status, "value") else str(mem.status),
                 "title": mem.title,
                 "judgment_influenced": bool(payload.get("judgment_influenced")),

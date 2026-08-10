@@ -99,7 +99,7 @@ def approve_stance_proposal(ws: Workspace, proposal_id: str) -> dict[str, Any]:
 def review_snapshot(ws: Workspace) -> dict[str, Any]:
     from twin.cognize.fade import list_accessibility_recommendations
 
-    backlog = len(ws.store.list_memories(status="candidate", limit=500))
+    backlog = len(ws.store.list_claims(status="candidate", limit=500))
     refs = (
         ws.store.list_open_reflections("default")
         if hasattr(ws.store, "list_open_reflections")

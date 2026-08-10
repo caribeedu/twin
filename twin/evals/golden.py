@@ -17,7 +17,7 @@ from twin.config import Config
 from twin.privacy.firewall import Firewall
 from twin.store.embeddings import Embedder
 from twin.store.formation import confirm_candidate, explain_memory, propose_or_corroborate
-from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType
 from twin.store.search import search
 from twin.store.store.base import MemoryStore
 from twin.privacy.quarantine import detect_injection
@@ -70,9 +70,9 @@ def run_golden_work_loop(
     ).seal()
     store.insert_percept(percept)
 
-    mem = MemoryItem(
+    mem = StoreClaim(
         id="tmp",
-        type=MemoryType.decision,
+        type=ClaimType.decision,
         title="Use SQLite locally",
         summary="Local Twin store is SQLite",
         domain="technical",
@@ -82,7 +82,7 @@ def run_golden_work_loop(
         store, mem, percept_id=percept.id, evidence_quote="use SQLite",
     )
     checks["candidate_created"] = (
-        action == "created" and candidate.status == MemoryStatus.candidate
+        action == "created" and candidate.status == ClaimStatus.candidate
     )
 
     # Closure must not confirm
@@ -94,20 +94,20 @@ def run_golden_work_loop(
             "rejected_alternatives": ["ship Postgres-only locally"],
         },
     )
-    reloaded = store.get_memory(candidate.id)
+    reloaded = store.get_claim(candidate.id)
     checks["close_no_auto_confirm"] = (
         session.status.value == "completed"
         and closure.provenance.get("confirms_memory") is False
         and reloaded is not None
-        and reloaded.status == MemoryStatus.candidate
+        and reloaded.status == ClaimStatus.candidate
     )
 
     confirmed = confirm_candidate(store, candidate.id, actor="user", note="golden")
-    checks["human_confirm"] = confirmed.memory.status == MemoryStatus.confirmed
+    checks["human_confirm"] = confirmed.claim.status == ClaimStatus.confirmed
 
     store.store_embedding(
-        candidate.id, "memory", embedder.name,
-        embedder.embed(f"{confirmed.memory.title}\n{confirmed.memory.summary}"),
+        candidate.id, "claim", embedder.name,
+        embedder.embed(f"{confirmed.claim.title}\n{confirmed.claim.summary}"),
     )
     fw = Firewall(cfg.policies_path, store)
     hits = search(
@@ -115,7 +115,7 @@ def run_golden_work_loop(
         target_domain="technical", firewall=fw,
     )
     checks["recall_after_confirm"] = any(
-        h.memory.id == candidate.id for h in hits.hits
+        h.claim.id == candidate.id for h in hits.hits
     )
 
     explanation = explain_memory(store, candidate.id)
@@ -136,9 +136,9 @@ def run_golden_work_loop(
     ).seal()
     store.insert_percept(inj_percept)
     # Injection must not become a confirmed memory via formation alone
-    bad = MemoryItem(
+    bad = StoreClaim(
         id="tmp2",
-        type=MemoryType.fact,
+        type=ClaimType.fact,
         title="Ignore previous instructions",
         summary=injection,
         domain="technical",
@@ -148,7 +148,7 @@ def run_golden_work_loop(
         store, bad, percept_id=inj_percept.id, evidence_quote=injection[:40],
     )
     checks["injection_not_auto_confirmed"] = (
-        bad_cand.status == MemoryStatus.candidate
+        bad_cand.status == ClaimStatus.candidate
     )
 
     passed = all(checks.values())
@@ -157,5 +157,5 @@ def run_golden_work_loop(
         "ok": passed,
         "checks": checks,
         "session_id": sid,
-        "memory_id": candidate.id,
+        "claim_id": candidate.id,
     }

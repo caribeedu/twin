@@ -41,7 +41,7 @@
   "expected": {
     "status": "interpreted",
     "catalogued": 3,
-    "memories": [
+    "claims": [
       {"type": "task", "title_contains": "billing service"},
       {"type": "decision", "title_contains": "MongoDB", "rejected_alternative": true},
       {"type": "fact", "title_contains": "Postgres 16"}

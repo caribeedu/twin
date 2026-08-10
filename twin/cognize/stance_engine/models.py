@@ -103,7 +103,7 @@ class JudgmentContext(BaseModel):
 
 
 class JudgmentProvenance(BaseModel):
-    memory_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     session_ids: list[str] = Field(default_factory=list)
     source: str = "manual"
@@ -186,8 +186,8 @@ class JudgmentProposal(BaseModel):
     expected_revision_id: Optional[str] = None
     proposed_item: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
-    supporting_memory_ids: list[str] = Field(default_factory=list)
-    contradicting_memory_ids: list[str] = Field(default_factory=list)
+    supporting_claim_ids: list[str] = Field(default_factory=list)
+    contradicting_claim_ids: list[str] = Field(default_factory=list)
     support_count: int = 0
     contradiction_count: int = 0
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -233,7 +233,7 @@ class JudgmentSnapshot(BaseModel):
 class JudgmentConflict(BaseModel):
     id: str
     judgment_id: str
-    memory_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
     other_judgment_id: Optional[str] = None
     type: ConflictType
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)

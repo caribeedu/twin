@@ -134,6 +134,6 @@ Academic citations may still say “memory” (paper titles). Everyday speech
 (“Twin remembers”) is fine in conversation; commands, schema, and product
 docs should not.
 
-Code note: internal `MemoryItem` / `WorkEpisode` / `judgment_*` tables remain
-until store and package migration completes — see [v2-tracker.md](v2-tracker.md)
-(v2.5 Package walls).
+Code note: internal `StoreClaim` rows (table `store_claims`, id prefix
+`clm_`) hold dual-read claim data until Cognize maps them to Narratives —
+see [v2-tracker.md](v2-tracker.md) (v2.6 dual-read schema rename).

@@ -39,7 +39,7 @@ def render_pack(
         lines = [header, "", "## References"]
         for p in provenance:
             lines.append(
-                f"- [{p.get('label', 'item')}] {p.get('memory_id')} "
+                f"- [{p.get('label', 'item')}] {p.get('claim_id')} "
                 f"(conf={p.get('confidence', 0):.2f}, ev={p.get('evidence_n', 0)}) "
                 f"→ {p.get('inspect_path')}"
             )
@@ -68,7 +68,7 @@ def render_pack(
             parts.append("## Provenance")
             for p in provenance[:12]:
                 parts.append(
-                    f"- {p.get('memory_id')}: {p.get('title')} "
+                    f"- {p.get('claim_id')}: {p.get('title')} "
                     f"[{p.get('label')}] {p.get('inspect_path')}"
                 )
         return "\n".join(parts)

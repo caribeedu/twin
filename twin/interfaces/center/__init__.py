@@ -74,7 +74,7 @@ def should_launch_center(argv: Optional[list[str]]) -> bool:
 def home_snapshot(ws: Workspace) -> dict[str, Any]:
     backlog = 0
     try:
-        backlog = len(ws.store.list_memories(status="candidate", limit=500))
+        backlog = len(ws.store.list_claims(status="candidate", limit=500))
     except Exception:
         pass
     reflections = 0

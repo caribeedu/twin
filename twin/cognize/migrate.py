@@ -1,4 +1,4 @@
-"""Backfill MemoryItem → Narrative / Interpretation."""
+"""Backfill StoreClaim → Narrative / Interpretation."""
 
 from __future__ import annotations
 
@@ -13,24 +13,24 @@ from twin.cognize.models import (
     NarrativeStatus,
 )
 from twin.clock import now_iso
-from twin.store.models import MemoryItem, MemoryStatus
+from twin.store.models import StoreClaim, ClaimStatus
 
 
-def memory_to_provisional(
-    mem: MemoryItem,
+def claim_to_provisional(
+    mem: StoreClaim,
     *,
     vault_id: str = "default",
 ) -> tuple[str, Narrative | Interpretation]:
     """Map memory to Narrative (confirmed) or Interpretation (candidate / needs_review)."""
     evidence_ids = list(getattr(mem, "source_ids", None) or [])
-    if mem.needs_review or mem.status != MemoryStatus.confirmed:
+    if mem.needs_review or mem.status != ClaimStatus.confirmed:
         intp = Interpretation(
             vault_id=vault_id,
             explanation=(mem.summary or mem.title or "").strip() or mem.id,
             status=InterpretationStatus.competing,
             evidence_ids=evidence_ids,
             metadata={
-                "memory_id": mem.id,
+                "claim_id": mem.id,
                 "needs_review": bool(mem.needs_review),
                 "memory_status": mem.status.value
                 if hasattr(mem.status, "value")
@@ -59,21 +59,21 @@ def memory_to_provisional(
         project_id=getattr(mem, "project_id", None),
         migrated_from_memory=True,
         committed_by="migration",
-        metadata={"memory_id": mem.id, "eps_pending": eps.model_dump(mode="json")},
+        metadata={"claim_id": mem.id, "eps_pending": eps.model_dump(mode="json")},
     )
     return "narrative", nar
 
 
-def _existing_memory_ids(store: Any, vault_id: str) -> set[str]:
+def _existing_claim_ids(store: Any, vault_id: str) -> set[str]:
     existing: set[str] = set()
     if hasattr(store, "list_narratives"):
         for nar in store.list_narratives(vault_id):
-            mid = (nar.metadata or {}).get("memory_id")
+            mid = (nar.metadata or {}).get("claim_id")
             if mid:
                 existing.add(mid)
     if hasattr(store, "list_cognize_interpretations"):
         for intp in store.list_cognize_interpretations(vault_id):
-            mid = (intp.metadata or {}).get("memory_id")
+            mid = (intp.metadata or {}).get("claim_id")
             if mid:
                 existing.add(mid)
     return existing
@@ -86,8 +86,8 @@ def backfill_from_memories(
     dry_run: bool = True,
     limit: int = 10_000,
 ) -> dict[str, Any]:
-    """Copy memories into Cognize entities; idempotent on ``metadata.memory_id``."""
-    memories = store.list_memories() if hasattr(store, "list_memories") else []
+    """Copy memories into Cognize entities; idempotent on ``metadata.claim_id``."""
+    memories = store.list_claims() if hasattr(store, "list_claims") else []
     stats = {
         "scanned": 0,
         "narratives": 0,
@@ -95,7 +95,7 @@ def backfill_from_memories(
         "skipped": 0,
         "dry_run": dry_run,
     }
-    existing_mem_ids = _existing_memory_ids(store, vault_id)
+    existing_mem_ids = _existing_claim_ids(store, vault_id)
 
     for mem in memories[:limit]:
         stats["scanned"] += 1
@@ -103,15 +103,15 @@ def backfill_from_memories(
             stats["skipped"] += 1
             continue
         if mem.status in (
-            MemoryStatus.rejected,
-            MemoryStatus.merged,
-            MemoryStatus.split,
-            MemoryStatus.deleted,
-            MemoryStatus.archived,
+            ClaimStatus.rejected,
+            ClaimStatus.merged,
+            ClaimStatus.split,
+            ClaimStatus.deleted,
+            ClaimStatus.archived,
         ):
             stats["skipped"] += 1
             continue
-        kind, obj = memory_to_provisional(mem, vault_id=vault_id)
+        kind, obj = claim_to_provisional(mem, vault_id=vault_id)
         if dry_run:
             if kind == "narrative":
                 stats["narratives"] += 1

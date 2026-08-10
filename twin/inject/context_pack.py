@@ -117,14 +117,14 @@ def _evidence_lines(store: MemoryStore, hits: list[SearchHit], top_n: int,
                     *, skip_ids: Optional[set[str]] = None) -> list[str]:
     skip_ids = skip_ids or set()
     top = sorted(
-        [h for h in hits if h.memory.id not in skip_ids],
+        [h for h in hits if h.claim.id not in skip_ids],
         key=lambda h: h.score, reverse=True,
     )[:top_n]
     lines: list[str] = []
     for hit in top:
-        for ev in store.get_evidence(hit.memory.id)[:1]:
+        for ev in store.get_evidence(hit.claim.id)[:1]:
             quote = ev.quote if len(ev.quote) <= 220 else ev.quote[:217] + "..."
-            lines.append(f'- [{hit.memory.id}] "{quote}"')
+            lines.append(f'- [{hit.claim.id}] "{quote}"')
     return lines
 
 
@@ -175,7 +175,7 @@ def build_context_pack(
     redacted_ids: set[str] = set()
     if hasattr(store, "insert_privacy_decision"):
         from ..privacy.engine import evaluate_access
-        memories = [h.memory for h in result.hits]
+        memories = [h.claim for h in result.hits]
         ev = evaluate_access(
             store, access, memories,
             policies_path=cfg.policies_path,
@@ -200,7 +200,7 @@ def build_context_pack(
             authorized_views[v["id"]] = v
             if v.get("redacted"):
                 redacted_ids.add(v["id"])
-        result.hits = [h for h in result.hits if h.memory.id in authorized_views]
+        result.hits = [h for h in result.hits if h.claim.id in authorized_views]
 
     _check_pack_deadline(deadline_monotonic, stage="after_privacy")
 
@@ -295,7 +295,7 @@ def build_context_pack(
                     pack_j[key] = filtered
                 for d in gov["denied"]:
                     privacy_blocked.append({
-                        "memory_id": d.get("memory_id", ""),
+                        "claim_id": d.get("claim_id", ""),
                         "reason": f"judgment:{d.get('reason', '')}",
                         "rule": d.get("rule", "judgment_denied"),
                     })
@@ -370,19 +370,19 @@ def build_context_pack(
     packed_hits: list[SearchHit] = []
     remaining = list(result.hits)
     for header, types, share in profile.sections:
-        section_hits = [h for h in remaining if h.memory.type.value in types]
+        section_hits = [h for h in remaining if h.claim.type.value in types]
         if not section_hits:
             continue
         section_ceiling = min(used + max(int(memory_budget * share), 200), memory_cap)
         if not push(f"## {header}", ceiling=section_ceiling):
             continue
         for hit in section_hits:
-            view = authorized_views.get(hit.memory.id) or {
-                "id": hit.memory.id, "title": hit.memory.title,
-                "summary": hit.memory.summary, "redacted": False,
+            view = authorized_views.get(hit.claim.id) or {
+                "id": hit.claim.id, "title": hit.claim.title,
+                "summary": hit.claim.summary, "redacted": False,
             }
-            status = hit.memory.status.value if hasattr(hit.memory.status, "value") else str(hit.memory.status)
-            label = cognitive_label(hit.memory)
+            status = hit.claim.status.value if hasattr(hit.claim.status, "value") else str(hit.claim.status)
+            label = cognitive_label(hit.claim)
             if not push(
                 _entry_from_view(view, status=status, label=label),
                 ceiling=section_ceiling,
@@ -390,7 +390,7 @@ def build_context_pack(
                 break
             remaining.remove(hit)
             packed_hits.append(hit)
-            confidences.append(hit.memory.confidence)
+            confidences.append(hit.claim.confidence)
             sources.append(_source_meta(hit, view, label=label))
     leftover = [h for h in sorted(remaining, key=lambda h: h.score, reverse=True)]
     if leftover and used + 100 < memory_cap:
@@ -400,19 +400,19 @@ def build_context_pack(
                 if not push("## Additional context", ceiling=memory_cap):
                     break
                 pushed_header = True
-            view = authorized_views.get(hit.memory.id) or {
-                "id": hit.memory.id, "title": hit.memory.title,
-                "summary": hit.memory.summary, "redacted": False,
+            view = authorized_views.get(hit.claim.id) or {
+                "id": hit.claim.id, "title": hit.claim.title,
+                "summary": hit.claim.summary, "redacted": False,
             }
-            status = hit.memory.status.value if hasattr(hit.memory.status, "value") else str(hit.memory.status)
-            label = cognitive_label(hit.memory)
+            status = hit.claim.status.value if hasattr(hit.claim.status, "value") else str(hit.claim.status)
+            label = cognitive_label(hit.claim)
             if not push(
                 _entry_from_view(view, status=status, label=label),
                 ceiling=memory_cap,
             ):
                 break
             packed_hits.append(hit)
-            confidences.append(hit.memory.confidence)
+            confidences.append(hit.claim.confidence)
             sources.append(_source_meta(hit, view, label=label))
 
     evidence_included = False
@@ -448,7 +448,7 @@ def build_context_pack(
             sources = []
             packed_hits = []
             privacy_blocked.append({
-                "memory_id": "",
+                "claim_id": "",
                 "reason": "output_leakage_blocked",
                 "rule": "leakage_scan" if findings else "canary",
             })
@@ -456,10 +456,10 @@ def build_context_pack(
     if "do_not_cache" in (privacy_meta.get("obligations") or []):
         privacy_meta["cacheable"] = False
 
-    blocked = [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked]
+    blocked = [{"claim_id": b.claim_id, "reason": b.rule} for b in result.blocked]
     for b in privacy_blocked:
         blocked.append({
-            "memory_id": b.get("memory_id", ""),
+            "claim_id": b.get("claim_id", ""),
             "reason": b.get("reason", b.get("rule", "privacy")),
         })
 
@@ -472,20 +472,20 @@ def build_context_pack(
         "goals": goals,
     }
     provenance = build_provenance_summary(store, packed_hits)
-    low_conf = [h.memory.id for h in packed_hits if h.memory.confidence < 0.55]
+    low_conf = [h.claim.id for h in packed_hits if h.claim.confidence < 0.55]
     uncertainty = {
         "low_confidence_ids": low_conf,
         "open_conflicts": [
-            h.memory.id for h in packed_hits
-            if "conflict" in (h.memory.quality_flags or [])
-            or "possible_conflict" in (h.memory.quality_flags or [])
+            h.claim.id for h in packed_hits
+            if "conflict" in (h.claim.quality_flags or [])
+            or "possible_conflict" in (h.claim.quality_flags or [])
         ],
     }
     explanation = {
         "profile": profile.name,
         "dropped": drop_counts,
         "injection_blocked": [
-            b.get("memory_id") for b in injection_blocked if b.get("memory_id")
+            b.get("claim_id") for b in injection_blocked if b.get("claim_id")
         ],
         "blocked_count": len(blocked),
         "mode": mode,
@@ -525,12 +525,12 @@ def build_context_pack(
 
                 if not narrative_visible_to_access(nar, access):
                     privacy_blocked.append({
-                        "memory_id": nar.id,
+                        "claim_id": nar.id,
                         "reason": "narrative_acl",
                         "rule": "sensitivity_audience",
                     })
                     blocked.append({
-                        "memory_id": nar.id,
+                        "claim_id": nar.id,
                         "reason": "narrative_acl",
                     })
                     continue
@@ -609,12 +609,12 @@ def build_context_pack(
                     "general", "*",
                 ):
                     privacy_blocked.append({
-                        "memory_id": ref.id,
+                        "claim_id": ref.id,
                         "reason": "reflection_domain",
                         "rule": "open_reflection_firewall",
                     })
                     blocked.append({
-                        "memory_id": ref.id,
+                        "claim_id": ref.id,
                         "reason": "reflection_domain",
                     })
                     continue
@@ -624,12 +624,12 @@ def build_context_pack(
                         "self", "owner",
                     ):
                         privacy_blocked.append({
-                            "memory_id": ref.id,
+                            "claim_id": ref.id,
                             "reason": "reflection_acl",
                             "rule": "sensitivity_audience",
                         })
                         blocked.append({
-                            "memory_id": ref.id,
+                            "claim_id": ref.id,
                             "reason": "reflection_acl",
                         })
                         continue
@@ -715,7 +715,7 @@ def build_context_pack(
 def _source_meta(hit: SearchHit, view: dict, *, label: str = "ok") -> dict:
     if view.get("redacted"):
         return {
-            "memory_id": f"opaque_{hit.memory.id[-8:]}",
+            "claim_id": f"opaque_{hit.claim.id[-8:]}",
             "redacted": True,
             "why_relevant": "authorized contextual match",
             "percept_ids": [],
@@ -723,11 +723,11 @@ def _source_meta(hit: SearchHit, view: dict, *, label: str = "ok") -> dict:
             "label": "redacted",
         }
     return {
-        "memory_id": hit.memory.id,
-        "title": view.get("title", hit.memory.title),
-        "confidence": hit.memory.confidence,
-        "status": hit.memory.status.value,
-        "percept_ids": hit.memory.percept_ids,
+        "claim_id": hit.claim.id,
+        "title": view.get("title", hit.claim.title),
+        "confidence": hit.claim.confidence,
+        "status": hit.claim.status.value,
+        "percept_ids": hit.claim.percept_ids,
         "why_relevant": hit.why,
         "redacted": False,
         "label": label,

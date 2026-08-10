@@ -24,7 +24,7 @@
   "expected": {
     "status": "interpreted",
     "catalogued": 1,
-    "memories": [
+    "claims": [
       {"type": "fact", "cognitive_act": "third_party_claim", "attributed_to": "Priya", "needs_review": true, "evidence_grounded": true}
     ]
   }

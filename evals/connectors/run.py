@@ -330,7 +330,7 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
                 extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
             finally:
                 set_interpreter_override(None)
-            decisions = [m for m in store.list_memories()
+            decisions = [m for m in store.list_claims()
                          if m.type.value == "decision"]
             pg = [m for m in decisions if "PostgreSQL" in m.summary]
             redis = [m for m in decisions if "Redis" in m.summary
@@ -384,7 +384,7 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
             cfg.embedder = "hash"
             cfg.ensure_home()
             extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
-            memories = store.list_memories()
+            memories = store.list_claims()
             if not memories:
                 return False, "extraction produced nothing to review"
             if not all(m.needs_review for m in memories):
@@ -920,7 +920,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
         findings = store.get_findings(f"episode:{ep.id}", unresolved_only=False)
         if not any(f.type.value == exp["conflict_type"] for f in findings):
             # also accept findings keyed only by type across all open findings
-            # when memory_id lookup is empty
+            # when claim_id lookup is empty
             if report.conflicts < 1:
                 return False, "expected cross_source_temporal_conflict"
         _ = slack  # retained for lineage in episode source_refs

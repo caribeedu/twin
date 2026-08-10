@@ -23,7 +23,7 @@ from twin import ids
 from twin.config import Config
 from twin.store.embeddings import Embedder
 from twin.store.formation import propose_or_corroborate
-from twin.store.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
+from twin.store.models import CanonicalClaim, ExtractorVersion, StoreClaim, ClaimType
 from twin.store.search import search
 from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
@@ -60,12 +60,12 @@ class EpisodeBrief:
 @dataclass
 class TrajectoryClaim:
     """A synthesized cross-source claim (0..N per episode)."""
-    type: str = MemoryType.decision.value
+    type: str = ClaimType.decision.value
     domain: str = "technical"
     title: str = ""
     summary: str = ""
     evidence_quotes: list[str] = field(default_factory=list)
-    related_memory_ids: list[str] = field(default_factory=list)
+    related_claim_ids: list[str] = field(default_factory=list)
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     confidence: float = 0.6
@@ -295,7 +295,7 @@ def gather_related_memories(
             limit=max(mem_budget * 2, 24),
         )
         for hit in result.hits:
-            mem = hit.memory
+            mem = hit.claim
             payload = mem.payload or {}
             if payload.get("episode_id") == brief.episode_id:
                 continue
@@ -452,21 +452,21 @@ def reflect_episode(
             "summary": claim.summary,
             "valid_from": claim.valid_from,
             "created": False,
-            "memory_id": None,
+            "claim_id": None,
         }
         if dry_run:
             result.claims.append(row)
             continue
 
         try:
-            mem_type = MemoryType(claim.type)
+            mem_type = ClaimType(claim.type)
         except ValueError:
-            mem_type = MemoryType.decision
+            mem_type = ClaimType.decision
         payload = {
             "episode_id": brief.episode_id,
             "phase_keys": list(claim.phase_keys),
             "edge_ids": list(claim.edge_ids),
-            "related_memory_ids": list(claim.related_memory_ids),
+            "related_claim_ids": list(claim.related_claim_ids),
             "source": "episode_reflect",
             "brain_stage": "hippocampus_consolidate",
             "trajectory": True,
@@ -486,8 +486,8 @@ def reflect_episode(
             valid_until = None
         elif valid_until and brief.valid_until and valid_until == brief.valid_until:
             valid_until = None
-        mem = MemoryItem(
-            id=ids.memory_id(),
+        mem = StoreClaim(
+            id=ids.claim_id(),
             type=mem_type,
             title=claim.title,
             summary=claim.summary,
@@ -530,19 +530,19 @@ def reflect_episode(
             _attach_cross_sense_evidence(store, mem.id, claim, brief)
             try:
                 store.store_embedding(
-                    mem.id, "memory", embedder.name,
+                    mem.id, "claim", embedder.name,
                     embedder.embed(f"{claim.title}\n{claim.summary}"),
                 )
             except Exception:
                 pass
             # Near-dup / conflict flags for review (same analyzer as extract).
             try:
-                from .quality import analyze_memory
-                analyze_memory(store, embedder, mem.id, persist=True)
+                from .quality import analyze_claim
+                analyze_claim(store, embedder, mem.id, persist=True)
             except Exception:
                 pass
         row["created"] = action == "created"
-        row["memory_id"] = mem.id
+        row["claim_id"] = mem.id
         result.claims.append(row)
 
     return result
@@ -588,7 +588,7 @@ def _ensure_reflection_percept(
 
 
 def _attach_extra_evidence(
-    store: MemoryStore, memory_id: str, claim: TrajectoryClaim, primary_pid: str,
+    store: MemoryStore, claim_id: str, claim: TrajectoryClaim, primary_pid: str,
     *, episode_id: str,
 ) -> None:
     from twin.store.provenance import attach_corroborating_evidence
@@ -606,7 +606,7 @@ def _attach_extra_evidence(
             # independence group — so intra-episode corroboration never inflates
             # the independent-source count (fixes "2 supports from 1 episode").
             attach_corroborating_evidence(
-                store, memory_id, pid, quote,
+                store, claim_id, pid, quote,
                 independence_group=f"episode:{episode_id}",
                 source_trust=0.7, bump_confidence=False,
             )
@@ -616,7 +616,7 @@ def _attach_extra_evidence(
 
 
 def _attach_cross_sense_evidence(
-    store: MemoryStore, memory_id: str, claim: TrajectoryClaim, brief: EpisodeBrief,
+    store: MemoryStore, claim_id: str, claim: TrajectoryClaim, brief: EpisodeBrief,
 ) -> None:
     """Attach model-cited cross-sense neighbors as independent evidence.
 
@@ -648,7 +648,7 @@ def _attach_cross_sense_evidence(
             continue
         try:
             attach_corroborating_evidence(
-                store, memory_id, pid, (blob.text or claim.summary)[:400],
+                store, claim_id, pid, (blob.text or claim.summary)[:400],
                 independence_group=f"xsense:{blob.sense}:{blob.record_id}",
                 source_trust=0.6, bump_confidence=True,
             )

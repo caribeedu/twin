@@ -50,7 +50,7 @@ class AttentionOutcome:
     id: str = field(default_factory=ids.attention_emission_id)
     session_id: str = ""
     kind: AttentionKind = AttentionKind.silence
-    memory_id: str = ""
+    claim_id: str = ""
     summary: str = ""
     reason: str = ""
     expected_value: float = 0.0
@@ -159,11 +159,11 @@ def _window_count(store: MemoryStore, session_id: str, policy: AttentionPolicy) 
     return n
 
 
-def _already_emitted(store: MemoryStore, session_id: str, memory_id: str, kind: str) -> bool:
-    if not memory_id or not hasattr(store, "list_attention_emissions"):
+def _already_emitted(store: MemoryStore, session_id: str, claim_id: str, kind: str) -> bool:
+    if not claim_id or not hasattr(store, "list_attention_emissions"):
         return False
     for e in store.list_attention_emissions(session_id, status="open", limit=50):
-        if e.memory_id == memory_id and (
+        if e.claim_id == claim_id and (
             e.kind.value if hasattr(e.kind, "value") else str(e.kind)
         ) == kind:
             return True
@@ -256,13 +256,13 @@ def evaluate_attention(
             payload={"inferred": tick.inferred_domain, "session_domain": session.domain},
         ))
 
-    for mid in tick.contradiction_memory_ids or []:
+    for mid in tick.contradiction_claim_ids or []:
         if _already_emitted(store, session_id, mid, AttentionKind.contradiction_alert.value):
             continue
         candidates.append(AttentionOutcome(
             session_id=session_id,
             kind=AttentionKind.contradiction_alert,
-            memory_id=mid,
+            claim_id=mid,
             summary="Possible contradiction with prior memory",
             reason="salience_contradiction",
             expected_value=0.7,
@@ -271,7 +271,7 @@ def evaluate_attention(
         ))
 
     for sug in tick.suggestions or []:
-        mid = sug.get("memory_id") or ""
+        mid = sug.get("claim_id") or ""
         conf = float(sug.get("confidence") or 0)
         rel = float(sug.get("score") if sug.get("score") is not None else 0)
         kind = AttentionKind.suggestion
@@ -281,11 +281,11 @@ def evaluate_attention(
         if _already_emitted(store, session_id, mid, kind.value):
             continue
         if hasattr(store, "is_attention_suppressed") and store.is_attention_suppressed(
-            session_id, kind=kind.value, memory_id=mid,
+            session_id, kind=kind.value, claim_id=mid,
         ):
             continue
         privacy_risk = policy.privacy_block_penalty if any(
-            b.get("memory_id") == mid for b in (tick.blocked or [])
+            b.get("claim_id") == mid for b in (tick.blocked or [])
         ) else 0.0
         ev = expected_value(
             relevance=max(rel, 0.01),
@@ -301,7 +301,7 @@ def evaluate_attention(
         candidates.append(AttentionOutcome(
             session_id=session_id,
             kind=kind,
-            memory_id=mid,
+            claim_id=mid,
             summary=sug.get("summary") or sug.get("title") or mid,
             reason=sug.get("why_relevant") or "recall",
             expected_value=round(ev, 4),
@@ -310,11 +310,11 @@ def evaluate_attention(
             payload={"tick_id": tick.tick_id},
         ))
 
-    for mid in tick.candidate_memory_ids or []:
+    for mid in tick.candidate_claim_ids or []:
         candidates.append(AttentionOutcome(
             session_id=session_id,
             kind=AttentionKind.memory_candidate,
-            memory_id=mid,
+            claim_id=mid,
             summary="New memory candidate from interpretation",
             reason="parallel_interpretation",
             expected_value=0.5,
@@ -369,7 +369,7 @@ def feedback_attention(
         if hasattr(store, "add_attention_suppression"):
             kind_s = em.kind.value if hasattr(em.kind, "value") else str(em.kind)
             store.add_attention_suppression(
-                em.session_id, kind=kind_s, memory_id=em.memory_id,
+                em.session_id, kind=kind_s, claim_id=em.claim_id,
             )
     else:
         return em

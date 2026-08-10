@@ -21,7 +21,7 @@ from twin import ids
 from twin.config import Config
 from twin.store.embeddings import Embedder
 from twin.store.formation import propose_or_corroborate
-from twin.store.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
+from twin.store.models import CanonicalClaim, ExtractorVersion, StoreClaim, ClaimType
 from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
 from .analysis_dossier import AnalysisDossier, compile_window_dossier
@@ -179,15 +179,15 @@ def pattern_reflect(
             "title": claim.title,
             "summary": claim.summary,
             "created": False,
-            "memory_id": None,
+            "claim_id": None,
         }
         if dry_run:
             result.claims.append(row)
             continue
         try:
-            mem_type = MemoryType(claim.type)
+            mem_type = ClaimType(claim.type)
         except ValueError:
-            mem_type = MemoryType.preference
+            mem_type = ClaimType.preference
         payload = {
             "source": "pattern_reflect",
             "brain_stage": "hippocampus_consolidate",
@@ -200,8 +200,8 @@ def pattern_reflect(
         evidence_quote = (
             claim.evidence_quotes[0] if claim.evidence_quotes else claim.summary
         )
-        mem = MemoryItem(
-            id=ids.memory_id(),
+        mem = StoreClaim(
+            id=ids.claim_id(),
             type=mem_type,
             title=claim.title,
             summary=claim.summary,
@@ -235,12 +235,12 @@ def pattern_reflect(
         if action == "created":
             try:
                 store.store_embedding(
-                    mem.id, "memory", embedder.name,
+                    mem.id, "claim", embedder.name,
                     embedder.embed(f"{claim.title}\n{claim.summary}"),
                 )
             except Exception:
                 pass
         row["created"] = action == "created"
-        row["memory_id"] = mem.id
+        row["claim_id"] = mem.id
         result.claims.append(row)
     return result

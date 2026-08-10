@@ -26,8 +26,8 @@
       "evidence": ["private"]
     }
   ],
-  "expected_memory_ids": ["mem_fixture_pg"],
-  "forbidden_memory_ids": ["mem_fixture_private"],
+  "expected_claim_ids": ["mem_fixture_pg"],
+  "forbidden_claim_ids": ["mem_fixture_private"],
   "expected_sections": ["Decisions"],
   "require_evidence": true
 }

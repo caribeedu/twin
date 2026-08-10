@@ -30,7 +30,7 @@ class RecallPolicy:
 
 @dataclass
 class RecallItem:
-    memory_id: str
+    claim_id: str
     summary: str
     why_relevant: str
     confidence: float
@@ -68,7 +68,7 @@ def apply_recall_policy(
 
     eligible: list[RecallItem] = []
     for row in suggested:
-        mid = row.get("memory_id") or ""
+        mid = row.get("claim_id") or ""
         conf = float(row.get("confidence") or 0.0)
         # Retrieval relevance only — do not fall back to confidence.
         if "score" not in row or row.get("score") is None:
@@ -83,7 +83,7 @@ def apply_recall_policy(
         if policy.min_salience > 0 and sal < policy.min_salience:
             continue
         eligible.append(RecallItem(
-            memory_id=mid,
+            claim_id=mid,
             summary=str(row.get("summary") or ""),
             why_relevant=str(row.get("why_relevant") or ""),
             confidence=conf,

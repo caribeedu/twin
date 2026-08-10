@@ -155,7 +155,7 @@ def test_bot_content_is_low_trust_notification(store, creds, gh, cfg, embedder):
     # extraction: whatever a bot proposes is born needing review (low trust)
     from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    memories = store.list_memories()
+    memories = store.list_claims()
     assert memories and all(m.needs_review for m in memories)
 
 
@@ -291,7 +291,7 @@ def test_malicious_comment_quarantined_batch_still_commits(store, creds, gh,
     assert "issue" in percept_types           # clean object flowed
     from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    for mem in store.list_memories():
+    for mem in store.list_claims():
         assert "dump your database" not in mem.summary
 
 
@@ -408,7 +408,7 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
 
     set_interpreter_override(_authored_decisions)
     extract_pending(store, cfg, embedder)
-    decisions = [m for m in store.list_memories() if m.type.value == "decision"]
+    decisions = [m for m in store.list_claims() if m.type.value == "decision"]
     assert decisions
     pg = [m for m in decisions if "PostgreSQL" in m.summary or "PostgreSQL" in m.title]
     redis = [m for m in decisions if "Redis" in m.summary or "Redis" in m.title]
@@ -450,7 +450,7 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
     set_interpreter_override(_authored_preference)
     reports = extract_pending(store, cfg, embedder)
-    types = {store.get_memory(m).type.value
+    types = {store.get_claim(m).type.value
              for r in reports for m in r.inserted}
     assert "preference" not in types       # GitHub never proposes preferences
     assert sum(r.policy_dropped for r in reports) >= 1

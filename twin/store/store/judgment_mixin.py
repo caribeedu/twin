@@ -240,7 +240,7 @@ class JudgmentStoreMixin:
                 # refresh evidence set
                 self.update_judgment_conflict(
                     existing.id,
-                    memory_ids=conflict.memory_ids,
+                    claim_ids=conflict.claim_ids,
                     confidence=conflict.confidence,
                     reason=conflict.reason,
                     evidence_fingerprint=conflict.evidence_fingerprint,

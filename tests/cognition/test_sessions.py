@@ -57,7 +57,7 @@ def test_start_session_records_supplied_context(store, cfg, embedder):
     assert session.domain == "technical"
     assert session.consolidation_status == ConsolidationStatus.none
     assert session.pack_chars == len(started.pack.context_pack)
-    assert session.supplied_memory_ids == [s["memory_id"] for s in started.pack.sources]
+    assert session.supplied_claim_ids == [s["claim_id"] for s in started.pack.sources]
     assert started.observer_mode in (
         "fast", "deep", "unresolved", "explicit", "search", "frozen",
     )
@@ -73,13 +73,13 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
     """No domain evidence + no explicit domain → the session opens
     unclassified with an EMPTY pack: no memories, no judgment profile."""
     from twin import ids
-    from twin.store.models import MemoryItem
+    from twin.store.models import StoreClaim
 
-    mem = MemoryItem(id=ids.memory_id(), type="fact", title="Webhook stack",
+    mem = StoreClaim(id=ids.claim_id(), type="fact", title="Webhook stack",
                      summary="Webhooks run on FastAPI.", domain="technical",
                      confidence=0.9, status="confirmed")
-    store.insert_memory(mem)
-    store.store_embedding(mem.id, "memory", embedder.name,
+    store.insert_claim(mem)
+    store.store_embedding(mem.id, "claim", embedder.name,
                           embedder.embed("Webhook stack\nWebhooks run on FastAPI."))
 
     started = start_session(store, cfg, embedder,
@@ -214,7 +214,7 @@ def test_complete_session_turns_work_into_candidate_memories(store, cfg, embedde
     assert done.status == SessionStatus.completed
     assert done.consolidation_status == ConsolidationStatus.completed
     assert done.ended_at
-    assert done.created_memory_ids  # heuristic extractor catches the decision
+    assert done.created_claim_ids  # heuristic extractor catches the decision
     # the summary became a percept…
     percepts = [p for p in store.list_percepts() if p.percept_type == "session_summary"]
     assert len(percepts) == 1
@@ -222,8 +222,8 @@ def test_complete_session_turns_work_into_candidate_memories(store, cfg, embedde
     assert percepts[0].project_id == project.id
     assert done.summary_percept_id == percepts[0].id
     # …and the extracted memories are project-linked candidates
-    for mid in done.created_memory_ids:
-        mem = store.get_memory(mid)
+    for mid in done.created_claim_ids:
+        mem = store.get_claim(mid)
         assert mem.status.value == "candidate"
         assert mem.project_id == project.id
 
@@ -342,7 +342,7 @@ def test_consolidation_failure_is_diagnosable_and_retryable(store, cfg, embedder
     assert done.status == SessionStatus.completed          # the work DID end
     assert done.consolidation_status == ConsolidationStatus.failed
     assert "RuntimeError" in done.consolidation_error
-    assert done.created_memory_ids == []
+    assert done.created_claim_ids == []
 
     # retry with the extractor healthy again
     monkeypatch.undo()
@@ -350,7 +350,7 @@ def test_consolidation_failure_is_diagnosable_and_retryable(store, cfg, embedder
                                summary="We decided to use RabbitMQ for the queue.")
     assert retried.consolidation_status == ConsolidationStatus.completed
     assert retried.consolidation_error is None
-    assert retried.created_memory_ids
+    assert retried.created_claim_ids
     # exactly one summary percept exists despite two attempts
     summaries = [p for p in store.list_percepts() if p.percept_type == "session_summary"]
     assert len(summaries) == 1
@@ -385,7 +385,7 @@ def test_completed_consolidation_is_idempotent_on_memories(store, cfg, embedder,
                                summary="We decided to use RabbitMQ for the queue.")
     assert retried.consolidation_status == ConsolidationStatus.completed
     # extraction dedupe: the same percept content yields no second memory
-    titles = [store.get_memory(m).title for m in retried.created_memory_ids]
+    titles = [store.get_claim(m).title for m in retried.created_claim_ids]
     assert len(titles) == len(set(titles))
     summaries = [p for p in store.list_percepts() if p.percept_type == "session_summary"]
     assert len(summaries) == 1
@@ -397,7 +397,7 @@ def test_abandoned_session_creates_nothing(store, cfg, embedder):
                             summary="ignored", abandoned=True)
     assert done.status == SessionStatus.abandoned
     assert done.consolidation_status == ConsolidationStatus.skipped
-    assert done.created_memory_ids == []
+    assert done.created_claim_ids == []
     assert store.list_percepts() == []
 
 
@@ -444,35 +444,35 @@ def test_record_feedback_validates_verdicts_and_scopes(store, cfg, embedder):
         record_feedback(store, session.id, "amazing")
     with pytest.raises(ValueError, match="scope"):
         record_feedback(store, session.id, "useful", scope="universe")
-    with pytest.raises(ValueError, match="memory_id"):
-        record_feedback(store, session.id, "useful", scope="memory")
+    with pytest.raises(ValueError, match="claim_id"):
+        record_feedback(store, session.id, "useful", scope="claim")
 
 
 def test_feedback_memory_must_belong_to_the_session(store, cfg, embedder):
     from twin import ids
-    from twin.store.models import MemoryItem
+    from twin.store.models import StoreClaim
 
-    supplied = MemoryItem(id=ids.memory_id(), type="decision",
+    supplied = StoreClaim(id=ids.claim_id(), type="decision",
                           title="Use FastAPI", summary="Decision: FastAPI.",
                           domain="technical", confidence=0.9, status="confirmed")
-    store.insert_memory(supplied)
-    store.store_embedding(supplied.id, "memory", embedder.name,
+    store.insert_claim(supplied)
+    store.store_embedding(supplied.id, "claim", embedder.name,
                           embedder.embed("Use FastAPI Decision FastAPI webhooks"))
-    foreign = MemoryItem(id=ids.memory_id(), type="fact", title="Unrelated",
+    foreign = StoreClaim(id=ids.claim_id(), type="fact", title="Unrelated",
                          summary="Not in this session.", domain="technical",
                          confidence=0.9, status="confirmed")
-    store.insert_memory(foreign)
+    store.insert_claim(foreign)
 
     session = start_session(store, cfg, embedder, "FastAPI webhooks decision",
                             domain="technical", client="cli").session
-    assert supplied.id in session.supplied_memory_ids
+    assert supplied.id in session.supplied_claim_ids
 
-    updated = record_feedback(store, session.id, "useful", memory_id=supplied.id)
-    assert updated.feedback[0]["scope"] == "memory"
+    updated = record_feedback(store, session.id, "useful", claim_id=supplied.id)
+    assert updated.feedback[0]["scope"] == "claim"
     with pytest.raises(ValueError, match="not found"):
-        record_feedback(store, session.id, "useful", memory_id="mem_ghost")
+        record_feedback(store, session.id, "useful", claim_id="mem_ghost")
     with pytest.raises(ValueError, match="was not supplied"):
-        record_feedback(store, session.id, "useful", memory_id=foreign.id)
+        record_feedback(store, session.id, "useful", claim_id=foreign.id)
 
 
 def test_feedback_allowed_after_completion(store, cfg, embedder):

@@ -12,7 +12,7 @@
  twin consolidate daily|weekly scheduled consolidation cycle
  twin runtime start|status|enqueue|job|retry|cancel durable cognitive runtime
  (live processing panel on start; session_domain_resolve / session_complete)
- twin promote <memory_id> propose promoting into Stance
+ twin promote <claim_id> propose promoting into Stance
  twin supersede <new_id> <old_id> new memory replaces the old one
  twin contradict <id_a> <id_b> flag two memories as contradictory
  twin stats memory + product quality metrics
@@ -323,7 +323,7 @@ def main(argv: list[str] | None = None) -> None:
     preidx.set_defaults(func=cmd_reindex)
 
     p = sub.add_parser("promote", help="propose promoting a memory into judgment")
-    p.add_argument("memory_id")
+    p.add_argument("claim_id")
     _add_json_flag(p)
     p.set_defaults(func=cmd_promote)
 
@@ -551,7 +551,7 @@ def main(argv: list[str] | None = None) -> None:
     ps.add_argument("--memory", default=None,
                     help="a memory this session supplied or created")
     ps.add_argument("--note", default=None)
-    ps.add_argument("--scope", default=None, choices=["session", "pack", "memory"])
+    ps.add_argument("--scope", default=None, choices=["session", "pack", "claim"])
     ps.set_defaults(func=cmd_session_feedback)
 
     ps = session_sub.add_parser("cleanup", help="abandon stale active sessions")
@@ -848,14 +848,14 @@ def main(argv: list[str] | None = None) -> None:
     pnm.add_argument("ids", nargs="+")
     pnm.set_defaults(func=cmd_narrative)
     pnsp = pns.add_parser("split")
-    pnsp.add_argument("memory_id")
+    pnsp.add_argument("claim_id")
     pnsp.add_argument("parts", nargs="+")
     pnsp.set_defaults(func=cmd_narrative)
     pnpv = pns.add_parser("provenance")
-    pnpv.add_argument("memory_id")
+    pnpv.add_argument("claim_id")
     pnpv.set_defaults(func=cmd_narrative)
     pna = pns.add_parser("archive")
-    pna.add_argument("memory_id")
+    pna.add_argument("claim_id")
     pna.set_defaults(func=cmd_narrative)
     pns.add_parser("unsupported").set_defaults(func=cmd_narrative, narrative_command="unsupported")
     pnu = pns.add_parser("undo")

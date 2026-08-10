@@ -8,7 +8,7 @@ from twin.cognize.commit import (
     preview_commit_token,
     resynthesize_narrative,
 )
-from twin.cognize.migrate import backfill_from_memories, memory_to_provisional
+from twin.cognize.migrate import backfill_from_memories, claim_to_provisional
 from twin.cognize.models import (
     EpistemicStatus,
     Interpretation,
@@ -29,7 +29,7 @@ from twin.cognize.orchestrator import (
     set_cognize_stage_override,
 )
 from twin.interfaces.commands import cognize_cmd
-from twin.store.models import MemoryItem, MemoryStatus, MemoryType, Sensitivity
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType, Sensitivity
 from twin.sense.sensory.percept import Percept
 from twin import ids
 
@@ -212,36 +212,36 @@ def test_preview_token_and_resynthesize(store):
 
 
 def test_needs_review_never_narrative():
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         title="maybe",
         summary="needs eyes",
         domain="technical",
         persona="developer",
         sensitivity=Sensitivity.internal,
         confidence=0.5,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
         needs_review=True,
     )
-    kind, obj = memory_to_provisional(mem)
+    kind, obj = claim_to_provisional(mem)
     assert kind == "interpretation"
 
 
 def test_backfill_idempotent_and_skips_needs_review(store):
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         title="review me",
         summary="candidate path",
         domain="technical",
         persona="developer",
         sensitivity=Sensitivity.internal,
         confidence=0.4,
-        status=MemoryStatus.candidate,
+        status=ClaimStatus.candidate,
         needs_review=True,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     s1 = backfill_from_memories(store, vault_id="default", dry_run=False)
     assert s1["interpretations"] >= 1
     assert s1["narratives"] == 0

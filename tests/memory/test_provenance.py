@@ -2,11 +2,11 @@
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.models import Artifact, Evidence, MemoryItem, MemoryStatus
+from twin.store.models import Artifact, Evidence, StoreClaim, ClaimStatus
 from twin.store.provenance import (
     ensure_artifact_from_percept,
-    memory_provenance,
-    memory_source_summary,
+    claim_provenance,
+    claim_source_summary,
 )
 from twin.store.retention import delete_artifact
 from twin.sense.sensory.percept import Percept
@@ -14,15 +14,15 @@ from twin.sense.sensory.percept import Percept
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="fact", title="t", summary="s",
+        id=ids.claim_id(), type="fact", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         entities=["Twin"],
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -41,15 +41,15 @@ def test_artifact_provenance_and_deletion(store, embedder):
     mem = _mem(store, embedder, title="Postgres", summary="Primary store is PostgreSQL.",
                status="confirmed")
     store.insert_evidence(Evidence(
-        id=ids.evidence_id(), memory_id=mem.id, percept_id=p.id,
+        id=ids.evidence_id(), claim_id=mem.id, percept_id=p.id,
         quote="switch primary store to postgres", artifact_id=art_id,
     ))
-    prov = memory_provenance(store, mem.id)
+    prov = claim_provenance(store, mem.id)
     assert prov["artifacts"]
     plan = delete_artifact(store, art_id, dry_run=False)
     assert mem.id in plan["memories_unsupported"] or mem.id in plan["memories_recalculated"]
-    reloaded = store.get_memory(mem.id)
-    assert reloaded.status in (MemoryStatus.unsupported, MemoryStatus.confirmed)
+    reloaded = store.get_claim(mem.id)
+    assert reloaded.status in (ClaimStatus.unsupported, ClaimStatus.confirmed)
 
 
 def test_delete_artifact_does_not_cascade_by_hash(store, embedder):
@@ -75,18 +75,18 @@ def test_delete_artifact_does_not_cascade_by_hash(store, embedder):
     m1 = _mem(store, embedder, title="from git", summary="README decision from git.")
     m2 = _mem(store, embedder, title="from local", summary="README decision from local copy.")
     store.insert_evidence(Evidence(
-        id=ids.evidence_id(), memory_id=m1.id, percept_id=p1.id,
+        id=ids.evidence_id(), claim_id=m1.id, percept_id=p1.id,
         quote="README", artifact_id=art1.id,
     ))
     store.insert_evidence(Evidence(
-        id=ids.evidence_id(), memory_id=m2.id, percept_id=p2.id,
+        id=ids.evidence_id(), claim_id=m2.id, percept_id=p2.id,
         quote="README", artifact_id=art2.id,
     ))
 
     plan = delete_artifact(store, art1.id, dry_run=False)
     assert p2.id not in plan["percepts"]
     assert "[content destroyed]" not in store.get_percept(p2.id).content
-    assert store.get_memory(m2.id).status == MemoryStatus.confirmed
+    assert store.get_claim(m2.id).status == ClaimStatus.confirmed
 
 
 def test_source_summary_hides_duplicate_episode_reflect(store, embedder):
@@ -121,9 +121,9 @@ def test_source_summary_hides_duplicate_episode_reflect(store, embedder):
     mem = _mem(store, embedder, title="AgentDocsSync", summary="deferred roadmap item")
     for p, quote in ((gh, "PR"), (r1, "reflect a"), (r2, "reflect b")):
         store.insert_evidence(Evidence(
-            id=ids.evidence_id(), memory_id=mem.id, percept_id=p.id, quote=quote,
+            id=ids.evidence_id(), claim_id=mem.id, percept_id=p.id, quote=quote,
         ))
-    summary = memory_source_summary(store, mem.id)
+    summary = claim_source_summary(store, mem.id)
     labels = [r["label"] for r in summary["refs"]]
     assert labels == ["GitHub · pull request · caribeedu/dogwalker#3"]
     assert "episode_reflect" not in " ".join(labels).lower()

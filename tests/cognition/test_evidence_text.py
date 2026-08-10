@@ -3,7 +3,7 @@
 from twin.clock import now_iso
 from twin.cognize.services.evidence_text import fold_summary_line, sanitize_evidence_quote
 from twin.store.formation import propose_or_corroborate
-from twin.store.models import MemoryItem, MemoryType
+from twin.store.models import StoreClaim, ClaimType
 from twin.sense.sensory.percept import Percept
 
 
@@ -45,9 +45,9 @@ def test_propose_stores_sanitized_evidence_quote(store):
     )
     p.seal()
     store.insert_percept(p)
-    mem = MemoryItem(
+    mem = StoreClaim(
         id="mem_pineapple",
-        type=MemoryType.preference,
+        type=ClaimType.preference,
         title="Pineapple Juice Preference",
         summary="The user likes pineapple juice.",
         domain="personal",

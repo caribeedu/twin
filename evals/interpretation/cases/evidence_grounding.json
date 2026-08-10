@@ -39,7 +39,7 @@
   "expected": {
     "status": "interpreted",
     "catalogued": 1,
-    "memories": [
+    "claims": [
       {"title_contains": "tabs", "evidence_grounded": true}
     ],
     "must_not_catalogue": ["deploy every Friday", "Kubernetes", "Invented", "Empty-span"]

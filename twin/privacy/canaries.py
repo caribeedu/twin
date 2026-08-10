@@ -22,7 +22,7 @@ def place_canary(
         id=ids.new_id("canary"),
         token=token,
         vault_id=vault_id,
-        placed_in=placed_in or ["memory"],
+        placed_in=placed_in or ["claim"],
         created_at=now_iso(),
         active=True,
     )

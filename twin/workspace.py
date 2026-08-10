@@ -51,9 +51,9 @@ class Workspace:
         """Regenerate every memory embedding with the current embedder
         (run after switching TWIN_EMBEDDER / embedding model)."""
         count = 0
-        for mem in self.store.list_memories(limit=1_000_000):
+        for mem in self.store.list_claims(limit=1_000_000):
             vector = self.embedder.embed(f"{mem.title}\n{mem.summary}")
-            self.store.store_embedding(mem.id, "memory", self.embedder.name, vector)
+            self.store.store_embedding(mem.id, "claim", self.embedder.name, vector)
             count += 1
         return count
 

@@ -11,7 +11,7 @@ from twin.cognize.services.observer import (
     resolve_context_domain,
 )
 from twin.cognize.services.sessions import ensure_project
-from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType
 
 
 def test_ambiguous_personal_text_stays_unclassified_without_llm(store, cfg):
@@ -142,14 +142,14 @@ def test_deep_read_rejects_unknown_labels(store, cfg):
 
 
 def _mem(store, embedder, *, title, summary, domain="technical"):
-    mem = MemoryItem(
-        id=ids.memory_id(), type=MemoryType.decision, domain=domain,
-        title=title, summary=summary, status=MemoryStatus.confirmed,
+    mem = StoreClaim(
+        id=ids.claim_id(), type=ClaimType.decision, domain=domain,
+        title=title, summary=summary, status=ClaimStatus.confirmed,
         confidence=0.9,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name, embedder.embed(f"{title}\n{summary}"),
+        mem.id, "claim", embedder.name, embedder.embed(f"{title}\n{summary}"),
     )
     return mem
 

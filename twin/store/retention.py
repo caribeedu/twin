@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..clock import now_iso
-from .models import MemoryStatus
+from .models import ClaimStatus
 from .store.base import MemoryStore
 
 
@@ -56,7 +56,7 @@ def delete_artifact(
         evidence_rows = store.list_evidence_by_percept_ids(percept_ids)  # type: ignore[attr-defined]
     else:
         evidence_rows = []
-        for mid_mem in store.list_memories(limit=1_000_000):
+        for mid_mem in store.list_claims(limit=1_000_000):
             for ev in store.get_evidence(mid_mem.id):
                 if ev.percept_id in percept_ids or ev.artifact_id == artifact_id:
                     evidence_rows.append(ev)
@@ -69,7 +69,7 @@ def delete_artifact(
             continue
         if ev.artifact_id == artifact_id or ev.percept_id in percept_ids:
             plan["evidence"].append(ev.id)
-            affected_memories.setdefault(ev.memory_id, []).append(ev.id)
+            affected_memories.setdefault(ev.claim_id, []).append(ev.id)
 
     for mid, ev_ids in affected_memories.items():
         all_ev = store.get_evidence(mid)
@@ -122,14 +122,14 @@ def delete_artifact(
                 for eid in ev_ids:
                     store.tombstone_evidence(eid, reason=reason)  # type: ignore[attr-defined]
                     plan["writes"] += 1
-            mem = store.get_memory(mid)
+            mem = store.get_claim(mid)
             if mem is None:
                 continue
             remaining = [e for e in store.get_evidence(mid) if e.id not in set(ev_ids)]
             if mid in plan["memories_unsupported"] or not remaining:
-                store.update_memory(
+                store.update_claim(
                     mid,
-                    status=MemoryStatus.unsupported.value,
+                    status=ClaimStatus.unsupported.value,
                     needs_review=True,
                     review_reason="all supporting evidence removed",
                     confidence=0.0,
@@ -140,7 +140,7 @@ def delete_artifact(
             else:
                 groups = {e.independence_group or e.percept_id for e in remaining if e.supports}
                 new_conf = min(0.95, 0.5 + 0.1 * len(groups))
-                store.update_memory(mid, confidence=round(new_conf, 3))
+                store.update_claim(mid, confidence=round(new_conf, 3))
                 plan["writes"] += 1
 
     return plan
@@ -167,10 +167,10 @@ def delete_by_source_system(
     }
 
 
-def mark_stale(store: MemoryStore, memory_id: str, reason: str = "stale") -> None:
-    store.update_memory(
-        memory_id,
-        status=MemoryStatus.stale.value,
+def mark_stale(store: MemoryStore, claim_id: str, reason: str = "stale") -> None:
+    store.update_claim(
+        claim_id,
+        status=ClaimStatus.stale.value,
         needs_review=True,
         review_reason=reason,
     )
@@ -186,8 +186,8 @@ def apply_retention_policies(
     from datetime import datetime, timezone
     actions: list[dict[str, Any]] = []
     now = datetime.now(timezone.utc)
-    for mem in store.list_memories(limit=1_000_000):
-        if mem.status.value == MemoryStatus.unsupported.value:
+    for mem in store.list_claims(limit=1_000_000):
+        if mem.status.value == ClaimStatus.unsupported.value:
             actions.append({"id": mem.id, "action": "archive", "reason": "unsupported"})
         elif (
             archive_completed_tasks

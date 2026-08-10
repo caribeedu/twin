@@ -18,7 +18,7 @@ from twin.sense.connectors.models import (
     SourceAccount,
     idempotency_key,
 )
-from twin.store.models import MemoryStatus, MemoryType
+from twin.store.models import ClaimStatus, ClaimType
 
 
 @pytest.fixture(autouse=True)
@@ -96,12 +96,12 @@ def test_pattern_reflect_creates_preference_candidate(store, cfg, embedder):
         time_from="2026-07-01T00:00:00Z", time_until="2026-07-31T23:59:59Z",
     )
     assert res.claims, res.skipped_reason
-    mem = store.get_memory(res.claims[0]["memory_id"])
+    mem = store.get_claim(res.claims[0]["claim_id"])
     assert mem is not None
-    assert mem.status == MemoryStatus.candidate
+    assert mem.status == ClaimStatus.candidate
     assert mem.needs_review is True
     assert mem.review_reason == "pattern_reflect"
-    assert mem.type == MemoryType.preference
+    assert mem.type == ClaimType.preference
     assert mem.payload.get("source") == "pattern_reflect"
     assert mem.payload.get("pattern") is True
 
@@ -140,11 +140,11 @@ def test_pattern_reflect_is_idempotent(store, cfg, embedder):
         store, cfg, embedder, vault_id=acc.vault_id,
         time_from="2026-07-01T00:00:00Z", time_until="2026-07-31T23:59:59Z",
     )
-    ids_first = {c["memory_id"] for c in first.claims}
+    ids_first = {c["claim_id"] for c in first.claims}
     second = pattern_reflect(
         store, cfg, embedder, vault_id=acc.vault_id,
         time_from="2026-07-01T00:00:00Z", time_until="2026-07-31T23:59:59Z",
     )
     for c in second.claims:
-        assert c["memory_id"] in ids_first
+        assert c["claim_id"] in ids_first
         assert c["created"] is False

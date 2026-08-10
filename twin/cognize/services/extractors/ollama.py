@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from twin.sense.sensory.percept import Percept
-from ..schema import EXTRACTION_JSON_SCHEMA, ExtractedMemory, ExtractionResult
+from ..schema import EXTRACTION_JSON_SCHEMA, ExtractedClaim, ExtractionResult
 
 SYSTEM_PROMPT = """\
 You are a memory-extraction engine for a personal cognitive system. You read a
@@ -68,8 +68,7 @@ def extract(percept: Percept, text: str, base_url: str = "http://127.0.0.1:11434
     resp.raise_for_status()
     content = resp.json()["message"]["content"]
     data = json.loads(content)
-    memories = [ExtractedMemory(**m).normalized() for m in data.get("memories", [])]
-    return ExtractionResult(memories=memories, extractor=f"ollama:{model}")
+    return ExtractionResult.from_llm_payload(data, extractor=f"ollama:{model}")
 
 
 def available(base_url: str) -> bool:

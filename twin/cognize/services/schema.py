@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from twin.config import ALL_DOMAINS
 
-MEMORY_TYPES = [
+CLAIM_TYPES = [
     "event", "fact", "decision", "preference", "belief",
     "task", "procedure", "relationship", "communication_act", "constraint",
 ]
@@ -21,7 +21,7 @@ class ExtractedRelation(BaseModel):
     object: str
 
 
-class ExtractedMemory(BaseModel):
+class ExtractedClaim(BaseModel):
     type: str
     title: str
     summary: str
@@ -34,8 +34,8 @@ class ExtractedMemory(BaseModel):
     evidence_quote: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
 
-    def normalized(self) -> "ExtractedMemory":
-        if self.type not in MEMORY_TYPES:
+    def normalized(self) -> "ExtractedClaim":
+        if self.type not in CLAIM_TYPES:
             self.type = "fact"
         # Preserve the explicit governance remap 'unknown'; other invalids
         # still fall back to technical for legacy extractor paths.
@@ -48,20 +48,27 @@ class ExtractedMemory(BaseModel):
 
 
 class ExtractionResult(BaseModel):
-    memories: list[ExtractedMemory] = Field(default_factory=list)
+    claims: list[ExtractedClaim] = Field(default_factory=list)
     extractor: str = "unknown"
 
+    @classmethod
+    def from_llm_payload(cls, data: dict, extractor: str = "unknown") -> "ExtractionResult":
+        raw = data.get("claims") or []
+        return cls(
+            claims=[ExtractedClaim(**m).normalized() for m in raw],
+            extractor=extractor,
+        )
 
 # JSON schema handed to the LLM via structured outputs.
 EXTRACTION_JSON_SCHEMA: dict = {
     "type": "object",
     "properties": {
-        "memories": {
+        "claims": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": MEMORY_TYPES},
+                    "type": {"type": "string", "enum": CLAIM_TYPES},
                     "title": {"type": "string"},
                     "summary": {"type": "string"},
                     "domain": {"type": "string", "enum": ALL_DOMAINS},
@@ -92,6 +99,6 @@ EXTRACTION_JSON_SCHEMA: dict = {
             },
         }
     },
-    "required": ["memories"],
+    "required": ["claims"],
     "additionalProperties": False,
 }

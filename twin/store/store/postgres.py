@@ -19,8 +19,8 @@ from twin.sense.sensory.percept import Percept
 from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import (
-    Artifact, CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem,
-    MemoryOperation, PerceptInterpretation, Project, Relation, ReviewBatch,
+    Artifact, CognitiveSession, DetectionSignal, Entity, Evidence, StoreClaim,
+    ClaimOperation, PerceptInterpretation, Project, Relation, ReviewBatch,
     ReviewFinding,
 )
 from .base import MemoryStore, now_iso
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS detection_signals (
     metadata JSONB NOT NULL DEFAULT '{}'
 );
 
-CREATE TABLE IF NOT EXISTS memories (
+CREATE TABLE IF NOT EXISTS store_claims (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -119,19 +119,19 @@ CREATE TABLE IF NOT EXISTS memories (
     project_id TEXT,
     fts tsvector GENERATED ALWAYS AS (to_tsvector('simple', title || ' ' || summary)) STORED
 );
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS project_id TEXT;
-CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories(domain);
-CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
-CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
-CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories USING GIN(fts);
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS project_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_store_claims_domain ON store_claims(domain);
+CREATE INDEX IF NOT EXISTS idx_store_claims_status ON store_claims(status);
+CREATE INDEX IF NOT EXISTS idx_store_claims_type ON store_claims(type);
+CREATE INDEX IF NOT EXISTS idx_store_claims_fts ON store_claims USING GIN(fts);
 
 CREATE TABLE IF NOT EXISTS evidence (
     id TEXT PRIMARY KEY,
-    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    claim_id TEXT NOT NULL REFERENCES store_claims(id) ON DELETE CASCADE,
     percept_id TEXT NOT NULL REFERENCES percepts(id),
     quote TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_evidence_memory ON evidence(memory_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_memory ON evidence(claim_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_percept ON evidence(percept_id);
 
 CREATE TABLE IF NOT EXISTS entities (
@@ -142,10 +142,10 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name ON entities(LOWER(name));
 
-CREATE TABLE IF NOT EXISTS memory_entities (
-    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS claim_entities (
+    claim_id TEXT NOT NULL REFERENCES store_claims(id) ON DELETE CASCADE,
     entity_id TEXT NOT NULL REFERENCES entities(id),
-    PRIMARY KEY (memory_id, entity_id)
+    PRIMARY KEY (claim_id, entity_id)
 );
 
 CREATE TABLE IF NOT EXISTS relations (
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS relations (
     subject_id TEXT NOT NULL,
     predicate TEXT NOT NULL,
     object_id TEXT NOT NULL,
-    memory_id TEXT,
+    claim_id TEXT,
     valid_from TEXT,
     valid_until TEXT,
     created_at TEXT NOT NULL
@@ -186,9 +186,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     status TEXT NOT NULL DEFAULT 'active',
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    supplied_memory_ids JSONB NOT NULL DEFAULT '[]',
+    supplied_claim_ids JSONB NOT NULL DEFAULT '[]',
     pack_chars INTEGER NOT NULL DEFAULT 0,
-    created_memory_ids JSONB NOT NULL DEFAULT '[]'
+    created_claim_ids JSONB NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS session_feedback (
     session_id TEXT NOT NULL,
     scope TEXT NOT NULL DEFAULT 'session',
     verdict TEXT NOT NULL,
-    memory_id TEXT,
+    claim_id TEXT,
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
@@ -223,7 +223,7 @@ CREATE INDEX IF NOT EXISTS idx_session_feedback ON session_feedback(session_id);
 
 CREATE TABLE IF NOT EXISTS firewall_log (
     id BIGSERIAL PRIMARY KEY,
-    memory_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
     target_domain TEXT NOT NULL,
     rule TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -231,19 +231,19 @@ CREATE TABLE IF NOT EXISTS firewall_log (
 );
 
 -- v0.3 quality / provenance / review
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS review_priority REAL NOT NULL DEFAULT 0;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS quality_score REAL NOT NULL DEFAULT 0;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]';
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS impact TEXT NOT NULL DEFAULT 'medium';
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS review_batch_id TEXT;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS canonical_claim JSONB NOT NULL DEFAULT '{}';
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS extractor_version JSONB NOT NULL DEFAULT '{}';
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_reconciled_at TEXT;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS retrieval_count INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS last_retrieved_at TEXT;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS deleted_at TEXT;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS review_priority REAL NOT NULL DEFAULT 0;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS quality_score REAL NOT NULL DEFAULT 0;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS quality_flags JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS impact TEXT NOT NULL DEFAULT 'medium';
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS review_batch_id TEXT;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS canonical_claim JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS extractor_version JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS last_reconciled_at TEXT;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS retrieval_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS last_retrieved_at TEXT;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS deleted_at TEXT;
+ALTER TABLE store_claims ADD COLUMN IF NOT EXISTS deletion_reason TEXT;
 
 ALTER TABLE evidence ADD COLUMN IF NOT EXISTS evidence_type TEXT NOT NULL DEFAULT 'verbatim';
 ALTER TABLE evidence ADD COLUMN IF NOT EXISTS directness REAL NOT NULL DEFAULT 1.0;
@@ -277,9 +277,9 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_system ON artifacts(source_system);
 
 CREATE TABLE IF NOT EXISTS review_findings (
     id TEXT PRIMARY KEY,
-    memory_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
     type TEXT NOT NULL,
-    related_memory_id TEXT,
+    related_claim_id TEXT,
     confidence REAL NOT NULL DEFAULT 0.5,
     reason TEXT NOT NULL DEFAULT '',
     suggested_action TEXT NOT NULL DEFAULT 'none',
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS review_findings (
     analyzer_version TEXT NOT NULL DEFAULT 'quality-v1',
     resolution_operation_id TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(memory_id);
+CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(claim_id);
 ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';
 ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS analyzer_version TEXT NOT NULL DEFAULT 'quality-v1';
 ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS resolution_operation_id TEXT;
@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS review_batches (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     query JSONB NOT NULL DEFAULT '{}',
-    memory_ids JSONB NOT NULL DEFAULT '[]',
+    claim_ids JSONB NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     completed_at TEXT,
     progress_total INTEGER NOT NULL DEFAULT 0,
@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS review_batches (
     metadata JSONB NOT NULL DEFAULT '{}'
 );
 
-CREATE TABLE IF NOT EXISTS memory_operations (
+CREATE TABLE IF NOT EXISTS claim_operations (
     id TEXT PRIMARY KEY,
     operation TEXT NOT NULL,
     actor TEXT NOT NULL DEFAULT 'user',
@@ -373,8 +373,8 @@ CREATE TABLE IF NOT EXISTS judgment_proposals (
     expected_revision_id TEXT,
     proposed_item JSONB NOT NULL DEFAULT '{}',
     reason TEXT NOT NULL DEFAULT '',
-    supporting_memory_ids JSONB NOT NULL DEFAULT '[]',
-    contradicting_memory_ids JSONB NOT NULL DEFAULT '[]',
+    supporting_claim_ids JSONB NOT NULL DEFAULT '[]',
+    contradicting_claim_ids JSONB NOT NULL DEFAULT '[]',
     support_count INTEGER NOT NULL DEFAULT 0,
     contradiction_count INTEGER NOT NULL DEFAULT 0,
     confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
@@ -422,7 +422,7 @@ CREATE TABLE IF NOT EXISTS judgment_snapshots (
 CREATE TABLE IF NOT EXISTS judgment_conflicts (
     id TEXT PRIMARY KEY,
     judgment_id TEXT NOT NULL,
-    memory_ids JSONB NOT NULL DEFAULT '[]',
+    claim_ids JSONB NOT NULL DEFAULT '[]',
     other_judgment_id TEXT,
     type TEXT NOT NULL,
     confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
@@ -718,6 +718,208 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
 
 
+_POSTGRES_MIGRATE_V26 = (
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'memories'
+      ) AND EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'store_claims'
+      ) THEN
+        IF (SELECT COUNT(*) FROM store_claims) = 0
+           AND (SELECT COUNT(*) FROM memories) > 0 THEN
+          DROP TABLE store_claims;
+        ELSIF (SELECT COUNT(*) FROM memories) = 0 THEN
+          DROP TABLE memories;
+        END IF;
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'memories'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'store_claims'
+      ) THEN
+        ALTER TABLE memories RENAME TO store_claims;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'memory_entities'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'claim_entities'
+      ) THEN
+        ALTER TABLE memory_entities RENAME TO claim_entities;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'memory_operations'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'claim_operations'
+      ) THEN
+        ALTER TABLE memory_operations RENAME TO claim_operations;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'evidence' AND column_name = 'memory_id'
+      ) THEN
+        ALTER TABLE evidence RENAME COLUMN memory_id TO claim_id;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'relations' AND column_name = 'memory_id'
+      ) THEN
+        ALTER TABLE relations RENAME COLUMN memory_id TO claim_id;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'review_findings' AND column_name = 'memory_id'
+      ) THEN
+        ALTER TABLE review_findings RENAME COLUMN memory_id TO claim_id;
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'review_findings' AND column_name = 'related_memory_id'
+      ) THEN
+        ALTER TABLE review_findings RENAME COLUMN related_memory_id TO related_claim_id;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'review_batches' AND column_name = 'memory_ids'
+      ) THEN
+        ALTER TABLE review_batches RENAME COLUMN memory_ids TO claim_ids;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'sessions' AND column_name = 'supplied_memory_ids'
+      ) THEN
+        ALTER TABLE sessions RENAME COLUMN supplied_memory_ids TO supplied_claim_ids;
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'sessions' AND column_name = 'created_memory_ids'
+      ) THEN
+        ALTER TABLE sessions RENAME COLUMN created_memory_ids TO created_claim_ids;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'session_feedback' AND column_name = 'memory_id'
+      ) THEN
+        ALTER TABLE session_feedback RENAME COLUMN memory_id TO claim_id;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'firewall_log' AND column_name = 'memory_id'
+      ) THEN
+        ALTER TABLE firewall_log RENAME COLUMN memory_id TO claim_id;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'judgment_proposals'
+          AND column_name = 'supporting_memory_ids'
+      ) THEN
+        ALTER TABLE judgment_proposals
+          RENAME COLUMN supporting_memory_ids TO supporting_claim_ids;
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'judgment_proposals'
+          AND column_name = 'contradicting_memory_ids'
+      ) THEN
+        ALTER TABLE judgment_proposals
+          RENAME COLUMN contradicting_memory_ids TO contradicting_claim_ids;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'judgment_conflicts' AND column_name = 'memory_ids'
+      ) THEN
+        ALTER TABLE judgment_conflicts RENAME COLUMN memory_ids TO claim_ids;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'claim_entities' AND column_name = 'memory_id'
+      ) THEN
+        ALTER TABLE claim_entities RENAME COLUMN memory_id TO claim_id;
+      END IF;
+    END $$;
+    """,
+    """
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'embeddings'
+      ) THEN
+        UPDATE embeddings SET ref_type = 'claim' WHERE ref_type = 'memory';
+      END IF;
+    END $$;
+    """,
+)
+
+
 class PostgresStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
     CognizeStoreMixin,
@@ -740,6 +942,14 @@ class PostgresStore(
                 self.has_pgvector = True
             except psycopg.Error:
                 self.has_pgvector = False
+            # Rename legacy dual-read names before CREATE TABLE store_claims /
+            # evidence(claim_id) so we do not leave an empty twin table beside
+            # populated memories, and so column renames apply to the live schema.
+            for stmt in _POSTGRES_MIGRATE_V26:
+                try:
+                    cur.execute(stmt)
+                except Exception:
+                    pass
             cur.execute(_SCHEMA_BASE)
             cur.execute(_CONNECTOR_SCHEMA)
             cur.execute(CORRELATION_SCHEMA)
@@ -770,6 +980,12 @@ class PostgresStore(
                 "task_profile TEXT NOT NULL DEFAULT ''",
                 "DROP INDEX IF EXISTS uq_hsb_host_ext",
             ):
+                try:
+                    cur.execute(stmt)
+                except Exception:
+                    pass
+            # Idempotent re-run after schema create (collision recovery / late columns).
+            for stmt in _POSTGRES_MIGRATE_V26:
                 try:
                     cur.execute(stmt)
                 except Exception:
@@ -991,12 +1207,12 @@ class PostgresStore(
 
     # -- memories ----------------------------------------------------------
 
-    def insert_memory(self, mem: MemoryItem) -> str:
+    def insert_claim(self, mem: StoreClaim) -> str:
         ts = now_iso()
         mem.created_at = mem.created_at or ts
         mem.updated_at = ts
         self._exec(
-            "INSERT INTO memories (id, type, title, summary, domain, persona,"
+            "INSERT INTO store_claims (id, type, title, summary, domain, persona,"
             " sensitivity, confidence, status, valid_from, valid_until,"
             " created_at, updated_at, payload, needs_review, review_reason,"
             " project_id)"
@@ -1012,24 +1228,24 @@ class PostgresStore(
         for name in mem.entities:
             ent = self.upsert_entity(name)
             self._exec(
-                "INSERT INTO memory_entities (memory_id, entity_id) VALUES (%s,%s)"
+                "INSERT INTO claim_entities (claim_id, entity_id) VALUES (%s,%s)"
                 " ON CONFLICT DO NOTHING",
                 (mem.id, ent.id),
             )
         return mem.id
 
-    def _row_to_memory(self, row: dict) -> MemoryItem:
+    def _row_to_memory(self, row: dict) -> StoreClaim:
         from ..models import CanonicalClaim, ExtractorVersion
         entities = [
             r["name"] for r in self._exec(
                 "SELECT e.name FROM entities e"
-                " JOIN memory_entities me ON me.entity_id = e.id"
-                " WHERE me.memory_id = %s", (row["id"],)
+                " JOIN claim_entities me ON me.entity_id = e.id"
+                " WHERE me.claim_id = %s", (row["id"],)
             )
         ]
         percept_ids = [
             r["percept_id"] for r in self._exec(
-                "SELECT DISTINCT percept_id FROM evidence WHERE memory_id = %s"
+                "SELECT DISTINCT percept_id FROM evidence WHERE claim_id = %s"
                 " AND deleted_at IS NULL", (row["id"],)
             )
         ]
@@ -1042,7 +1258,7 @@ class PostgresStore(
         flags = row.get("quality_flags") or []
         if isinstance(flags, str):
             flags = json.loads(flags)
-        return MemoryItem(
+        return StoreClaim(
             id=row["id"], type=row["type"], title=row["title"], summary=row["summary"],
             domain=row["domain"], persona=row["persona"], sensitivity=row["sensitivity"],
             confidence=row["confidence"], status=row["status"],
@@ -1066,11 +1282,11 @@ class PostgresStore(
             deletion_reason=row.get("deletion_reason"),
         )
 
-    def get_memory(self, memory_id: str) -> Optional[MemoryItem]:
-        rows = self._exec("SELECT * FROM memories WHERE id = %s", (memory_id,))
+    def get_claim(self, claim_id: str) -> Optional[StoreClaim]:
+        rows = self._exec("SELECT * FROM store_claims WHERE id = %s", (claim_id,))
         return self._row_to_memory(rows[0]) if rows else None
 
-    def list_memories(
+    def list_claims(
         self,
         status: Optional[str] = None,
         domain: Optional[str] = None,
@@ -1078,8 +1294,8 @@ class PostgresStore(
         needs_review: Optional[bool] = None,
         project_id: Optional[str] = None,
         limit: int = 200,
-    ) -> list[MemoryItem]:
-        query = "SELECT * FROM memories WHERE TRUE"
+    ) -> list[StoreClaim]:
+        query = "SELECT * FROM store_claims WHERE TRUE"
         params: list[Any] = []
         if project_id:
             query += " AND project_id = %s"
@@ -1100,7 +1316,7 @@ class PostgresStore(
         params.append(limit)
         return [self._row_to_memory(r) for r in self._exec(query, tuple(params))]
 
-    def update_memory(self, memory_id: str, **fields: Any) -> None:
+    def update_claim(self, claim_id: str, **fields: Any) -> None:
         allowed = {
             "type", "title", "summary", "domain", "persona", "sensitivity", "confidence",
             "status", "valid_from", "valid_until", "needs_review", "review_reason",
@@ -1119,21 +1335,21 @@ class PostgresStore(
                     val = val.model_dump()
                 updates[key] = json.dumps(val or ({} if key != "quality_flags" else []))
         sets = ", ".join(f"{k} = %s" for k in updates)
-        params = list(updates.values()) + [now_iso(), memory_id]
-        self._exec(f"UPDATE memories SET {sets}, updated_at = %s WHERE id = %s", tuple(params))
+        params = list(updates.values()) + [now_iso(), claim_id]
+        self._exec(f"UPDATE store_claims SET {sets}, updated_at = %s WHERE id = %s", tuple(params))
 
     # -- evidence ----------------------------------------------------------
 
     def insert_evidence(self, ev: Evidence) -> str:
         self._exec(
-            "INSERT INTO evidence (id, memory_id, percept_id, quote) VALUES (%s,%s,%s,%s)",
-            (ev.id, ev.memory_id, ev.percept_id, self.codec.encrypt(ev.quote)),
+            "INSERT INTO evidence (id, claim_id, percept_id, quote) VALUES (%s,%s,%s,%s)",
+            (ev.id, ev.claim_id, ev.percept_id, self.codec.encrypt(ev.quote)),
         )
         return ev.id
 
-    def get_evidence(self, memory_id: str) -> list[Evidence]:
-        rows = self._exec("SELECT id, memory_id, percept_id, quote FROM evidence"
-                          " WHERE memory_id = %s", (memory_id,))
+    def get_evidence(self, claim_id: str) -> list[Evidence]:
+        rows = self._exec("SELECT id, claim_id, percept_id, quote FROM evidence"
+                          " WHERE claim_id = %s", (claim_id,))
         return [Evidence(**{**r, "quote": self.codec.decrypt(r["quote"])}) for r in rows]
 
     # -- entities & relations ------------------------------------------------
@@ -1164,27 +1380,27 @@ class PostgresStore(
     def insert_relation(self, rel: Relation) -> str:
         rel.created_at = rel.created_at or now_iso()
         self._exec(
-            "INSERT INTO relations (id, subject_id, predicate, object_id, memory_id,"
+            "INSERT INTO relations (id, subject_id, predicate, object_id, claim_id,"
             " valid_from, valid_until, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 rel.id, rel.subject_id, rel.predicate, rel.object_id,
-                rel.memory_id, rel.valid_from, rel.valid_until, rel.created_at,
+                rel.claim_id, rel.valid_from, rel.valid_until, rel.created_at,
             ),
         )
         return rel.id
 
     def relations_for(self, node_id: str) -> list[Relation]:
         rows = self._exec(
-            "SELECT id, subject_id, predicate, object_id, memory_id, valid_from,"
+            "SELECT id, subject_id, predicate, object_id, claim_id, valid_from,"
             " valid_until, created_at FROM relations"
             " WHERE subject_id = %s OR object_id = %s",
             (node_id, node_id),
         )
         return [Relation(**r) for r in rows]
 
-    def memories_for_entity(self, entity_id: str) -> list[MemoryItem]:
+    def claims_for_entity(self, entity_id: str) -> list[StoreClaim]:
         rows = self._exec(
-            "SELECT m.* FROM memories m JOIN memory_entities me ON me.memory_id = m.id"
+            "SELECT m.* FROM store_claims m JOIN claim_entities me ON me.claim_id = m.id"
             " WHERE me.entity_id = %s ORDER BY m.created_at DESC",
             (entity_id,),
         )
@@ -1240,7 +1456,7 @@ class PostgresStore(
             return {}
         tsquery = " | ".join(terms)
         rows = self._exec(
-            "SELECT id, ts_rank(fts, q) AS score FROM memories,"
+            "SELECT id, ts_rank(fts, q) AS score FROM store_claims,"
             " to_tsquery('simple', %s) q WHERE fts @@ q"
             " ORDER BY score DESC LIMIT %s",
             (tsquery, limit),
@@ -1310,7 +1526,7 @@ class PostgresStore(
         self._exec(
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
             " initial_query, status, started_at, ended_at, last_activity_at,"
-            " supplied_memory_ids, pack_chars, created_memory_ids,"
+            " supplied_claim_ids, pack_chars, created_claim_ids,"
             " consolidation_status, consolidation_error, summary_percept_id,"
             " judgment_snapshot_id)"
             " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1319,8 +1535,8 @@ class PostgresStore(
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
                 session.started_at, session.ended_at, session.last_activity_at,
-                json.dumps(session.supplied_memory_ids), session.pack_chars,
-                json.dumps(session.created_memory_ids),
+                json.dumps(session.supplied_claim_ids), session.pack_chars,
+                json.dumps(session.created_claim_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
                 session.judgment_snapshot_id,
@@ -1332,8 +1548,8 @@ class PostgresStore(
         self._exec(
             "UPDATE sessions SET client = %s, project_id = %s, domain = %s,"
             " task_profile = %s, initial_query = %s, status = %s, ended_at = %s,"
-            " last_activity_at = %s, supplied_memory_ids = %s, pack_chars = %s,"
-            " created_memory_ids = %s, consolidation_status = %s,"
+            " last_activity_at = %s, supplied_claim_ids = %s, pack_chars = %s,"
+            " created_claim_ids = %s, consolidation_status = %s,"
             " consolidation_error = %s, summary_percept_id = %s,"
             " judgment_snapshot_id = %s WHERE id = %s",
             (
@@ -1341,8 +1557,8 @@ class PostgresStore(
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
                 session.ended_at, session.last_activity_at or now_iso(),
-                json.dumps(session.supplied_memory_ids), session.pack_chars,
-                json.dumps(session.created_memory_ids),
+                json.dumps(session.supplied_claim_ids), session.pack_chars,
+                json.dumps(session.created_claim_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
                 session.judgment_snapshot_id,
@@ -1380,10 +1596,10 @@ class PostgresStore(
             if cur.rowcount == 0:
                 raise ValueError(f"session {session_id} not found")
             cur.execute(
-                "INSERT INTO session_feedback (session_id, scope, verdict, memory_id,"
+                "INSERT INTO session_feedback (session_id, scope, verdict, claim_id,"
                 " note, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
                 (session_id, feedback.get("scope", "session"), feedback["verdict"],
-                 feedback.get("memory_id"), feedback.get("note", ""),
+                 feedback.get("claim_id"), feedback.get("note", ""),
                  feedback.get("at") or now_iso()),
             )
 
@@ -1410,11 +1626,11 @@ class PostgresStore(
 
     def _session_feedback(self, session_id: str) -> list[dict]:
         rows = self._exec(
-            "SELECT scope, verdict, memory_id, note, created_at FROM session_feedback"
+            "SELECT scope, verdict, claim_id, note, created_at FROM session_feedback"
             " WHERE session_id = %s ORDER BY id", (session_id,)
         )
         return [
-            {"scope": r["scope"], "verdict": r["verdict"], "memory_id": r["memory_id"],
+            {"scope": r["scope"], "verdict": r["verdict"], "claim_id": r["claim_id"],
              "note": r["note"], "at": r["created_at"]}
             for r in rows
         ]
@@ -1426,9 +1642,9 @@ class PostgresStore(
             initial_query=row["initial_query"], status=row["status"],
             started_at=row["started_at"], ended_at=row["ended_at"],
             last_activity_at=row["last_activity_at"],
-            supplied_memory_ids=row["supplied_memory_ids"], pack_chars=row["pack_chars"],
+            supplied_claim_ids=row["supplied_claim_ids"], pack_chars=row["pack_chars"],
             artifacts=self._session_artifacts(row["id"]),
-            created_memory_ids=row["created_memory_ids"],
+            created_claim_ids=row["created_claim_ids"],
             feedback=self._session_feedback(row["id"]),
             consolidation_status=row["consolidation_status"],
             consolidation_error=row["consolidation_error"],
@@ -1467,11 +1683,11 @@ class PostgresStore(
 
     # -- firewall log ----------------------------------------------------------------
 
-    def log_firewall(self, memory_id: str, target_domain: str, rule: str, action: str) -> None:
+    def log_firewall(self, claim_id: str, target_domain: str, rule: str, action: str) -> None:
         self._exec(
-            "INSERT INTO firewall_log (memory_id, target_domain, rule, action, created_at)"
+            "INSERT INTO firewall_log (claim_id, target_domain, rule, action, created_at)"
             " VALUES (%s,%s,%s,%s,%s)",
-            (memory_id, target_domain, rule, action, now_iso()),
+            (claim_id, target_domain, rule, action, now_iso()),
         )
 
     # -- artifacts / findings / batches / operations -------------------------
@@ -1563,8 +1779,8 @@ class PostgresStore(
             out.append(Evidence(**{k: v for k, v in r.items() if k in Evidence.model_fields}))
         return out
 
-    def replace_findings(self, memory_id: str, findings: list[ReviewFinding]) -> None:
-        self._exec("DELETE FROM review_findings WHERE memory_id = %s", (memory_id,))
+    def replace_findings(self, claim_id: str, findings: list[ReviewFinding]) -> None:
+        self._exec("DELETE FROM review_findings WHERE claim_id = %s", (claim_id,))
         for f in findings:
             self.insert_finding(f)
 
@@ -1573,12 +1789,12 @@ class PostgresStore(
         status = getattr(finding.status, "value", finding.status) or "open"
         resolved = bool(finding.resolved or status != "open")
         self._exec(
-            "INSERT INTO review_findings (id, memory_id, type, related_memory_id,"
+            "INSERT INTO review_findings (id, claim_id, type, related_claim_id,"
             " confidence, reason, suggested_action, requires_human_review, resolved,"
             " created_at, resolved_at, metadata, status, analyzer_version,"
             " resolution_operation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
-                finding.id, finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.id, finding.claim_id, finding.type.value, finding.related_claim_id,
                 finding.confidence, finding.reason, finding.suggested_action.value,
                 finding.requires_human_review, resolved,
                 finding.created_at, finding.resolved_at, json.dumps(finding.metadata),
@@ -1591,12 +1807,12 @@ class PostgresStore(
         status = getattr(finding.status, "value", finding.status) or "open"
         resolved = bool(finding.resolved or status != "open")
         self._exec(
-            "UPDATE review_findings SET memory_id = %s, type = %s, related_memory_id = %s,"
+            "UPDATE review_findings SET claim_id = %s, type = %s, related_claim_id = %s,"
             " confidence = %s, reason = %s, suggested_action = %s, requires_human_review = %s,"
             " resolved = %s, resolved_at = %s, metadata = %s, status = %s, analyzer_version = %s,"
             " resolution_operation_id = %s WHERE id = %s",
             (
-                finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.claim_id, finding.type.value, finding.related_claim_id,
                 finding.confidence, finding.reason, finding.suggested_action.value,
                 finding.requires_human_review, resolved, finding.resolved_at,
                 json.dumps(finding.metadata), status, finding.analyzer_version,
@@ -1604,11 +1820,11 @@ class PostgresStore(
             ),
         )
 
-    def get_findings(self, memory_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
-        q = "SELECT * FROM review_findings WHERE memory_id = %s"
+    def get_findings(self, claim_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
+        q = "SELECT * FROM review_findings WHERE claim_id = %s"
         if unresolved_only:
             q += " AND (status = 'open' OR (status IS NULL AND resolved = FALSE))"
-        rows = self._exec(q, (memory_id,))
+        rows = self._exec(q, (claim_id,))
         return [self._row_to_finding(r) for r in rows]
 
     @staticmethod
@@ -1621,8 +1837,8 @@ class PostgresStore(
             "resolved" if row["resolved"] else "open"
         )
         return ReviewFinding(
-            id=row["id"], memory_id=row["memory_id"], type=row["type"],
-            related_memory_id=row["related_memory_id"],
+            id=row["id"], claim_id=row["claim_id"], type=row["type"],
+            related_claim_id=row["related_claim_id"],
             confidence=row["confidence"], reason=row["reason"] or "",
             suggested_action=row["suggested_action"] or "none",
             requires_human_review=bool(row["requires_human_review"]),
@@ -1638,12 +1854,12 @@ class PostgresStore(
 
     def insert_review_batch(self, batch: ReviewBatch) -> str:
         self._exec(
-            "INSERT INTO review_batches (id, name, query, memory_ids, created_at,"
+            "INSERT INTO review_batches (id, name, query, claim_ids, created_at,"
             " completed_at, progress_total, progress_reviewed, metadata)"
             " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 batch.id, batch.name, json.dumps(batch.query),
-                json.dumps(batch.memory_ids), batch.created_at, batch.completed_at,
+                json.dumps(batch.claim_ids), batch.created_at, batch.completed_at,
                 batch.progress_total, batch.progress_reviewed, json.dumps(batch.metadata),
             ),
         )
@@ -1657,8 +1873,8 @@ class PostgresStore(
         return ReviewBatch(
             id=row["id"], name=row["name"],
             query=row["query"] if isinstance(row["query"], dict) else json.loads(row["query"]),
-            memory_ids=row["memory_ids"] if isinstance(row["memory_ids"], list)
-            else json.loads(row["memory_ids"]),
+            claim_ids=row["claim_ids"] if isinstance(row["claim_ids"], list)
+            else json.loads(row["claim_ids"]),
             created_at=row["created_at"], completed_at=row["completed_at"],
             progress_total=row["progress_total"], progress_reviewed=row["progress_reviewed"],
             metadata=row["metadata"] if isinstance(row["metadata"], dict)
@@ -1666,9 +1882,9 @@ class PostgresStore(
         )
 
     def update_review_batch(self, batch_id: str, **fields: Any) -> None:
-        allowed = {"completed_at", "progress_total", "progress_reviewed", "memory_ids", "metadata"}
+        allowed = {"completed_at", "progress_total", "progress_reviewed", "claim_ids", "metadata"}
         updates = {k: v for k, v in fields.items() if k in allowed}
-        for key in ("memory_ids", "metadata"):
+        for key in ("claim_ids", "metadata"):
             if key in updates and not isinstance(updates[key], str):
                 updates[key] = json.dumps(updates[key])
         if not updates:
@@ -1677,9 +1893,9 @@ class PostgresStore(
         self._exec(f"UPDATE review_batches SET {sets} WHERE id = %s",
                    tuple(list(updates.values()) + [batch_id]))
 
-    def insert_operation(self, op: MemoryOperation) -> str:
+    def insert_operation(self, op: ClaimOperation) -> str:
         self._exec(
-            "INSERT INTO memory_operations (id, operation, actor, at, inputs, output,"
+            "INSERT INTO claim_operations (id, operation, actor, at, inputs, output,"
             " before_state, after_state, undoable, undone_at)"
             " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
@@ -1689,12 +1905,12 @@ class PostgresStore(
         )
         return op.id
 
-    def get_operation(self, operation_id: str) -> Optional[MemoryOperation]:
-        rows = self._exec("SELECT * FROM memory_operations WHERE id = %s", (operation_id,))
+    def get_operation(self, operation_id: str) -> Optional[ClaimOperation]:
+        rows = self._exec("SELECT * FROM claim_operations WHERE id = %s", (operation_id,))
         if not rows:
             return None
         row = rows[0]
-        return MemoryOperation(
+        return ClaimOperation(
             id=row["id"], operation=row["operation"], actor=row["actor"], at=row["at"],
             inputs=row["inputs"] if isinstance(row["inputs"], list) else json.loads(row["inputs"]),
             output=row["output"],
@@ -1707,15 +1923,15 @@ class PostgresStore(
 
     def mark_operation_undone(self, operation_id: str) -> None:
         self._exec(
-            "UPDATE memory_operations SET undone_at = %s, undoable = FALSE WHERE id = %s",
+            "UPDATE claim_operations SET undone_at = %s, undoable = FALSE WHERE id = %s",
             (now_iso(), operation_id),
         )
 
-    def bump_retrieval(self, memory_id: str) -> None:
+    def bump_retrieval(self, claim_id: str) -> None:
         self._exec(
-            "UPDATE memories SET retrieval_count = retrieval_count + 1,"
+            "UPDATE store_claims SET retrieval_count = retrieval_count + 1,"
             " last_retrieved_at = %s WHERE id = %s",
-            (now_iso(), memory_id),
+            (now_iso(), claim_id),
         )
 
     # -- judgment mixin hooks -----------------------------------------------

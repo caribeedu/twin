@@ -18,7 +18,7 @@ import yaml
 from typing import TYPE_CHECKING
 
 from ..config import SENSITIVITY_ORDER, UNCLASSIFIED_DOMAIN
-from twin.store.models import MemoryItem
+from twin.store.models import StoreClaim
 
 if TYPE_CHECKING:
     from twin.store.store.base import MemoryStore
@@ -43,7 +43,7 @@ class Rule:
     max_sensitivity: Optional[str] = None
     min_confidence: Optional[float] = None
 
-    def matches(self, mem: MemoryItem, target_domain: str) -> bool:
+    def matches(self, mem: StoreClaim, target_domain: str) -> bool:
         if self.memory_domains and mem.domain not in self.memory_domains:
             return False
         if self.target_domains and target_domain not in self.target_domains:
@@ -76,7 +76,7 @@ class Firewall:
                 min_confidence=match.get("confidence_below"),
             ))
 
-    def evaluate(self, mem: MemoryItem, target_domain: str, as_of: Optional[str] = None) -> Verdict:
+    def evaluate(self, mem: StoreClaim, target_domain: str, as_of: Optional[str] = None) -> Verdict:
         # an unclassified target is restricted mode, never an alias for a
         # permissive domain: nothing crosses until the domain is confirmed
         if target_domain == UNCLASSIFIED_DOMAIN:
@@ -110,7 +110,7 @@ class Firewall:
             return Verdict(True, "default", "default allow")
         return self._log(mem, target_domain, Verdict(False, "default", "default deny"))
 
-    def _log(self, mem: MemoryItem, target_domain: str, verdict: Verdict) -> Verdict:
+    def _log(self, mem: StoreClaim, target_domain: str, verdict: Verdict) -> Verdict:
         if self.store is not None and not verdict.allowed:
             self.store.log_firewall(mem.id, target_domain, verdict.rule, "block")
         return verdict

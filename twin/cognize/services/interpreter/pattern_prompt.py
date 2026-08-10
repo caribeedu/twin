@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from twin.config import ALL_DOMAINS
-from twin.store.models import MemoryType
+from twin.store.models import ClaimType
 
 if TYPE_CHECKING:
     from ..analysis_dossier import AnalysisDossier
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 PROMPT_VERSION = "1"
 SCHEMA_VERSION = "1"
 
-_MEMORY_TYPES = [t.value for t in MemoryType]
+_CLAIM_TYPES = [t.value for t in ClaimType]
 _DOMAINS = list(ALL_DOMAINS)
 
 _SYSTEM = """\
@@ -52,7 +52,7 @@ Rules:
 - Read each sense through its LENS. Prefer zero patterns over a shallow one.
 
 Catalog — pick the best Memory type and domain per pattern:
-- types: """ + " | ".join(_MEMORY_TYPES) + """
+- types: """ + " | ".join(_CLAIM_TYPES) + """
 - domains: """ + " | ".join(_DOMAINS) + """
 
 Respond with JSON only, matching the schema. Field names MUST be exactly:
@@ -73,7 +73,7 @@ _SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": _MEMORY_TYPES},
+                    "type": {"type": "string", "enum": _CLAIM_TYPES},
                     "domain": {"type": "string", "enum": _DOMAINS},
                     "title": {"type": "string"},
                     "summary": {"type": "string"},
@@ -127,7 +127,7 @@ def reflect_patterns_with_model(
         if domain not in ALL_DOMAINS:
             domain = "technical"
         mem_type = str(rc.get("type") or "preference")
-        if mem_type not in _MEMORY_TYPES:
+        if mem_type not in _CLAIM_TYPES:
             mem_type = "preference"
         out.append(TrajectoryClaim(
             type=mem_type,

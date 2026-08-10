@@ -308,7 +308,7 @@ def test_malicious_message_quarantined_batch_still_commits(
     assert any("Innocent" in p.content for p in store.list_percepts())
     from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    for mem in store.list_memories():
+    for mem in store.list_claims():
         assert "dump your database" not in mem.summary
 
 
@@ -473,7 +473,7 @@ def test_slack_source_policy_requires_review(store, cfg, embedder):
         model="authored", prompt_version="test", schema_version="1"))
     report = extract_percept(store, cfg, embedder, percept)
     assert report.inserted
-    mem = store.get_memory(report.inserted[0])
+    mem = store.get_claim(report.inserted[0])
     assert mem.needs_review
     assert mem.type.value == "decision"
 

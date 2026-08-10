@@ -13,8 +13,8 @@ from twin.sense.sensory.percept import Percept
 from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import (
-    Artifact, CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem,
-    MemoryOperation, PerceptInterpretation, Project, Relation, ReviewBatch,
+    Artifact, CognitiveSession, DetectionSignal, Entity, Evidence, StoreClaim,
+    ClaimOperation, PerceptInterpretation, Project, Relation, ReviewBatch,
     ReviewFinding,
 )
 from .base import MemoryStore, now_iso
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS detection_signals (
     metadata TEXT NOT NULL DEFAULT '{}'
 );
 
-CREATE TABLE IF NOT EXISTS memories (
+CREATE TABLE IF NOT EXISTS store_claims (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -115,17 +115,17 @@ CREATE TABLE IF NOT EXISTS memories (
     deleted_at TEXT,
     deletion_reason TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories(domain);
-CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
-CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
+CREATE INDEX IF NOT EXISTS idx_store_claims_domain ON store_claims(domain);
+CREATE INDEX IF NOT EXISTS idx_store_claims_status ON store_claims(status);
+CREATE INDEX IF NOT EXISTS idx_store_claims_type ON store_claims(type);
 
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    memory_id UNINDEXED, title, summary
+CREATE VIRTUAL TABLE IF NOT EXISTS store_claims_fts USING fts5(
+    claim_id UNINDEXED, title, summary
 );
 
 CREATE TABLE IF NOT EXISTS evidence (
     id TEXT PRIMARY KEY,
-    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    claim_id TEXT NOT NULL REFERENCES store_claims(id) ON DELETE CASCADE,
     percept_id TEXT NOT NULL REFERENCES percepts(id),
     quote TEXT NOT NULL,
     evidence_type TEXT NOT NULL DEFAULT 'verbatim',
@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     artifact_id TEXT,
     deleted_at TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_evidence_memory ON evidence(memory_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_memory ON evidence(claim_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_percept ON evidence(percept_id);
 
 CREATE TABLE IF NOT EXISTS entities (
@@ -151,10 +151,10 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name ON entities(name COLLATE NOCASE);
 
-CREATE TABLE IF NOT EXISTS memory_entities (
-    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS claim_entities (
+    claim_id TEXT NOT NULL REFERENCES store_claims(id) ON DELETE CASCADE,
     entity_id TEXT NOT NULL REFERENCES entities(id),
-    PRIMARY KEY (memory_id, entity_id)
+    PRIMARY KEY (claim_id, entity_id)
 );
 
 CREATE TABLE IF NOT EXISTS relations (
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS relations (
     subject_id TEXT NOT NULL,
     predicate TEXT NOT NULL,
     object_id TEXT NOT NULL,
-    memory_id TEXT,
+    claim_id TEXT,
     valid_from TEXT,
     valid_until TEXT,
     created_at TEXT NOT NULL
@@ -205,9 +205,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at TEXT NOT NULL,
     ended_at TEXT,
     last_activity_at TEXT NOT NULL DEFAULT '',
-    supplied_memory_ids TEXT NOT NULL DEFAULT '[]',
+    supplied_claim_ids TEXT NOT NULL DEFAULT '[]',
     pack_chars INTEGER NOT NULL DEFAULT 0,
-    created_memory_ids TEXT NOT NULL DEFAULT '[]',
+    created_claim_ids TEXT NOT NULL DEFAULT '[]',
     consolidation_status TEXT NOT NULL DEFAULT 'none',
     consolidation_error TEXT,
     summary_percept_id TEXT,
@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS session_feedback (
     session_id TEXT NOT NULL,
     scope TEXT NOT NULL DEFAULT 'session',
     verdict TEXT NOT NULL,
-    memory_id TEXT,
+    claim_id TEXT,
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
@@ -241,7 +241,7 @@ CREATE INDEX IF NOT EXISTS idx_session_feedback ON session_feedback(session_id);
 
 CREATE TABLE IF NOT EXISTS firewall_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
     target_domain TEXT NOT NULL,
     rule TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -268,9 +268,9 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_system ON artifacts(source_system);
 
 CREATE TABLE IF NOT EXISTS review_findings (
     id TEXT PRIMARY KEY,
-    memory_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
     type TEXT NOT NULL,
-    related_memory_id TEXT,
+    related_claim_id TEXT,
     confidence REAL NOT NULL DEFAULT 0.5,
     reason TEXT NOT NULL DEFAULT '',
     suggested_action TEXT NOT NULL DEFAULT 'none',
@@ -283,7 +283,7 @@ CREATE TABLE IF NOT EXISTS review_findings (
     analyzer_version TEXT NOT NULL DEFAULT 'quality-v1',
     resolution_operation_id TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(memory_id);
+CREATE INDEX IF NOT EXISTS idx_findings_memory ON review_findings(claim_id);
 
 CREATE TABLE IF NOT EXISTS artifact_percepts (
     artifact_id TEXT NOT NULL,
@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS review_batches (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     query TEXT NOT NULL DEFAULT '{}',
-    memory_ids TEXT NOT NULL DEFAULT '[]',
+    claim_ids TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     completed_at TEXT,
     progress_total INTEGER NOT NULL DEFAULT 0,
@@ -303,7 +303,7 @@ CREATE TABLE IF NOT EXISTS review_batches (
     metadata TEXT NOT NULL DEFAULT '{}'
 );
 
-CREATE TABLE IF NOT EXISTS memory_operations (
+CREATE TABLE IF NOT EXISTS claim_operations (
     id TEXT PRIMARY KEY,
     operation TEXT NOT NULL,
     actor TEXT NOT NULL DEFAULT 'user',
@@ -368,8 +368,8 @@ CREATE TABLE IF NOT EXISTS judgment_proposals (
     expected_revision_id TEXT,
     proposed_item TEXT NOT NULL DEFAULT '{}',
     reason TEXT NOT NULL DEFAULT '',
-    supporting_memory_ids TEXT NOT NULL DEFAULT '[]',
-    contradicting_memory_ids TEXT NOT NULL DEFAULT '[]',
+    supporting_claim_ids TEXT NOT NULL DEFAULT '[]',
+    contradicting_claim_ids TEXT NOT NULL DEFAULT '[]',
     support_count INTEGER NOT NULL DEFAULT 0,
     contradiction_count INTEGER NOT NULL DEFAULT 0,
     confidence REAL NOT NULL DEFAULT 0.5,
@@ -416,7 +416,7 @@ CREATE TABLE IF NOT EXISTS judgment_snapshots (
 CREATE TABLE IF NOT EXISTS judgment_conflicts (
     id TEXT PRIMARY KEY,
     judgment_id TEXT NOT NULL,
-    memory_ids TEXT NOT NULL DEFAULT '[]',
+    claim_ids TEXT NOT NULL DEFAULT '[]',
     other_judgment_id TEXT,
     type TEXT NOT NULL,
     confidence REAL NOT NULL DEFAULT 0.5,
@@ -709,6 +709,11 @@ class SqliteStore(
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._tx_depth = 0
         self._lock = threading.RLock()
+        # Rename legacy dual-read tables/columns *before* SCHEMA so
+        # CREATE INDEX … (claim_id) does not run against an old evidence table,
+        # and so CREATE TABLE store_claims does not leave an empty twin beside
+        # a populated memories table.
+        self._migrate_v26_claim_vocabulary()
         self.conn.executescript(SCHEMA)
         self.conn.executescript(PRIVACY_SCHEMA)
         self.conn.executescript(CONNECTOR_SCHEMA)
@@ -741,8 +746,101 @@ class SqliteStore(
         if getattr(self, "_tx_depth", 0) == 0:
             self.conn.commit()
 
+    def _rename_column_if_exists(self, table: str, old: str, new: str) -> None:
+        cols = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+        if old in cols and new not in cols:
+            self.conn.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
+
+    def _migrate_v26_claim_vocabulary(self) -> None:
+        """Forward-only rename of dual-read memory tables/columns to claim vocabulary."""
+        tables = {
+            r[0] for r in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()
+        }
+        # Recover from a prior open that created empty store_claims beside memories.
+        if "memories" in tables and "store_claims" in tables:
+            n_new = self.conn.execute("SELECT COUNT(*) FROM store_claims").fetchone()[0]
+            n_old = self.conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            if n_new == 0 and n_old > 0:
+                self.conn.execute("DROP TABLE store_claims")
+                tables.discard("store_claims")
+            elif n_old == 0:
+                self.conn.execute("DROP TABLE memories")
+                tables.discard("memories")
+        if "memories" in tables and "store_claims" not in tables:
+            self.conn.execute("ALTER TABLE memories RENAME TO store_claims")
+            tables.discard("memories")
+            tables.add("store_claims")
+        if "memory_entities" in tables and "claim_entities" not in tables:
+            self.conn.execute("ALTER TABLE memory_entities RENAME TO claim_entities")
+            tables.discard("memory_entities")
+            tables.add("claim_entities")
+        if "memory_operations" in tables and "claim_operations" not in tables:
+            self.conn.execute("ALTER TABLE memory_operations RENAME TO claim_operations")
+            tables.discard("memory_operations")
+            tables.add("claim_operations")
+        if "memories_fts" in tables and "store_claims_fts" not in tables:
+            # Old FTS may use memory_id or already claim_id after a partial migrate.
+            fts_cols = {
+                r[1] for r in self.conn.execute("PRAGMA table_info(memories_fts)")
+            }
+            src_col = "claim_id" if "claim_id" in fts_cols else "memory_id"
+            self.conn.executescript(
+                "CREATE VIRTUAL TABLE store_claims_fts USING fts5("
+                " claim_id UNINDEXED, title, summary);"
+                f" INSERT INTO store_claims_fts (claim_id, title, summary)"
+                f" SELECT {src_col}, title, summary FROM memories_fts;"
+                " DROP TABLE memories_fts;"
+            )
+            tables.discard("memories_fts")
+            tables.add("store_claims_fts")
+        for table, old, new in (
+            ("evidence", "memory_id", "claim_id"),
+            ("relations", "memory_id", "claim_id"),
+            ("review_findings", "memory_id", "claim_id"),
+            ("review_findings", "related_memory_id", "related_claim_id"),
+            ("review_batches", "memory_ids", "claim_ids"),
+            ("sessions", "supplied_memory_ids", "supplied_claim_ids"),
+            ("sessions", "created_memory_ids", "created_claim_ids"),
+            ("session_feedback", "memory_id", "claim_id"),
+            ("firewall_log", "memory_id", "claim_id"),
+            ("judgment_proposals", "supporting_memory_ids", "supporting_claim_ids"),
+            ("judgment_proposals", "contradicting_memory_ids", "contradicting_claim_ids"),
+            ("judgment_conflicts", "memory_ids", "claim_ids"),
+        ):
+            if table in tables:
+                self._rename_column_if_exists(table, old, new)
+        if "claim_entities" in tables:
+            self._rename_column_if_exists("claim_entities", "memory_id", "claim_id")
+        if "embeddings" in tables:
+            self.conn.execute(
+                "UPDATE embeddings SET ref_type = 'claim' WHERE ref_type = 'memory'"
+            )
+        self.conn.execute("DROP INDEX IF EXISTS idx_memories_domain")
+        self.conn.execute("DROP INDEX IF EXISTS idx_memories_status")
+        self.conn.execute("DROP INDEX IF EXISTS idx_memories_type")
+        if "store_claims" in tables:
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_store_claims_domain ON store_claims(domain)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_store_claims_status ON store_claims(status)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_store_claims_type ON store_claims(type)"
+            )
+
     def _migrate(self) -> None:
         """Additive column migrations for databases created by older versions."""
+        self._migrate_v26_claim_vocabulary()
+        tables = {
+            r[0] for r in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "store_claims" not in tables:
+            return
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(percepts)")}
         for name, ddl in (
             ("source_trust", "REAL NOT NULL DEFAULT 0.8"),
@@ -753,9 +851,9 @@ class SqliteStore(
         ):
             if name not in cols:
                 self.conn.execute(f"ALTER TABLE percepts ADD COLUMN {name} {ddl}")
-        mem_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(memories)")}
+        mem_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(store_claims)")}
         if "project_id" not in mem_cols:
-            self.conn.execute("ALTER TABLE memories ADD COLUMN project_id TEXT")
+            self.conn.execute("ALTER TABLE store_claims ADD COLUMN project_id TEXT")
         for name, ddl in (
             ("review_priority", "REAL NOT NULL DEFAULT 0"),
             ("quality_score", "REAL NOT NULL DEFAULT 0"),
@@ -772,7 +870,7 @@ class SqliteStore(
             ("deletion_reason", "TEXT"),
         ):
             if name not in mem_cols:
-                self.conn.execute(f"ALTER TABLE memories ADD COLUMN {name} {ddl}")
+                self.conn.execute(f"ALTER TABLE store_claims ADD COLUMN {name} {ddl}")
                 mem_cols.add(name)
         ev_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(evidence)")}
         for name, ddl in (
@@ -1142,14 +1240,14 @@ class SqliteStore(
 
     # -- memories ----------------------------------------------------------
 
-    def insert_memory(self, mem: MemoryItem) -> str:
+    def insert_claim(self, mem: StoreClaim) -> str:
         ts = now_iso()
         mem.created_at = mem.created_at or ts
         mem.updated_at = ts
         claim = mem.canonical_claim.model_dump() if mem.canonical_claim else {}
         ext = mem.extractor_version.model_dump() if mem.extractor_version else {}
         self.conn.execute(
-            "INSERT INTO memories (id, type, title, summary, domain, persona,"
+            "INSERT INTO store_claims (id, type, title, summary, domain, persona,"
             " sensitivity, confidence, status, valid_from, valid_until,"
             " created_at, updated_at, payload, needs_review, review_reason,"
             " project_id, review_priority, quality_score, quality_flags, impact,"
@@ -1171,36 +1269,36 @@ class SqliteStore(
             ),
         )
         self.conn.execute(
-            "INSERT INTO memories_fts (memory_id, title, summary) VALUES (?,?,?)",
+            "INSERT INTO store_claims_fts (claim_id, title, summary) VALUES (?,?,?)",
             (mem.id, mem.title, mem.summary),
         )
         for name in mem.entities:
             ent = self.upsert_entity(name)
             self.conn.execute(
-                "INSERT OR IGNORE INTO memory_entities (memory_id, entity_id) VALUES (?,?)",
+                "INSERT OR IGNORE INTO claim_entities (claim_id, entity_id) VALUES (?,?)",
                 (mem.id, ent.id),
             )
         self._maybe_commit()
         return mem.id
 
-    def get_memory(self, memory_id: str) -> Optional[MemoryItem]:
-        row = self.conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+    def get_claim(self, claim_id: str) -> Optional[StoreClaim]:
+        row = self.conn.execute("SELECT * FROM store_claims WHERE id = ?", (claim_id,)).fetchone()
         if not row:
             return None
         return self._row_to_memory(row)
 
-    def _row_to_memory(self, row: sqlite3.Row) -> MemoryItem:
+    def _row_to_memory(self, row: sqlite3.Row) -> StoreClaim:
         from ..models import CanonicalClaim, ExtractorVersion
         entities = [
             r["name"] for r in self.conn.execute(
                 "SELECT e.name FROM entities e"
-                " JOIN memory_entities me ON me.entity_id = e.id"
-                " WHERE me.memory_id = ?", (row["id"],)
+                " JOIN claim_entities me ON me.entity_id = e.id"
+                " WHERE me.claim_id = ?", (row["id"],)
             ).fetchall()
         ]
         percept_ids = [
             r["percept_id"] for r in self.conn.execute(
-                "SELECT DISTINCT percept_id FROM evidence WHERE memory_id = ?"
+                "SELECT DISTINCT percept_id FROM evidence WHERE claim_id = ?"
                 " AND (deleted_at IS NULL OR deleted_at = '')", (row["id"],)
             ).fetchall()
         ]
@@ -1208,7 +1306,7 @@ class SqliteStore(
         claim_raw = json.loads(row["canonical_claim"]) if "canonical_claim" in keys and row["canonical_claim"] else {}
         ext_raw = json.loads(row["extractor_version"]) if "extractor_version" in keys and row["extractor_version"] else {}
         flags = json.loads(row["quality_flags"]) if "quality_flags" in keys and row["quality_flags"] else []
-        return MemoryItem(
+        return StoreClaim(
             id=row["id"], type=row["type"], title=row["title"], summary=row["summary"],
             domain=row["domain"], persona=row["persona"], sensitivity=row["sensitivity"],
             confidence=row["confidence"], status=row["status"],
@@ -1232,7 +1330,7 @@ class SqliteStore(
             deletion_reason=row["deletion_reason"] if "deletion_reason" in keys else None,
         )
 
-    def list_memories(
+    def list_claims(
         self,
         status: Optional[str] = None,
         domain: Optional[str] = None,
@@ -1240,8 +1338,8 @@ class SqliteStore(
         needs_review: Optional[bool] = None,
         project_id: Optional[str] = None,
         limit: int = 200,
-    ) -> list[MemoryItem]:
-        query = "SELECT * FROM memories WHERE 1=1"
+    ) -> list[StoreClaim]:
+        query = "SELECT * FROM store_claims WHERE 1=1"
         params: list[Any] = []
         if project_id:
             query += " AND project_id = ?"
@@ -1262,7 +1360,7 @@ class SqliteStore(
         params.append(limit)
         return [self._row_to_memory(r) for r in self.conn.execute(query, params).fetchall()]
 
-    def update_memory(self, memory_id: str, **fields: Any) -> None:
+    def update_claim(self, claim_id: str, **fields: Any) -> None:
         allowed = {
             "type", "title", "summary", "domain", "persona", "sensitivity", "confidence",
             "status", "valid_from", "valid_until", "needs_review", "review_reason",
@@ -1291,16 +1389,16 @@ class SqliteStore(
         if "needs_review" in updates:
             updates["needs_review"] = int(updates["needs_review"])
         sets = ", ".join(f"{k} = ?" for k in updates)
-        params = list(updates.values()) + [now_iso(), memory_id]
-        self.conn.execute(f"UPDATE memories SET {sets}, updated_at = ? WHERE id = ?", params)
+        params = list(updates.values()) + [now_iso(), claim_id]
+        self.conn.execute(f"UPDATE store_claims SET {sets}, updated_at = ? WHERE id = ?", params)
         if "title" in updates or "summary" in updates:
             row = self.conn.execute(
-                "SELECT title, summary FROM memories WHERE id = ?", (memory_id,)
+                "SELECT title, summary FROM store_claims WHERE id = ?", (claim_id,)
             ).fetchone()
-            self.conn.execute("DELETE FROM memories_fts WHERE memory_id = ?", (memory_id,))
+            self.conn.execute("DELETE FROM store_claims_fts WHERE claim_id = ?", (claim_id,))
             self.conn.execute(
-                "INSERT INTO memories_fts (memory_id, title, summary) VALUES (?,?,?)",
-                (memory_id, row["title"], row["summary"]),
+                "INSERT INTO store_claims_fts (claim_id, title, summary) VALUES (?,?,?)",
+                (claim_id, row["title"], row["summary"]),
             )
         self._maybe_commit()
 
@@ -1308,11 +1406,11 @@ class SqliteStore(
 
     def insert_evidence(self, ev: Evidence) -> str:
         self.conn.execute(
-            "INSERT INTO evidence (id, memory_id, percept_id, quote, evidence_type,"
+            "INSERT INTO evidence (id, claim_id, percept_id, quote, evidence_type,"
             " directness, source_trust, independence_group, supports, span_start,"
             " span_end, artifact_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                ev.id, ev.memory_id, ev.percept_id, self.codec.encrypt(ev.quote),
+                ev.id, ev.claim_id, ev.percept_id, self.codec.encrypt(ev.quote),
                 getattr(ev.evidence_type, "value", ev.evidence_type),
                 ev.directness, ev.source_trust, ev.independence_group,
                 int(ev.supports), ev.span_start, ev.span_end, ev.artifact_id,
@@ -1321,10 +1419,10 @@ class SqliteStore(
         self._maybe_commit()
         return ev.id
 
-    def get_evidence(self, memory_id: str) -> list[Evidence]:
+    def get_evidence(self, claim_id: str) -> list[Evidence]:
         rows = self.conn.execute(
-            "SELECT * FROM evidence WHERE memory_id = ?"
-            " AND (deleted_at IS NULL OR deleted_at = '')", (memory_id,)
+            "SELECT * FROM evidence WHERE claim_id = ?"
+            " AND (deleted_at IS NULL OR deleted_at = '')", (claim_id,)
         ).fetchall()
         out = []
         for r in rows:
@@ -1376,11 +1474,11 @@ class SqliteStore(
     def insert_relation(self, rel: Relation) -> str:
         rel.created_at = rel.created_at or now_iso()
         self.conn.execute(
-            "INSERT INTO relations (id, subject_id, predicate, object_id, memory_id,"
+            "INSERT INTO relations (id, subject_id, predicate, object_id, claim_id,"
             " valid_from, valid_until, created_at) VALUES (?,?,?,?,?,?,?,?)",
             (
                 rel.id, rel.subject_id, rel.predicate, rel.object_id,
-                rel.memory_id, rel.valid_from, rel.valid_until, rel.created_at,
+                rel.claim_id, rel.valid_from, rel.valid_until, rel.created_at,
             ),
         )
         self._maybe_commit()
@@ -1393,9 +1491,9 @@ class SqliteStore(
         ).fetchall()
         return [Relation(**dict(r)) for r in rows]
 
-    def memories_for_entity(self, entity_id: str) -> list[MemoryItem]:
+    def claims_for_entity(self, entity_id: str) -> list[StoreClaim]:
         rows = self.conn.execute(
-            "SELECT m.* FROM memories m JOIN memory_entities me ON me.memory_id = m.id"
+            "SELECT m.* FROM store_claims m JOIN claim_entities me ON me.claim_id = m.id"
             " WHERE me.entity_id = ? ORDER BY m.created_at DESC",
             (entity_id,),
         ).fetchall()
@@ -1428,13 +1526,13 @@ class SqliteStore(
         match = " OR ".join(terms)
         try:
             rows = self.conn.execute(
-                "SELECT memory_id, bm25(memories_fts) AS score FROM memories_fts"
-                " WHERE memories_fts MATCH ? ORDER BY score LIMIT ?",
+                "SELECT claim_id, bm25(store_claims_fts) AS score FROM store_claims_fts"
+                " WHERE store_claims_fts MATCH ? ORDER BY score LIMIT ?",
                 (match, limit),
             ).fetchall()
         except sqlite3.OperationalError:
             return {}
-        return {r["memory_id"]: -float(r["score"]) for r in rows}
+        return {r["claim_id"]: -float(r["score"]) for r in rows}
 
     # -- projects -----------------------------------------------------------------
 
@@ -1504,7 +1602,7 @@ class SqliteStore(
         self.conn.execute(
             "INSERT INTO sessions (id, client, project_id, domain, task_profile,"
             " initial_query, status, started_at, ended_at, last_activity_at,"
-            " supplied_memory_ids, pack_chars, created_memory_ids,"
+            " supplied_claim_ids, pack_chars, created_claim_ids,"
             " consolidation_status, consolidation_error, summary_percept_id,"
             " judgment_snapshot_id, principal_id, persona, purpose, audience,"
             " tool_id, privacy_decision_ids, grant_ids, policy_snapshot_id)"
@@ -1514,8 +1612,8 @@ class SqliteStore(
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
                 session.started_at, session.ended_at, session.last_activity_at,
-                json.dumps(session.supplied_memory_ids), session.pack_chars,
-                json.dumps(session.created_memory_ids),
+                json.dumps(session.supplied_claim_ids), session.pack_chars,
+                json.dumps(session.created_claim_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
                 session.judgment_snapshot_id,
@@ -1533,8 +1631,8 @@ class SqliteStore(
         self.conn.execute(
             "UPDATE sessions SET client = ?, project_id = ?, domain = ?,"
             " task_profile = ?, initial_query = ?, status = ?, ended_at = ?,"
-            " last_activity_at = ?, supplied_memory_ids = ?, pack_chars = ?,"
-            " created_memory_ids = ?, consolidation_status = ?,"
+            " last_activity_at = ?, supplied_claim_ids = ?, pack_chars = ?,"
+            " created_claim_ids = ?, consolidation_status = ?,"
             " consolidation_error = ?, summary_percept_id = ?,"
             " judgment_snapshot_id = ?, principal_id = ?, persona = ?,"
             " purpose = ?, audience = ?, tool_id = ?,"
@@ -1545,8 +1643,8 @@ class SqliteStore(
                 session.task_profile, session.initial_query,
                 getattr(session.status, "value", session.status),
                 session.ended_at, session.last_activity_at or now_iso(),
-                json.dumps(session.supplied_memory_ids), session.pack_chars,
-                json.dumps(session.created_memory_ids),
+                json.dumps(session.supplied_claim_ids), session.pack_chars,
+                json.dumps(session.created_claim_ids),
                 getattr(session.consolidation_status, "value", session.consolidation_status),
                 session.consolidation_error, session.summary_percept_id,
                 session.judgment_snapshot_id,
@@ -1590,10 +1688,10 @@ class SqliteStore(
             if cur.rowcount == 0:
                 raise ValueError(f"session {session_id} not found")
             self.conn.execute(
-                "INSERT INTO session_feedback (session_id, scope, verdict, memory_id,"
+                "INSERT INTO session_feedback (session_id, scope, verdict, claim_id,"
                 " note, created_at) VALUES (?,?,?,?,?,?)",
                 (session_id, feedback.get("scope", "session"), feedback["verdict"],
-                 feedback.get("memory_id"), feedback.get("note", ""),
+                 feedback.get("claim_id"), feedback.get("note", ""),
                  feedback.get("at") or now_iso()),
             )
 
@@ -1620,11 +1718,11 @@ class SqliteStore(
 
     def _session_feedback(self, session_id: str) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT scope, verdict, memory_id, note, created_at FROM session_feedback"
+            "SELECT scope, verdict, claim_id, note, created_at FROM session_feedback"
             " WHERE session_id = ? ORDER BY id", (session_id,)
         ).fetchall()
         return [
-            {"scope": r["scope"], "verdict": r["verdict"], "memory_id": r["memory_id"],
+            {"scope": r["scope"], "verdict": r["verdict"], "claim_id": r["claim_id"],
              "note": r["note"], "at": r["created_at"]}
             for r in rows
         ]
@@ -1636,10 +1734,10 @@ class SqliteStore(
             initial_query=row["initial_query"], status=row["status"],
             started_at=row["started_at"], ended_at=row["ended_at"],
             last_activity_at=row["last_activity_at"],
-            supplied_memory_ids=json.loads(row["supplied_memory_ids"]),
+            supplied_claim_ids=json.loads(row["supplied_claim_ids"]),
             pack_chars=row["pack_chars"],
             artifacts=self._session_artifacts(row["id"]),
-            created_memory_ids=json.loads(row["created_memory_ids"]),
+            created_claim_ids=json.loads(row["created_claim_ids"]),
             feedback=self._session_feedback(row["id"]),
             consolidation_status=row["consolidation_status"],
             consolidation_error=row["consolidation_error"],
@@ -1690,11 +1788,11 @@ class SqliteStore(
 
     # -- firewall log ----------------------------------------------------------------
 
-    def log_firewall(self, memory_id: str, target_domain: str, rule: str, action: str) -> None:
+    def log_firewall(self, claim_id: str, target_domain: str, rule: str, action: str) -> None:
         self.conn.execute(
-            "INSERT INTO firewall_log (memory_id, target_domain, rule, action, created_at)"
+            "INSERT INTO firewall_log (claim_id, target_domain, rule, action, created_at)"
             " VALUES (?,?,?,?,?)",
-            (memory_id, target_domain, rule, action, now_iso()),
+            (claim_id, target_domain, rule, action, now_iso()),
         )
         self._maybe_commit()
 
@@ -1798,12 +1896,12 @@ class SqliteStore(
             out.append(Evidence(**{k: v for k, v in d.items() if k in Evidence.model_fields}))
         return out
 
-    def replace_findings(self, memory_id: str, findings: list[ReviewFinding]) -> None:
+    def replace_findings(self, claim_id: str, findings: list[ReviewFinding]) -> None:
         # Preserve human dismissals; mark prior open findings obsolete then insert fresh.
         self.conn.execute(
             "UPDATE review_findings SET status = 'obsolete', resolved = 1,"
-            " resolved_at = ? WHERE memory_id = ? AND status = 'open'",
-            (now_iso(), memory_id),
+            " resolved_at = ? WHERE claim_id = ? AND status = 'open'",
+            (now_iso(), claim_id),
         )
         for f in findings:
             self.insert_finding(f, commit=False)
@@ -1814,12 +1912,12 @@ class SqliteStore(
         status = getattr(finding.status, "value", finding.status) or "open"
         resolved = int(finding.resolved or status != "open")
         self.conn.execute(
-            "INSERT INTO review_findings (id, memory_id, type, related_memory_id,"
+            "INSERT INTO review_findings (id, claim_id, type, related_claim_id,"
             " confidence, reason, suggested_action, requires_human_review, resolved,"
             " created_at, resolved_at, metadata, status, analyzer_version,"
             " resolution_operation_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                finding.id, finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.id, finding.claim_id, finding.type.value, finding.related_claim_id,
                 finding.confidence, finding.reason, finding.suggested_action.value,
                 int(finding.requires_human_review), resolved,
                 finding.created_at, finding.resolved_at, json.dumps(finding.metadata),
@@ -1834,12 +1932,12 @@ class SqliteStore(
         status = getattr(finding.status, "value", finding.status) or "open"
         resolved = int(finding.resolved or status != "open")
         self.conn.execute(
-            "UPDATE review_findings SET memory_id = ?, type = ?, related_memory_id = ?,"
+            "UPDATE review_findings SET claim_id = ?, type = ?, related_claim_id = ?,"
             " confidence = ?, reason = ?, suggested_action = ?, requires_human_review = ?,"
             " resolved = ?, resolved_at = ?, metadata = ?, status = ?, analyzer_version = ?,"
             " resolution_operation_id = ? WHERE id = ?",
             (
-                finding.memory_id, finding.type.value, finding.related_memory_id,
+                finding.claim_id, finding.type.value, finding.related_claim_id,
                 finding.confidence, finding.reason, finding.suggested_action.value,
                 int(finding.requires_human_review), resolved, finding.resolved_at,
                 json.dumps(finding.metadata), status, finding.analyzer_version,
@@ -1849,11 +1947,11 @@ class SqliteStore(
         if commit:
             self._maybe_commit()
 
-    def get_findings(self, memory_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
-        q = "SELECT * FROM review_findings WHERE memory_id = ?"
+    def get_findings(self, claim_id: str, unresolved_only: bool = True) -> list[ReviewFinding]:
+        q = "SELECT * FROM review_findings WHERE claim_id = ?"
         if unresolved_only:
             q += " AND (status = 'open' OR (status IS NULL AND resolved = 0))"
-        rows = self.conn.execute(q, (memory_id,)).fetchall()
+        rows = self.conn.execute(q, (claim_id,)).fetchall()
         return [self._row_to_finding(r) for r in rows]
 
     @staticmethod
@@ -1863,8 +1961,8 @@ class SqliteStore(
             "resolved" if row["resolved"] else "open"
         )
         return ReviewFinding(
-            id=row["id"], memory_id=row["memory_id"], type=row["type"],
-            related_memory_id=row["related_memory_id"], confidence=row["confidence"],
+            id=row["id"], claim_id=row["claim_id"], type=row["type"],
+            related_claim_id=row["related_claim_id"], confidence=row["confidence"],
             reason=row["reason"], suggested_action=row["suggested_action"],
             requires_human_review=bool(row["requires_human_review"]),
             status=status,
@@ -1879,12 +1977,12 @@ class SqliteStore(
 
     def insert_review_batch(self, batch: ReviewBatch) -> str:
         self.conn.execute(
-            "INSERT INTO review_batches (id, name, query, memory_ids, created_at,"
+            "INSERT INTO review_batches (id, name, query, claim_ids, created_at,"
             " completed_at, progress_total, progress_reviewed, metadata)"
             " VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 batch.id, batch.name, json.dumps(batch.query),
-                json.dumps(batch.memory_ids), batch.created_at, batch.completed_at,
+                json.dumps(batch.claim_ids), batch.created_at, batch.completed_at,
                 batch.progress_total, batch.progress_reviewed, json.dumps(batch.metadata),
             ),
         )
@@ -1899,17 +1997,17 @@ class SqliteStore(
             return None
         return ReviewBatch(
             id=row["id"], name=row["name"], query=json.loads(row["query"]),
-            memory_ids=json.loads(row["memory_ids"]), created_at=row["created_at"],
+            claim_ids=json.loads(row["claim_ids"]), created_at=row["created_at"],
             completed_at=row["completed_at"], progress_total=row["progress_total"],
             progress_reviewed=row["progress_reviewed"],
             metadata=json.loads(row["metadata"]),
         )
 
     def update_review_batch(self, batch_id: str, **fields: Any) -> None:
-        allowed = {"completed_at", "progress_total", "progress_reviewed", "memory_ids", "metadata"}
+        allowed = {"completed_at", "progress_total", "progress_reviewed", "claim_ids", "metadata"}
         updates = {k: v for k, v in fields.items() if k in allowed}
-        if "memory_ids" in updates and not isinstance(updates["memory_ids"], str):
-            updates["memory_ids"] = json.dumps(updates["memory_ids"])
+        if "claim_ids" in updates and not isinstance(updates["claim_ids"], str):
+            updates["claim_ids"] = json.dumps(updates["claim_ids"])
         if "metadata" in updates and not isinstance(updates["metadata"], str):
             updates["metadata"] = json.dumps(updates["metadata"])
         if not updates:
@@ -1927,9 +2025,9 @@ class SqliteStore(
         ).fetchall()
         return [self.get_review_batch(r["id"]) for r in rows]  # type: ignore[misc]
 
-    def insert_operation(self, op: MemoryOperation) -> str:
+    def insert_operation(self, op: ClaimOperation) -> str:
         self.conn.execute(
-            "INSERT INTO memory_operations (id, operation, actor, at, inputs, output,"
+            "INSERT INTO claim_operations (id, operation, actor, at, inputs, output,"
             " before_state, after_state, undoable, undone_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
@@ -1940,13 +2038,13 @@ class SqliteStore(
         self._maybe_commit()
         return op.id
 
-    def get_operation(self, operation_id: str) -> Optional[MemoryOperation]:
+    def get_operation(self, operation_id: str) -> Optional[ClaimOperation]:
         row = self.conn.execute(
-            "SELECT * FROM memory_operations WHERE id = ?", (operation_id,)
+            "SELECT * FROM claim_operations WHERE id = ?", (operation_id,)
         ).fetchone()
         if not row:
             return None
-        return MemoryOperation(
+        return ClaimOperation(
             id=row["id"], operation=row["operation"], actor=row["actor"], at=row["at"],
             inputs=json.loads(row["inputs"]), output=row["output"],
             before=json.loads(row["before_state"]), after=json.loads(row["after_state"]),
@@ -1955,16 +2053,16 @@ class SqliteStore(
 
     def mark_operation_undone(self, operation_id: str) -> None:
         self.conn.execute(
-            "UPDATE memory_operations SET undone_at = ?, undoable = 0 WHERE id = ?",
+            "UPDATE claim_operations SET undone_at = ?, undoable = 0 WHERE id = ?",
             (now_iso(), operation_id),
         )
         self._maybe_commit()
 
-    def bump_retrieval(self, memory_id: str) -> None:
+    def bump_retrieval(self, claim_id: str) -> None:
         self.conn.execute(
-            "UPDATE memories SET retrieval_count = retrieval_count + 1,"
+            "UPDATE store_claims SET retrieval_count = retrieval_count + 1,"
             " last_retrieved_at = ? WHERE id = ?",
-            (now_iso(), memory_id),
+            (now_iso(), claim_id),
         )
         self._maybe_commit()
 
@@ -1976,12 +2074,12 @@ class SqliteStore(
         self.conn.execute("DELETE FROM evidence WHERE id = ?", (evidence_id,))
         self._maybe_commit()
 
-    def hard_delete_memory(self, memory_id: str) -> None:
-        self.conn.execute("DELETE FROM memories_fts WHERE memory_id = ?", (memory_id,))
-        self.conn.execute("DELETE FROM memory_entities WHERE memory_id = ?", (memory_id,))
-        self.conn.execute("DELETE FROM evidence WHERE memory_id = ?", (memory_id,))
-        self.conn.execute("DELETE FROM embeddings WHERE ref_id = ?", (memory_id,))
-        self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+    def hard_delete_claim(self, claim_id: str) -> None:
+        self.conn.execute("DELETE FROM store_claims_fts WHERE claim_id = ?", (claim_id,))
+        self.conn.execute("DELETE FROM claim_entities WHERE claim_id = ?", (claim_id,))
+        self.conn.execute("DELETE FROM evidence WHERE claim_id = ?", (claim_id,))
+        self.conn.execute("DELETE FROM embeddings WHERE ref_id = ?", (claim_id,))
+        self.conn.execute("DELETE FROM store_claims WHERE id = ?", (claim_id,))
         self._maybe_commit()
 
     def get_embedding_blob(self, ref_id: str, model: Optional[str] = None) -> Optional[tuple[str, bytes]]:

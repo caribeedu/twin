@@ -3,14 +3,14 @@
   "kind": "recall_policy",
   "suggested": [
     {
-      "memory_id": "mem_a",
+      "claim_id": "mem_a",
       "summary": "high conf low score",
       "why_relevant": "x",
       "confidence": 0.95,
       "score": 0.05
     },
     {
-      "memory_id": "mem_b",
+      "claim_id": "mem_b",
       "summary": "ok conf high score",
       "why_relevant": "y",
       "confidence": 0.7,

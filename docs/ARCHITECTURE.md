@@ -87,7 +87,7 @@ this is unfinished v2 work, not optional cosmetics.
 | **`interfaces`** | CLI, MCP, REST, web, TUI Center, workers, export/backup | `twin.interfaces` (+ `runtime`, `sovereignty`) |
 
 Transitional shims at old package roots have been removed; import the target
-packages above. Dual-read `MemoryItem` rows and `judgment_*` table names may
+packages above. Dual-read `StoreClaim` rows and `judgment_*` table names may
 remain in the store until data migration finishes — product copy must not call
 them Memory or Judgment.
 
@@ -585,17 +585,17 @@ The project must not depend on its own UI. Prefer **native** when a client can b
 
 Product units are **Narrative**, **Stance**, **Evidence**, **Relation**,
 **Situation**, **Reflection**, **Interpretation** ([GLOSSARY.md](GLOSSARY.md) ·
-[COGNIZE.md](COGNIZE.md)). The `MemoryItem` shape below is the **dual-read /
+[COGNIZE.md](COGNIZE.md)). The `StoreClaim` shape below is the **dual-read /
 legacy row** still served by today’s store during migration — not the product
 noun.
 
-### Memory Item (legacy dual-read row)
+### StoreClaim (dual-read row)
 
-A dual-read memory row must contain:
+A store claim row must contain:
 
 ```json
 {
-  "id": "mem_...",
+  "id": "clm_...",
   "type": "event | fact | decision | preference | belief | task | procedure | relationship | communication_act | constraint",
   "title": "...",
   "summary": "...",
@@ -828,7 +828,7 @@ Desired format:
   "inferred_domain": "technical",
   "suggested_context": [
     {
-      "memory_id": "mem_...",
+      "claim_id": "mem_...",
       "summary": "...",
       "why_relevant": "semantic similarity + entity match",
       "confidence": 0.87,
@@ -837,7 +837,7 @@ Desired format:
   ],
   "blocked_context": [
     {
-      "memory_id": "mem_...",
+      "claim_id": "mem_...",
       "reason": "relationship_not_allowed_outside_own_domain"
     }
   ]

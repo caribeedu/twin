@@ -228,7 +228,7 @@ def cmd_interpret(args) -> None:
 
 def cmd_review(args) -> None:
     from twin.cognize.services.quality import analyze_candidates, review_queue
-    from twin.store.models import MemoryStatus
+    from twin.store.models import ClaimStatus
     from twin.interfaces import ux
 
     ws = Workspace(args.home)
@@ -236,7 +236,7 @@ def cmd_review(args) -> None:
         reports = analyze_candidates(ws.store, ws.embedder)
         rows = [
             {
-                "memory_id": r.memory_id,
+                "claim_id": r.claim_id,
                 "priority": round(r.review_priority, 2),
                 "action": r.suggested_action.value,
                 "flags": list(r.quality_flags),
@@ -250,8 +250,8 @@ def cmd_review(args) -> None:
                 ux.print_ok("no candidates to analyze")
                 return
             ux.print_table(
-                ["memory", "priority", "action", "flags"],
-                [[r["memory_id"], f"{r['priority']:.2f}", r["action"],
+                ["claim", "priority", "action", "flags"],
+                [[r["claim_id"], f"{r['priority']:.2f}", r["action"],
                   ", ".join(r["flags"]) or "—"] for r in rows[:20]],
             )
             ux.print_ok(f"analyzed {len(rows)} candidate(s)")
@@ -305,11 +305,11 @@ def cmd_review(args) -> None:
         ux.print_panel(body, title=f"{idx}/{len(queue)}")
         choice = ux.read_key("  [a]pprove [r]eject [s]kip [q]uit  ", allowed="arsq")
         if choice == "a":
-            ws.store.set_status(mem.id, MemoryStatus.confirmed)
+            ws.store.set_status(mem.id, ClaimStatus.confirmed)
             approved += 1
             ux.print_ok("approved")
         elif choice == "r":
-            ws.store.set_status(mem.id, MemoryStatus.rejected)
+            ws.store.set_status(mem.id, ClaimStatus.rejected)
             rejected += 1
             ux.print_err("rejected")
         elif choice == "q":
@@ -352,8 +352,8 @@ def cmd_review_batch(args) -> None:
         if batch is None:
             raise SystemExit(f"batch {args.batch_id} not found")
         upcoming = []
-        for mid in batch.memory_ids[batch.progress_reviewed:batch.progress_reviewed + 5]:
-            m = ws.store.get_memory(mid)
+        for mid in batch.claim_ids[batch.progress_reviewed:batch.progress_reviewed + 5]:
+            m = ws.store.get_claim(mid)
             if m:
                 upcoming.append({"id": m.id, "title": m.title})
         data = {
@@ -369,7 +369,7 @@ def cmd_review_batch(args) -> None:
             ])
             if upcoming:
                 ux.print_table(
-                    ["memory", "title"],
+                    ["claim", "title"],
                     [[u["id"], u["title"]] for u in upcoming],
                 )
             ux.print_next([("→", "twin review   — review candidates interactively")])
@@ -381,11 +381,11 @@ def _narrative_lifecycle(args) -> None:
     from twin.interfaces import ux
     from twin.store.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
 
-    from twin.store.provenance import memory_provenance
+    from twin.store.provenance import claim_provenance
 
     ws = Workspace(args.home)
     if args.narrative_command == "diff":
-        a, b = ws.store.get_memory(args.id_a), ws.store.get_memory(args.id_b)
+        a, b = ws.store.get_claim(args.id_a), ws.store.get_claim(args.id_b)
         if not a or not b:
             raise SystemExit("memory not found")
 
@@ -410,35 +410,35 @@ def _narrative_lifecycle(args) -> None:
         _emit(args, {"merged_id": merged, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "split":
         parts = [{"title": p, "summary": p} for p in args.parts]
-        result = split_memory(ws.store, args.memory_id, parts, embedder=ws.embedder)
+        result = split_memory(ws.store, args.claim_id, parts, embedder=ws.embedder)
         children = result.extras.get("children")
 
         def pretty():
             ux.print_rule("narrative split")
-            ux.print_ok(f"split {args.memory_id} → {children}")
+            ux.print_ok(f"split {args.claim_id} → {children}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
         _emit(args, {"children": children, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "provenance":
-        prov = memory_provenance(ws.store, args.memory_id)
+        prov = claim_provenance(ws.store, args.claim_id)
 
         def pretty():
-            ux.print_rule(f"provenance · {args.memory_id}")
+            ux.print_rule(f"provenance · {args.claim_id}")
             ux.print_panel(json.dumps(prov, indent=2, default=str), title="lineage")
 
         _emit(args, prov, pretty)
     elif args.narrative_command == "archive":
-        result = archive_memory(ws.store, args.memory_id)
+        result = archive_memory(ws.store, args.claim_id)
 
         def pretty():
             ux.print_rule("narrative archive")
-            ux.print_ok(f"archived {args.memory_id}")
+            ux.print_ok(f"archived {args.claim_id}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
-        _emit(args, {"archived": args.memory_id, "operation_id": result.operation_id}, pretty)
+        _emit(args, {"archived": args.claim_id, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "unsupported":
         rows = [{"id": m.id, "title": m.title}
-                for m in ws.store.list_memories(status="unsupported", limit=200)]
+                for m in ws.store.list_claims(status="unsupported", limit=200)]
 
         def pretty():
             ux.print_rule("narrative · unsupported")
@@ -607,7 +607,7 @@ def cmd_search(args) -> None:
     else:
         ux.print_ok(f"{len(result.hits)} hit(s)")
         for i, h in enumerate(result.hits, start=1):
-            mem = h.memory
+            mem = h.claim
             body = (
                 f"{ux.score_bar(h.score)}  {h.why}\n"
                 f"[{mem.type.value}] {mem.domain} · {mem.status.value} · "
@@ -621,7 +621,7 @@ def cmd_search(args) -> None:
     if result.blocked:
         ux.print_warn(f"{len(result.blocked)} blocked by firewall")
         for b in result.blocked[:12]:
-            ux.print_dim(f"  {b.memory_id}: {b.rule} — {b.reason}")
+            ux.print_dim(f"  {b.claim_id}: {b.rule} — {b.reason}")
         if len(result.blocked) > 12:
             ux.print_dim(f"  … +{len(result.blocked) - 12} more")
 
@@ -665,7 +665,7 @@ def cmd_pack(args) -> None:
     if pack.sources:
         lines = []
         for src in pack.sources[:15]:
-            mid = src.get("memory_id") or src.get("id") or "?"
+            mid = src.get("claim_id") or src.get("id") or "?"
             title = src.get("title") or ""
             conf = src.get("confidence")
             why = src.get("why_relevant") or src.get("label") or ""
@@ -677,7 +677,7 @@ def cmd_pack(args) -> None:
         for b in pack.blocked[:8]:
             if isinstance(b, dict):
                 ux.print_dim(
-                    f"  {b.get('memory_id', '?')}: {b.get('rule', b.get('reason', ''))}"
+                    f"  {b.get('claim_id', '?')}: {b.get('rule', b.get('reason', ''))}"
                 )
             else:
                 ux.print_dim(f"  {b}")
@@ -960,21 +960,21 @@ def cmd_reindex(args) -> None:
 
 def cmd_promote(args) -> None:
     from twin.interfaces import ux
-    from twin.cognize.stance_engine.profile import promote_memory
+    from twin.cognize.stance_engine.profile import promote_claim
 
     ws = Workspace(args.home)
-    mem = ws.store.get_memory(args.memory_id)
+    mem = ws.store.get_claim(args.claim_id)
     if mem is None:
-        raise SystemExit(f"memory {args.memory_id} not found")
-    section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
-    ws.store.update_memory(mem.id, payload={**mem.payload, "promoted_to_judgment": True})
+        raise SystemExit(f"memory {args.claim_id} not found")
+    section = promote_claim(ws.cfg.judgment_path, mem, store=ws.store)
+    ws.store.update_claim(mem.id, payload={**mem.payload, "promoted_to_judgment": True})
 
     def pretty():
         ux.print_rule("promote")
         ux.print_ok(f"promoted {mem.id} → {section}")
         ux.print_dim("pending human approval if a proposal was created")
 
-    _emit(args, {"memory_id": mem.id, "section": section}, pretty)
+    _emit(args, {"claim_id": mem.id, "section": section}, pretty)
 
 
 def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
@@ -1055,7 +1055,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     mem_count = (
         signed.get("memory_count")
         if signed.get("memory_count") is not None
-        else len(proposal.get("supporting_memory_ids") or [])
+        else len(proposal.get("supporting_claim_ids") or [])
     )
     independent = (
         signed.get("independent_sources")
@@ -1068,7 +1068,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     if support is None:
         support = independent if independent is not None else mem_count
     contra = proposal.get("contradiction_count") or len(
-        proposal.get("contradicting_memory_ids") or []
+        proposal.get("contradicting_claim_ids") or []
     )
     if independent is not None:
         support_line = f"{independent} independent source(s) · {mem_count} memories"
@@ -1096,7 +1096,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     supporting = signed.get("supporting") or []
     if supporting:
         ux.print_table(
-            ["memory", "title", "sources"],
+            ["claim", "title", "sources"],
             [[
                 str(s.get("id") or "—"),
                 (str(s.get("title") or "")[:56]),
@@ -1104,7 +1104,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
             ] for s in supporting[:8]],
         )
     else:
-        mem_ids = list(prov.get("memory_ids") or proposal.get("supporting_memory_ids") or [])
+        mem_ids = list(prov.get("claim_ids") or proposal.get("supporting_claim_ids") or [])
         if mem_ids:
             ux.print_dim("from memories: " + ", ".join(mem_ids[:8])
                          + (" …" if len(mem_ids) > 8 else ""))
@@ -1409,11 +1409,11 @@ def cmd_privacy(args) -> None:
         bootstrap_policy_set(ws.store)
         memories = []
         for mid in args.memory or []:
-            m = ws.store.get_memory(mid)
+            m = ws.store.get_claim(mid)
             if m:
                 memories.append(m)
         if not memories:
-            memories = ws.store.list_memories(status="confirmed", limit=20)
+            memories = ws.store.list_claims(status="confirmed", limit=20)
         req = AccessRequest(
             principal_id=f"tool_{args.tool}",
             persona=args.persona,
@@ -2377,9 +2377,9 @@ def cmd_export(args) -> None:
     from twin.cognize.stance_engine.profile import load_profile
 
     ws = Workspace(args.home)
-    memories = ws.store.list_memories(limit=100000)
+    memories = ws.store.list_claims(limit=100000)
     data = {
-        "memories": [
+        "claims": [
             {
                 **m.model_dump(),
                 "type": m.type.value, "sensitivity": m.sensitivity.value,
@@ -2395,7 +2395,7 @@ def cmd_export(args) -> None:
     def pretty():
         ux.print_rule("export")
         ux.print_kv([
-            ("memories", str(len(data["memories"]))),
+            ("claims", str(len(data["claims"]))),
             ("entities", str(len(data["entities"]))),
         ])
         ux.print_warn("summary only — pipe with --json to capture the full dump")
@@ -2422,7 +2422,7 @@ def cmd_session_start(args) -> None:
         print("  ⚠ domain unclassified — no context supplied (default-deny)."
               " Re-run with --domain work|technical|personal_preferences|"
               "assistant_preferences")
-    print(f"  supplied {len(ses.supplied_memory_ids)} memories"
+    print(f"  supplied {len(ses.supplied_claim_ids)} memories"
           f" ({ses.pack_chars // 4} tokens approx)\n")
     print(started.pack.context_pack or "(empty pack)")
 
@@ -2453,8 +2453,8 @@ def cmd_session_complete(args) -> None:
     if ses.consolidation_error:
         print(f"  ⚠ consolidation failed: {ses.consolidation_error}")
         print("  retry with: twin session complete " + ses.id)
-    if ses.created_memory_ids:
-        print(f"  {len(ses.created_memory_ids)} candidate memories created"
+    if ses.created_claim_ids:
+        print(f"  {len(ses.created_claim_ids)} candidate memories created"
               f" — review with: twin review")
 
 
@@ -2463,7 +2463,7 @@ def cmd_session_feedback(args) -> None:
 
     ws = Workspace(args.home)
     ses = record_feedback(ws.store, args.session_id, args.verdict,
-                          memory_id=args.memory, note=args.note or "",
+                          claim_id=args.memory, note=args.note or "",
                           scope=args.scope)
     print(f"session {ses.id}: feedback '{args.verdict}' recorded")
 
@@ -2540,7 +2540,7 @@ def cmd_project(args) -> None:
     else:
         for p in ws.store.list_projects():
             sessions = len(ws.store.list_sessions(project_id=p.id))
-            memories = len(ws.store.list_memories(project_id=p.id, limit=100000))
+            memories = len(ws.store.list_claims(project_id=p.id, limit=100000))
             print(f"{p.id}  {p.name} [{p.status}]"
                   f" — {memories} memories, {sessions} sessions,"
                   f" repos: {', '.join(p.repos) or '—'}")
@@ -3127,7 +3127,7 @@ def cmd_episode(args) -> None:
                 ux.print_kv([
                     ("valid_from", claim.get("valid_from") or "—"),
                     ("action", marker),
-                    ("candidate", claim.get("memory_id") or "—"),
+                    ("candidate", claim.get("claim_id") or "—"),
                 ])
             if result.claims and not dry:
                 ux.print_next([

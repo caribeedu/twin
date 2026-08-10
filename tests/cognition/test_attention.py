@@ -62,7 +62,7 @@ def test_feedback_suppresses_emission(store, cfg, embedder):
     em = AttentionOutcome(
         session_id=sid,
         kind=AttentionKind.suggestion,
-        memory_id="mem_x",
+        claim_id="mem_x",
         summary="hint",
         expected_value=0.8,
         status="open",
@@ -71,4 +71,4 @@ def test_feedback_suppresses_emission(store, cfg, embedder):
     out = feedback_attention(store, em.id, verdict="irrelevant")
     assert out is not None
     assert out.status == "suppressed"
-    assert store.is_attention_suppressed(sid, kind="suggestion", memory_id="mem_x")
+    assert store.is_attention_suppressed(sid, kind="suggestion", claim_id="mem_x")

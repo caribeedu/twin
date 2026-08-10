@@ -1,4 +1,4 @@
-"""Prefixed, sortable identifiers (mem_..., src_..., ent_...)."""
+"""Prefixed, sortable identifiers (clm_..., src_..., ent_...)."""
 
 import secrets
 import time
@@ -21,8 +21,8 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{_base32(ts, 10)}{_base32(rand, 8)}"
 
 
-def memory_id() -> str:
-    return new_id("mem")
+def claim_id() -> str:
+    return new_id("clm")
 
 
 def source_id() -> str:

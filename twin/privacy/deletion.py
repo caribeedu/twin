@@ -40,7 +40,7 @@ def _evidence_groups(ev: Any) -> set[str]:
 def _evidence_touches_selector(ev: Any, selector: dict[str, Any]) -> bool:
     artifact_id = selector.get("artifact_id")
     if not artifact_id:
-        # domain/project/memory_ids selectors affect all evidence of matched mem
+        # domain/project/claim_ids selectors affect all evidence of matched mem
         return True
     if getattr(ev, "artifact_id", None) == artifact_id:
         return True
@@ -54,14 +54,14 @@ def _match_memories(store: MemoryStore, selector: dict[str, Any]) -> list[Any]:
     source_account = selector.get("source_account")
     domain = selector.get("domain")
     project_id = selector.get("project_id")
-    memory_ids = selector.get("memory_ids")
+    claim_ids = selector.get("claim_ids")
 
-    memories = store.list_memories(limit=100000)
+    memories = store.list_claims(limit=100000)
     matched = []
     for m in memories:
         if getattr(m, "deleted_at", None):
             continue
-        if memory_ids and m.id not in memory_ids:
+        if claim_ids and m.id not in claim_ids:
             continue
         payload = m.payload or {}
         if domain and m.domain != domain:
@@ -107,11 +107,11 @@ def _plan_memory_actions(
         else:
             remaining_groups |= groups
 
-    # Explicit memory_ids selector → delete the memory itself
-    explicit = bool(selector.get("memory_ids") and mem.id in (selector.get("memory_ids") or []))
+    # Explicit claim_ids selector → delete the memory itself
+    explicit = bool(selector.get("claim_ids") and mem.id in (selector.get("claim_ids") or []))
     no_remaining = not remaining_groups and (not evs or bool(affected_ev))
     # Domain-wide without artifact → treat as full delete of matched memories
-    wholesale = not selector.get("artifact_id") and not selector.get("memory_ids")
+    wholesale = not selector.get("artifact_id") and not selector.get("claim_ids")
 
     if mode == DeletionMode.detach:
         action = "recalculate"
@@ -185,7 +185,7 @@ def _build_manifest(
     all_mem = memories_delete + memories_recalculate
     if hasattr(store, "list_judgment_proposals"):
         for p in store.list_judgment_proposals(status="pending"):
-            if any(mid in (p.supporting_memory_ids or []) for mid in all_mem):
+            if any(mid in (p.supporting_claim_ids or []) for mid in all_mem):
                 proposals.append(p.id)
 
     return {
@@ -240,7 +240,7 @@ def preview_deletion(
         "judgment_proposals_affected": len(manifest["judgment_proposals"]),
         "exports": 0,
         "backups": 0,
-        "matched_memory_ids_sample": mem_ids[:PREVIEW_UI_CAP],
+        "matched_claim_ids_sample": mem_ids[:PREVIEW_UI_CAP],
         "matched_memory_count": len(mem_ids),
         "memories_to_delete": len(manifest["memories_delete"]),
         "memories_to_recalculate": len(manifest["memories_recalculate"]),
@@ -366,13 +366,13 @@ def execute_deletion(
             affected_artifacts = set(man.get("artifacts") or [])
 
             for mid in man.get("memories_recalculate") or []:
-                mem = store.get_memory(mid)
+                mem = store.get_claim(mid)
                 if mem is None:
                     continue
                 remaining_percepts = [
                     x for x in (mem.percept_ids or []) if x not in affected_percepts
                 ]
-                # source_ids may not exist on MemoryItem — use payload links
+                # source_ids may not exist on StoreClaim — use payload links
                 updates: dict[str, Any] = {
                     "percept_ids": remaining_percepts,
                     "deletion_reason": req.reason or "privacy_detach",
@@ -383,11 +383,11 @@ def execute_deletion(
                     updates["confidence"] = new_conf
                 except Exception:
                     pass
-                store.update_memory(mid, **updates)
+                store.update_claim(mid, **updates)
 
             for mid in man.get("memories_delete") or []:
                 if req.mode == DeletionMode.anonymize:
-                    store.update_memory(
+                    store.update_claim(
                         mid,
                         title="[anonymized]",
                         summary="[anonymized]",
@@ -396,7 +396,7 @@ def execute_deletion(
                         deletion_reason=req.reason or "privacy_anonymize_scaffold",
                     )
                 else:
-                    store.update_memory(
+                    store.update_claim(
                         mid,
                         deleted_at=now_iso(),
                         deletion_reason=req.reason or (
@@ -431,7 +431,7 @@ def execute_deletion(
                     residuals.append(f"embedding_residual:{mid}")
             except Exception:
                 pass
-        mem = store.get_memory(mid) if hasattr(store, "get_memory") else None
+        mem = store.get_claim(mid) if hasattr(store, "get_claim") else None
         if mem is not None and not getattr(mem, "deleted_at", None):
             residuals.append(f"memory_still_active:{mid}")
     for eid in man.get("evidence_delete") or []:

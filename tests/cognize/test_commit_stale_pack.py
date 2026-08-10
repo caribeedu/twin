@@ -7,7 +7,7 @@ from twin.cognize.migrate import backfill_from_memories
 from twin.cognize.models import EpistemicStatus
 from twin.inject.context_pack import build_context_pack
 from twin.store.embeddings import HashEmbedder
-from twin.store.models import MemoryItem, MemoryStatus, MemoryType, Sensitivity
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType, Sensitivity
 from twin.sense.sensory.percept import Percept
 
 
@@ -87,19 +87,19 @@ def test_pack_withholds_stale_as_fresh(store, cfg):
 def test_backfill_dry_run(store):
     from twin import ids
 
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         title="Use Postgres",
         summary="Chose Postgres outbox",
         domain="technical",
         persona="developer",
         sensitivity=Sensitivity.internal,
         confidence=0.9,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
         needs_review=False,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     stats = backfill_from_memories(store, vault_id="default", dry_run=True)
     assert stats["narratives"] >= 1
     assert store.list_narratives("default") == []

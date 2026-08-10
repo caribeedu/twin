@@ -153,8 +153,8 @@ def grant_covers(
     labels = scope.get("labels") or []
     if labels and not (set(labels) & set(classification.labels)) and "*" not in labels:
         return False
-    memory_ids = scope.get("memory_ids") or []
-    if memory_ids and classification.resource_id not in memory_ids:
+    claim_ids = scope.get("claim_ids") or []
+    if claim_ids and classification.resource_id not in claim_ids:
         return False
     return True
 

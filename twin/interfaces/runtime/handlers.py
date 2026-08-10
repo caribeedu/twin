@@ -122,15 +122,15 @@ def handle_consolidate_weekly(
 def handle_reembed_memory(
     store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
-    mid = (job.payload or {}).get("memory_id")
+    mid = (job.payload or {}).get("claim_id")
     if not mid:
-        raise HandlerError("missing memory_id", error_class=ErrorClass.permanent, stage="validate")
-    mem = store.get_memory(mid)
+        raise HandlerError("missing claim_id", error_class=ErrorClass.permanent, stage="validate")
+    mem = store.get_claim(mid)
     if mem is None:
         raise HandlerError(f"memory {mid} not found", error_class=ErrorClass.permanent, stage="validate")
     vector = embedder.embed(f"{mem.title}\n{mem.summary}")
-    store.store_embedding(mem.id, "memory", embedder.name, vector)
-    return {"memory_id": mid, "embedder": embedder.name}
+    store.store_embedding(mem.id, "claim", embedder.name, vector)
+    return {"claim_id": mid, "embedder": embedder.name}
 
 
 def handle_integrity_check(
@@ -350,7 +350,7 @@ def handle_session_complete(
             else str(session.consolidation_status)
         ),
         "summary_percept_id": session.summary_percept_id,
-        "created_memory_ids": list(session.created_memory_ids or []),
+        "created_claim_ids": list(session.created_claim_ids or []),
     }
 
 

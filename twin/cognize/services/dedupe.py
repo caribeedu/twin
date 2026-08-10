@@ -32,8 +32,8 @@ def check(store: MemoryStore, embedder: Embedder, mem_type: str, text: str) -> D
     vector = embedder.embed(text)
     best_id: Optional[str] = None
     best_sim = 0.0
-    for ref_id, sim in store.similar(vector, "memory", embedder.name, min_sim=RELATED_THRESHOLD).items():
-        existing = store.get_memory(ref_id)
+    for ref_id, sim in store.similar(vector, "claim", embedder.name, min_sim=RELATED_THRESHOLD).items():
+        existing = store.get_claim(ref_id)
         if existing is None or existing.type.value != mem_type:
             continue
         if existing.status.value in INACTIVE_STATUSES:

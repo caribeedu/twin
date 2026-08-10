@@ -7,7 +7,7 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from twin.sense.sensory.percept import Percept
-from .models import Artifact, Evidence, MemoryItem
+from .models import Artifact, Evidence, StoreClaim
 from .store.base import MemoryStore
 
 
@@ -60,13 +60,13 @@ def ensure_artifact_from_percept(store: MemoryStore, percept: Percept) -> Option
     return art.id
 
 
-def memory_provenance(store: MemoryStore, memory_id: str) -> dict[str, Any]:
+def claim_provenance(store: MemoryStore, claim_id: str) -> dict[str, Any]:
     """Navigable lineage for 'why does twin believe this?'."""
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
 
-    evidence = store.get_evidence(memory_id)
+    evidence = store.get_evidence(claim_id)
     percepts: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
     seen_art: set[str] = set()
@@ -103,7 +103,7 @@ def memory_provenance(store: MemoryStore, memory_id: str) -> dict[str, Any]:
 
     relations = [
         r.model_dump(mode="json")
-        for r in store.relations_for(memory_id)
+        for r in store.relations_for(claim_id)
         if r.predicate in (
             "supersedes", "contradicts", "merged_into", "split_into",
             "related_to", "supported_by",
@@ -111,7 +111,7 @@ def memory_provenance(store: MemoryStore, memory_id: str) -> dict[str, Any]:
     ]
 
     return {
-        "memory": mem.model_dump(mode="json"),
+        "claim": mem.model_dump(mode="json"),
         "evidence": [e.model_dump(mode="json") for e in evidence],
         "percepts": percepts,
         "artifacts": artifacts,
@@ -180,13 +180,13 @@ def _source_ref_label(sensor: str, ext_type: str, ext_id: str, sm: dict[str, Any
     return " · ".join(bits)
 
 
-def memory_source_summary(store: MemoryStore, memory_id: str) -> dict[str, Any]:
+def claim_source_summary(store: MemoryStore, claim_id: str) -> dict[str, Any]:
     """Compact 'where did this come from?' for UI cards and list endpoints.
 
     Returns sensors (slack/github/…), concrete artifact refs, and a short
     human label suitable for a tag — without the full provenance dump.
     """
-    evidence = store.get_evidence(memory_id) if hasattr(store, "get_evidence") else []
+    evidence = store.get_evidence(claim_id) if hasattr(store, "get_evidence") else []
     sensors: list[str] = []
     refs: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -238,7 +238,7 @@ def memory_source_summary(store: MemoryStore, memory_id: str) -> dict[str, Any]:
         sensors = [refs[0]["sensor"]]
     # Fallback: episode / pattern origin when evidence is still empty
     if not sensors:
-        mem = store.get_memory(memory_id)
+        mem = store.get_claim(claim_id)
         payload = (mem.payload or {}) if mem else {}
         if payload.get("episode_id"):
             sensors = ["episode"]
@@ -269,7 +269,7 @@ def memory_source_summary(store: MemoryStore, memory_id: str) -> dict[str, Any]:
     }
 
 
-def memory_source_keys(store: MemoryStore, memory: Any) -> set[str]:
+def claim_source_keys(store: MemoryStore, memory: Any) -> set[str]:
     """Distinct *independent sources* backing one memory.
 
     The unit of independence is the evidence ``independence_group`` (e.g.
@@ -281,7 +281,7 @@ def memory_source_keys(store: MemoryStore, memory: Any) -> set[str]:
     Falls back to the memory's own origin (episode / pattern window / id) only
     when no evidence groups are recorded.
     """
-    mem = memory if hasattr(memory, "payload") else store.get_memory(memory)
+    mem = memory if hasattr(memory, "payload") else store.get_claim(memory)
     if mem is None:
         return set()
     keys: set[str] = set()
@@ -312,7 +312,7 @@ def count_independent_sources(store: MemoryStore, memories: Any) -> int:
     groups: set[str] = set()
     materialized = list(memories)
     for m in materialized:
-        groups |= memory_source_keys(store, m)
+        groups |= claim_source_keys(store, m)
     if groups:
         return len(groups)
     return 1 if materialized else 0
@@ -320,7 +320,7 @@ def count_independent_sources(store: MemoryStore, memories: Any) -> int:
 
 def attach_corroborating_evidence(
     store: MemoryStore,
-    memory_id: str,
+    claim_id: str,
     percept_id: str,
     quote: str,
     *,
@@ -331,12 +331,12 @@ def attach_corroborating_evidence(
     """Paraphrase/corroboration: same memory, additional evidence, capped confidence."""
     from twin.cognize.services.evidence_text import sanitize_evidence_quote
 
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     ev = Evidence(
         id=ids.evidence_id(),
-        memory_id=memory_id,
+        claim_id=claim_id,
         percept_id=percept_id,
         quote=sanitize_evidence_quote(quote),
         evidence_type="verbatim",  # type: ignore[arg-type]
@@ -348,10 +348,10 @@ def attach_corroborating_evidence(
     store.insert_evidence(ev)
     if bump_confidence:
         # diminishing returns; independence groups share credit
-        existing = store.get_evidence(memory_id)
+        existing = store.get_evidence(claim_id)
         groups = {e.independence_group or e.percept_id for e in existing}
         # asymptotic toward 0.95
         n = len(groups)
         new_conf = min(0.95, mem.confidence + 0.08 / max(1, n - 1) if n > 1 else mem.confidence + 0.05)
-        store.update_memory(memory_id, confidence=round(new_conf, 3))
+        store.update_claim(claim_id, confidence=round(new_conf, 3))
     return ev

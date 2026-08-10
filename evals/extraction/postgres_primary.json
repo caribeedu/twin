@@ -6,7 +6,7 @@
     "source_trust": 0.95
   },
   "expected": {
-    "memories": [
+    "claims": [
       {
         "type": "decision",
         "canonical_claim": "PostgreSQL",

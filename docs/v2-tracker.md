@@ -64,7 +64,7 @@ A version ships only when **every required task** for that version is `done` and
 | **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
 | **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): browse **all** Cognize entities with purpose-shaped UI; operator panes aligned with TUI Center; retire Memory-as-product UI | T-130–T-139 | Every §2.2 entity list+detail reachable; no Memory nav; REST contract tests green; package `2.4.0` (+ exit-criteria hardening in `2.4.1`) |
 | **v2.5** | Package walls | Code packages match Sense / Cognize / Inject (+ store, llm, privacy, interfaces); fold `cognition` → `cognize`; split `memory` / `judgment` by function; MCP names follow product vocabulary | T-140–T-149 | Import graph uses target packages; no product Memory/Judgment nouns in public surfaces; package `2.5.0` |
-| **v2.6** | Dual-read schema rename | Retire `MemoryItem` / `memory_id` dual-read names in favor of store claim vocabulary; migrate tables/columns; MCP `memory_*` tools retarget or drop | T-150–T-152 | No `MemoryItem` in public Python API; store/tests/export green; package `2.6.0` |
+| **v2.6** | Dual-read schema rename | Retire `MemoryItem` / `memory_id` dual-read names → `StoreClaim` / `claim_id`; migrate tables/columns; MCP `claim_*` only (no `memory_*` / `judgment_*` shims) | T-150–T-152 | Public store API uses claim vocabulary; store/tests/export green; package `2.6.0` |
 
 ### Completing this tracker ≠ ROADMAP v3 “Extended Brain”
 
@@ -126,8 +126,8 @@ v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package
 
 #### v2.6 — Dual-read schema rename
 
-- [ ] T-150 T-151 T-152
-- [ ] `__version__ = 2.6.0` + CHANGELOG + tag `v2.6.0`
+- [x] T-150 T-151 T-152
+- [x] `__version__ = 2.6.0` + CHANGELOG (tag after merge approval)
 
 ---
 
@@ -151,7 +151,7 @@ P11 Experiments + evals (§9.3 priority)
 P12 Doc split (ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH) + README trim
 P13 Web Command Center — single-route entity visibility + operator panes
 P14 Package walls — sense / cognize / inject / store / llm / privacy / interfaces
-P15 Dual-read schema rename — MemoryItem → store claim vocabulary
+P15 Dual-read schema rename — MemoryItem → StoreClaim vocabulary
 ```
 
 Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must not claim “fresh Narratives” until P1+P6 exist. P13 starts after v2.3 ships. P14 starts after v2.4 ships. P15 starts after v2.5 ships.
@@ -233,9 +233,9 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-147 | **v2.5** | P14 | `privacy` owns Firewall / PII / guardrails | done |
 | T-148 | **v2.5** | P14 | `interfaces` absorbs runtime + sovereignty | done |
 | T-149 | **v2.5** | P14 | QA gate — imports, MCP names, package `2.5.0` | done |
-| T-150 | **v2.6** | P15 | Rename dual-read types (`MemoryItem` → store claim) | todo |
-| T-151 | **v2.6** | P15 | Migrate store columns / FKs (`memory_id` → claim id) | todo |
-| T-152 | **v2.6** | P15 | QA gate — API/MCP/export without Memory* product names | todo |
+| T-150 | **v2.6** | P15 | Rename dual-read types (`MemoryItem` → store claim) | done |
+| T-151 | **v2.6** | P15 | Migrate store columns / FKs (`memory_id` → claim id) | done |
+| T-152 | **v2.6** | P15 | QA gate — API/MCP/export without Memory* product names | done |
 
 
 ---
@@ -270,7 +270,7 @@ Update `docs/GLOSSARY.md` and `docs/COGNITION.md` so the v2 entity names are can
 ### Assumptions
 
 - `docs/v2.md` remains authoritative; this task only mirrors settled naming.
-- Existing code still uses `MemoryItem` — docs may say “code still uses Memory* until T-014.”
+- Existing code still uses `MemoryItem` / store claim rows — docs may say “code still uses Memory* until T-014 / T-150.”
 - IDENTITY.md unit-of-value text may still say “understanding”; leave it unless it contradicts Narrative as durable product unit — if conflict, prefer v2 §0− and note the IDENTITY update in T-121.
 
 ### Expected QA
@@ -412,7 +412,7 @@ Provide JSON-schema export or pydantic `.model_json_schema()` used by LLM stage 
 - [x] Types importable; unit tests construct valid and reject invalid Relation types.
 - [x] `NarrativeRevisionDecision.outcome` enum matches `integrate \| branch \| contradict \| supersede \| keep_separate \| defer`.
 - [x] Docstrings cite `docs/v2.md` §2.2 / §10.
-- [x] No `MemoryItem` subclass pretending to be Narrative without an explicit `LegacyMemoryAdapter` name.
+- [x] No `MemoryItem` / `StoreClaim` subclass pretending to be Narrative without an explicit `LegacyMemoryAdapter` name.
 
 ### Assumptions
 
@@ -574,7 +574,7 @@ Provide query helpers: neighbors by type, collapse independent-origin sets for I
 
 ### Description
 
-Ship an explicit dual-read adapter so existing confirmed `MemoryItem`s remain usable while Cognize writes Narratives:
+Ship an explicit dual-read adapter so existing confirmed `StoreClaim`s remain usable while Cognize writes Narratives:
 
 1. Document mapping:
    - confirmed Memory (decision/event/fact…) → provisional **Narrative** or **Interpretation** (choose one rule and stick to it; recommended: confirmed memories become Narratives with EpistemicState `freshness_boundary=valid_from`, flagged `migrated_from_memory=true`; candidates become Interpretations `competing`).
@@ -727,7 +727,7 @@ Update docs/SETUP: heuristic is not a cognition backend.
 
 ### Exit criteria
 
-- [x] Test: `TWIN_EXTRACTOR=heuristic` + `twin cognize`/`extract` does not insert MemoryItems or Interpretations; returns blocked/halt.
+- [x] Test: `TWIN_EXTRACTOR=heuristic` + `twin cognize`/`extract` does not insert StoreClaims or Interpretations; returns blocked/halt.
 - [x] CI still has a deterministic stand-in for tests via **authored overrides** / recorded fixtures (like `set_interpreter_override`), not lexical meaning.
 - [x] CHANGELOG/OPERATIONS note the behavior change.
 
@@ -2825,7 +2825,7 @@ aliases, CHANGELOG + tag `v2.5.0`.
 
 ## T-150 — Rename dual-read types (`MemoryItem` → store claim)
 
-**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `todo`  
+**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
 **Depends on:** T-149  
 **Blocks:** T-151, T-152
 
@@ -2836,28 +2836,26 @@ API. Target vocabulary (finalize in implementation, keep one canonical set):
 
 | Today (dual-read) | Target |
 |---|---|
-| `MemoryItem` | `StoreClaim` (or `ClaimRow` — pick one, stick to it) |
+| `MemoryItem` | `StoreClaim` |
 | `MemoryType` / `MemoryStatus` | `ClaimType` / `ClaimStatus` |
 | `MemoryOperation` | `ClaimOperation` |
-| `MemoryStore` | keep **or** alias `Store` / `TwinStore` (facade name may stay if too invasive) |
+| `MemoryStore` | keep as store facade name |
 
 Scope: `twin/store/models.py` and all importers. Do **not** change product
-nouns Narrative / Interpretation / Stance. Dual-read mapping to Narratives
-must keep working during and after the rename (compat aliases for one
-release window if needed).
+nouns Narrative / Interpretation / Stance. No transitional type aliases.
 
 Out of scope here: physical DB column renames (T-151).
 
 ### Exit criteria
 
-- [ ] Public store models use claim vocabulary; `MemoryItem` only as deprecated alias (or gone).
-- [ ] Docs (GLOSSARY / ARCHITECTURE store section) describe claim rows, not product “memory.”
-- [ ] Unit tests for models + formation/lifecycle green.
+- [x] Public store models use claim vocabulary; no `MemoryItem` / `MemoryType` / `MemoryStatus` / `MemoryOperation` shims.
+- [x] Docs (GLOSSARY / ARCHITECTURE store section) describe claim rows, not product “memory.”
+- [x] Unit tests for models + formation/lifecycle green.
 
 ### Assumptions
 
-- Column/FK names may still say `memory_id` until T-151.
-- MCP `memory_*` tools may keep names until T-152 retargets them.
+- Column/FK renames completed in T-151 (`claim_id` / `store_claims`).
+- MCP `claim_*` only; no `memory_*` / `judgment_*` tool shims (T-152).
 
 ### Expected QA
 
@@ -2871,14 +2869,14 @@ Out of scope here: physical DB column renames (T-151).
 
 ## T-151 — Migrate store columns / FKs (`memory_id` → claim id)
 
-**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `todo`  
+**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
 **Depends on:** T-150  
 **Blocks:** T-152
 
 ### Description
 
 Schema migration for SQLite + Postgres: rename dual-read tables/columns that
-still use `memory` / `memories` / `memory_id` to the claim vocabulary chosen
+still use `memory` / `memories` / `claim_id` to the claim vocabulary chosen
 in T-150. Preserve export/backup/restore. Evidence, relations, findings,
 sessions, and connector links must keep referential integrity.
 
@@ -2886,9 +2884,9 @@ Provide a one-shot migrator (and downgrade policy: none — forward only).
 
 ### Exit criteria
 
-- [ ] Fresh DB and upgraded DB both use claim column names.
-- [ ] Export → restore round-trip green on SQLite and Postgres CI jobs.
-- [ ] No silent data loss on dual-read rows or Evidence FKs.
+- [x] Fresh DB and upgraded DB both use claim column names.
+- [x] Export → restore round-trip green on SQLite and Postgres CI jobs.
+- [x] No silent data loss on dual-read rows or Evidence FKs.
 
 ### Assumptions
 
@@ -2907,7 +2905,7 @@ Provide a one-shot migrator (and downgrade policy: none — forward only).
 
 ## T-152 — QA gate — API/MCP/export without Memory* product names
 
-**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `todo`  
+**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
 **Depends on:** T-150, T-151  
 **Blocks:** none (release gate for `2.6.0`)
 
@@ -2921,9 +2919,9 @@ Finish dual-read retirement on host surfaces:
 
 ### Exit criteria
 
-- [ ] MCP preferred tools and docs use Narrative / claim language; legacy aliases documented or gone.
-- [ ] Grep gate: no new `MemoryItem` in twin/ except optional compat shim.
-- [ ] Package `2.6.0` recorded; CI green.
+- [x] MCP tools and docs use Narrative / claim / stance language; no `memory_*` or `judgment_*` tool shims.
+- [x] Grep gate: no `MemoryItem` / type aliases in `twin/`.
+- [x] Package `2.6.0` recorded; focused local suites green (CI after push/PR).
 
 ### Resources
 

@@ -63,7 +63,7 @@ def test_unavailable_interpreter_defers_and_never_fabricates(store, interpreting
     assert report.deferred is True
     assert report.interpretation_status == "deferred"
     assert report.inserted == []
-    assert store.list_memories() == []          # nothing fabricated from lexical rules
+    assert store.list_claims() == []          # nothing fabricated from lexical rules
     state = store.get_interpretation(p.id)
     assert state.status == "deferred" and state.attempts == 1
     # deferred == retryable: the percept is still pending
@@ -132,7 +132,7 @@ def test_proposal_is_not_a_decision(store, interpreting_cfg, embedder):
     p = _percept("Bruno: I propose we adopt Redis.", source_trust=0.95)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     assert mem.payload["cognitive_act"] == "proposal"
     assert mem.needs_review is True
     assert "unsettled cognitive act" in (mem.review_reason or "")
@@ -150,7 +150,7 @@ def test_third_party_claim_is_attributed_and_reviewed(store, interpreting_cfg, e
                  source_trust=0.95)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     assert mem.payload["attributed_to"] == "Priya"
     assert mem.payload["speaker_is_owner"] is False
     assert mem.needs_review is True
@@ -170,7 +170,7 @@ def test_settled_decision_not_held_by_act(store, interpreting_cfg, embedder):
                  source_trust=0.95)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     assert mem.payload["cognitive_act"] == "decision"
     # the act itself does not hold a settled decision for review
     assert "unsettled cognitive act" not in (mem.review_reason or "")
@@ -192,7 +192,7 @@ def test_ungrounded_items_are_dropped(store, interpreting_cfg, embedder):
     p = _percept("The team standardized on tabs for indentation.")
     store.insert_percept(p)
     report = extract_percept(store, interpreting_cfg, embedder, p)
-    summaries = [m.summary for m in store.list_memories()]
+    summaries = [m.summary for m in store.list_claims()]
     assert any("tabs" in s for s in summaries)
     assert all("Fridays" not in s for s in summaries)   # ungrounded guess dropped
     assert len(report.inserted) == 1
@@ -211,7 +211,7 @@ def test_interpretation_metadata_recorded_on_memory_and_state(store, interpretin
     store.insert_percept(p)
     report = extract_percept(store, interpreting_cfg, embedder, p)
 
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     ev = mem.extractor_version
     assert ev.extractor == "ollama:qwen3.6" and ev.model == "qwen3.6"
     assert ev.prompt_version == "interpret-v1" and ev.schema_version == "1"
@@ -239,7 +239,7 @@ def test_quarantine_precedes_interpretation(store, interpreting_cfg, embedder):
     assert report.extractor == "quarantined"
     assert report.interpretation_status == "quarantined"
     assert called["n"] == 0                     # interpreter never saw the content
-    assert store.list_memories() == []
+    assert store.list_claims() == []
     assert store.get_interpretation(p.id).status == "quarantined"
 
 
@@ -259,7 +259,7 @@ def test_source_policy_still_applies_over_interpreter(store, interpreting_cfg, e
                  metadata={"connector_type": "github"}, source_trust=0.9)
     store.insert_percept(p)
     report = extract_percept(store, interpreting_cfg, embedder, p)
-    types = {m.type.value for m in store.list_memories()}
+    types = {m.type.value for m in store.list_claims()}
     assert "preference" not in types            # dropped by source policy
     assert "decision" in types
     assert report.policy_dropped >= 1
@@ -283,7 +283,7 @@ def test_nonempty_but_invented_evidence_span_is_dropped(store, interpreting_cfg,
     p = _percept("The team standardized on tabs.")
     store.insert_percept(p)
     report = extract_percept(store, interpreting_cfg, embedder, p)
-    summaries = [m.summary for m in store.list_memories()]
+    summaries = [m.summary for m in store.list_claims()]
     assert any("tabs" in s for s in summaries)
     assert all("Kubernetes" not in s for s in summaries)   # invented span rejected
     assert report.ungrounded == 1
@@ -300,7 +300,7 @@ def test_paraphrase_is_not_accepted_as_verbatim_evidence(store, interpreting_cfg
     p = _percept("We chose PostgreSQL.")
     store.insert_percept(p)
     report = extract_percept(store, interpreting_cfg, embedder, p)
-    assert store.list_memories() == []       # paraphrase is not verbatim evidence
+    assert store.list_claims() == []       # paraphrase is not verbatim evidence
     assert report.ungrounded == 1
     # nothing grounded → understood-empty, terminal
     assert store.get_interpretation(p.id).status == "empty"
@@ -323,7 +323,7 @@ def test_evidence_grounding_uses_masked_source(store, interpreting_cfg, embedder
     p = _percept(content)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    mems = store.list_memories()
+    mems = store.list_claims()
     assert mems                                   # grounded against masked text
     assert "alice@example.com" not in mems[0].summary
 
@@ -383,7 +383,7 @@ def test_invalid_memory_type_is_dropped_not_coerced_to_fact(store, interpreting_
     p = _percept("Some bogus type.")
     store.insert_percept(p)
     report = extract_percept(store, interpreting_cfg, embedder, p)
-    assert store.list_memories() == []           # never silently a 'fact'
+    assert store.list_claims() == []           # never silently a 'fact'
     assert report.invalid == 1
 
 
@@ -398,7 +398,7 @@ def test_invalid_domain_goes_to_review_as_unknown_not_technical(store,
     p = _percept("A grounded fact.", source_trust=0.95)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     assert mem.domain == "unknown"               # not silently 'technical'
     assert mem.payload["invalid_domain"] == "wonderland"
     assert mem.needs_review is True
@@ -463,7 +463,7 @@ def test_invented_speaker_is_flagged_unresolved(store, interpreting_cfg, embedde
                  actors=["Marina"], source_trust=0.95)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     assert mem.payload["attribution_unresolved"] is True
     assert mem.needs_review is True
 
@@ -529,6 +529,6 @@ def test_known_speaker_attribution_resolves(store, interpreting_cfg, embedder):
                  actors=["Marina"], source_trust=0.95)
     store.insert_percept(p)
     extract_percept(store, interpreting_cfg, embedder, p)
-    [mem] = store.list_memories()
+    [mem] = store.list_claims()
     assert "attribution_unresolved" not in mem.payload
     assert "unsettled cognitive act" not in (mem.review_reason or "")

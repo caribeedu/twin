@@ -10,7 +10,7 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from twin.privacy.firewall import Firewall
-from twin.store.models import MemoryItem
+from twin.store.models import StoreClaim
 from twin.store.store.base import MemoryStore
 from .classify import classify_memory
 from .grants import (
@@ -137,7 +137,7 @@ def evaluate_resource(
     store: Optional[MemoryStore] = None,
     consume_grants: bool = False,
     legacy_firewall: Optional[Firewall] = None,
-    memory: Optional[MemoryItem] = None,
+    memory: Optional[StoreClaim] = None,
     target_domain: Optional[str] = None,
     principal: Optional[Principal] = None,
 ) -> ResourceDecision:
@@ -317,7 +317,7 @@ def evaluate_resource(
 def evaluate_access(
     store: MemoryStore,
     request: AccessRequest,
-    memories: list[MemoryItem],
+    memories: list[StoreClaim],
     *,
     policies_path: Optional[Path | str] = None,
     policies: Optional[list[PrivacyPolicy]] = None,
@@ -411,14 +411,14 @@ def evaluate_access(
                 grant_ids.append(rd.grant_id)
 
             if rd.effect == PolicyEffect.deny:
-                denied.append({"memory_id": mem.id, "reason": rd.reason,
+                denied.append({"claim_id": mem.id, "reason": rd.reason,
                                "rule": rd.matched_policy_ids[0] if rd.matched_policy_ids else ""})
             elif rd.effect == PolicyEffect.require_grant:
-                needs_grant.append({"memory_id": mem.id, "reason": rd.reason})
-                denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_grant"})
+                needs_grant.append({"claim_id": mem.id, "reason": rd.reason})
+                denied.append({"claim_id": mem.id, "reason": rd.reason, "rule": "require_grant"})
             elif rd.effect == PolicyEffect.require_confirmation:
-                needs_confirm.append({"memory_id": mem.id, "reason": rd.reason})
-                denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_confirmation"})
+                needs_confirm.append({"claim_id": mem.id, "reason": rd.reason})
+                denied.append({"claim_id": mem.id, "reason": rd.reason, "rule": "require_confirmation"})
             elif rd.effect in (
                 PolicyEffect.redact, PolicyEffect.generalize,
                 PolicyEffect.aggregate, PolicyEffect.pseudonymize,
@@ -523,11 +523,11 @@ def evaluate_judgment_items(
     """Run governance over judgment items (as classified resources)."""
     from twin.cognize.stance_engine.models import JudgmentItem
 
-    synthetic: list[MemoryItem] = []
+    synthetic: list[StoreClaim] = []
     for it in items:
         if not isinstance(it, JudgmentItem):
             continue
-        synthetic.append(MemoryItem(
+        synthetic.append(StoreClaim(
             id=it.id,
             type="constraint" if it.kind.value == "constraint" else "belief",
             title=it.statement[:80],

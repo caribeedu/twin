@@ -69,36 +69,36 @@ def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
     result = search(pg_store, embedder, "FastAPI backend webhooks",
                     target_domain="technical", firewall=fw)
     assert result.hits
-    assert "FastAPI" in " ".join(h.memory.summary for h in result.hits[:3])
+    assert "FastAPI" in " ".join(h.claim.summary for h in result.hits[:3])
 
     # review lifecycle
-    from twin.store.models import MemoryStatus
+    from twin.store.models import ClaimStatus
 
-    pg_store.set_status(inserted[0], MemoryStatus.confirmed)
-    assert pg_store.get_memory(inserted[0]).status.value == "confirmed"
+    pg_store.set_status(inserted[0], ClaimStatus.confirmed)
+    assert pg_store.get_claim(inserted[0]).status.value == "confirmed"
 
     # entities + graph — entity resolution is the cognitive interpreter's job;
     # the offline mock extracts none, so the graph is simply exercised as empty
     entities = pg_store.list_entities()
     assert isinstance(entities, list)
     if entities:
-        assert isinstance(pg_store.memories_for_entity(entities[0].id), list)
+        assert isinstance(pg_store.claims_for_entity(entities[0].id), list)
 
 
 def test_pgvector_server_side_similarity(pg_store, embedder):
     from twin import ids
-    from twin.store.models import MemoryItem
+    from twin.store.models import StoreClaim
 
     for i, text in enumerate(["FastAPI no backend", "jantar em família"]):
-        mem = MemoryItem(id=ids.memory_id(), type="fact", title=text, summary=text)
-        pg_store.insert_memory(mem)
-        pg_store.store_embedding(mem.id, "memory", embedder.name, embedder.embed(text))
+        mem = StoreClaim(id=ids.claim_id(), type="fact", title=text, summary=text)
+        pg_store.insert_claim(mem)
+        pg_store.store_embedding(mem.id, "claim", embedder.name, embedder.embed(text))
 
     query_vec = embedder.embed("backend FastAPI webhooks")
-    scores = pg_store.similar(query_vec, "memory", embedder.name, min_sim=0.01)
+    scores = pg_store.similar(query_vec, "claim", embedder.name, min_sim=0.01)
     assert scores
     top = max(scores, key=scores.get)
-    assert "FastAPI" in pg_store.get_memory(top).title
+    assert "FastAPI" in pg_store.get_claim(top).title
 
 
 def test_projects_and_sessions_on_postgres(pg_store, cfg, embedder):
@@ -137,8 +137,8 @@ def test_projects_and_sessions_on_postgres(pg_store, cfg, embedder):
     assert done.status.value == "completed"
     assert done.consolidation_status.value == "completed"
     assert done.summary_percept_id
-    assert done.created_memory_ids
-    assert pg_store.get_memory(done.created_memory_ids[0]).project_id == project.id
+    assert done.created_claim_ids
+    assert pg_store.get_claim(done.created_claim_ids[0]).project_id == project.id
     # compare-and-set: a second complete is rejected
     with pytest.raises(ValueError, match="not completable"):
         complete_session(pg_store, cfg, embedder, session.id, summary="again")
@@ -147,10 +147,10 @@ def test_projects_and_sessions_on_postgres(pg_store, cfg, embedder):
         observe_session(pg_store, session.id, {"kind": "file"})
 
     record_feedback(pg_store, session.id, "useful",
-                    memory_id=done.created_memory_ids[0])
+                    claim_id=done.created_claim_ids[0])
     loaded = pg_store.get_session(session.id)
     assert loaded.artifacts and loaded.feedback
-    assert loaded.feedback[0]["scope"] == "memory"
+    assert loaded.feedback[0]["scope"] == "claim"
     assert [s.id for s in pg_store.list_sessions(status="completed")] == [session.id]
     assert [s.id for s in pg_store.list_sessions(project_id=project.id)] == [session.id]
 
@@ -159,9 +159,9 @@ def test_firewall_log_on_postgres(pg_store, cfg):
     from twin import ids
     from twin.clock import now_iso
     from twin.privacy.firewall import Firewall
-    from twin.store.models import MemoryItem
+    from twin.store.models import StoreClaim
 
-    mem = MemoryItem(id=ids.memory_id(), type="fact", title="x", summary="x",
+    mem = StoreClaim(id=ids.claim_id(), type="fact", title="x", summary="x",
                      domain="relationship", status="confirmed", confidence=0.9,
                      created_at=now_iso(), updated_at=now_iso())
     fw = Firewall(cfg.policies_path, pg_store)
@@ -175,19 +175,19 @@ def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
     """Same fault-injection as SQLite — Postgres must roll back structural merge."""
     from twin import ids
     from twin.store.lifecycle import merge_memories
-    from twin.store.models import MemoryItem, MemoryStatus
+    from twin.store.models import StoreClaim, ClaimStatus
 
     def _mem(**kw):
         base = dict(
-            id=ids.memory_id(), type="fact", title="t", summary="s",
+            id=ids.claim_id(), type="fact", title="t", summary="s",
             domain="technical", confidence=0.9, status="confirmed",
             entities=["Twin"],
         )
         base.update(kw)
-        mem = MemoryItem(**base)
-        pg_store.insert_memory(mem)
+        mem = StoreClaim(**base)
+        pg_store.insert_claim(mem)
         pg_store.store_embedding(
-            mem.id, "memory", embedder.name,
+            mem.id, "claim", embedder.name,
             embedder.embed(f"{mem.title}\n{mem.summary}"),
         )
         return mem
@@ -195,27 +195,27 @@ def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
     a = _mem(title="A", summary="alpha fact about Twin")
     b = _mem(title="B", summary="beta fact about Twin")
     a_id, b_id = a.id, b.id
-    before_ids = {m.id for m in pg_store.list_memories(limit=1000)}
+    before_ids = {m.id for m in pg_store.list_claims(limit=1000)}
 
-    real_update = pg_store.update_memory
+    real_update = pg_store.update_claim
     calls = {"n": 0}
 
     def boom(mid, **kwargs):
         calls["n"] += 1
-        if kwargs.get("status") == MemoryStatus.merged.value and calls["n"] >= 2:
+        if kwargs.get("status") == ClaimStatus.merged.value and calls["n"] >= 2:
             raise RuntimeError("injected failure")
         return real_update(mid, **kwargs)
 
-    pg_store.update_memory = boom  # type: ignore[method-assign]
+    pg_store.update_claim = boom  # type: ignore[method-assign]
     try:
         with pytest.raises(RuntimeError, match="injected"):
             merge_memories(pg_store, [a_id, b_id], embedder=embedder)
     finally:
-        pg_store.update_memory = real_update  # type: ignore[method-assign]
+        pg_store.update_claim = real_update  # type: ignore[method-assign]
 
-    assert pg_store.get_memory(a_id).status != MemoryStatus.merged
-    assert pg_store.get_memory(b_id).status != MemoryStatus.merged
-    after_ids = {m.id for m in pg_store.list_memories(limit=1000)}
+    assert pg_store.get_claim(a_id).status != ClaimStatus.merged
+    assert pg_store.get_claim(b_id).status != ClaimStatus.merged
+    after_ids = {m.id for m in pg_store.list_claims(limit=1000)}
     assert after_ids == before_ids
 
 
@@ -448,7 +448,7 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
     try:
         report = extract_percept(pg_store, cfg, embedder, p)
         assert report.deferred is True
-        assert pg_store.list_memories() == []
+        assert pg_store.list_claims() == []
         state = pg_store.get_interpretation(p.id)
         assert state.status == "deferred" and state.failure_class == "unavailable"
         assert state.terminal is False and state.interpretation_attempted is True
@@ -488,7 +488,7 @@ def test_detection_signals_on_postgres(pg_store, cfg, embedder):
     pg_store.insert_percept(p)
     report = extract_percept(pg_store, cfg, embedder, p)
     assert report.interpretation_status == "heuristic_detection"
-    assert pg_store.list_memories() == []
+    assert pg_store.list_claims() == []
     signals = pg_store.list_detection_signals(p.id)
     assert signals and all(s.span for s in signals)
     state = pg_store.get_interpretation(p.id)

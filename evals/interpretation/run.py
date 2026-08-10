@@ -73,7 +73,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
         finally:
             set_interpreter_override(None)
 
-        memories = [store.get_memory(mid) for mid in report.inserted]
+        memories = [store.get_claim(mid) for mid in report.inserted]
         memories = [m for m in memories if m]
         exp = case["expected"]
 
@@ -89,7 +89,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
         for m in memories:
             by_type.setdefault(m.type.value, []).append(m)
 
-        for want in exp.get("memories", []):
+        for want in exp.get("claims", []):
             match = None
             for m in memories:
                 if want.get("type") and m.type.value != want["type"]:

@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS attention_emissions (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'silence',
-    memory_id TEXT NOT NULL DEFAULT '',
+    claim_id TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT '',
     expected_value REAL NOT NULL DEFAULT 0,
@@ -31,11 +31,11 @@ CREATE TABLE IF NOT EXISTS attention_suppressions (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
-    memory_id TEXT NOT NULL DEFAULT '',
+    claim_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_attention_suppress
-    ON attention_suppressions(session_id, kind, memory_id);
+    ON attention_suppressions(session_id, kind, claim_id);
 """
 
 
@@ -59,7 +59,7 @@ def row_to_emission(row: Any) -> AttentionOutcome:
         id=row["id"],
         session_id=row["session_id"],
         kind=kind,
-        memory_id=row["memory_id"] or "",
+        claim_id=row["claim_id"] or "",
         summary=row["summary"] or "",
         reason=row["reason"] or "",
         expected_value=float(row["expected_value"] or 0),
@@ -77,11 +77,11 @@ class AttentionOpsStoreMixin:
             em.created_at = now_iso()
         kind = em.kind.value if hasattr(em.kind, "value") else str(em.kind)
         self._j_exec(
-            "INSERT INTO attention_emissions (id, session_id, kind, memory_id, summary,"
+            "INSERT INTO attention_emissions (id, session_id, kind, claim_id, summary,"
             " reason, expected_value, relevance, confidence, status, created_at, payload)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                em.id, em.session_id, kind, em.memory_id or "", em.summary or "",
+                em.id, em.session_id, kind, em.claim_id or "", em.summary or "",
                 em.reason or "", float(em.expected_value), float(em.relevance),
                 float(em.confidence), em.status or "open", em.created_at,
                 _dumps(em.payload),
@@ -93,11 +93,11 @@ class AttentionOpsStoreMixin:
     def update_attention_emission(self, em: AttentionOutcome) -> None:
         kind = em.kind.value if hasattr(em.kind, "value") else str(em.kind)
         self._j_exec(
-            "UPDATE attention_emissions SET kind=?, memory_id=?, summary=?, reason=?,"
+            "UPDATE attention_emissions SET kind=?, claim_id=?, summary=?, reason=?,"
             " expected_value=?, relevance=?, confidence=?, status=?, payload=?"
             " WHERE id=?",
             (
-                kind, em.memory_id or "", em.summary or "", em.reason or "",
+                kind, em.claim_id or "", em.summary or "", em.reason or "",
                 float(em.expected_value), float(em.relevance), float(em.confidence),
                 em.status, _dumps(em.payload), em.id,
             ),
@@ -141,24 +141,24 @@ class AttentionOpsStoreMixin:
         return int(getattr(cur, "rowcount", 0) or 0)
 
     def add_attention_suppression(
-        self, session_id: str, *, kind: str = "", memory_id: str = "",
+        self, session_id: str, *, kind: str = "", claim_id: str = "",
     ) -> None:
         from twin import ids
 
         self._j_exec(
             "INSERT INTO attention_suppressions"
-            " (id, session_id, kind, memory_id, created_at) VALUES (?,?,?,?,?)",
-            (ids.new_id("asup"), session_id, kind or "", memory_id or "", now_iso()),
+            " (id, session_id, kind, claim_id, created_at) VALUES (?,?,?,?,?)",
+            (ids.new_id("asup"), session_id, kind or "", claim_id or "", now_iso()),
         )
         self._j_commit()
 
     def is_attention_suppressed(
-        self, session_id: str, *, kind: str = "", memory_id: str = "",
+        self, session_id: str, *, kind: str = "", claim_id: str = "",
     ) -> bool:
         row = self._j_fetchone(
             "SELECT id FROM attention_suppressions WHERE session_id = ?"
-            " AND (kind = '' OR kind = ?) AND (memory_id = '' OR memory_id = ?)"
+            " AND (kind = '' OR kind = ?) AND (claim_id = '' OR claim_id = ?)"
             " LIMIT 1",
-            (session_id, kind or "", memory_id or ""),
+            (session_id, kind or "", claim_id or ""),
         )
         return row is not None

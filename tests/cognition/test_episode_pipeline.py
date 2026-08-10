@@ -160,7 +160,7 @@ def test_pipeline_consolidate_creates_candidates(store, cfg, embedder):
     )
     assert report.stages["hippocampus_consolidate"].status.value == "ok"
     assert report.candidate_ids
-    mem = store.get_memory(report.candidate_ids[0])
+    mem = store.get_claim(report.candidate_ids[0])
     assert mem is not None
     assert mem.status.value == "candidate"
 

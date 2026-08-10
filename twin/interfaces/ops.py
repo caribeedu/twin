@@ -117,7 +117,7 @@ def doctor(cfg: Config) -> list[Check]:
             checks.append(Check("store:sqlite", WARN if url.startswith("postgres") else OK,
                                 url))
         checks.append(Check("store:migrations", OK, "schema up to date"))
-        pending = len([m for m in store.list_memories(status="candidate") if m.needs_review])
+        pending = len([m for m in store.list_claims(status="candidate") if m.needs_review])
         if pending:
             checks.append(Check("review:queue", WARN, f"{pending} memories awaiting review"))
         else:

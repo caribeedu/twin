@@ -44,7 +44,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 1. Prefer `inject_context_pack` or `session_start` at the beginning of a technical task.
 2. Always pass a truthful `target_domain`.
 3. Treat `blocked` as authoritative — do not ask the model to “ignore” the firewall.
-4. Prefer `narrative_*` / `stance_*` tools for durable substrate; treat legacy `memory_*` rows as dual-read, not established Narrative.
+4. Prefer `narrative_*` / `stance_*` tools for durable substrate; use `claim_*` for store claim rows.
 5. Cite Narrative / Evidence ids when using specific claims.
 6. Mutating tools require `confirm=true` (and stronger flags for constitutional Stance changes).
 
@@ -63,22 +63,21 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `stance_conflicts` / `stance_version` | … | Conflicts and version metadata |
 | `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable Stance |
 
-Legacy `judgment_*` and `memory_judgment_profile` remain as **deprecated aliases** of the Stance tools above.
-
-## Retrieve (legacy dual-read)
-
-These `memory_*` tools still serve dual-read store rows during migration.
-Prefer Narrative tools above when the account is committed.
+## Retrieve (store claims)
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `memory_search` | `query`, `domain="technical"`, `type?`, `limit=10` | Hybrid search (vector + FTS + graph boosts) filtered by domain. |
-| `memory_get` | `memory_id` | Single dual-read row with evidence links. |
-| `memory_related` | `entity` | Graph neighborhood around an entity name/id. |
-| `memory_project_context` | `project_name` | Rows scoped to a project. |
-| `memory_recent_decisions` | `project_name?`, `limit=10` | Recent `decision` dual-read rows. |
-| `memory_user_preferences` | `context=""` | Stable preference rows for the given context string. |
-| `memory_judgment_profile` | — | Active Stance items (DB) plus YAML bootstrap view. |
+| `claim_search` | `query`, `domain="technical"`, `type?`, `limit=10` | Hybrid search (vector + FTS + graph boosts) filtered by domain. |
+| `claim_get` | `claim_id` | Single store claim with evidence links. |
+| `claim_related` | `entity` | Graph neighborhood around an entity name/id. |
+| `claim_project_context` | `project_name` | Claims scoped to a project. |
+| `claim_recent_decisions` | `project_name?`, `limit=10` | Recent `decision` claims. |
+| `claim_user_preferences` | `context=""` | Stable preference claims for the given context string. |
+| `claim_quality` | `claim_id` | Quality analysis (duplicates, conflicts, review priority). |
+| `claim_neighbors` | `claim_id` | Semantically/entity-related neighbor claims. |
+| `claim_provenance` | `claim_id` | Lineage: claim → evidence → percept → artifact. |
+| `claim_confirm` / `claim_reject` / `claim_archive` | `claim_id`, `confirm=false` | Curation mutations (require `confirm=true`). |
+| `claim_merge` / `claim_split` | … | Merge/split claims (require `confirm=true`). |
 
 ## Context packs
 
@@ -96,8 +95,8 @@ Prefer Narrative tools above when the account is committed.
 | `get_active_session` | `session_id` | Session snapshot. |
 | `get_attention` | `session_id`, `evaluate=false` | Attention / focus hints for the session. |
 | `session_complete` | `session_id`, `summary=""`, `abandoned=false`, `summary_origin="assistant"`, `user_confirmed=false` | Closes the session; may enqueue extraction candidates. |
-| `session_feedback` | `session_id`, `verdict`, `memory_id?`, `note=""`, `scope?` | Feedback on session usefulness / a memory in context. |
-| `provide_feedback` | `emission_id=""`, `session_id=""`, `verdict="useful"`, `memory_id?`, `note=""` | Feedback on a specific emission (pack/suggestion). |
+| `session_feedback` | `session_id`, `verdict`, `claim_id?`, `note=""`, `scope?` | Feedback on session usefulness / a claim in context. |
+| `provide_feedback` | `emission_id=""`, `session_id=""`, `verdict="useful"`, `claim_id?`, `note=""` | Feedback on a specific emission (pack/suggestion). |
 
 ## Review & curation (mutating — need `confirm`)
 
@@ -105,25 +104,22 @@ Prefer Narrative tools above when the account is committed.
 |---|---|---|
 | `review_queue` | `limit=20`, `conflicts_only=false` | Priority-ordered candidates waiting for human review. |
 | `review_batch_get` | `batch_id` | Load a review batch. |
-| `review_suggest_action` | `memory_id` | Suggest confirm/reject/merge/… **without** mutating. |
-| `memory_confirm` | `memory_id`, `confirm=false` | Promote candidate to confirmed. |
-| `memory_reject` | `memory_id`, `confirm=false` | Reject a candidate. |
-| `memory_archive` | `memory_id`, `confirm=false` | Archive a memory. |
-| `memory_merge` | `memory_ids`, `confirm=false`, titles/summaries/scope flags… | Merge memories into one (cross-scope needs extra confirm). |
-| `memory_split` | `memory_id`, `parts`, `confirm=false` | Split one memory into parts. |
+| `review_suggest_action` | `claim_id` | Suggest confirm/reject/merge/… **without** mutating. |
+| `claim_confirm` | `claim_id`, `confirm=false` | Confirm a candidate claim. |
+| `claim_reject` | `claim_id`, `confirm=false` | Reject a candidate claim. |
+| `claim_archive` | `claim_id`, `confirm=false` | Archive a claim. |
+| `claim_merge` | `claim_ids`, `confirm=false`, titles/summaries/scope flags… | Merge claims. |
+| `claim_split` | `claim_id`, `parts`, `confirm=false` | Split a claim. |
 
 ## Quality & provenance
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `memory_quality` | `memory_id` | Quality findings + review priority. |
-| `memory_neighbors` | `memory_id` | Nearby memories for side-by-side review. |
-| `memory_provenance` | `memory_id` | Chain memory, evidence, percept, artifact. |
+| `claim_quality` | `claim_id` | Quality findings + review priority. |
+| `claim_neighbors` | `claim_id` | Nearby claims for side-by-side review. |
+| `claim_provenance` | `claim_id` | Chain claim, evidence, percept, artifact. |
 
 ## Stance governance
-
-Primary tools use the `stance_*` prefix. `judgment_*` names remain as
-deprecated aliases for one migration window.
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -141,7 +137,7 @@ deprecated aliases for one migration window.
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `privacy_evaluate` | `memory_ids?`, `persona="individual"`, `purpose="memory_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
+| `privacy_evaluate` | `claim_ids?`, `persona="individual"`, `purpose="memory_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
 | `privacy_explain` | `decision_id` | Explain a prior privacy decision. |
 | `privacy_validate_output` | `text` | Check model output for policy violations. |
 
@@ -270,7 +266,7 @@ Any MCP stdio-compatible client works with:
 4. **Report usefulness with `session_feedback`** (`useful`,
    `partially_useful`, `irrelevant`, `incorrect`, `missing_context`,
    `privacy_overblock`, `privacy_underblock`), with `scope` = `session`,
-   `pack` or `memory`. A `memory_id` must be one this session supplied or
+   `pack` or `memory`. A `claim_id` must be one this session supplied or
    created. This feeds twin's product metrics — especially "did the user
    have to re-explain something twin should already have known?".
 
@@ -291,7 +287,7 @@ Any MCP stdio-compatible client works with:
 4. Use `memory_search`/`memory_get` to dig deeper, `memory_related` and
    `memory_project_context` to navigate the graph, `memory_recent_decisions`
    before proposing architecture changes.
-5. Cite the `memory_id` when using specific content — every memory has
+5. Cite the `claim_id` when using specific content — every memory has
    traceable verbatim evidence.
 
 #### Troubleshooting

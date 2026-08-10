@@ -28,7 +28,7 @@ from twin.sense.connectors.models import (
     SourceAccount,
     idempotency_key,
 )
-from twin.store.models import MemoryStatus, MemoryType
+from twin.store.models import ClaimStatus, ClaimType
 
 _OUTCOME_WORDS = ("merged", "shipped", "released", "closed", "resolved")
 _PIVOT_WORDS = ("revert", "instead", "switch to", "supersed", "pivot")
@@ -179,13 +179,13 @@ def test_reflect_pivot_yields_trajectory_candidate(store, cfg, embedder):
 
     result = reflect_episode(store, cfg, embedder, ep.id)
     assert result.claims, result.skipped_reason
-    mem_id = result.claims[0]["memory_id"]
-    mem = store.get_memory(mem_id)
+    mem_id = result.claims[0]["claim_id"]
+    mem = store.get_claim(mem_id)
     assert mem is not None
-    assert mem.status == MemoryStatus.candidate
+    assert mem.status == ClaimStatus.candidate
     assert mem.needs_review is True
     assert mem.review_reason == "episode_reflect"
-    assert mem.type == MemoryType.decision
+    assert mem.type == ClaimType.decision
     assert "SQS" in mem.summary or "SQS" in mem.title
     assert mem.valid_from == "2026-07-03T09:00:00Z"
     assert mem.payload.get("episode_id") == ep.id
@@ -197,10 +197,10 @@ def test_reflect_is_idempotent(store, cfg, embedder):
     acc, inst = _acct(store, account_id="acct_idem")
     ep = _pivot_episode(store, cfg, embedder, acc, inst)
     first = reflect_episode(store, cfg, embedder, ep.id)
-    ids_first = {c["memory_id"] for c in first.claims}
+    ids_first = {c["claim_id"] for c in first.claims}
     second = reflect_episode(store, cfg, embedder, ep.id)
     for c in second.claims:
-        assert c["memory_id"] in ids_first
+        assert c["claim_id"] in ids_first
         assert c["created"] is False
 
 
@@ -362,9 +362,9 @@ def test_reflect_allows_divergent_pr_commit_pair(store, cfg, embedder):
 
     result = reflect_episode(store, cfg, embedder, ep_id, reflector=_fake)
     assert result.claims, result.skipped_reason
-    mem = store.get_memory(result.claims[0]["memory_id"])
+    mem = store.get_claim(result.claims[0]["claim_id"])
     assert mem is not None
-    assert mem.type == MemoryType.constraint
+    assert mem.type == ClaimType.constraint
     assert "idempotency" in mem.summary
 
 
@@ -372,27 +372,27 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
     """Consolidate retrieves confirmed/candidate/rejected neighbors."""
     from twin import ids
     from twin.cognize.services.episode_reflect import gather_related_memories
-    from twin.store.models import MemoryItem
+    from twin.store.models import StoreClaim
 
     acc, inst = _acct(store, account_id="acct_rel")
     ep = _pivot_episode(store, cfg, embedder, acc, inst)
 
-    confirmed = MemoryItem(
-        id=ids.memory_id(), type="preference",
+    confirmed = StoreClaim(
+        id=ids.claim_id(), type="preference",
         title="Prefers managed queues",
         summary="Edu prefers SQS over self-hosted Kafka for ops cost.",
         domain="technical", confidence=0.9, status="confirmed",
     )
-    rejected = MemoryItem(
-        id=ids.memory_id(), type="decision",
+    rejected = StoreClaim(
+        id=ids.claim_id(), type="decision",
         title="Keep Kafka forever",
         summary="Rejected: keep self-hosted Kafka as the queue.",
         domain="technical", confidence=0.5, status="rejected",
     )
     for mem in (confirmed, rejected):
-        store.insert_memory(mem)
+        store.insert_claim(mem)
         store.store_embedding(
-            mem.id, "memory", embedder.name,
+            mem.id, "claim", embedder.name,
             embedder.embed(f"{mem.title}\n{mem.summary}"),
         )
 
@@ -414,15 +414,15 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
             domain="technical",
             title="Managed queues over self-hosted",
             summary="Chose SQS; rejected keeping Kafka forever.",
-            related_memory_ids=[rejected.id],
+            related_claim_ids=[rejected.id],
             twin_influenced=True,
         )]
 
     result = reflect_episode(store, cfg, embedder, ep.id, reflector=_fake)
     assert result.claims, result.skipped_reason
     assert any(r["id"] == rejected.id for r in seen["related"])
-    mem = store.get_memory(result.claims[0]["memory_id"])
-    assert mem.payload.get("related_memory_ids") == [rejected.id]
+    mem = store.get_claim(result.claims[0]["claim_id"])
+    assert mem.payload.get("related_claim_ids") == [rejected.id]
 
 
 def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
@@ -463,7 +463,7 @@ def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
             domain="technical",
             title="Prefer managed SQS",
             summary="Open-session intent: SQS over Kafka for ops cost.",
-            related_memory_ids=[arts[0]["id"]],
+            related_claim_ids=[arts[0]["id"]],
             twin_influenced=True,
         )]
 
@@ -503,8 +503,8 @@ def test_reflect_dry_run_persists_nothing(store, cfg, embedder):
     ep = _pivot_episode(store, cfg, embedder, acc, inst)
     result = reflect_episode(store, cfg, embedder, ep.id, dry_run=True)
     assert result.claims
-    assert all(c["memory_id"] is None for c in result.claims)
-    assert store.list_memories(status="candidate", limit=50) == []
+    assert all(c["claim_id"] is None for c in result.claims)
+    assert store.list_claims(status="candidate", limit=50) == []
 
 
 def test_reflect_deferred_without_reflector(store, cfg, embedder):
@@ -532,8 +532,8 @@ def test_reflect_override(store, cfg, embedder):
 
     result = reflect_episode(store, cfg, embedder, ep.id, reflector=_fake)
     assert len(result.claims) == 1
-    mem = store.get_memory(result.claims[0]["memory_id"])
-    assert mem.type == MemoryType.belief
+    mem = store.get_claim(result.claims[0]["claim_id"])
+    assert mem.type == ClaimType.belief
     assert mem.payload.get("twin_influenced") is True
 
 

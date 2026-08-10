@@ -35,11 +35,11 @@ def screen_injection(hits: list[SearchHit]) -> tuple[list[SearchHit], list[dict[
     kept: list[SearchHit] = []
     blocked: list[dict[str, Any]] = []
     for hit in hits:
-        text = f"{hit.memory.title}\n{hit.memory.summary}"
+        text = f"{hit.claim.title}\n{hit.claim.summary}"
         patterns = detect_injection(text)
         if patterns:
             blocked.append({
-                "memory_id": hit.memory.id,
+                "claim_id": hit.claim.id,
                 "reason": f"prompt_injection:{','.join(patterns[:3])}",
                 "rule": "pack_injection_screen",
             })
@@ -65,11 +65,11 @@ def dedupe_and_diversify(
     type_counts: dict[str, int] = {}
     out: list[SearchHit] = []
     for hit in sorted(hits, key=lambda h: h.score, reverse=True):
-        title_key = (hit.memory.title or "").strip().lower()[:near_title_prefix]
+        title_key = (hit.claim.title or "").strip().lower()[:near_title_prefix]
         if title_key and title_key in seen_titles:
             dropped["duplicate_title"] += 1
             continue
-        type_s = hit.memory.type.value if hasattr(hit.memory.type, "value") else str(hit.memory.type)
+        type_s = hit.claim.type.value if hasattr(hit.claim.type, "value") else str(hit.claim.type)
         if type_counts.get(type_s, 0) >= max_per_type:
             dropped["type_cap"] += 1
             continue
@@ -83,7 +83,7 @@ def dedupe_and_diversify(
 def prefer_current(hits: list[SearchHit]) -> list[SearchHit]:
     """Stable sort: higher score, then more recent updated/created."""
     def key(h: SearchHit):
-        mem = h.memory
+        mem = h.claim
         stamp = mem.updated_at or mem.created_at or ""
         return (h.score, stamp)
 
@@ -95,14 +95,14 @@ def build_provenance_summary(
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for hit in hits[:limit]:
-        ev_n = len(store.get_evidence(hit.memory.id)) if hasattr(store, "get_evidence") else 0
+        ev_n = len(store.get_evidence(hit.claim.id)) if hasattr(store, "get_evidence") else 0
         out.append({
-            "memory_id": hit.memory.id,
-            "title": hit.memory.title,
-            "label": cognitive_label(hit.memory),
+            "claim_id": hit.claim.id,
+            "title": hit.claim.title,
+            "label": cognitive_label(hit.claim),
             "evidence_n": ev_n,
-            "inspect_path": f"/api/memory/{hit.memory.id}/explain",
-            "confidence": hit.memory.confidence,
+            "inspect_path": f"/api/memory/{hit.claim.id}/explain",
+            "confidence": hit.claim.confidence,
         })
     return out
 

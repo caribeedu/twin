@@ -503,7 +503,7 @@ def _related_from_retrieve(
     )
     out: list[dict[str, Any]] = []
     for hit in result.hits:
-        mem = hit.memory
+        mem = hit.claim
         payload = mem.payload or {}
         if exclude_episode_id and payload.get("episode_id") == exclude_episode_id:
             continue
@@ -555,11 +555,11 @@ def _gather_user_stance(
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for t in stance_types:
-        rows = store.list_memories(
+        rows = store.list_claims(
             type_=t, status="confirmed", project_id=project_id, limit=limit,
         )
         if not rows and project_id:
-            rows = store.list_memories(type_=t, status="confirmed", limit=limit)
+            rows = store.list_claims(type_=t, status="confirmed", limit=limit)
         for mem in rows:
             if mem.id in seen:
                 continue

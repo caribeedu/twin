@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from twin.store.lifecycle import merge_memories
-from twin.store.models import FindingType, INACTIVE_STATUSES, MemoryItem
-from .quality import altitude_rank, memory_altitude
+from twin.store.models import FindingType, INACTIVE_STATUSES, StoreClaim
+from .quality import altitude_rank, claim_altitude
 
 
 @dataclass
@@ -25,7 +25,7 @@ class CondenseReport:
     detail: str = ""
 
 
-def _is_active_candidate(mem: Optional[MemoryItem]) -> bool:
+def _is_active_candidate(mem: Optional[StoreClaim]) -> bool:
     if mem is None:
         return False
     status = getattr(mem.status, "value", mem.status)
@@ -36,8 +36,8 @@ def _is_active_candidate(mem: Optional[MemoryItem]) -> bool:
 
 def _cluster_key_members(
     store,
-    seeds: list[MemoryItem],
-) -> list[list[MemoryItem]]:
+    seeds: list[StoreClaim],
+) -> list[list[StoreClaim]]:
     """Union-find clusters from near_duplicate / possible_merge findings."""
     parent: dict[str, str] = {}
 
@@ -66,7 +66,7 @@ def _cluster_key_members(
                 FindingType.exact_duplicate.value,
             ):
                 continue
-            other_id = f.related_memory_id
+            other_id = f.related_claim_id
             if not other_id or other_id not in by_id:
                 continue
             other = by_id[other_id]
@@ -80,7 +80,7 @@ def _cluster_key_members(
                 continue
             union(mem.id, other_id)
 
-    clusters: dict[str, list[MemoryItem]] = {}
+    clusters: dict[str, list[StoreClaim]] = {}
     for mem in seeds:
         if mem.id not in parent:
             continue
@@ -88,9 +88,9 @@ def _cluster_key_members(
     return [ms for ms in clusters.values() if len(ms) >= 2]
 
 
-def _pick_survivor(members: list[MemoryItem]) -> MemoryItem:
-    def key(m: MemoryItem) -> tuple:
-        alt = memory_altitude(m)
+def _pick_survivor(members: list[StoreClaim]) -> StoreClaim:
+    def key(m: StoreClaim) -> tuple:
+        alt = claim_altitude(m)
         return (
             -altitude_rank(alt),
             -float(m.quality_score or 0),
@@ -105,20 +105,20 @@ def condense_near_duplicates(
     store,
     embedder=None,
     *,
-    memory_ids: Optional[list[str]] = None,
+    claim_ids: Optional[list[str]] = None,
     limit: int = 200,
     dry_run: bool = False,
 ) -> CondenseReport:
     """Merge near-duplicate candidate clusters into one survivor each."""
     report = CondenseReport()
-    seeds: list[MemoryItem] = []
-    if memory_ids:
-        for mid in memory_ids:
-            mem = store.get_memory(mid)
+    seeds: list[StoreClaim] = []
+    if claim_ids:
+        for mid in claim_ids:
+            mem = store.get_claim(mid)
             if _is_active_candidate(mem):
                 seeds.append(mem)  # type: ignore[arg-type]
     else:
-        pool = store.list_memories(status="candidate", needs_review=True, limit=limit)
+        pool = store.list_claims(status="candidate", needs_review=True, limit=limit)
         for mem in pool:
             flags = set(mem.quality_flags or [])
             if flags & {"near_duplicate", "possible_merge", "exact_duplicate"}:
@@ -127,7 +127,7 @@ def condense_near_duplicates(
                 seeds.append(mem)
 
     seen: set[str] = set()
-    uniq: list[MemoryItem] = []
+    uniq: list[StoreClaim] = []
     for m in seeds:
         if m.id in seen:
             continue
@@ -182,13 +182,13 @@ def condense_near_duplicates(
         report.merged += 1
         if new_id:
             report.survivor_ids.append(new_id)
-            merged_mem = store.get_memory(new_id)
+            merged_mem = store.get_claim(new_id)
             if merged_mem is not None:
                 payload = dict(merged_mem.payload or {})
                 # Recompute on the merge product (inherits trajectory payload).
-                payload["altitude"] = memory_altitude(merged_mem)
+                payload["altitude"] = claim_altitude(merged_mem)
                 payload["condensed"] = True
-                store.update_memory(
+                store.update_claim(
                     new_id,
                     payload=payload,
                     needs_review=True,

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "twin-cognition"
-version = "2.5.0"
+version = "2.6.0"
 description = " A governed cognitive layer that transforms distributed observations into reusable understanding across models and interfaces."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Edu Caribé" }]
 keywords = [
     "cognitive-os",
-    "memory",
+    "claim",
     "judgment",
     "mcp",
     "context",

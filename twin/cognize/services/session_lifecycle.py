@@ -249,7 +249,7 @@ def close_session_structured(
         rejected_alternatives=list(c.get("rejected_alternatives") or []),
         possible_contradictions=list(c.get("possible_contradictions") or []),
         memory_candidates=list(
-            c.get("memory_candidates") or session.created_memory_ids or []
+            c.get("memory_candidates") or session.created_claim_ids or []
         ),
         review_required=list(c.get("review_required") or []),
         related_session_ids=list(related_session_ids or c.get("related_session_ids") or []),

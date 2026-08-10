@@ -37,7 +37,7 @@ from twin.cognize.stance_engine.revisions import commit_new_item
 from twin.cognize.stance_engine.simulate import counterfactual, evaluate, simulate
 from twin.cognize.stance_engine.versions import active_items, create_version, restore_version
 from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
-from twin.store.models import MemoryItem
+from twin.store.models import StoreClaim
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
 
@@ -52,15 +52,15 @@ def _cli_access(store):
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="decision", title="t", summary="s",
+        id=ids.claim_id(), type="decision", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         entities=["Twin"],
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -145,7 +145,7 @@ def test_supporting_memory_change_invalidates_token(store, cfg, embedder):
     )
     prop = propose_from_memory(store, mem.id)
     token = preview_proposal(store, prop.id)["preview_token"]
-    store.update_memory(mem.id, summary="Prefere ferramentas locais — edited after preview.")
+    store.update_claim(mem.id, summary="Prefere ferramentas locais — edited after preview.")
     with pytest.raises(ValueError, match="preview_token"):
         approve_proposal(store, prop.id, preview_token=token)
 
@@ -217,7 +217,7 @@ def _make_rich_item(**kw) -> JudgmentItem:
         status=JudgmentStatus.active,
         created_at=now, updated_at=now, approved_at=now, approved_by="user",
         provenance=JudgmentProvenance(
-            source="explicit_user_statement", memory_ids=["mem_1"],
+            source="explicit_user_statement", claim_ids=["mem_1"],
         ),
         exceptions=[JudgmentException(
             id=ids.judgment_exception_id(),
@@ -555,10 +555,10 @@ def test_constitutional_requires_extra_confirm(store, cfg):
 
 
 def test_promote_creates_proposal(store, cfg, embedder):
-    from twin.cognize.stance_engine.profile import promote_memory
+    from twin.cognize.stance_engine.profile import promote_claim
     mem = _mem(store, embedder, type="preference", title="ADRs",
                summary="Prefere ADRs no repo.")
-    section = promote_memory(cfg.judgment_path, mem, store=store)
+    section = promote_claim(cfg.judgment_path, mem, store=store)
     assert section.startswith("proposal:")
 
 

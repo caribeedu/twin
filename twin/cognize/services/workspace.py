@@ -61,9 +61,9 @@ class WorkspaceTickResult:
     blocked: list[dict[str, Any]] = field(default_factory=list)
     silent: bool = False
     silence_reason: str = ""
-    contradiction_memory_ids: list[str] = field(default_factory=list)
+    contradiction_claim_ids: list[str] = field(default_factory=list)
     parallel_interpretation: dict[str, Any] = field(default_factory=dict)
-    candidate_memory_ids: list[str] = field(default_factory=list)
+    candidate_claim_ids: list[str] = field(default_factory=list)
     stages: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     error: str = ""
@@ -339,9 +339,9 @@ def workspace_tick(
 
         stage = "salience"
         result.stages.append("salience")
-        mids = [r["memory_id"] for r in suggested_rows if r.get("memory_id")]
+        mids = [r["claim_id"] for r in suggested_rows if r.get("claim_id")]
         scores = score_memories(store, mids, query_text=text)
-        result.contradiction_memory_ids = list(scores.contradiction_ids)
+        result.contradiction_claim_ids = list(scores.contradiction_ids)
 
         stage = "recall"
         result.stages.append("recall")
@@ -353,7 +353,7 @@ def workspace_tick(
         )
         result.suggestions = [
             {
-                "memory_id": s.memory_id,
+                "claim_id": s.claim_id,
                 "summary": s.summary,
                 "why_relevant": s.why_relevant,
                 "confidence": s.confidence,
@@ -438,7 +438,7 @@ def workspace_tick(
                     "stage_counts": report.stage_counts(),
                     "reused_percept": reused_percept,
                 }
-                result.candidate_memory_ids = list(report.inserted)
+                result.candidate_claim_ids = list(report.inserted)
                 tick.percept_id = percept.id
 
         stage = "done"

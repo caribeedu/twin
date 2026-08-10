@@ -57,7 +57,7 @@ a Memory row.
 | **Narrative** | Human-committed, evidence-backed, revisable account |
 | **Stance** | How similar cases should be evaluated later |
 | **Understanding** | Emergent state over the above — not a table |
-| Memory | Transitional dual-read `MemoryItem` during store migration — not a product noun |
+| Memory | Transitional dual-read `StoreClaim` during store migration — not a product noun |
 
 ### Example
 

@@ -5,13 +5,20 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.6.0 — Dual-read schema rename
+
+Retire `MemoryItem` / `memory_id` dual-read vocabulary in favor of store
+**claim** vocabulary: `StoreClaim`, `claim_id`, `store_claims` tables,
+`claim_*` MCP tools, export/metrics keys `claims`, new id prefix `clm_`.
+No `Memory*` / `memory_*` / `judgment_*` compatibility shims. Forward-only
+SQLite/Postgres migrations rename legacy `memories` / `memory_id` columns.
+
 ### v2.5.0 — Package walls
 
 Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,
 privacy, interfaces). Fold cognition into cognize.services and judgment into
 cognize.stance_engine; Domain Firewall under privacy; MCP prefers
-``stance_*`` tools (``judgment_*`` kept as deprecated aliases). Transitional
-import shims at old package roots removed.
+``stance_*`` tools. Transitional import shims at old package roots removed.
 
 ### v2.4.1 — Web Center exit-criteria hardening
 
@@ -359,7 +366,7 @@ Delivered:
 - a cognitive interpreter (`twin/cognition/interpreter/`) as the production path: the local LLM reads a Percept and emits grounded, act-aware `InterpretedItem`s — each with a cognitive act (statement, question, hypothesis, proposal, decision, opinion, third-party claim), a memory type (including rejected alternatives), a speaker/attribution, and a verbatim `evidence_span`; items the model cannot ground in the source are dropped rather than stored;
 - deferral as a first-class outcome: in interpreting modes (`auto`/`ollama`) an unavailable or failing model records the Percept as `deferred` (or `error`) and catalogues nothing — lexical rules never fabricate cognitive conclusions in the production path. A `percept_interpretations` record tracks execution status, model, prompt and schema versions and attempt count, so *never interpreted*, *interpreted and empty*, and *deferred* are three distinct, non-conflated states; `extract_pending` selects by interpretation state, so a returning model resumes cleanly and settled Percepts are never re-interpreted (bounded retries via `MAX_INTERPRETATION_ATTEMPTS`);
 - cognitive-act governance: a proposal is not a decision, and a question, hypothesis, opinion or third-party claim is born needing review regardless of the classifier's confidence; deterministic gates (quarantine, source policy, confidentiality floor, dedupe, calibration, review) still run exactly as before — the interpreter decides meaning, deterministic code decides use;
-- lexical rules are detection-only: `heuristic` mode records `DetectionSignal`s (routing/prioritization hints — a candidate category and the source span) and creates no `MemoryItem` at all; establishing a memory type, domain, entity, confidence or evidence is the interpreter's job alone, and no offline path derives those from the text. The deterministic CI stand-in is an `echo` mock (the counterpart of the hash embedder): it grounds content as neutral, review-bound `fact`/`statement` observations with fixed confidence and **makes no classification** — any test that asserts meaning supplies authored ground truth (a recorded interpretation via `set_interpreter_override`), never a lexically-derived one. `TWIN_EXTRACTOR` is honoured at Config construction;
+- lexical rules are detection-only: `heuristic` mode records `DetectionSignal`s (routing/prioritization hints — a candidate category and the source span) and creates no `StoreClaim` at all; establishing a memory type, domain, entity, confidence or evidence is the interpreter's job alone, and no offline path derives those from the text. The deterministic CI stand-in is an `echo` mock (the counterpart of the hash embedder): it grounds content as neutral, review-bound `fact`/`statement` observations with fixed confidence and **makes no classification** — any test that asserts meaning supplies authored ground truth (a recorded interpretation via `set_interpreter_override`), never a lexically-derived one. `TWIN_EXTRACTOR` is honoured at Config construction;
 - evidence is validated deterministically: every catalogued item's `evidence_span` must appear verbatim (Unicode/quote/whitespace-normalized, no paraphrase) in the *masked* text the interpreter read — an invented span, even a non-empty one, is dropped, closing the hallucinated-evidence path; validation runs against masked text so PII placeholders line up and removed PII cannot return;
 - a service outage is separated from a Percept-specific failure: availability and the HTTP client are resolved once per batch by an `InterpretationRuntime`; a `deferred`/`unavailable` outage never consumes a Percept's retry budget and is never abandoned, while a reachable-but-failing interpreter is an `error` with a failure class (transient/schema/permanent) bounded by `MAX_INTERPRETATION_ATTEMPTS` and `next_attempt_at` backoff before going terminal;
 - no silent semantic fallbacks: an out-of-vocabulary memory type is dropped (never coerced to `fact`); an unrecognized domain becomes `unknown` and is routed to review (never silently `technical`); a speaker attribution is grounded against the Percept's known actors — an unknown speaker is flagged `attribution_unresolved` and an unverified owner claim `owner_claim_unverified`, both review-bound;
@@ -409,7 +416,7 @@ Phase 2 — Cognitive Sessions:
 Phase 3 — Memory Formation:
 
 - `twin/memory/formation.py` — deterministic `formation_identity` / `mem_f…` ids; propose-or-corroborate; formation states (`candidate` to `corroborating` / `conflicting` / `awaiting_review` to `confirmed` / `rejected` / …); per-type policy (belief/procedure always review; never auto-confirm);
-- confirm requires evidence; reject requires reason; restore rejected back to re-review; auditable `MemoryOperation`s; explain view;
+- confirm requires evidence; reject requires reason; restore rejected back to re-review; auditable `ClaimOperation`s; explain view;
 - pipeline inserts via `propose_or_corroborate` (idempotent on identity);
 - surfaces: `GET/POST /api/memory/candidates…`, `GET /api/memory/{id}/explain|history`;
 - `tests/memory/test_formation.py`.

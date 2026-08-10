@@ -2,20 +2,20 @@
 
 from twin import ids
 from twin.store.batches import create_batch
-from twin.store.models import MemoryItem
+from twin.store.models import StoreClaim
 
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="fact", title="t", summary="s",
+        id=ids.claim_id(), type="fact", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         entities=["Twin"],
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem

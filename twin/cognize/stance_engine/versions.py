@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.models import MemoryOperation
+from twin.store.models import ClaimOperation
 from twin.store.store.base import MemoryStore
 from .models import (
     AppliedRevisionRef,
@@ -224,7 +224,7 @@ def _audit(store: MemoryStore, operation: str, output: str, after: dict[str, Any
            *, actor: str, undoable: bool = False) -> None:
     if not hasattr(store, "insert_operation"):
         return
-    store.insert_operation(MemoryOperation(
+    store.insert_operation(ClaimOperation(
         id=ids.operation_id(),
         operation=operation,
         actor=actor,

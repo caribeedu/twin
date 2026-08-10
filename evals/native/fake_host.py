@@ -11,7 +11,7 @@ from twin.config import Config
 from twin.interfaces.native.events import HostCapabilities, HostEvent
 from twin.interfaces.native.service import NativeHostService
 from twin.store.embeddings import get_embedder
-from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType
 from twin.store.store.sqlite import SqliteStore
 
 # Claude-specific hook names / adapter imports must stay out of the generic
@@ -63,18 +63,18 @@ def _fake_env():
 
 
 def _seed_memory(store, embedder, *, title: str, summary: str, domain: str = "technical"):
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         domain=domain,
         title=title,
         summary=summary,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
         confidence=0.9,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name, embedder.embed(f"{title}\n{summary}"),
+        mem.id, "claim", embedder.name, embedder.embed(f"{title}\n{summary}"),
     )
     return mem
 

@@ -29,7 +29,7 @@ def _clamp(x: float) -> float:
 
 def score_memories(
     store: MemoryStore,
-    memory_ids: list[str],
+    claim_ids: list[str],
     *,
     query_text: str = "",
 ) -> SalienceScores:
@@ -44,8 +44,8 @@ def score_memories(
     })
     conflict_touch: set[str] = set()
     q = (query_text or "").lower()
-    for mid in memory_ids:
-        mem = store.get_memory(mid)
+    for mid in claim_ids:
+        mem = store.get_claim(mid)
         if mem is None:
             continue
         st = getattr(mem.status, "value", mem.status)
@@ -57,7 +57,7 @@ def score_memories(
                 if ftype in conflict_kinds:
                     conflict_touch.add(mid)
                     meta = getattr(f, "metadata", None) or {}
-                    for key in ("neighbor_ids", "related_ids", "memory_ids"):
+                    for key in ("neighbor_ids", "related_ids", "claim_ids"):
                         for other in meta.get(key) or []:
                             conflict_touch.add(str(other))
                     break

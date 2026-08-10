@@ -326,7 +326,7 @@ def test_gmail_source_policy_requires_review(store, cfg, embedder):
         model="authored", prompt_version="test", schema_version="1"))
     report = extract_percept(store, cfg, embedder, percept)
     assert report.inserted
-    mem = store.get_memory(report.inserted[0])
+    mem = store.get_claim(report.inserted[0])
     assert mem.needs_review
     assert mem.type.value == "decision"
 

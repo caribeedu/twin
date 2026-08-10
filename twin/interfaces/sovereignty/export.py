@@ -16,14 +16,14 @@ from twin.interfaces.sovereignty.manifest import (
 
 SECTIONS = (
     "percepts",
-    "memories",
+    "claims",
     "evidence",
     "sessions",
     "session_events",
     "judgment_items",
     "judgment_proposals",
     "privacy_decisions",
-    "memory_operations",
+    "claim_operations",
     "personas",
     "cognize_situations",
     "cognize_reflections",
@@ -69,17 +69,17 @@ def collect_export(store: MemoryStore) -> dict[str, list[Any]]:
         data["percepts"] = list(store.list_percepts())
 
     for status in ("candidate", "confirmed", "rejected", "deprecated", "archived"):
-        data["memories"].extend(store.list_memories(status=status, limit=5_000))
+        data["claims"].extend(store.list_claims(status=status, limit=5_000))
     seen: set[str] = set()
     uniq = []
-    for m in data["memories"]:
+    for m in data["claims"]:
         if m.id in seen:
             continue
         seen.add(m.id)
         uniq.append(m)
-    data["memories"] = uniq
+    data["claims"] = uniq
 
-    for mem in data["memories"]:
+    for mem in data["claims"]:
         data["evidence"].extend(store.get_evidence(mem.id))
 
     if hasattr(store, "list_sessions"):

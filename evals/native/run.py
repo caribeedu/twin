@@ -23,7 +23,7 @@ CASES = Path(__file__).parent / "cases"
 
 def _confirmed_ids(store) -> set[str]:
     return {
-        m.id for m in store.list_memories(limit=5000)
+        m.id for m in store.list_claims(limit=5000)
         if getattr(m.status, "value", m.status) == "confirmed"
     }
 

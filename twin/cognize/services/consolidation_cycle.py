@@ -62,7 +62,7 @@ class ConsolidationCycleResult:
     at: str = ""
     stages: list[str] = field(default_factory=list)
     analyzed: int = 0
-    contradiction_memory_ids: list[str] = field(default_factory=list)
+    contradiction_claim_ids: list[str] = field(default_factory=list)
     automation: dict[str, Any] = field(default_factory=dict)
     temporal_updates: list[dict[str, Any]] = field(default_factory=list)
     goals_observed: list[dict[str, Any]] = field(default_factory=list)
@@ -137,8 +137,8 @@ def refresh_temporal_beliefs_and_goals(
     updates: list[dict[str, Any]] = []
     truncated = False
 
-    # Page by over-fetching; list_memories has no offset — detect truncation.
-    beliefs = store.list_memories(type_="belief", status="confirmed", limit=page_size)
+    # Page by over-fetching; list_claims has no offset — detect truncation.
+    beliefs = store.list_claims(type_="belief", status="confirmed", limit=page_size)
     if len(beliefs) >= page_size:
         truncated = True
 
@@ -153,7 +153,7 @@ def refresh_temporal_beliefs_and_goals(
         if not reasons:
             continue
         row = {
-            "memory_id": mem.id,
+            "claim_id": mem.id,
             "type": "belief",
             "action": "flag_review",
             "reasons": reasons,
@@ -165,7 +165,7 @@ def refresh_temporal_beliefs_and_goals(
         flags = list(mem.quality_flags or [])
         if "stale" not in flags:
             flags.append("stale")
-        store.update_memory(
+        store.update_claim(
             mem.id,
             needs_review=True,
             review_reason="temporal_belief_refresh",
@@ -207,7 +207,7 @@ def _existing_window_proposals(
 
 def _confirmed_snapshot(store: MemoryStore) -> tuple[set[str], set[str]]:
     mems = {
-        m.id for m in store.list_memories(status="confirmed", limit=10_000)
+        m.id for m in store.list_claims(status="confirmed", limit=10_000)
     }
     judgments: set[str] = set()
     if hasattr(store, "list_judgment_items"):
@@ -235,7 +235,7 @@ def inventory_closed_sessions(
                 "status": status,
                 "domain": ses.domain,
                 "project_id": ses.project_id,
-                "created_memory_ids": list(ses.created_memory_ids or []),
+                "created_claim_ids": list(ses.created_claim_ids or []),
                 "has_closure": closure is not None,
                 "consolidation_status": (
                     ses.consolidation_status.value
@@ -249,13 +249,13 @@ def inventory_closed_sessions(
 def inventory_open_tasks(
     store: MemoryStore, *, limit: int = 200,
 ) -> list[dict[str, Any]]:
-    tasks = store.list_memories(type_="task", status="candidate", limit=limit)
-    tasks += store.list_memories(type_="task", status="confirmed", limit=limit)
+    tasks = store.list_claims(type_="task", status="candidate", limit=limit)
+    tasks += store.list_claims(type_="task", status="confirmed", limit=limit)
     out: list[dict[str, Any]] = []
     for mem in tasks:
         until = _parse_iso(mem.valid_until)
         out.append({
-            "memory_id": mem.id,
+            "claim_id": mem.id,
             "title": mem.title,
             "status": mem.status.value if hasattr(mem.status, "value") else str(mem.status),
             "needs_review": mem.needs_review,
@@ -270,9 +270,9 @@ def prepare_review_backlog(
     """List candidates awaiting review; optionally stamp formation_state."""
     from twin.store.formation import FormationState, as_candidate
 
-    rows = store.list_memories(status="candidate", needs_review=True, limit=limit)
+    rows = store.list_claims(status="candidate", needs_review=True, limit=limit)
     if len(rows) < limit:
-        extra = store.list_memories(status="candidate", limit=limit)
+        extra = store.list_claims(status="candidate", limit=limit)
         seen = {r.id for r in rows}
         for m in extra:
             if m.id not in seen:
@@ -283,7 +283,7 @@ def prepare_review_backlog(
     for mem in rows:
         cand = as_candidate(store, mem)
         item = {
-            "memory_id": mem.id,
+            "claim_id": mem.id,
             "formation_state": cand.formation_state.value,
             "review_reason": mem.review_reason or "",
             "type": mem.type.value if hasattr(mem.type, "value") else str(mem.type),
@@ -299,7 +299,7 @@ def prepare_review_backlog(
             if payload.get("formation_state") != FormationState.awaiting_review.value:
                 if mem.needs_review:
                     payload["formation_state"] = FormationState.awaiting_review.value
-                    store.update_memory(mem.id, payload=payload)
+                    store.update_claim(mem.id, payload=payload)
     return prepared
 
 
@@ -308,7 +308,7 @@ def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[s
 
     counts: dict[str, int] = {}
     corroborating = 0
-    for mem in store.list_memories(status="candidate", limit=limit):
+    for mem in store.list_claims(status="candidate", limit=limit):
         state = derive_formation_state(mem).value
         counts[state] = counts.get(state, 0) + 1
         corroborating += int((mem.payload or {}).get("corroboration_count") or 0)
@@ -379,8 +379,8 @@ def reflect_recent_episodes(
             continue
         reflected += 1
         for claim in result.claims:
-            if claim.get("memory_id") and claim.get("created"):
-                created.append(claim["memory_id"])
+            if claim.get("claim_id") and claim.get("created"):
+                created.append(claim["claim_id"])
     return created
 
 
@@ -440,8 +440,8 @@ def run_pattern_reflect_pass(
         except Exception:
             continue
         for claim in res.claims:
-            if claim.get("memory_id") and claim.get("created"):
-                created.append(claim["memory_id"])
+            if claim.get("claim_id") and claim.get("created"):
+                created.append(claim["claim_id"])
     return created
 
 
@@ -456,9 +456,9 @@ def build_cognitive_change_report(
     judgment_proposal_ids: list[str],
 ) -> dict[str, Any]:
     """Weekly (or daily) auditable summary — never mutates Memory/Judgment."""
-    superseded = store.list_memories(status="deprecated", limit=100)
+    superseded = store.list_claims(status="deprecated", limit=100)
     low_conf = [
-        m for m in store.list_memories(status="confirmed", limit=200)
+        m for m in store.list_claims(status="confirmed", limit=200)
         if m.confidence < 0.55
     ]
     return {
@@ -469,7 +469,7 @@ def build_cognitive_change_report(
         "contradictions": len(contradiction_ids),
         "superseded_or_deprecated": len(superseded),
         "low_confidence_confirmed": [
-            {"memory_id": m.id, "confidence": m.confidence, "title": m.title}
+            {"claim_id": m.id, "confidence": m.confidence, "title": m.title}
             for m in low_conf[:50]
         ],
         "judgment_proposals": list(judgment_proposal_ids),
@@ -742,16 +742,16 @@ def run_consolidation_cycle(
             reports = analyze_candidates(store, embedder, limit=analyze_limit)
             result.analyzed = len(reports)
         else:
-            queue = store.list_memories(status="candidate", needs_review=True, limit=analyze_limit)
+            queue = store.list_claims(status="candidate", needs_review=True, limit=analyze_limit)
             if not queue:
-                queue = store.list_memories(status="candidate", limit=analyze_limit)
+                queue = store.list_claims(status="candidate", limit=analyze_limit)
             result.analyzed = len(queue)
             result.notes.append("dry_run skipped quality analyzer writes")
 
         stage = "contradictions"
         result.stages.append("contradictions")
         conflict_ids: list[str] = []
-        scanned = store.list_memories(limit=conflict_scan_limit)
+        scanned = store.list_claims(limit=conflict_scan_limit)
         if len(scanned) >= conflict_scan_limit:
             result.truncated = True
             result.notes.append(
@@ -760,7 +760,7 @@ def run_consolidation_cycle(
         for mem in scanned:
             if "possible_conflict" in (mem.quality_flags or []):
                 conflict_ids.append(mem.id)
-        result.contradiction_memory_ids = conflict_ids
+        result.contradiction_claim_ids = conflict_ids
 
         stage = "safe_automation"
         result.stages.append("safe_automation")
@@ -934,7 +934,7 @@ def run_consolidation_cycle(
             store,
             kind=kind,
             temporal_updates=result.temporal_updates,
-            contradiction_ids=result.contradiction_memory_ids,
+            contradiction_ids=result.contradiction_claim_ids,
             open_tasks=result.open_tasks,
             closed_sessions=result.closed_sessions,
             judgment_proposal_ids=result.judgment_proposal_ids,

@@ -35,7 +35,7 @@
   "expected": {
     "status": "interpreted",
     "catalogued": 2,
-    "memories": [
+    "claims": [
       {"title_contains": "PostgreSQL advisory locks", "cognitive_act": "decision", "review_reason_excludes": "unsettled cognitive act"},
       {"title_contains": "Redis cache", "cognitive_act": "proposal", "needs_review": true, "attributed_to": "Bruno", "review_reason_contains": "unsettled cognitive act"}
     ]

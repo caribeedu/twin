@@ -567,7 +567,7 @@ def test_malicious_content_quarantined_never_extracted(store, creds, cfg, embedd
     # extraction has nothing to chew on → no memories
     from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    assert store.list_memories() == []
+    assert store.list_claims() == []
 
 
 # -- ownership / vaults ----------------------------------------------------------
@@ -1050,8 +1050,8 @@ def test_persisted_errors_are_sanitized(store, creds):
 def test_no_confirmed_memory_or_judgment_written(store, creds):
     _acc, inst = _make(store, creds, source_owner="employer", org_key="acme")
     sync_connector(store, creds, inst.id)
-    assert store.list_memories(status="confirmed") == []
-    assert store.list_memories() == []
+    assert store.list_claims(status="confirmed") == []
+    assert store.list_claims() == []
     if hasattr(store, "list_judgment_items"):
         assert store.list_judgment_items() == []
 
@@ -1158,7 +1158,7 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
     ).seal()
     store.insert_percept(connector_percept)
     report = extract_percept(store, cfg, embedder, connector_percept)
-    types = {store.get_memory(m).type.value for m in report.inserted}
+    types = {store.get_claim(m).type.value for m in report.inserted}
     assert "preference" not in types          # dropped by policy
     assert report.policy_dropped >= 1
     assert "decision" in types                # allowed type flows normally
@@ -1171,7 +1171,7 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
                     source_trust=0.9).seal()
     store.insert_percept(local)
     local_report = extract_percept(store, cfg, embedder, local)
-    local_types = {store.get_memory(m).type.value for m in local_report.inserted}
+    local_types = {store.get_claim(m).type.value for m in local_report.inserted}
     assert "preference" in local_types
     assert local_report.policy_dropped == 0
 

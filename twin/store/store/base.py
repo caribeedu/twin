@@ -15,7 +15,7 @@ from ...clock import now_iso  # re-export for backends
 from twin.sense.sensory.percept import Percept
 from ..embeddings import cosine, from_blob
 from ..models import (
-    CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem, MemoryStatus,
+    CognitiveSession, DetectionSignal, Entity, Evidence, StoreClaim, ClaimStatus,
     PerceptInterpretation, Project, Relation,
 )
 
@@ -81,13 +81,13 @@ class MemoryStore(ABC):
     # -- memories ----------------------------------------------------------
 
     @abstractmethod
-    def insert_memory(self, mem: MemoryItem) -> str: ...
+    def insert_claim(self, mem: StoreClaim) -> str: ...
 
     @abstractmethod
-    def get_memory(self, memory_id: str) -> Optional[MemoryItem]: ...
+    def get_claim(self, claim_id: str) -> Optional[StoreClaim]: ...
 
     @abstractmethod
-    def list_memories(
+    def list_claims(
         self,
         status: Optional[str] = None,
         domain: Optional[str] = None,
@@ -95,14 +95,14 @@ class MemoryStore(ABC):
         needs_review: Optional[bool] = None,
         project_id: Optional[str] = None,
         limit: int = 200,
-    ) -> list[MemoryItem]: ...
+    ) -> list[StoreClaim]: ...
 
     @abstractmethod
-    def update_memory(self, memory_id: str, **fields) -> None: ...
+    def update_claim(self, claim_id: str, **fields) -> None: ...
 
-    def set_status(self, memory_id: str, status: MemoryStatus, clear_review: bool = True) -> None:
-        self.update_memory(
-            memory_id,
+    def set_status(self, claim_id: str, status: ClaimStatus, clear_review: bool = True) -> None:
+        self.update_claim(
+            claim_id,
             status=status.value,
             **({"needs_review": False, "review_reason": None} if clear_review else {}),
         )
@@ -113,7 +113,7 @@ class MemoryStore(ABC):
     def insert_evidence(self, ev: Evidence) -> str: ...
 
     @abstractmethod
-    def get_evidence(self, memory_id: str) -> list[Evidence]: ...
+    def get_evidence(self, claim_id: str) -> list[Evidence]: ...
 
     # -- entities & relations ----------------------------------------------
 
@@ -133,7 +133,7 @@ class MemoryStore(ABC):
     def relations_for(self, node_id: str) -> list[Relation]: ...
 
     @abstractmethod
-    def memories_for_entity(self, entity_id: str) -> list[MemoryItem]: ...
+    def claims_for_entity(self, entity_id: str) -> list[StoreClaim]: ...
 
     # -- embeddings ----------------------------------------------------------
 
@@ -160,12 +160,12 @@ class MemoryStore(ABC):
 
     @abstractmethod
     def fts_search(self, query: str, limit: int = 50) -> dict[str, float]:
-        """memory_id → relevance score (higher = better)."""
+        """claim_id → relevance score (higher = better)."""
 
     # -- firewall audit log ----------------------------------------------------
 
     @abstractmethod
-    def log_firewall(self, memory_id: str, target_domain: str, rule: str, action: str) -> None: ...
+    def log_firewall(self, claim_id: str, target_domain: str, rule: str, action: str) -> None: ...
 
     # -- projects -----------------------------------------------------------------
 

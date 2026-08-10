@@ -32,7 +32,7 @@ from twin.cognize.stance_engine.profile import load_profile
 from twin.store.models import (
     FeedbackVerdict,
     FindingStatus,
-    MemoryStatus,
+    ClaimStatus,
     TaskProfile,
 )
 from twin.store.search import search
@@ -140,9 +140,9 @@ class SessionCompleteRequest(BaseModel):
 
 class SessionFeedbackRequest(BaseModel):
     verdict: FeedbackVerdict
-    memory_id: Optional[str] = None
+    claim_id: Optional[str] = None
     note: str = Field(default="", max_length=10_000)
-    scope: Optional[Literal["session", "pack", "memory"]] = None
+    scope: Optional[Literal["session", "pack", "claim"]] = None
 
 
 class ProjectRequest(BaseModel):
@@ -182,7 +182,7 @@ class ConnectorSyncRequest(BaseModel):
 
 
 class MergeRequest(BaseModel):
-    memory_ids: list[str] = Field(min_length=2)
+    claim_ids: list[str] = Field(min_length=2)
     title: Optional[str] = None
     summary: Optional[str] = None
     confirm_cross_scope_merge: bool = False
@@ -204,7 +204,7 @@ class ResolveRequest(BaseModel):
     """Resolve a review finding / neighbor relation for one memory."""
 
     action: str  # merge|contradict|supersede|supersede_by|dismiss|archive|split|…
-    related_memory_id: Optional[str] = None
+    related_claim_id: Optional[str] = None
     finding_id: Optional[str] = None
     title: Optional[str] = None
     summary: Optional[str] = None
@@ -214,14 +214,14 @@ class ResolveRequest(BaseModel):
     sensitivity: Optional[str] = None
 
 
-def _mem_dict(mem, store=None) -> dict[str, Any]:
+def _claim_dict(mem, store=None) -> dict[str, Any]:
     data = mem.model_dump()
     data["type"] = mem.type.value
     data["sensitivity"] = mem.sensitivity.value
     data["status"] = mem.status.value
     try:
-        from twin.cognize.services.quality import memory_altitude
-        data["altitude"] = (mem.payload or {}).get("altitude") or memory_altitude(mem)
+        from twin.cognize.services.quality import claim_altitude
+        data["altitude"] = (mem.payload or {}).get("altitude") or claim_altitude(mem)
     except Exception:
         data["altitude"] = (mem.payload or {}).get("altitude") or "ground"
     data["condensed"] = bool(
@@ -230,8 +230,8 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
     )
     if store is not None:
         try:
-            from twin.store.provenance import memory_source_summary
-            src = memory_source_summary(store, mem.id)
+            from twin.store.provenance import claim_source_summary
+            src = claim_source_summary(store, mem.id)
             data["sources"] = src.get("sensors") or []
             data["source_label"] = src.get("label") or ""
             data["source_refs"] = src.get("refs") or []
@@ -244,7 +244,7 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
         for mid in (mem.payload or {}).get("merged_from") or []:
             if not isinstance(mid, str):
                 continue
-            other = store.get_memory(mid)
+            other = store.get_claim(mid)
             if other is None:
                 based_in.append({
                     "id": mid, "title": mid, "status": "unknown",
@@ -305,16 +305,16 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/extract")
     def api_extract(auto_approve: bool = False):
-        from twin.store.models import MemoryStatus
+        from twin.store.models import ClaimStatus
 
         reports = extract_pending(ws.store, ws.cfg, ws.embedder)
         auto_approved: list[str] = []
         if auto_approve:
             for r in reports:
                 for mid in r.inserted:
-                    mem = ws.store.get_memory(mid)
+                    mem = ws.store.get_claim(mid)
                     if mem is not None and mem.status.value == "candidate":
-                        ws.store.set_status(mid, MemoryStatus.confirmed)
+                        ws.store.set_status(mid, ClaimStatus.confirmed)
                         auto_approved.append(mid)
         return [
             {
@@ -350,50 +350,50 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         needs_review: Optional[bool] = None,
         limit: int = 500,
     ):
-        memories = ws.store.list_memories(
+        memories = ws.store.list_claims(
             status=status, domain=domain, type_=type,
             needs_review=needs_review, limit=max(1, min(limit, 2000)),
         )
-        return [_mem_dict(m, ws.store) for m in memories]
+        return [_claim_dict(m, ws.store) for m in memories]
 
-    @app.get("/api/memories/{memory_id}")
-    def api_memory(memory_id: str):
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/memories/{claim_id}")
+    def api_memory(claim_id: str):
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
-        evidence = [e.model_dump() for e in ws.store.get_evidence(memory_id)]
-        return {**_mem_dict(mem, ws.store), "evidence": evidence}
+        evidence = [e.model_dump() for e in ws.store.get_evidence(claim_id)]
+        return {**_claim_dict(mem, ws.store), "evidence": evidence}
 
-    @app.post("/api/memories/{memory_id}/review")
-    def api_review(memory_id: str, action: str, domain: Optional[str] = None,
+    @app.post("/api/memories/{claim_id}/review")
+    def api_review(claim_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
         from ..clock import now_iso
         from twin.store.lifecycle import archive_memory
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if domain:
-            ws.store.update_memory(memory_id, domain=domain)
+            ws.store.update_claim(claim_id, domain=domain)
         if sensitivity:
-            ws.store.update_memory(memory_id, sensitivity=sensitivity)
+            ws.store.update_claim(claim_id, sensitivity=sensitivity)
         if action == "approve":
-            ws.store.set_status(memory_id, MemoryStatus.confirmed)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso(), needs_review=False)
+            ws.store.set_status(claim_id, ClaimStatus.confirmed)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso(), needs_review=False)
         elif action == "reject":
-            ws.store.set_status(memory_id, MemoryStatus.rejected)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso(), needs_review=False)
+            ws.store.set_status(claim_id, ClaimStatus.rejected)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso(), needs_review=False)
         elif action == "defer":
-            ws.store.update_memory(memory_id, needs_review=True, review_reason="deferred")
+            ws.store.update_claim(claim_id, needs_review=True, review_reason="deferred")
         elif action == "archive":
             try:
-                archive_memory(ws.store, memory_id)
+                archive_memory(ws.store, claim_id)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         elif action != "update":
             raise HTTPException(
                 400, "action must be approve | reject | update | defer | archive",
             )
-        return _mem_dict(ws.store.get_memory(memory_id), ws.store)
+        return _claim_dict(ws.store.get_claim(claim_id), ws.store)
 
     # -- memory formation ----------------------------------------------
 
@@ -416,60 +416,60 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         summary: Optional[str] = None
         domain: Optional[str] = None
 
-    @app.post("/api/memory/candidates/{memory_id}/confirm")
+    @app.post("/api/memory/candidates/{claim_id}/confirm")
     def api_formation_confirm(
-        memory_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
+        claim_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
     ):
         from twin.store.formation import confirm_candidate
         try:
             return confirm_candidate(
-                ws.store, memory_id, note=req.note,
+                ws.store, claim_id, note=req.note,
             ).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/memory/candidates/{memory_id}/reject")
-    def api_formation_reject(memory_id: str, req: FormationRejectRequest):
+    @app.post("/api/memory/candidates/{claim_id}/reject")
+    def api_formation_reject(claim_id: str, req: FormationRejectRequest):
         from twin.store.formation import reject_candidate
         try:
             return reject_candidate(
-                ws.store, memory_id, reason=req.reason,
+                ws.store, claim_id, reason=req.reason,
             ).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/memory/candidates/{memory_id}/edit")
-    def api_formation_edit(memory_id: str, req: FormationEditRequest):
+    @app.post("/api/memory/candidates/{claim_id}/edit")
+    def api_formation_edit(claim_id: str, req: FormationEditRequest):
         from twin.store.formation import edit_candidate
         try:
             return edit_candidate(
-                ws.store, memory_id,
+                ws.store, claim_id,
                 title=req.title, summary=req.summary, domain=req.domain,
             ).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/memory/candidates/{memory_id}/restore")
-    def api_formation_restore(memory_id: str):
+    @app.post("/api/memory/candidates/{claim_id}/restore")
+    def api_formation_restore(claim_id: str):
         from twin.store.formation import restore_candidate
         try:
-            return restore_candidate(ws.store, memory_id).model_dump(mode="json")
+            return restore_candidate(ws.store, claim_id).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get("/api/memory/{memory_id}/explain")
-    def api_memory_explain(memory_id: str):
+    @app.get("/api/memory/{claim_id}/explain")
+    def api_memory_explain(claim_id: str):
         from twin.store.formation import explain_memory
         try:
-            return explain_memory(ws.store, memory_id)
+            return explain_memory(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
-    @app.get("/api/memory/{memory_id}/history")
-    def api_memory_history(memory_id: str):
+    @app.get("/api/memory/{claim_id}/history")
+    def api_memory_history(claim_id: str):
         from twin.store.formation import explain_memory
         try:
-            return {"memory_id": memory_id, "history": explain_memory(ws.store, memory_id)["history"]}
+            return {"claim_id": claim_id, "history": explain_memory(ws.store, claim_id)["history"]}
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -479,8 +479,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         result = search(ws.store, ws.embedder, q, target_domain=domain,
                         firewall=ws.firewall, type_=type, limit=limit)
         return {
-            "hits": [{**_mem_dict(h.memory, ws.store), "score": h.score, "why": h.why} for h in result.hits],
-            "blocked": [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
+            "hits": [{**_claim_dict(h.claim, ws.store), "score": h.score, "why": h.why} for h in result.hits],
+            "blocked": [{"claim_id": b.claim_id, "reason": b.rule} for b in result.blocked],
         }
 
     def _resolve_project_id(project: Optional[str]) -> Optional[str]:
@@ -981,7 +981,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_session_feedback(session_id: str, req: SessionFeedbackRequest):
         try:
             session = record_feedback(ws.store, session_id, req.verdict.value,
-                                      memory_id=req.memory_id, note=req.note,
+                                      claim_id=req.claim_id, note=req.note,
                                       scope=req.scope)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
@@ -1022,36 +1022,36 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ws.store.update_project(project)
         return ws.store.get_project(project.id).model_dump()
 
-    @app.post("/api/memories/{memory_id}/promote")
-    def api_promote(memory_id: str):
-        from twin.cognize.stance_engine.profile import promote_memory
+    @app.post("/api/memories/{claim_id}/promote")
+    def api_promote(claim_id: str):
+        from twin.cognize.stance_engine.profile import promote_claim
 
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         try:
-            section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
+            section = promote_claim(ws.cfg.judgment_path, mem, store=ws.store)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
-        ws.store.update_memory(memory_id, payload={**mem.payload, "promoted_to_judgment": True})
-        return {"memory_id": memory_id, "promoted_to": section}
+        ws.store.update_claim(claim_id, payload={**mem.payload, "promoted_to_judgment": True})
+        return {"claim_id": claim_id, "promoted_to": section}
 
-    @app.post("/api/memories/{memory_id}/supersede/{old_id}")
-    def api_supersede(memory_id: str, old_id: str):
+    @app.post("/api/memories/{claim_id}/supersede/{old_id}")
+    def api_supersede(claim_id: str, old_id: str):
         from twin.store.lifecycle import supersede
 
         try:
-            result = supersede(ws.store, memory_id, old_id)
+            result = supersede(ws.store, claim_id, old_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         return result.__dict__
 
-    @app.post("/api/memories/{memory_id}/contradict/{other_id}")
-    def api_contradict(memory_id: str, other_id: str):
+    @app.post("/api/memories/{claim_id}/contradict/{other_id}")
+    def api_contradict(claim_id: str, other_id: str):
         from twin.store.lifecycle import contradict
 
         try:
-            result = contradict(ws.store, memory_id, other_id)
+            result = contradict(ws.store, claim_id, other_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         return result.__dict__
@@ -1350,24 +1350,24 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             sensitivity=sensitivity, min_priority=min_priority,
             conflicts_only=conflicts, limit=limit,
         )
-        return [_mem_dict(m, ws.store) for m in queue]
+        return [_claim_dict(m, ws.store) for m in queue]
 
     class BatchCreateRequest(BaseModel):
         name: str = Field(min_length=1, max_length=200)
         query: dict[str, Any] = Field(default_factory=dict)
-        memory_ids: list[str] = Field(default_factory=list)
+        claim_ids: list[str] = Field(default_factory=list)
 
     class BatchApplyRequest(BaseModel):
         action: str
-        memory_ids: Optional[list[str]] = None
+        claim_ids: Optional[list[str]] = None
         force: bool = False
         preview_token: Optional[str] = None
 
     def _finding_dict(finding, store) -> dict[str, Any]:
         data = finding.model_dump(mode="json")
-        rid = finding.related_memory_id
+        rid = finding.related_claim_id
         if rid:
-            related = store.get_memory(rid)
+            related = store.get_claim(rid)
             if related is not None:
                 data["related"] = {
                     "id": related.id,
@@ -1379,13 +1379,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 }
         return data
 
-    def _close_finding(store, memory_id: str, finding_id: Optional[str], *,
+    def _close_finding(store, claim_id: str, finding_id: Optional[str], *,
                        status: FindingStatus = FindingStatus.resolved,
                        operation_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         if not finding_id or not hasattr(store, "get_findings"):
             return None
         from ..clock import now_iso
-        findings = store.get_findings(memory_id, unresolved_only=False)
+        findings = store.get_findings(claim_id, unresolved_only=False)
         finding = next((f for f in findings if f.id == finding_id), None)
         if finding is None:
             return None
@@ -1400,7 +1400,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/review/batches")
     def api_create_batch(req: BatchCreateRequest):
         from twin.store.batches import create_batch
-        batch = create_batch(ws.store, req.name, query=req.query, memory_ids=req.memory_ids or None)
+        batch = create_batch(ws.store, req.name, query=req.query, claim_ids=req.claim_ids or None)
         return batch.model_dump()
 
     @app.get("/api/review/batches/{batch_id}")
@@ -1418,7 +1418,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             raise HTTPException(404, "batch not found")
-        ids = req.memory_ids or batch.memory_ids
+        ids = req.claim_ids or batch.claim_ids
         preview = batch_preview(ws.store, ids, req.action)
         if req.force is False and preview.get("requires_individual_review"):
             return {**preview, "preview_only": True}
@@ -1427,31 +1427,31 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             force=req.force, preview_token=req.preview_token,
         )
 
-    @app.get("/api/memories/{memory_id}/neighbors")
-    def api_neighbors(memory_id: str):
+    @app.get("/api/memories/{claim_id}/neighbors")
+    def api_neighbors(claim_id: str):
         from twin.cognize.services.quality import discover_neighbors
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         neighbors = discover_neighbors(ws.store, ws.embedder, mem)
         return [
-            {**_mem_dict(n, ws.store), "similarity": sim, "reason": reason}
+            {**_claim_dict(n, ws.store), "similarity": sim, "reason": reason}
             for n, sim, reason in neighbors
         ]
 
-    @app.get("/api/memories/{memory_id}/quality")
-    def api_quality(memory_id: str, refresh: bool = False):
-        from twin.cognize.services.quality import analyze_memory
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/memories/{claim_id}/quality")
+    def api_quality(claim_id: str, refresh: bool = False):
+        from twin.cognize.services.quality import analyze_claim
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         # Prefer stored findings unless caller asks to re-analyze.
         if not refresh and hasattr(ws.store, "get_findings"):
-            stored = ws.store.get_findings(memory_id, unresolved_only=True)
+            stored = ws.store.get_findings(claim_id, unresolved_only=True)
             if stored:
-                from twin.cognize.services.quality import memory_altitude
+                from twin.cognize.services.quality import claim_altitude
                 return {
-                    "memory_id": memory_id,
+                    "claim_id": claim_id,
                     "quality_score": mem.quality_score,
                     "review_priority": mem.review_priority,
                     "impact": mem.impact,
@@ -1462,11 +1462,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                     "requires_human_review": bool(mem.needs_review),
                     "quality_flags": list(mem.quality_flags or []),
                     "neighbors": [],
-                    "altitude": memory_altitude(mem),
+                    "altitude": claim_altitude(mem),
                     "from_store": True,
                 }
         try:
-            report = analyze_memory(ws.store, ws.embedder, memory_id)
+            report = analyze_claim(ws.store, ws.embedder, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         data = report.model_dump(mode="json")
@@ -1474,29 +1474,29 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         data["from_store"] = False
         return data
 
-    @app.get("/api/memories/{memory_id}/findings")
-    def api_findings(memory_id: str, unresolved_only: bool = True):
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/memories/{claim_id}/findings")
+    def api_findings(claim_id: str, unresolved_only: bool = True):
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if not hasattr(ws.store, "get_findings"):
             return []
         return [
             _finding_dict(f, ws.store)
-            for f in ws.store.get_findings(memory_id, unresolved_only=unresolved_only)
+            for f in ws.store.get_findings(claim_id, unresolved_only=unresolved_only)
         ]
 
-    @app.post("/api/memories/{memory_id}/findings/{finding_id}/dismiss")
-    def api_dismiss_finding(memory_id: str, finding_id: str):
+    @app.post("/api/memories/{claim_id}/findings/{finding_id}/dismiss")
+    def api_dismiss_finding(claim_id: str, finding_id: str):
         closed = _close_finding(
-            ws.store, memory_id, finding_id, status=FindingStatus.dismissed,
+            ws.store, claim_id, finding_id, status=FindingStatus.dismissed,
         )
         if closed is None:
             raise HTTPException(404, "finding not found")
         return closed
 
-    @app.post("/api/memories/{memory_id}/resolve")
-    def api_resolve(memory_id: str, req: ResolveRequest):
+    @app.post("/api/memories/{claim_id}/resolve")
+    def api_resolve(claim_id: str, req: ResolveRequest):
         from ..clock import now_iso
         from twin.store.lifecycle import (
             archive_memory,
@@ -1506,17 +1506,17 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             supersede,
         )
 
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if req.domain:
-            ws.store.update_memory(memory_id, domain=req.domain)
+            ws.store.update_claim(claim_id, domain=req.domain)
         if req.sensitivity:
-            ws.store.update_memory(memory_id, sensitivity=req.sensitivity)
+            ws.store.update_claim(claim_id, sensitivity=req.sensitivity)
 
         action = (req.action or "").strip().lower()
-        related_id = req.related_memory_id
-        result: dict[str, Any] = {"action": action, "memory_id": memory_id}
+        related_id = req.related_claim_id
+        result: dict[str, Any] = {"action": action, "claim_id": claim_id}
         op_id: Optional[str] = None
         remove_ids: list[str] = []
         finding_status = FindingStatus.resolved
@@ -1526,9 +1526,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 finding_status = FindingStatus.dismissed
             elif action == "merge":
                 if not related_id:
-                    raise ValueError("related_memory_id required for merge")
+                    raise ValueError("related_claim_id required for merge")
                 merged = merge_memories(
-                    ws.store, [memory_id, related_id],
+                    ws.store, [claim_id, related_id],
                     title=req.title, summary=req.summary,
                     embedder=ws.embedder,
                     confirm_cross_scope_merge=req.confirm_cross_scope_merge,
@@ -1541,76 +1541,76 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                     "operation_id": op_id,
                     **merged.extras,
                 })
-                remove_ids = [memory_id, related_id]
+                remove_ids = [claim_id, related_id]
             elif action == "contradict":
                 if not related_id:
-                    raise ValueError("related_memory_id required for contradict")
-                out = contradict(ws.store, memory_id, related_id)
+                    raise ValueError("related_claim_id required for contradict")
+                out = contradict(ws.store, claim_id, related_id)
                 op_id = out.operation_id
                 result["operation_id"] = op_id
             elif action == "supersede":
                 if not related_id:
-                    raise ValueError("related_memory_id required for supersede")
-                out = supersede(ws.store, memory_id, related_id)
+                    raise ValueError("related_claim_id required for supersede")
+                out = supersede(ws.store, claim_id, related_id)
                 # Keep the newer claim as confirmed — matches legacy review form.
-                ws.store.set_status(memory_id, MemoryStatus.confirmed)
-                ws.store.update_memory(
-                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                ws.store.set_status(claim_id, ClaimStatus.confirmed)
+                ws.store.update_claim(
+                    claim_id, reviewed_at=now_iso(), needs_review=False,
                 )
                 op_id = out.operation_id
                 result["operation_id"] = op_id
-                remove_ids = [memory_id, related_id]
+                remove_ids = [claim_id, related_id]
             elif action == "supersede_by":
                 if not related_id:
-                    raise ValueError("related_memory_id required for supersede_by")
-                out = supersede(ws.store, related_id, memory_id)
-                related_mem = ws.store.get_memory(related_id)
-                if related_mem is not None and related_mem.status == MemoryStatus.candidate:
-                    ws.store.set_status(related_id, MemoryStatus.confirmed)
-                    ws.store.update_memory(
+                    raise ValueError("related_claim_id required for supersede_by")
+                out = supersede(ws.store, related_id, claim_id)
+                related_mem = ws.store.get_claim(related_id)
+                if related_mem is not None and related_mem.status == ClaimStatus.candidate:
+                    ws.store.set_status(related_id, ClaimStatus.confirmed)
+                    ws.store.update_claim(
                         related_id, reviewed_at=now_iso(), needs_review=False,
                     )
                 op_id = out.operation_id
                 result["operation_id"] = op_id
-                remove_ids = [memory_id, related_id]
+                remove_ids = [claim_id, related_id]
             elif action == "split":
                 parts = req.parts or []
                 if len(parts) < 2:
                     raise ValueError("split requires at least two parts")
-                out = split_memory(ws.store, memory_id, parts, embedder=ws.embedder)
+                out = split_memory(ws.store, claim_id, parts, embedder=ws.embedder)
                 op_id = out.operation_id
                 result.update({
                     "children": out.extras.get("children"),
                     "operation_id": op_id,
                 })
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             elif action == "archive":
-                out = archive_memory(ws.store, memory_id)
+                out = archive_memory(ws.store, claim_id)
                 op_id = out.operation_id
                 result["operation_id"] = op_id
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             elif action == "request_evidence":
-                ws.store.update_memory(
-                    memory_id, needs_review=True,
+                ws.store.update_claim(
+                    claim_id, needs_review=True,
                     review_reason="more evidence requested",
                     quality_flags=list(set((mem.quality_flags or []) + ["weak_evidence"])),
                 )
             elif action == "defer":
-                ws.store.update_memory(
-                    memory_id, needs_review=True, review_reason="deferred",
+                ws.store.update_claim(
+                    claim_id, needs_review=True, review_reason="deferred",
                 )
             elif action == "confirm":
-                ws.store.set_status(memory_id, MemoryStatus.confirmed)
-                ws.store.update_memory(
-                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                ws.store.set_status(claim_id, ClaimStatus.confirmed)
+                ws.store.update_claim(
+                    claim_id, reviewed_at=now_iso(), needs_review=False,
                 )
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             elif action == "reject":
-                ws.store.set_status(memory_id, MemoryStatus.rejected)
-                ws.store.update_memory(
-                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                ws.store.set_status(claim_id, ClaimStatus.rejected)
+                ws.store.update_claim(
+                    claim_id, reviewed_at=now_iso(), needs_review=False,
                 )
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             else:
                 raise HTTPException(
                     400,
@@ -1622,21 +1622,21 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
         closed = _close_finding(
-            ws.store, memory_id, req.finding_id,
+            ws.store, claim_id, req.finding_id,
             status=finding_status, operation_id=op_id,
         )
         if closed is not None:
             result["finding"] = closed
         result["removed_from_queue"] = remove_ids
-        result["memory"] = _mem_dict(ws.store.get_memory(memory_id), ws.store) \
-            if ws.store.get_memory(memory_id) else None
+        result["claim"] = _claim_dict(ws.store.get_claim(claim_id), ws.store) \
+            if ws.store.get_claim(claim_id) else None
         return result
 
-    @app.get("/api/memories/{memory_id}/provenance")
-    def api_provenance(memory_id: str):
-        from twin.store.provenance import memory_provenance
+    @app.get("/api/memories/{claim_id}/provenance")
+    def api_provenance(claim_id: str):
+        from twin.store.provenance import claim_provenance
         try:
-            return memory_provenance(ws.store, memory_id)
+            return claim_provenance(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -1662,42 +1662,42 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 CanonicalClaim(**claim) if isinstance(claim, dict) else claim
             )
         try:
-            result = merge_memories(ws.store, req.memory_ids, **merge_kwargs)
+            result = merge_memories(ws.store, req.claim_ids, **merge_kwargs)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "merged_id": result.extras.get("merged_id"),
                 "operation_id": result.operation_id, **result.extras}
 
-    @app.post("/api/memories/{memory_id}/split")
-    def api_split(memory_id: str, req: SplitRequest):
+    @app.post("/api/memories/{claim_id}/split")
+    def api_split(claim_id: str, req: SplitRequest):
         from twin.store.lifecycle import split_memory
         try:
-            result = split_memory(ws.store, memory_id, req.parts, embedder=ws.embedder)
+            result = split_memory(ws.store, claim_id, req.parts, embedder=ws.embedder)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "children": result.extras.get("children"),
                 "operation_id": result.operation_id}
 
-    @app.post("/api/memories/{memory_id}/archive")
-    def api_archive(memory_id: str):
+    @app.post("/api/memories/{claim_id}/archive")
+    def api_archive(claim_id: str):
         from twin.store.lifecycle import archive_memory
         try:
-            result = archive_memory(ws.store, memory_id)
+            result = archive_memory(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         return {"action": result.action, "operation_id": result.operation_id}
 
-    @app.post("/api/memories/{memory_id}/request-evidence")
-    def api_request_evidence(memory_id: str):
-        mem = ws.store.get_memory(memory_id)
+    @app.post("/api/memories/{claim_id}/request-evidence")
+    def api_request_evidence(claim_id: str):
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
-        ws.store.update_memory(
-            memory_id, needs_review=True,
+        ws.store.update_claim(
+            claim_id, needs_review=True,
             review_reason="more evidence requested",
             quality_flags=list(set(mem.quality_flags + ["weak_evidence"])),
         )
-        return _mem_dict(ws.store.get_memory(memory_id), ws.store)
+        return _claim_dict(ws.store.get_claim(claim_id), ws.store)
 
     @app.get("/api/artifacts/{artifact_id}")
     def api_artifact(artifact_id: str):
@@ -2213,7 +2213,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.get("/api/export")
     def api_export():
         """Full JSON export (vendor-independence guarantee)."""
-        memories = ws.store.list_memories(limit=100000)
+        memories = ws.store.list_claims(limit=100000)
         judgment_export = load_profile(ws.cfg.judgment_path)
         if hasattr(ws.store, "list_judgment_items"):
             judgment_export = {
@@ -2221,8 +2221,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 "items": [i.model_dump(mode="json") for i in ws.store.list_judgment_items(status="active")],
             }
         return JSONResponse({
-            "memories": [
-                {**_mem_dict(m, ws.store), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
+            "claims": [
+                {**_claim_dict(m, ws.store), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
                 for m in memories
             ],
             "entities": [e.model_dump() for e in ws.store.list_entities()],
@@ -2247,35 +2247,35 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         # Tiny inline avoidance of 404 noise in logs
         return RedirectResponse("/static/app.css", status_code=302)
 
-    @app.post("/review/{memory_id}")
-    def ui_review(memory_id: str, action: str = Form(...), domain: str = Form(None),
+    @app.post("/review/{claim_id}")
+    def ui_review(claim_id: str, action: str = Form(...), domain: str = Form(None),
                   sensitivity: str = Form(None), neighbor_id: str = Form(None)):
         from ..clock import now_iso
         from twin.store.lifecycle import archive_memory, contradict, merge_memories, supersede
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if domain:
-            ws.store.update_memory(memory_id, domain=domain)
+            ws.store.update_claim(claim_id, domain=domain)
         if sensitivity:
-            ws.store.update_memory(memory_id, sensitivity=sensitivity)
+            ws.store.update_claim(claim_id, sensitivity=sensitivity)
         if action == "approve":
-            ws.store.set_status(memory_id, MemoryStatus.confirmed)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso())
+            ws.store.set_status(claim_id, ClaimStatus.confirmed)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso())
         elif action == "reject":
-            ws.store.set_status(memory_id, MemoryStatus.rejected)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso())
+            ws.store.set_status(claim_id, ClaimStatus.rejected)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso())
         elif action == "defer":
-            ws.store.update_memory(memory_id, needs_review=True, review_reason="deferred")
+            ws.store.update_claim(claim_id, needs_review=True, review_reason="deferred")
         elif action == "archive":
-            archive_memory(ws.store, memory_id)
+            archive_memory(ws.store, claim_id)
         elif action == "supersede_hint" and neighbor_id:
-            supersede(ws.store, memory_id, neighbor_id)
-            ws.store.set_status(memory_id, MemoryStatus.confirmed)
+            supersede(ws.store, claim_id, neighbor_id)
+            ws.store.set_status(claim_id, ClaimStatus.confirmed)
         elif action == "contradict_hint" and neighbor_id:
-            contradict(ws.store, memory_id, neighbor_id)
+            contradict(ws.store, claim_id, neighbor_id)
         elif action == "merge_hint" and neighbor_id:
-            merge_memories(ws.store, [memory_id, neighbor_id], embedder=ws.embedder)
+            merge_memories(ws.store, [claim_id, neighbor_id], embedder=ws.embedder)
         elif action != "update":
             raise HTTPException(400, "unknown action")
         return RedirectResponse("/#review", status_code=303)

@@ -255,7 +255,7 @@ def start_session(
             task_profile=session.task_profile or "general",
             project_id=project_id,
         )
-    session.supplied_memory_ids = [s["memory_id"] for s in pack.sources]
+    session.supplied_claim_ids = [s["claim_id"] for s in pack.sources]
     session.pack_chars = len(pack.context_pack)
     session.judgment_snapshot_id = pack.judgment_snapshot_id
     session.privacy_decision_ids = (
@@ -400,21 +400,21 @@ def _consolidate(store: MemoryStore, cfg: Config, embedder: Embedder,
         session.summary_percept_id = percept.id
 
         report = extract_percept(store, cfg, embedder, percept)
-        new_ids = [m for m in report.inserted if m not in session.created_memory_ids]
-        session.created_memory_ids = session.created_memory_ids + new_ids
+        new_ids = [m for m in report.inserted if m not in session.created_claim_ids]
+        session.created_claim_ids = session.created_claim_ids + new_ids
         if session.project_id:
             for mid in new_ids:
-                store.update_memory(mid, project_id=session.project_id)
+                store.update_claim(mid, project_id=session.project_id)
         if session.judgment_snapshot_id:
             for mid in new_ids:
-                mem = store.get_memory(mid)
+                mem = store.get_claim(mid)
                 if mem is None:
                     continue
                 payload = dict(mem.payload or {})
                 payload["judgment_influenced"] = True
                 payload["decision_origin"] = "twin_assisted"
                 payload["judgment_snapshot_id"] = session.judgment_snapshot_id
-                store.update_memory(mid, payload=payload)
+                store.update_claim(mid, payload=payload)
         session.consolidation_status = ConsolidationStatus.completed
     except Exception as exc:
         # never silent: the session stays diagnosable and retryable
@@ -427,13 +427,13 @@ def _consolidate(store: MemoryStore, cfg: Config, embedder: Embedder,
 
 
 def record_feedback(store: MemoryStore, session_id: str, verdict: str,
-                    memory_id: Optional[str] = None, note: str = "",
+                    claim_id: Optional[str] = None, note: str = "",
                     scope: Optional[str] = None) -> CognitiveSession:
     """Explicit usefulness feedback — the raw material of product metrics.
 
     ``scope`` says what the verdict is about: the whole ``session``, the
-    supplied ``pack``, or one ``memory`` (implied when memory_id is given).
-    A memory_id must exist and must have been part of this session (supplied
+    supplied ``pack``, or one ``memory`` (implied when claim_id is given).
+    A claim_id must exist and must have been part of this session (supplied
     in the pack or created by it) — feedback about foreign memories would
     silently corrupt the usage metrics."""
     FeedbackVerdict(verdict)  # raises ValueError on unknown verdicts
@@ -441,24 +441,24 @@ def record_feedback(store: MemoryStore, session_id: str, verdict: str,
     if session is None:
         raise ValueError(f"session {session_id} not found")
 
-    if memory_id:
-        if store.get_memory(memory_id) is None:
-            raise ValueError(f"memory {memory_id} not found")
-        if memory_id not in session.supplied_memory_ids + session.created_memory_ids:
-            raise ValueError(f"memory {memory_id} was not supplied by or created "
+    if claim_id:
+        if store.get_claim(claim_id) is None:
+            raise ValueError(f"memory {claim_id} not found")
+        if claim_id not in session.supplied_claim_ids + session.created_claim_ids:
+            raise ValueError(f"memory {claim_id} was not supplied by or created "
                              f"in session {session_id}")
-        scope = scope or "memory"
+        scope = scope or "claim"
     else:
         scope = scope or "session"
     if scope not in FEEDBACK_SCOPES:
         raise ValueError(f"scope must be one of {FEEDBACK_SCOPES}")
-    if scope == "memory" and not memory_id:
-        raise ValueError("scope='memory' requires memory_id")
+    if scope == "claim" and not claim_id:
+        raise ValueError("scope='claim' requires claim_id")
 
     store.append_session_feedback(session_id, {
         "scope": scope,
         "verdict": verdict,
-        "memory_id": memory_id,
+        "claim_id": claim_id,
         "note": note,
         "at": now_iso(),
     })

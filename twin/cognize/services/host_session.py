@@ -25,7 +25,7 @@ from twin.store.embeddings import Embedder
 from twin.store.models import (
     HostSessionBinding,
     InterventionRecommendation,
-    MemoryStatus,
+    ClaimStatus,
     SessionStatus,
 )
 from twin.store.store.base import MemoryStore
@@ -932,12 +932,12 @@ def recommend_intervention(
         return []
 
     candidates = []
-    for mid in list(session.supplied_memory_ids or [])[:50]:
-        mem = store.get_memory(mid)
+    for mid in list(session.supplied_claim_ids or [])[:50]:
+        mem = store.get_claim(mid)
         if mem is not None:
             candidates.append(mem)
     if not candidates and session.project_id:
-        candidates = store.list_memories(
+        candidates = store.list_claims(
             project_id=session.project_id, status="confirmed", limit=40,
         )
 
@@ -950,7 +950,7 @@ def recommend_intervention(
     out: list[InterventionRecommendation] = []
     for mem in candidates:
         if getattr(mem.status, "value", mem.status) not in (
-            MemoryStatus.confirmed.value, "confirmed",
+            ClaimStatus.confirmed.value, "confirmed",
         ):
             continue
         if mem.type.value != "decision" and str(mem.type) != "decision":
@@ -972,7 +972,7 @@ def recommend_intervention(
             supported_actions=["display"],
             requires_confirmation=False,
             metadata={
-                "memory_id": mem.id,
+                "claim_id": mem.id,
                 "overlap": overlap,
                 "heuristic": "token_overlap_reverse_cue",
             },

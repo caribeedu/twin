@@ -19,7 +19,7 @@ from twin.store.models import (
     FindingStatus,
     FindingType,
     INACTIVE_STATUSES,
-    MemoryItem,
+    StoreClaim,
     QualityReport,
     ReviewFinding,
     SuggestedAction,
@@ -69,19 +69,19 @@ def _thresholds(embedder: Embedder) -> dict[str, float]:
 def discover_neighbors(
     store: MemoryStore,
     embedder: Embedder,
-    mem: MemoryItem,
+    mem: StoreClaim,
     *,
     limit: int = 12,
-) -> list[tuple[MemoryItem, float, str]]:
+) -> list[tuple[StoreClaim, float, str]]:
     text = f"{mem.title}\n{mem.summary}"
     vector = embedder.embed(text)
     related = _thresholds(embedder)["related"]
     scored: dict[str, tuple[float, str]] = {}
 
-    for ref_id, sim in store.similar(vector, "memory", embedder.name, min_sim=related).items():
+    for ref_id, sim in store.similar(vector, "claim", embedder.name, min_sim=related).items():
         if ref_id == mem.id:
             continue
-        other = store.get_memory(ref_id)
+        other = store.get_claim(ref_id)
         if other is None or other.status.value in INACTIVE_STATUSES:
             continue
         scored[ref_id] = (sim, "semantic")
@@ -90,13 +90,13 @@ def discover_neighbors(
         ent = store.get_entity_by_name(name)
         if ent is None:
             continue
-        for other in store.memories_for_entity(ent.id):
+        for other in store.claims_for_entity(ent.id):
             if other.id == mem.id or other.status.value in INACTIVE_STATUSES:
                 continue
             prev = scored.get(other.id, (0.0, ""))
             scored[other.id] = (max(prev[0], 0.55), "entity" if prev[0] < 0.55 else prev[1])
 
-    for other in store.list_memories(project_id=mem.project_id, type_=mem.type.value, limit=80):
+    for other in store.list_claims(project_id=mem.project_id, type_=mem.type.value, limit=80):
         if other.id == mem.id or other.status.value in INACTIVE_STATUSES:
             continue
         if mem.project_id and other.project_id == mem.project_id:
@@ -108,7 +108,7 @@ def discover_neighbors(
         other_id = rel.object_id if rel.subject_id == mem.id else rel.subject_id
         if other_id == mem.id:
             continue
-        other = store.get_memory(other_id)
+        other = store.get_claim(other_id)
         if other is None:
             continue
         boost = 0.95 if rel.predicate in ("contradicts", "supersedes") else 0.7
@@ -116,15 +116,15 @@ def discover_neighbors(
         scored[other_id] = (max(prev[0], boost), rel.predicate)
 
     ranked = sorted(scored.items(), key=lambda kv: kv[1][0], reverse=True)[:limit]
-    out: list[tuple[MemoryItem, float, str]] = []
+    out: list[tuple[StoreClaim, float, str]] = []
     for mid, (score, reason) in ranked:
-        other = store.get_memory(mid)
+        other = store.get_claim(mid)
         if other:
             out.append((other, score, reason))
     return out
 
 
-def memory_altitude(mem: MemoryItem) -> str:
+def claim_altitude(mem: StoreClaim) -> str:
     """Consolidation height of a memory — higher means more distilled value."""
     payload = mem.payload or {}
     mem_type = getattr(mem.type, "value", mem.type)
@@ -150,7 +150,7 @@ def altitude_rank(altitude: str) -> int:
         return 0
 
 
-def _specificity(mem: MemoryItem) -> float:
+def _specificity(mem: StoreClaim) -> float:
     words = len(mem.summary.split())
     if words < 6:
         return 0.25
@@ -162,7 +162,7 @@ def _specificity(mem: MemoryItem) -> float:
     return min(1.0, 0.55 + words / 40)
 
 
-def _claim_of(mem: MemoryItem) -> Optional[CanonicalClaim]:
+def _claim_of(mem: StoreClaim) -> Optional[CanonicalClaim]:
     if mem.canonical_claim and (mem.canonical_claim.subject or mem.canonical_claim.predicate):
         return mem.canonical_claim
     return None
@@ -173,7 +173,7 @@ def _scope_tokens(text: str) -> set[str]:
     return {s for s in SCOPE_TOKENS if s in low}
 
 
-def _scope_difference(a: MemoryItem, b: MemoryItem) -> bool:
+def _scope_difference(a: StoreClaim, b: StoreClaim) -> bool:
     sa = _scope_tokens(f"{a.title} {a.summary}")
     sb = _scope_tokens(f"{b.title} {b.summary}")
     ca, cb = _claim_of(a), _claim_of(b)
@@ -190,7 +190,7 @@ def _normalize_tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9_]{3,}", text.lower())}
 
 
-def _looks_conflict(a: MemoryItem, b: MemoryItem, *, sim: float, claim_match: float) -> str | None:
+def _looks_conflict(a: StoreClaim, b: StoreClaim, *, sim: float, claim_match: float) -> str | None:
     """Return finding type or None. Only comparable claims can conflict."""
     if a.type.value != b.type.value:
         return None
@@ -244,7 +244,7 @@ def _looks_conflict(a: MemoryItem, b: MemoryItem, *, sim: float, claim_match: fl
 
 
 def review_priority(
-    mem: MemoryItem,
+    mem: StoreClaim,
     *,
     contradiction_risk: float = 0.0,
     source_risk: float = 0.0,
@@ -285,9 +285,9 @@ def review_priority(
     return round(min(1.0, base), 4)
 
 
-def select_canonical_survivor(memories: list[MemoryItem], store: MemoryStore) -> MemoryItem:
+def select_canonical_survivor(memories: list[StoreClaim], store: MemoryStore) -> StoreClaim:
     """Pick one survivor from an exact-duplicate group."""
-    def sort_key(m: MemoryItem) -> tuple:
+    def sort_key(m: StoreClaim) -> tuple:
         evidence = store.get_evidence(m.id)
         groups = {e.independence_group or e.artifact_id or e.percept_id for e in evidence}
         avg_trust = (
@@ -308,7 +308,7 @@ def select_canonical_survivor(memories: list[MemoryItem], store: MemoryStore) ->
 
 def build_duplicate_groups(
     store: MemoryStore,
-    candidates: list[MemoryItem],
+    candidates: list[StoreClaim],
 ) -> list[DuplicateGroup]:
     """Union-find exact-duplicate clusters from quality flags / findings."""
     parent: dict[str, str] = {}
@@ -332,8 +332,8 @@ def build_duplicate_groups(
         if hasattr(store, "get_findings"):
             findings = store.get_findings(mem.id)  # type: ignore[attr-defined]
         related = [
-            f.related_memory_id for f in findings
-            if f.type == FindingType.exact_duplicate and f.related_memory_id
+            f.related_claim_id for f in findings
+            if f.type == FindingType.exact_duplicate and f.related_claim_id
         ]
         if not related:
             # fall back: other candidates with same flag + near-identical title
@@ -359,31 +359,31 @@ def build_duplicate_groups(
     for members in clusters.values():
         if len(members) < 2:
             continue
-        objs = [store.get_memory(m) for m in members]
+        objs = [store.get_claim(m) for m in members]
         objs = [m for m in objs if m]
         if len(objs) < 2:
             continue
         survivor = select_canonical_survivor(objs, store)
         groups.append(DuplicateGroup(
             id=ids.new_id("dup"),
-            memory_ids=[m.id for m in objs],
-            canonical_memory_id=survivor.id,
+            claim_ids=[m.id for m in objs],
+            canonical_claim_id=survivor.id,
             reason="exact duplicate cluster",
             created_at=ts,
         ))
     return groups
 
 
-def analyze_memory(
+def analyze_claim(
     store: MemoryStore,
     embedder: Embedder,
-    memory_id: str,
+    claim_id: str,
     *,
     persist: bool = True,
 ) -> QualityReport:
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
 
     thr = _thresholds(embedder)
     neighbors = discover_neighbors(store, embedder, mem)
@@ -398,7 +398,7 @@ def analyze_memory(
     evidence = store.get_evidence(mem.id)
     if not evidence:
         findings.append(ReviewFinding(
-            id=ids.finding_id(), memory_id=mem.id, type=FindingType.weak_evidence,
+            id=ids.finding_id(), claim_id=mem.id, type=FindingType.weak_evidence,
             confidence=0.9, reason="no evidence attached",
             suggested_action=SuggestedAction.request_more_evidence,
             requires_human_review=True, created_at=ts,
@@ -413,7 +413,7 @@ def analyze_memory(
         split_likely = len(re.findall(r"\b(and|,)\b", mem.summary, flags=re.I)) >= 3
         ftype = FindingType.possible_split if split_likely else FindingType.low_specificity
         findings.append(ReviewFinding(
-            id=ids.finding_id(), memory_id=mem.id, type=ftype,
+            id=ids.finding_id(), claim_id=mem.id, type=ftype,
             confidence=0.7, reason="summary is generic or compound",
             suggested_action=SuggestedAction.split if split_likely else SuggestedAction.edit,
             requires_human_review=True, created_at=ts,
@@ -427,8 +427,8 @@ def analyze_memory(
     for other, sim, reason in neighbors:
         if sim >= 0.98 and mem.title.strip().lower() == other.title.strip().lower():
             findings.append(ReviewFinding(
-                id=ids.finding_id(), memory_id=mem.id, type=FindingType.exact_duplicate,
-                related_memory_id=other.id, confidence=sim,
+                id=ids.finding_id(), claim_id=mem.id, type=FindingType.exact_duplicate,
+                related_claim_id=other.id, confidence=sim,
                 reason=f"exact/near-identical content ({reason})",
                 suggested_action=SuggestedAction.reject,
                 requires_human_review=False, created_at=ts,
@@ -440,8 +440,8 @@ def analyze_memory(
 
         if sim >= thr["near_duplicate"]:
             findings.append(ReviewFinding(
-                id=ids.finding_id(), memory_id=mem.id, type=FindingType.near_duplicate,
-                related_memory_id=other.id, confidence=sim,
+                id=ids.finding_id(), claim_id=mem.id, type=FindingType.near_duplicate,
+                related_claim_id=other.id, confidence=sim,
                 reason=f"near-duplicate via {reason}",
                 suggested_action=SuggestedAction.merge,
                 requires_human_review=True, created_at=ts,
@@ -455,8 +455,8 @@ def analyze_memory(
         kind = _looks_conflict(mem, other, sim=sim, claim_match=thr["claim_match"])
         if kind == FindingType.scope_difference.value:
             findings.append(ReviewFinding(
-                id=ids.finding_id(), memory_id=mem.id, type=FindingType.scope_difference,
-                related_memory_id=other.id, confidence=0.7,
+                id=ids.finding_id(), claim_id=mem.id, type=FindingType.scope_difference,
+                related_claim_id=other.id, confidence=0.7,
                 reason="similar claim with different scope — may coexist",
                 suggested_action=SuggestedAction.confirm,
                 requires_human_review=False, created_at=ts,
@@ -469,9 +469,9 @@ def analyze_memory(
             newer = (mem.valid_from or mem.created_at) > (other.valid_from or other.created_at)
             if mem.type.value == "decision" and other.type.value == "decision" and newer:
                 findings.append(ReviewFinding(
-                    id=ids.finding_id(), memory_id=mem.id,
+                    id=ids.finding_id(), claim_id=mem.id,
                     type=FindingType.possible_supersedence,
-                    related_memory_id=other.id, confidence=min(0.95, sim + 0.05),
+                    related_claim_id=other.id, confidence=min(0.95, sim + 0.05),
                     reason="newer decision may supersede older comparable claim",
                     suggested_action=SuggestedAction.supersede,
                     requires_human_review=True, created_at=ts,
@@ -482,9 +482,9 @@ def analyze_memory(
                 possible_supersedence = True
             else:
                 findings.append(ReviewFinding(
-                    id=ids.finding_id(), memory_id=mem.id,
+                    id=ids.finding_id(), claim_id=mem.id,
                     type=FindingType.possible_conflict,
-                    related_memory_id=other.id, confidence=sim,
+                    related_claim_id=other.id, confidence=sim,
                     reason="comparable claims with incompatible values",
                     suggested_action=SuggestedAction.contradict,
                     requires_human_review=True, created_at=ts,
@@ -498,8 +498,8 @@ def analyze_memory(
 
         if kind == FindingType.possibly_related.value:
             findings.append(ReviewFinding(
-                id=ids.finding_id(), memory_id=mem.id, type=FindingType.possibly_related,
-                related_memory_id=other.id, confidence=sim,
+                id=ids.finding_id(), claim_id=mem.id, type=FindingType.possibly_related,
+                related_claim_id=other.id, confidence=sim,
                 reason="related but not established as conflict",
                 suggested_action=SuggestedAction.defer,
                 requires_human_review=False, created_at=ts,
@@ -511,8 +511,8 @@ def analyze_memory(
         if thr["related"] <= sim < thr["near_duplicate"] and mem.type.value == other.type.value:
             if mem.project_id == other.project_id:
                 findings.append(ReviewFinding(
-                    id=ids.finding_id(), memory_id=mem.id, type=FindingType.possible_merge,
-                    related_memory_id=other.id, confidence=sim,
+                    id=ids.finding_id(), claim_id=mem.id, type=FindingType.possible_merge,
+                    related_claim_id=other.id, confidence=sim,
                     reason="paraphrase candidates — merge or corroborate",
                     suggested_action=SuggestedAction.merge,
                     requires_human_review=True, created_at=ts,
@@ -529,7 +529,7 @@ def analyze_memory(
         impact = "high"
         requires_human = True
 
-    altitude = memory_altitude(mem)
+    altitude = claim_altitude(mem)
     priority = review_priority(
         mem.model_copy(update={"impact": impact, "quality_flags": flags}),
         contradiction_risk=contradiction_risk,
@@ -555,7 +555,7 @@ def analyze_memory(
         requires_human = True
 
     report = QualityReport(
-        memory_id=mem.id,
+        claim_id=mem.id,
         quality_score=quality,
         review_priority=priority,
         impact=impact,
@@ -570,7 +570,7 @@ def analyze_memory(
     if persist:
         payload = dict(mem.payload or {})
         payload["altitude"] = altitude
-        store.update_memory(
+        store.update_claim(
             mem.id,
             review_priority=priority,
             quality_score=quality,
@@ -594,10 +594,10 @@ def analyze_candidates(
     *,
     limit: int = 200,
 ) -> list[QualityReport]:
-    queue = store.list_memories(status="candidate", needs_review=True, limit=limit)
+    queue = store.list_claims(status="candidate", needs_review=True, limit=limit)
     if not queue:
-        queue = store.list_memories(status="candidate", limit=limit)
-    return [analyze_memory(store, embedder, m.id) for m in queue]
+        queue = store.list_claims(status="candidate", limit=limit)
+    return [analyze_claim(store, embedder, m.id) for m in queue]
 
 
 def review_queue(
@@ -610,15 +610,15 @@ def review_queue(
     min_priority: float = 0.0,
     conflicts_only: bool = False,
     limit: int = 100,
-) -> list[MemoryItem]:
-    memories = store.list_memories(
+) -> list[StoreClaim]:
+    memories = store.list_claims(
         status="candidate", needs_review=True, project_id=project_id,
         domain=domain, type_=type_, limit=limit * 3,
     )
     if not memories:
-        memories = store.list_memories(status="candidate", project_id=project_id,
+        memories = store.list_claims(status="candidate", project_id=project_id,
                                       domain=domain, type_=type_, limit=limit * 3)
-    out: list[MemoryItem] = []
+    out: list[StoreClaim] = []
     for m in memories:
         if sensitivity and m.sensitivity.value != sensitivity:
             continue

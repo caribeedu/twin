@@ -9,7 +9,7 @@ Mode selection (``TWIN_EXTRACTOR``):
  stub → deterministic offline interpreter (test/CI stand-in for the LLM)
  heuristic → NOT an interpreter — conservative detection only. It records
  ``DetectionSignal``s (routing/prioritization hints) and NEVER a
- ``MemoryItem``: lexical rules must not establish a memory type,
+ ``StoreClaim``: lexical rules must not establish a memory type,
  domain, entity or cognitive confidence.
 
 Load-bearing rules:
@@ -35,7 +35,7 @@ from twin.privacy.pii import mask
 from twin.store.calibration import calibrated_confidence, load_calibration
 from twin.store.embeddings import Embedder
 from twin.store.models import (
-    DetectionSignal, Evidence, ExtractorVersion, MemoryItem,
+    DetectionSignal, Evidence, ExtractorVersion, StoreClaim,
     PerceptInterpretation, Relation,
 )
 from twin.store.provenance import ensure_artifact_from_percept
@@ -51,8 +51,8 @@ from .interpreter.schema import (
     InterpretationResult,
     InterpretationStatus,
 )
-from .quality import analyze_memory
-from .schema import ExtractedMemory
+from .quality import analyze_claim
+from .schema import ExtractedClaim
 
 # Cognitive acts (as stored in payload) that are never settled knowledge on
 # their own — a proposal is not a decision, a question is not a fact.
@@ -186,7 +186,7 @@ def _known_actor_labels(percept: Percept) -> set[str]:
 
 
 def _prepare_item(item, percept: Percept, report: ExtractReport):
-    """Turn a grounded InterpretedItem into an ExtractedMemory, refusing the
+    """Turn a grounded InterpretedItem into an ExtractedClaim, refusing the
     silent semantic fallbacks the old code did. Returns (extracted, forced
     review reasons) or (None, []) when the item must be dropped."""
     # invalid memory type is a schema error, never silently a 'fact'
@@ -225,8 +225,8 @@ def _prepare_item(item, percept: Percept, report: ExtractReport):
 # -- source qualification / review ----------------------------------------------
 
 
-def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept,
-                                extractor_name: str = "heuristic") -> ExtractedMemory:
+def _apply_source_qualification(extracted: ExtractedClaim, percept: Percept,
+                                extractor_name: str = "heuristic") -> ExtractedClaim:
     """Source metadata shapes the derived memory:
     trust scales confidence; confidentiality is a sensitivity floor.
     v0.3: also apply source×type calibration matrix."""
@@ -246,7 +246,7 @@ def _apply_source_qualification(extracted: ExtractedMemory, percept: Percept,
     return extracted
 
 
-def _needs_review(cfg: Config, mem: ExtractedMemory, percept: Percept) -> Optional[str]:
+def _needs_review(cfg: Config, mem: ExtractedClaim, percept: Percept) -> Optional[str]:
     if mem.confidence < cfg.review_confidence_threshold:
         return f"low confidence ({mem.confidence:.2f})"
     if percept.source_trust < cfg.low_trust_threshold:
@@ -385,8 +385,8 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             independence_group_for,
         )
         igroup = independence_group_for(percept, fallback=artifact_id or percept.id)
-        mem = MemoryItem(
-            id=ids.memory_id(),
+        mem = StoreClaim(
+            id=ids.claim_id(),
             type=extracted.type,  # type: ignore[arg-type]
             title=extracted.title,
             summary=extracted.summary,
@@ -420,13 +420,13 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             report.duplicates += 1
             continue
 
-        store.store_embedding(mem.id, "memory", embedder.name, embedder.embed(dedupe_text))
+        store.store_embedding(mem.id, "claim", embedder.name, embedder.embed(dedupe_text))
 
         if verdict.action == "review" and verdict.existing_id:
             store.insert_relation(Relation(
                 id=ids.relation_id(),
                 subject_id=mem.id, predicate="related_to", object_id=verdict.existing_id,
-                memory_id=mem.id,
+                claim_id=mem.id,
             ))
         for rel in extracted.relations:
             subj = store.upsert_entity(rel.subject)
@@ -434,16 +434,16 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             store.insert_relation(Relation(
                 id=ids.relation_id(),
                 subject_id=subj.id, predicate=rel.predicate, object_id=obj.id,
-                memory_id=mem.id, valid_from=mem.valid_from,
+                claim_id=mem.id, valid_from=mem.valid_from,
             ))
 
         try:
-            analyze_memory(store, embedder, mem.id, persist=True)
+            analyze_claim(store, embedder, mem.id, persist=True)
         except Exception:
             pass
 
         report.inserted.append(mem.id)
-        reloaded = store.get_memory(mem.id)
+        reloaded = store.get_claim(mem.id)
         if (reloaded and reloaded.needs_review) or review_reason:
             report.flagged_for_review += 1
 

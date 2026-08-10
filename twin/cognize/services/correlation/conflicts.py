@@ -68,9 +68,9 @@ def _texts_from_episode(store, episode: WorkEpisode) -> list[tuple[str, str]]:
 def _upsert_finding(store, finding: ReviewFinding) -> tuple[ReviewFinding, bool]:
     """Insert or refresh by finding_key. Returns (finding, created)."""
     key = (finding.metadata or {}).get("finding_key")
-    memory_id = finding.memory_id
+    claim_id = finding.claim_id
     if key and hasattr(store, "get_findings"):
-        for existing in store.get_findings(memory_id, unresolved_only=False):
+        for existing in store.get_findings(claim_id, unresolved_only=False):
             if (existing.metadata or {}).get("finding_key") == key:
                 existing.reason = finding.reason
                 existing.confidence = finding.confidence
@@ -92,10 +92,10 @@ def _close_stale_findings(
     store, episode: WorkEpisode, *, active_keys: set[str],
 ) -> int:
     closed = 0
-    memory_id = f"episode:{episode.id}"
+    claim_id = f"episode:{episode.id}"
     if not hasattr(store, "get_findings"):
         return 0
-    for existing in store.get_findings(memory_id, unresolved_only=True):
+    for existing in store.get_findings(claim_id, unresolved_only=True):
         key = (existing.metadata or {}).get("finding_key")
         if not key or not str(key).startswith("corr:"):
             continue
@@ -117,11 +117,11 @@ def detect_temporal_conflicts(
     store,
     episode: WorkEpisode,
     *,
-    memory_id: Optional[str] = None,
+    claim_id: Optional[str] = None,
 ) -> list[ReviewFinding]:
     """Emit/update ``cross_source_temporal_conflict`` findings."""
     texts = _texts_from_episode(store, episode)
-    mid = memory_id or f"episode:{episode.id}"
+    mid = claim_id or f"episode:{episode.id}"
     if len(texts) < 2:
         _close_stale_findings(store, episode, active_keys=set())
         return []
@@ -153,7 +153,7 @@ def detect_temporal_conflicts(
         active_keys.add(key)
         desired.append(ReviewFinding(
             id=ids.finding_id(),
-            memory_id=mid,
+            claim_id=mid,
             type=FindingType.cross_source_temporal_conflict,
             status=FindingStatus.open,
             confidence=0.75,
@@ -204,7 +204,7 @@ def detect_temporal_conflicts(
             active_keys.add(key)
             desired.append(ReviewFinding(
                 id=ids.finding_id(),
-                memory_id=mid,
+                claim_id=mid,
                 type=FindingType.cross_source_temporal_conflict,
                 status=FindingStatus.open,
                 confidence=0.70,

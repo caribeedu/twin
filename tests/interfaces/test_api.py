@@ -71,7 +71,7 @@ def test_full_flow_over_api(client):
     export = client.get("/api/export").json()
     # the offline mock grounds content as memories but extracts no entities —
     # entity resolution is the cognitive interpreter's job, not a mock's
-    assert export["memories"]
+    assert export["claims"]
     assert "entities" in export
 
     # UI renders
@@ -128,7 +128,7 @@ def test_session_lifecycle_over_api(client):
                           "summary_origin": "user"})
     assert r.json()["status"] == "completed"
     assert r.json()["consolidation_status"] == "completed"
-    assert r.json()["created_memory_ids"]
+    assert r.json()["created_claim_ids"]
 
     r = client.post(f"/api/sessions/{session_id}/feedback",
                     json={"verdict": "useful", "note": "had the right decisions"})
@@ -141,7 +141,7 @@ def test_session_lifecycle_over_api(client):
     # a memory foreign to the session is rejected by the domain layer
     assert client.post(f"/api/sessions/{session_id}/feedback",
                        json={"verdict": "useful",
-                             "memory_id": "mem_ghost"}).status_code == 400
+                             "claim_id": "mem_ghost"}).status_code == 400
 
     # listings and filters
     assert client.get(f"/api/sessions/{session_id}").json()["status"] == "completed"
@@ -262,7 +262,7 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     from twin import ids
     from twin.store.models import (
         FindingType,
-        MemoryItem,
+        StoreClaim,
         ReviewFinding,
         SuggestedAction,
     )
@@ -275,14 +275,14 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     ws = Workspace(home)
 
     def _seed(title, summary, **kw):
-        mem = MemoryItem(
-            id=ids.memory_id(), type="fact", title=title, summary=summary,
+        mem = StoreClaim(
+            id=ids.claim_id(), type="fact", title=title, summary=summary,
             domain="technical", confidence=0.85, status="candidate",
             needs_review=True, **kw,
         )
-        ws.store.insert_memory(mem)
+        ws.store.insert_claim(mem)
         ws.store.store_embedding(
-            mem.id, "memory", ws.embedder.name,
+            mem.id, "claim", ws.embedder.name,
             ws.embedder.embed(f"{mem.title}\n{mem.summary}"),
         )
         return mem
@@ -292,8 +292,8 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     b = _seed("Retry uses exponential backoff",
               "Webhook retries use exponential backoff with jitter.")
     finding = ReviewFinding(
-        id=ids.finding_id(), memory_id=b.id, type=FindingType.near_duplicate,
-        related_memory_id=a.id, confidence=0.95,
+        id=ids.finding_id(), claim_id=b.id, type=FindingType.near_duplicate,
+        related_claim_id=a.id, confidence=0.95,
         reason="near-duplicate via test",
         suggested_action=SuggestedAction.merge,
         requires_human_review=True,
@@ -307,7 +307,7 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     # Dismiss leaves both memories intact.
     c = _seed("Unrelated note", "Something else entirely.")
     f2 = ReviewFinding(
-        id=ids.finding_id(), memory_id=c.id, type=FindingType.weak_evidence,
+        id=ids.finding_id(), claim_id=c.id, type=FindingType.weak_evidence,
         confidence=0.9, reason="no evidence",
         suggested_action=SuggestedAction.request_more_evidence,
     )
@@ -322,7 +322,7 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     # Contradict marks the relation without removing the candidate.
     d = _seed("Use linear retry", "Retries should be linear, not exponential.")
     r = client.post(f"/api/memories/{d.id}/resolve", json={
-        "action": "contradict", "related_memory_id": a.id,
+        "action": "contradict", "related_claim_id": a.id,
     })
     assert r.status_code == 200
     assert r.json()["action"] == "contradict"
@@ -331,7 +331,7 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     # Merge collapses the near-duplicates.
     r = client.post(f"/api/memories/{b.id}/resolve", json={
         "action": "merge",
-        "related_memory_id": a.id,
+        "related_claim_id": a.id,
         "finding_id": finding.id,
         "title": "Webhook retries use exponential backoff",
         "summary": "Webhook retries use exponential backoff with jitter.",

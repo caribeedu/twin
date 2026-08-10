@@ -10,39 +10,39 @@ from twin.cognize.services.consolidation_cycle import (
     run_consolidation_cycle,
 )
 from twin.cognize.services.sessions import ensure_project
-from twin.store.models import MemoryItem, MemoryStatus
+from twin.store.models import StoreClaim, ClaimStatus
 
 
 def _belief(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="belief",
+        id=ids.claim_id(), type="belief",
         title="Local-first storage",
         summary="Prefer local SQLite before shared infra.",
         domain="technical", confidence=0.85, status="confirmed",
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
 
 
 def _confirmed_ids(store):
-    return {m.id for m in store.list_memories(status="confirmed", limit=10_000)}
+    return {m.id for m in store.list_claims(status="confirmed", limit=10_000)}
 
 
 def test_temporal_refresh_flags_expired_belief(store, embedder):
     past = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()
     mem = _belief(store, embedder, valid_until=past)
     updates, _goals, _trunc = refresh_temporal_beliefs_and_goals(store, dry_run=False)
-    assert any(u["memory_id"] == mem.id for u in updates)
-    refreshed = store.get_memory(mem.id)
+    assert any(u["claim_id"] == mem.id for u in updates)
+    refreshed = store.get_claim(mem.id)
     assert refreshed.needs_review is True
     assert "stale" in (refreshed.quality_flags or [])
-    assert refreshed.status == MemoryStatus.confirmed
+    assert refreshed.status == ClaimStatus.confirmed
 
 
 def test_daily_cycle_dry_run_no_writes(store, cfg, embedder):
@@ -60,7 +60,7 @@ def test_daily_cycle_dry_run_no_writes(store, cfg, embedder):
     assert result.episode_cognition.get("dry_run") is True
     assert "episode_reflect" in result.stages
     assert "judgment_proposals" not in result.stages
-    assert store.get_memory(mem.id).needs_review is False
+    assert store.get_claim(mem.id).needs_review is False
     assert _confirmed_ids(store) == before
     assert any("invariant_ok" in n for n in result.notes)
 
@@ -123,19 +123,19 @@ def test_concurrent_cycle_window_has_single_run(store, cfg, embedder):
 
 
 def test_cycle_never_confirms_memory_or_judgment(store, cfg, embedder):
-    cand = MemoryItem(
-        id=ids.memory_id(), type="fact", title="Candidate only",
+    cand = StoreClaim(
+        id=ids.claim_id(), type="fact", title="Candidate only",
         summary="Must stay candidate through consolidation.",
         domain="technical", confidence=0.8, status="candidate",
         needs_review=True,
     )
-    store.insert_memory(cand)
+    store.insert_claim(cand)
     before_confirmed = _confirmed_ids(store)
     result = run_consolidation_cycle(
         store, cfg, embedder, kind="daily", dry_run=False,
         as_of=datetime(2026, 7, 1, tzinfo=timezone.utc),
     )
-    assert store.get_memory(cand.id).status == MemoryStatus.candidate
+    assert store.get_claim(cand.id).status == ClaimStatus.candidate
     assert _confirmed_ids(store) == before_confirmed
     assert any("invariant_ok" in n for n in result.notes)
 
@@ -243,13 +243,13 @@ def test_operational_stages_and_replay_report(store, cfg, embedder):
 
     started = start_session(store, cfg, embedder, "consolidate me", client="cli")
     complete_session(store, cfg, embedder, started.session.id, summary="shipped runtime")
-    cand = MemoryItem(
-        id=ids.memory_id(), type="task", title="Open task",
+    cand = StoreClaim(
+        id=ids.claim_id(), type="task", title="Open task",
         summary="Still pending work",
         domain="technical", confidence=0.7, status="candidate",
         needs_review=True, review_reason="needs human",
     )
-    store.insert_memory(cand)
+    store.insert_claim(cand)
 
     as_of = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     first = run_consolidation_cycle(
@@ -260,13 +260,13 @@ def test_operational_stages_and_replay_report(store, cfg, embedder):
     assert "review_prepare" in first.stages
     assert "change_report" in first.stages
     assert any(s["session_id"] == started.session.id for s in first.closed_sessions)
-    assert any(t["memory_id"] == cand.id for t in first.open_tasks)
+    assert any(t["claim_id"] == cand.id for t in first.open_tasks)
     assert first.cognitive_change_report.get("kind") == "daily"
     assert "no Memory/Judgment confirmation" in " ".join(
         first.cognitive_change_report.get("notes") or [],
     )
     # review stamp
-    assert (store.get_memory(cand.id).payload or {}).get("formation_state") == "awaiting_review"
+    assert (store.get_claim(cand.id).payload or {}).get("formation_state") == "awaiting_review"
 
     second = run_consolidation_cycle(
         store, cfg, embedder, kind="daily", dry_run=False, as_of=as_of,

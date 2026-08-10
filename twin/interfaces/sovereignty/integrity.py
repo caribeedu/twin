@@ -11,14 +11,14 @@ def run_integrity_checks(store: MemoryStore) -> dict[str, Any]:
     problems: list[str] = []
     stats: dict[str, int] = {}
 
-    memories = []
+    claims = []
     for status in ("candidate", "confirmed", "rejected"):
-        memories.extend(store.list_memories(status=status, limit=5_000))
-    stats["memories"] = len(memories)
+        claims.extend(store.list_claims(status=status, limit=5_000))
+    stats["claims"] = len(claims)
 
     orphan_evidence = 0
     missing_evidence = 0
-    for mem in memories:
+    for mem in claims:
         evs = store.get_evidence(mem.id)
         if not evs and mem.status.value == "confirmed":
             missing_evidence += 1

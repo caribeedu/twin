@@ -96,15 +96,15 @@ def observe(
         if hit.score < min_score:
             continue
         suggestion.suggested_context.append({
-            "memory_id": hit.memory.id,
-            "summary": hit.memory.summary,
+            "claim_id": hit.claim.id,
+            "summary": hit.claim.summary,
             "why_relevant": hit.why,
-            "confidence": hit.memory.confidence,
+            "confidence": hit.claim.confidence,
             "score": float(hit.score),
             "allowed": True,
         })
     suggestion.blocked_context = [
-        {"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked
+        {"claim_id": b.claim_id, "reason": b.rule} for b in result.blocked
     ]
     return suggestion
 
@@ -297,11 +297,11 @@ def infer_domain_from_search(
     for hit in result.hits:
         if hit.score < min_score:
             continue
-        domain = (hit.memory.domain or "").strip()
+        domain = (hit.claim.domain or "").strip()
         if not domain or domain == UNCLASSIFIED_DOMAIN:
             continue
         weights[domain] = weights.get(domain, 0.0) + float(hit.score)
-        pid = hit.memory.project_id
+        pid = hit.claim.project_id
         if pid:
             project_votes[pid] = project_votes.get(pid, 0.0) + float(hit.score)
 

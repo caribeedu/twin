@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from .models import Evidence, MemoryItem, MemoryStatus, Relation
+from .models import Evidence, StoreClaim, ClaimStatus, Relation
 from .store.base import MemoryStore
 
 
@@ -26,13 +26,13 @@ class LifecycleResult:
     extras: dict[str, Any] = field(default_factory=dict)
 
 
-def _snapshot(mem: MemoryItem) -> dict[str, Any]:
+def _snapshot(mem: StoreClaim) -> dict[str, Any]:
     return mem.model_dump(mode="json")
 
 
-def _restore_memory_fields(store: MemoryStore, memory_id: str, snap: dict[str, Any]) -> None:
-    store.update_memory(
-        memory_id,
+def _restore_memory_fields(store: MemoryStore, claim_id: str, snap: dict[str, Any]) -> None:
+    store.update_claim(
+        claim_id,
         title=snap.get("title"),
         summary=snap.get("summary"),
         domain=snap.get("domain"),
@@ -60,21 +60,21 @@ def _restore_memory_fields(store: MemoryStore, memory_id: str, snap: dict[str, A
     )
 
 
-def _capture_embedding(store: MemoryStore, memory_id: str) -> Optional[dict[str, Any]]:
+def _capture_embedding(store: MemoryStore, claim_id: str) -> Optional[dict[str, Any]]:
     if not hasattr(store, "get_embedding_blob"):
         return None
-    got = store.get_embedding_blob(memory_id)  # type: ignore[attr-defined]
+    got = store.get_embedding_blob(claim_id)  # type: ignore[attr-defined]
     if not got:
         return None
     model, blob = got
-    return {"ref_id": memory_id, "model": model, "blob": blob.hex()}
+    return {"ref_id": claim_id, "model": model, "blob": blob.hex()}
 
 
 def _restore_embedding(store: MemoryStore, payload: Optional[dict[str, Any]]) -> None:
     if not payload or not hasattr(store, "restore_embedding_blob"):
         return
     store.restore_embedding_blob(  # type: ignore[attr-defined]
-        payload["ref_id"], "memory", payload["model"], bytes.fromhex(payload["blob"]),
+        payload["ref_id"], "claim", payload["model"], bytes.fromhex(payload["blob"]),
     )
 
 
@@ -83,8 +83,8 @@ def _record_op(store: MemoryStore, operation: str, inputs: list[str],
                actor: str = "user") -> Optional[str]:
     if not hasattr(store, "insert_operation"):
         return None
-    from .models import MemoryOperation
-    op = MemoryOperation(
+    from .models import ClaimOperation
+    op = ClaimOperation(
         id=ids.operation_id(),
         operation=operation,
         actor=actor,
@@ -101,8 +101,8 @@ def _record_op(store: MemoryStore, operation: str, inputs: list[str],
 
 def supersede(store: MemoryStore, new_id: str, old_id: str,
               actor: str = "user") -> LifecycleResult:
-    new_mem = store.get_memory(new_id)
-    old_mem = store.get_memory(old_id)
+    new_mem = store.get_claim(new_id)
+    old_mem = store.get_claim(old_id)
     if new_mem is None or old_mem is None:
         raise ValueError("both memories must exist")
     if new_id == old_id:
@@ -121,63 +121,63 @@ def supersede(store: MemoryStore, new_id: str, old_id: str,
         relation_id = store.insert_relation(Relation(
             id=ids.relation_id(),
             subject_id=new_id, predicate="supersedes", object_id=old_id,
-            memory_id=new_id, valid_from=cutoff,
+            claim_id=new_id, valid_from=cutoff,
         ))
-        store.update_memory(
+        store.update_claim(
             old_id,
-            status=MemoryStatus.deprecated.value,
+            status=ClaimStatus.deprecated.value,
             valid_until=cutoff,
             needs_review=False,
             review_reason=None,
         )
         after = {
             "created_relation_ids": [relation_id],
-            "created_memory_ids": [],
+            "created_claim_ids": [],
             "created_evidence_ids": [],
-            "old_status": MemoryStatus.deprecated.value,
+            "old_status": ClaimStatus.deprecated.value,
         }
         op_id = _record_op(store, "supersede", [new_id, old_id], new_id, before, after, actor=actor)
     return LifecycleResult("supersede", new_id, old_id, relation_id, op_id)
 
 
-def contradict(store: MemoryStore, memory_id: str, contradicted_id: str,
+def contradict(store: MemoryStore, claim_id: str, contradicted_id: str,
                actor: str = "user") -> LifecycleResult:
-    mem = store.get_memory(memory_id)
-    other = store.get_memory(contradicted_id)
+    mem = store.get_claim(claim_id)
+    other = store.get_claim(contradicted_id)
     if mem is None or other is None:
         raise ValueError("both memories must exist")
-    if memory_id == contradicted_id:
+    if claim_id == contradicted_id:
         raise ValueError("a memory cannot contradict itself")
 
     with store.transaction():
         before = {"a": _snapshot(mem), "b": _snapshot(other)}
         relation_id = store.insert_relation(Relation(
             id=ids.relation_id(),
-            subject_id=memory_id, predicate="contradicts", object_id=contradicted_id,
-            memory_id=memory_id,
+            subject_id=claim_id, predicate="contradicts", object_id=contradicted_id,
+            claim_id=claim_id,
         ))
-        store.update_memory(
+        store.update_claim(
             contradicted_id,
-            status=MemoryStatus.contradicted.value,
+            status=ClaimStatus.contradicted.value,
             needs_review=True,
-            review_reason=f"contradicted by {memory_id}",
+            review_reason=f"contradicted by {claim_id}",
         )
-        store.update_memory(
-            memory_id,
+        store.update_claim(
+            claim_id,
             needs_review=True,
             review_reason=f"contradicts {contradicted_id} — confirm which holds",
         )
         after = {"created_relation_ids": [relation_id]}
-        op_id = _record_op(store, "contradict", [memory_id, contradicted_id], None,
+        op_id = _record_op(store, "contradict", [claim_id, contradicted_id], None,
                            before, after, actor=actor)
-    return LifecycleResult("contradict", memory_id, contradicted_id, relation_id, op_id)
+    return LifecycleResult("contradict", claim_id, contradicted_id, relation_id, op_id)
 
 
 _OUTPUT_UNSET = object()
 
 
 def _assert_merge_compatible(
-    mems: list[MemoryItem],
+    mems: list[StoreClaim],
     *,
     confirm_cross_scope_merge: bool = False,
 ) -> None:
@@ -206,7 +206,7 @@ def _assert_merge_compatible(
 
 
 def _resolve_merge_semantics(
-    mems: list[MemoryItem],
+    mems: list[StoreClaim],
     *,
     output_type: Optional[str] = None,
     output_domain: Optional[str] = None,
@@ -274,7 +274,7 @@ def _resolve_merge_semantics(
 
 def merge_memories(
     store: MemoryStore,
-    memory_ids: list[str],
+    claim_ids: list[str],
     *,
     title: Optional[str] = None,
     summary: Optional[str] = None,
@@ -288,11 +288,11 @@ def merge_memories(
     output_project_id: Any = _OUTPUT_UNSET,
     output_canonical_claim: Any = _OUTPUT_UNSET,
 ) -> LifecycleResult:
-    if len(memory_ids) < 2:
+    if len(claim_ids) < 2:
         raise ValueError("merge requires at least two memories")
-    mems: list[MemoryItem] = []
-    for mid in memory_ids:
-        m = store.get_memory(mid)
+    mems: list[StoreClaim] = []
+    for mid in claim_ids:
+        m = store.get_claim(mid)
         if m is None:
             raise ValueError(f"memory {mid} not found")
         if m.status.value in ("merged", "deleted", "split"):
@@ -310,7 +310,7 @@ def merge_memories(
 
     with store.transaction():
         before: dict[str, Any] = {
-            "memories": {m.id: _snapshot(m) for m in mems},
+            "claims": {m.id: _snapshot(m) for m in mems},
             "embeddings": {},
         }
         for m in mems:
@@ -326,12 +326,12 @@ def merge_memories(
                     entities.append(e)
 
         status = (
-            MemoryStatus.confirmed
+            ClaimStatus.confirmed
             if human_confirmed_synthesis and title and summary
-            else MemoryStatus.candidate
+            else ClaimStatus.candidate
         )
-        new = MemoryItem(
-            id=ids.memory_id(),
+        new = StoreClaim(
+            id=ids.claim_id(),
             type=semantics["type"],
             title=title or primary.title,
             summary=summary or " ".join(dict.fromkeys(m.summary for m in mems)),
@@ -343,16 +343,16 @@ def merge_memories(
             confidence=max(m.confidence for m in mems),
             status=status,
             valid_from=min((m.valid_from for m in mems if m.valid_from), default=None),
-            payload={**primary.payload, "merged_from": memory_ids},
-            needs_review=status == MemoryStatus.candidate,
-            review_reason="merged synthesis — confirm" if status == MemoryStatus.candidate else None,
+            payload={**primary.payload, "merged_from": claim_ids},
+            needs_review=status == ClaimStatus.candidate,
+            review_reason="merged synthesis — confirm" if status == ClaimStatus.candidate else None,
             project_id=semantics["project_id"],
             entities=entities,
             impact=max(mems, key=lambda m: {"low": 0, "medium": 1, "high": 2}.get(m.impact, 1)).impact,
             canonical_claim=semantics["canonical_claim"],
             extractor_version=primary.extractor_version,
         )
-        store.insert_memory(new)
+        store.insert_claim(new)
 
         created_evidence: list[str] = []
         seen_groups: set[str] = set()
@@ -365,7 +365,7 @@ def merge_memories(
                 seen_groups.add(key)
                 eid = ids.evidence_id()
                 store.insert_evidence(Evidence(
-                    id=eid, memory_id=new.id, percept_id=ev.percept_id, quote=ev.quote,
+                    id=eid, claim_id=new.id, percept_id=ev.percept_id, quote=ev.quote,
                     evidence_type=ev.evidence_type, directness=ev.directness,
                     source_trust=ev.source_trust, independence_group=group,
                     supports=ev.supports, span_start=ev.span_start, span_end=ev.span_end,
@@ -379,11 +379,11 @@ def merge_memories(
             rid = store.insert_relation(Relation(
                 id=ids.relation_id(),
                 subject_id=m.id, predicate="merged_into", object_id=new.id,
-                memory_id=new.id,
+                claim_id=new.id,
             ))
             created_relations.append(rid)
-            store.update_memory(
-                m.id, status=MemoryStatus.merged.value,
+            store.update_claim(
+                m.id, status=ClaimStatus.merged.value,
                 needs_review=False, review_reason=None,
             )
             for rel in store.relations_for(m.id):
@@ -393,7 +393,7 @@ def merge_memories(
                     nr = ids.relation_id()
                     store.insert_relation(Relation(
                         id=nr, subject_id=new.id, predicate=rel.predicate,
-                        object_id=rel.object_id, memory_id=new.id,
+                        object_id=rel.object_id, claim_id=new.id,
                         valid_from=rel.valid_from, valid_until=rel.valid_until,
                     ))
                     redirected.append(nr)
@@ -401,7 +401,7 @@ def merge_memories(
                     nr = ids.relation_id()
                     store.insert_relation(Relation(
                         id=nr, subject_id=rel.subject_id, predicate=rel.predicate,
-                        object_id=new.id, memory_id=new.id,
+                        object_id=new.id, claim_id=new.id,
                         valid_from=rel.valid_from, valid_until=rel.valid_until,
                     ))
                     redirected.append(nr)
@@ -410,28 +410,28 @@ def merge_memories(
 
         if embedder is not None:
             store.store_embedding(
-                new.id, "memory", embedder.name,
+                new.id, "claim", embedder.name,
                 embedder.embed(f"{new.title}\n{new.summary}"),
             )
 
         after = {
-            "created_memory_ids": [new.id],
+            "created_claim_ids": [new.id],
             "created_evidence_ids": created_evidence,
             "created_relation_ids": created_relations + redirected,
             "deleted_embedding_refs": list(before["embeddings"].keys()),
         }
-        op_id = _record_op(store, "merge_memories", memory_ids, new.id, before, after, actor=actor)
+        op_id = _record_op(store, "merge_memories", claim_ids, new.id, before, after, actor=actor)
 
     return LifecycleResult(
-        "merge", new.id, memory_ids[0],
+        "merge", new.id, claim_ids[0],
         created_relations[0] if created_relations else "",
-        op_id, extras={"merged_id": new.id, "sources": memory_ids},
+        op_id, extras={"merged_id": new.id, "sources": claim_ids},
     )
 
 
 def split_memory(
     store: MemoryStore,
-    memory_id: str,
+    claim_id: str,
     parts: list[dict[str, Any]],
     *,
     actor: str = "user",
@@ -444,20 +444,20 @@ def split_memory(
     """
     if len(parts) < 2:
         raise ValueError("split requires at least two parts")
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
 
     with store.transaction():
         before = {
-            "memories": {memory_id: _snapshot(mem)},
+            "claims": {claim_id: _snapshot(mem)},
             "embeddings": {},
         }
-        emb = _capture_embedding(store, memory_id)
+        emb = _capture_embedding(store, claim_id)
         if emb:
-            before["embeddings"][memory_id] = emb
+            before["embeddings"][claim_id] = emb
 
-        evidence = store.get_evidence(memory_id)
+        evidence = store.get_evidence(claim_id)
         by_id = {e.id: e for e in evidence}
         child_ids: list[str] = []
         created_relations: list[str] = []
@@ -466,8 +466,8 @@ def split_memory(
         for part in parts:
             mapped_ids = part.get("evidence_ids") or []
             has_map = bool(mapped_ids)
-            child = MemoryItem(
-                id=ids.memory_id(),
+            child = StoreClaim(
+                id=ids.claim_id(),
                 type=part.get("type", mem.type.value),  # type: ignore[arg-type]
                 title=part["title"],
                 summary=part.get("summary", part["title"]),
@@ -475,10 +475,10 @@ def split_memory(
                 persona=mem.persona,
                 sensitivity=mem.sensitivity,
                 confidence=mem.confidence if has_map else min(mem.confidence, 0.55),
-                status=MemoryStatus.candidate,
+                status=ClaimStatus.candidate,
                 valid_from=mem.valid_from,
                 valid_until=mem.valid_until,
-                payload={**mem.payload, "split_from": memory_id},
+                payload={**mem.payload, "split_from": claim_id},
                 needs_review=True,
                 review_reason=(
                     "split part — confirm"
@@ -490,7 +490,7 @@ def split_memory(
                 extractor_version=mem.extractor_version,
                 quality_flags=[] if has_map else ["evidence_mapping_required"],
             )
-            store.insert_memory(child)
+            store.insert_claim(child)
             child_ids.append(child.id)
 
             if has_map:
@@ -500,7 +500,7 @@ def split_memory(
                         continue
                     new_eid = ids.evidence_id()
                     store.insert_evidence(Evidence(
-                        id=new_eid, memory_id=child.id, percept_id=ev.percept_id,
+                        id=new_eid, claim_id=child.id, percept_id=ev.percept_id,
                         quote=ev.quote, evidence_type=ev.evidence_type,
                         directness=ev.directness, source_trust=ev.source_trust,
                         independence_group=ev.independence_group, supports=True,
@@ -513,7 +513,7 @@ def split_memory(
                 for ev in evidence:
                     new_eid = ids.evidence_id()
                     store.insert_evidence(Evidence(
-                        id=new_eid, memory_id=child.id, percept_id=ev.percept_id,
+                        id=new_eid, claim_id=child.id, percept_id=ev.percept_id,
                         quote=ev.quote, evidence_type="derived",  # type: ignore[arg-type]
                         directness=min(0.4, ev.directness),
                         source_trust=ev.source_trust,
@@ -525,66 +525,66 @@ def split_memory(
 
             rid = store.insert_relation(Relation(
                 id=ids.relation_id(),
-                subject_id=memory_id, predicate="split_into", object_id=child.id,
-                memory_id=child.id,
+                subject_id=claim_id, predicate="split_into", object_id=child.id,
+                claim_id=child.id,
             ))
             created_relations.append(rid)
             if embedder is not None:
                 store.store_embedding(
-                    child.id, "memory", embedder.name,
+                    child.id, "claim", embedder.name,
                     embedder.embed(f"{child.title}\n{child.summary}"),
                 )
 
-        store.update_memory(
-            memory_id,
-            status=MemoryStatus.split.value,
+        store.update_claim(
+            claim_id,
+            status=ClaimStatus.split.value,
             needs_review=False,
             review_reason=None,
             payload={**mem.payload, "split_into": child_ids},
         )
         if hasattr(store, "delete_embedding"):
-            store.delete_embedding(memory_id)  # type: ignore[attr-defined]
+            store.delete_embedding(claim_id)  # type: ignore[attr-defined]
 
         after = {
-            "created_memory_ids": child_ids,
+            "created_claim_ids": child_ids,
             "created_evidence_ids": created_evidence,
             "created_relation_ids": created_relations,
             "deleted_embedding_refs": list(before["embeddings"].keys()),
         }
-        op_id = _record_op(store, "split_memory", [memory_id], child_ids[0],
+        op_id = _record_op(store, "split_memory", [claim_id], child_ids[0],
                            before, after, actor=actor)
 
     return LifecycleResult(
-        "split", memory_id, child_ids[0],
+        "split", claim_id, child_ids[0],
         created_relations[0] if created_relations else "",
-        op_id, extras={"source": memory_id, "children": child_ids},
+        op_id, extras={"source": claim_id, "children": child_ids},
     )
 
 
-def archive_memory(store: MemoryStore, memory_id: str, *,
+def archive_memory(store: MemoryStore, claim_id: str, *,
                    reason: str = "archived", actor: str = "user") -> LifecycleResult:
-    mem = store.get_memory(memory_id)
+    mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {memory_id} not found")
+        raise ValueError(f"memory {claim_id} not found")
     with store.transaction():
         before = {
-            "memories": {memory_id: _snapshot(mem)},
+            "claims": {claim_id: _snapshot(mem)},
             "embeddings": {},
         }
-        emb = _capture_embedding(store, memory_id)
+        emb = _capture_embedding(store, claim_id)
         if emb:
-            before["embeddings"][memory_id] = emb
-        store.update_memory(
-            memory_id,
-            status=MemoryStatus.archived.value,
+            before["embeddings"][claim_id] = emb
+        store.update_claim(
+            claim_id,
+            status=ClaimStatus.archived.value,
             needs_review=False,
             review_reason=reason,
         )
         if hasattr(store, "delete_embedding"):
-            store.delete_embedding(memory_id)  # type: ignore[attr-defined]
+            store.delete_embedding(claim_id)  # type: ignore[attr-defined]
         after = {"deleted_embedding_refs": list(before["embeddings"].keys())}
-        op_id = _record_op(store, "archive", [memory_id], None, before, after, actor=actor)
-    return LifecycleResult("archive", memory_id, memory_id, "", op_id)
+        op_id = _record_op(store, "archive", [claim_id], None, before, after, actor=actor)
+    return LifecycleResult("archive", claim_id, claim_id, "", op_id)
 
 
 def undo_operation(store: MemoryStore, operation_id: str) -> dict[str, Any]:
@@ -612,19 +612,19 @@ def undo_operation(store: MemoryStore, operation_id: str) -> dict[str, Any]:
                 store.delete_evidence_row(eid)  # type: ignore[attr-defined]
 
         # 3. remove created memories (merge result / split children)
-        for mid in after.get("created_memory_ids", []):
-            if hasattr(store, "hard_delete_memory"):
-                store.hard_delete_memory(mid)  # type: ignore[attr-defined]
+        for mid in after.get("created_claim_ids", []):
+            if hasattr(store, "hard_delete_claim"):
+                store.hard_delete_claim(mid)  # type: ignore[attr-defined]
             else:
-                store.update_memory(
-                    mid, status=MemoryStatus.deleted.value,
+                store.update_claim(
+                    mid, status=ClaimStatus.deleted.value,
                     deleted_at=now_iso(), deletion_reason="operation_undone",
                 )
                 if hasattr(store, "delete_embedding"):
                     store.delete_embedding(mid)  # type: ignore[attr-defined]
 
-        # 4. restore memory snapshots
-        mems = before.get("memories") or {}
+        # 4. restore claim snapshots
+        mems = before.get("claims") or {}
         if not mems:
             # legacy shapes
             if "old" in before:
@@ -634,7 +634,7 @@ def undo_operation(store: MemoryStore, operation_id: str) -> dict[str, Any]:
             if "b" in before and len(op.inputs) > 1:
                 mems[op.inputs[1]] = before["b"]
             if op.operation == "archive" and op.inputs:
-                # old archive format stored {memory_id: snap} at top level sometimes
+                # old archive format stored {claim_id: snap} at top level sometimes
                 for k, v in before.items():
                     if isinstance(v, dict) and "status" in v:
                         mems[k] = v

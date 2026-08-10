@@ -10,21 +10,21 @@ from twin.store.lifecycle import (
     supersede,
     undo_operation,
 )
-from twin.store.models import Evidence, MemoryItem, MemoryStatus
+from twin.store.models import Evidence, StoreClaim, ClaimStatus
 from twin.sense.sensory.percept import Percept
 
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="fact", title="t", summary="s",
+        id=ids.claim_id(), type="fact", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         entities=["Twin"], project_id="proj_twin",
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -36,7 +36,7 @@ def test_supersede_closes_old_memory(store, embedder):
     new = _mem(store, embedder, type="belief", title="modular monolith",
                summary="Prefere modular monolith.", valid_from="2026-07-01")
     result = supersede(store, new.id, old.id)
-    reloaded = store.get_memory(old.id)
+    reloaded = store.get_claim(old.id)
     assert reloaded.status.value == "deprecated"
     assert reloaded.valid_until == "2026-07-01"
     rels = store.relations_for(new.id)
@@ -51,7 +51,7 @@ def test_meeting_candidate_supersedes_prior_decision_after_confirm(store, embedd
     is an explicit Memory lifecycle action.
     """
     from twin.clock import now_iso
-    from twin.store.models import Evidence, MemoryStatus
+    from twin.store.models import Evidence, ClaimStatus
     from twin.sense.sensory.percept import Percept
 
     pr = Percept(
@@ -87,7 +87,7 @@ def test_meeting_candidate_supersedes_prior_decision_after_confirm(store, embedd
         confidence=0.75,
     )
     store.insert_evidence(Evidence(
-        id=ids.new_id("ev"), memory_id=old.id, quote="ship Atlas Friday",
+        id=ids.new_id("ev"), claim_id=old.id, quote="ship Atlas Friday",
         percept_id=pr.id, artifact_id="github:pr:atlas#8",
         independence_group="lineage:github:acme/atlas#8",
     ))
@@ -97,27 +97,27 @@ def test_meeting_candidate_supersedes_prior_decision_after_confirm(store, embedd
         confidence=0.80,
     )
     store.insert_evidence(Evidence(
-        id=ids.new_id("ev"), memory_id=new.id, quote="postpone the Atlas ship",
+        id=ids.new_id("ev"), claim_id=new.id, quote="postpone the Atlas ship",
         percept_id=meeting.id, artifact_id="fireflies:meeting:m1",
         independence_group="meeting:m1",
     ))
 
-    assert store.get_memory(old.id).status == MemoryStatus.candidate
-    assert store.get_memory(new.id).status == MemoryStatus.candidate
-    store.update_memory(new.id, status=MemoryStatus.confirmed.value)
+    assert store.get_claim(old.id).status == ClaimStatus.candidate
+    assert store.get_claim(new.id).status == ClaimStatus.candidate
+    store.update_claim(new.id, status=ClaimStatus.confirmed.value)
     result = supersede(store, new.id, old.id)
     assert result.action == "supersede"
-    assert store.get_memory(old.id).status == MemoryStatus.deprecated
-    assert store.get_memory(new.id).status == MemoryStatus.confirmed
+    assert store.get_claim(old.id).status == ClaimStatus.deprecated
+    assert store.get_claim(new.id).status == ClaimStatus.confirmed
 
 
 def test_contradict_flags_both_for_review(store, embedder):
     a = _mem(store, embedder, title="usa tabs", summary="Prefere tabs.")
     b = _mem(store, embedder, title="usa espaços", summary="Prefere espaços.")
     contradict(store, a.id, b.id)
-    assert store.get_memory(b.id).status.value == "contradicted"
-    assert store.get_memory(a.id).needs_review
-    assert store.get_memory(b.id).needs_review
+    assert store.get_claim(b.id).status.value == "contradicted"
+    assert store.get_claim(a.id).needs_review
+    assert store.get_claim(b.id).needs_review
     rels = store.relations_for(a.id)
     assert any(r.predicate == "contradicts" for r in rels)
 
@@ -146,21 +146,21 @@ def test_merge_preserves_evidence_and_undo(store, embedder):
              status="confirmed")
     b = _mem(store, embedder, title="API FastAPI", summary="The Twin API is built with FastAPI.",
              status="confirmed")
-    store.insert_evidence(Evidence(id=ids.evidence_id(), memory_id=a.id, percept_id=p.id,
+    store.insert_evidence(Evidence(id=ids.evidence_id(), claim_id=a.id, percept_id=p.id,
                                    quote="Twin uses FastAPI"))
-    store.insert_evidence(Evidence(id=ids.evidence_id(), memory_id=b.id, percept_id=p.id,
+    store.insert_evidence(Evidence(id=ids.evidence_id(), claim_id=b.id, percept_id=p.id,
                                    quote="API is built with FastAPI"))
     result = merge_memories(store, [a.id, b.id], title="Twin HTTP API uses FastAPI",
                             embedder=embedder)
     merged_id = result.extras["merged_id"]
-    merged = store.get_memory(merged_id)
+    merged = store.get_claim(merged_id)
     assert merged is not None
-    assert store.get_memory(a.id).status == MemoryStatus.merged
-    assert store.get_memory(b.id).status == MemoryStatus.merged
+    assert store.get_claim(a.id).status == ClaimStatus.merged
+    assert store.get_claim(b.id).status == ClaimStatus.merged
     assert len(store.get_evidence(merged_id)) >= 1
     assert result.operation_id
     undo_operation(store, result.operation_id)
-    assert store.get_memory(a.id).status != MemoryStatus.merged
+    assert store.get_claim(a.id).status != ClaimStatus.merged
 
 
 def test_undo_restores_embeddings_and_graph(store, embedder):
@@ -173,14 +173,14 @@ def test_undo_restores_embeddings_and_graph(store, embedder):
         human_confirmed_synthesis=True, embedder=embedder,
     )
     merged_id = result.extras["merged_id"]
-    assert store.get_memory(a.id).status == MemoryStatus.merged
+    assert store.get_claim(a.id).status == ClaimStatus.merged
     assert store.get_embedding_blob(a.id) is None
 
     undo_operation(store, result.operation_id)
-    assert store.get_memory(a.id).status == MemoryStatus.confirmed
-    assert store.get_memory(b.id).status == MemoryStatus.confirmed
+    assert store.get_claim(a.id).status == ClaimStatus.confirmed
+    assert store.get_claim(b.id).status == ClaimStatus.confirmed
     assert store.get_embedding_blob(a.id) is not None
-    assert store.get_memory(merged_id) is None
+    assert store.get_claim(merged_id) is None
     rels = store.relations_for(a.id)
     assert not any(r.predicate == "merged_into" and r.object_id == merged_id for r in rels)
 
@@ -197,11 +197,11 @@ def test_split_creates_children(store, embedder):
         {"title": "SQLite dev", "summary": "Twin development storage can use SQLite."},
         {"title": "FastAPI", "summary": "Twin HTTP API uses FastAPI."},
     ], embedder=embedder)
-    assert store.get_memory(mem.id).status == MemoryStatus.split
+    assert store.get_claim(mem.id).status == ClaimStatus.split
     children = result.extras["children"]
     assert len(children) == 3
     for cid in children:
-        assert store.get_memory(cid).status == MemoryStatus.candidate
+        assert store.get_claim(cid).status == ClaimStatus.candidate
 
 
 def test_split_evidence_mapping(store, embedder):
@@ -213,7 +213,7 @@ def test_split_evidence_mapping(store, embedder):
     p = Percept(id=ids.new_id("pct"), percept_type="document", source_sensor="document",
                 content="PostgreSQL is the primary production backend.")
     store.insert_percept(p)
-    ev = Evidence(id=ids.evidence_id(), memory_id=mem.id, percept_id=p.id,
+    ev = Evidence(id=ids.evidence_id(), claim_id=mem.id, percept_id=p.id,
                   quote="PostgreSQL is the primary production backend.")
     store.insert_evidence(ev)
 
@@ -224,8 +224,8 @@ def test_split_evidence_mapping(store, embedder):
          "evidence_ids": []},
     ], embedder=embedder)
     children = result.extras["children"]
-    child_a = store.get_memory(children[0])
-    child_b = store.get_memory(children[1])
+    child_a = store.get_claim(children[0])
+    child_b = store.get_claim(children[1])
     ev_a = store.get_evidence(child_a.id)
     ev_b = store.get_evidence(child_b.id)
     assert any(e.supports for e in ev_a)
@@ -260,7 +260,7 @@ def test_merge_cross_type_requires_output_semantics(store, embedder):
         summary="Decision: ship the release.",
         embedder=embedder,
     )
-    merged = store.get_memory(result.extras["merged_id"])
+    merged = store.get_claim(result.extras["merged_id"])
     assert merged is not None
     assert merged.type.value == "decision"
 
@@ -271,9 +271,9 @@ def test_merge_rolls_back_on_mid_failure(store, embedder):
     p = Percept(id=ids.new_id("pct"), percept_type="document", source_sensor="document",
                 content="FastAPI")
     store.insert_percept(p)
-    store.insert_evidence(Evidence(id=ids.evidence_id(), memory_id=a.id, percept_id=p.id,
+    store.insert_evidence(Evidence(id=ids.evidence_id(), claim_id=a.id, percept_id=p.id,
                                    quote="FastAPI"))
-    store.insert_evidence(Evidence(id=ids.evidence_id(), memory_id=b.id, percept_id=p.id,
+    store.insert_evidence(Evidence(id=ids.evidence_id(), claim_id=b.id, percept_id=p.id,
                                    quote="FastAPI"))
 
     real_insert = store.insert_relation
@@ -286,40 +286,40 @@ def test_merge_rolls_back_on_mid_failure(store, embedder):
         return real_insert(*args, **kwargs)
 
     store.insert_relation = boom  # type: ignore[method-assign]
-    before_ids = {m.id for m in store.list_memories(limit=100)}
+    before_ids = {m.id for m in store.list_claims(limit=100)}
     with pytest.raises(RuntimeError):
         merge_memories(store, [a.id, b.id], embedder=embedder)
     store.insert_relation = real_insert  # type: ignore[method-assign]
 
-    after = store.list_memories(limit=100)
+    after = store.list_claims(limit=100)
     assert {m.id for m in after} == before_ids
-    assert store.get_memory(a.id).status == MemoryStatus.confirmed
-    assert store.get_memory(b.id).status == MemoryStatus.confirmed
+    assert store.get_claim(a.id).status == ClaimStatus.confirmed
+    assert store.get_claim(b.id).status == ClaimStatus.confirmed
 
 
 def test_merge_transaction_rollback_on_fault(store, embedder):
     a = _mem(store, embedder, title="A", summary="alpha fact about Twin")
     b = _mem(store, embedder, title="B", summary="beta fact about Twin")
     a_id, b_id = a.id, b.id
-    before_ids = {m.id for m in store.list_memories(limit=1000)}
+    before_ids = {m.id for m in store.list_claims(limit=1000)}
 
-    real_update = store.update_memory
+    real_update = store.update_claim
     calls = {"n": 0}
 
     def boom(mid, **kwargs):
         calls["n"] += 1
-        if kwargs.get("status") == MemoryStatus.merged.value and calls["n"] >= 2:
+        if kwargs.get("status") == ClaimStatus.merged.value and calls["n"] >= 2:
             raise RuntimeError("injected failure")
         return real_update(mid, **kwargs)
 
-    store.update_memory = boom  # type: ignore[method-assign]
+    store.update_claim = boom  # type: ignore[method-assign]
     try:
         with pytest.raises(RuntimeError, match="injected"):
             merge_memories(store, [a_id, b_id], embedder=embedder)
     finally:
-        store.update_memory = real_update  # type: ignore[method-assign]
+        store.update_claim = real_update  # type: ignore[method-assign]
 
-    assert store.get_memory(a_id).status != MemoryStatus.merged
-    assert store.get_memory(b_id).status != MemoryStatus.merged
-    after_ids = {m.id for m in store.list_memories(limit=1000)}
+    assert store.get_claim(a_id).status != ClaimStatus.merged
+    assert store.get_claim(b_id).status != ClaimStatus.merged
+    after_ids = {m.id for m in store.list_claims(limit=1000)}
     assert after_ids == before_ids

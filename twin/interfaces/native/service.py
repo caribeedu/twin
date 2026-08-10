@@ -281,7 +281,7 @@ class NativeHostService:
                     recs.append(InterventionRecommendation(
                         type="info",
                         reason=(
-                            f"Spontaneous recall: {sug.get('summary') or sug.get('memory_id')}"
+                            f"Spontaneous recall: {sug.get('summary') or sug.get('claim_id')}"
                         ),
                         urgency="low",
                         session_id=binding.cognitive_session_id,
@@ -289,7 +289,7 @@ class NativeHostService:
                         requires_confirmation=False,
                         metadata={
                             "stage": "suggestion",
-                            "memory_id": sug.get("memory_id"),
+                            "claim_id": sug.get("claim_id"),
                             "confidence": sug.get("confidence"),
                             "salience": sug.get("salience"),
                             "why_relevant": sug.get("why_relevant"),

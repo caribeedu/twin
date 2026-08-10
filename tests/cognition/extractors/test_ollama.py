@@ -10,7 +10,7 @@ from twin.store.embeddings import OllamaEmbedder, get_embedder
 from twin.sense.sensory.percept import Percept
 
 FAKE_EXTRACTION = {
-    "memories": [
+    "claims": [
         {
             "type": "decision",
             "title": "Usar FastAPI no serviço de webhooks",
@@ -47,8 +47,8 @@ def test_ollama_extractor_parses_structured_output():
     result = ollama_extractor.extract(percept, percept.content,
                                       model="qwen3:8b", client=_fake_client(handler))
     assert result.extractor == "ollama:qwen3:8b"
-    assert len(result.memories) == 1
-    mem = result.memories[0]
+    assert len(result.claims) == 1
+    mem = result.claims[0]
     assert mem.type == "decision"
     assert mem.entities == ["Atlas", "FastAPI"]
     # request used structured outputs (json schema in `format`) and the model
@@ -76,10 +76,10 @@ def test_get_embedder_falls_back_to_hash_when_ollama_unreachable(monkeypatch):
 
 
 def test_embeddings_from_different_models_never_mix(store):
-    store.store_embedding("mem_a", "memory", "hash-v1-512", [1.0, 0.0])
-    store.store_embedding("mem_b", "memory", "ollama-nomic-embed-text", [1.0, 0.0])
-    ids_hash = [rid for rid, _ in store.iter_embeddings("memory", "hash-v1-512")]
-    ids_ollama = [rid for rid, _ in store.iter_embeddings("memory", "ollama-nomic-embed-text")]
+    store.store_embedding("mem_a", "claim", "hash-v1-512", [1.0, 0.0])
+    store.store_embedding("mem_b", "claim", "ollama-nomic-embed-text", [1.0, 0.0])
+    ids_hash = [rid for rid, _ in store.iter_embeddings("claim", "hash-v1-512")]
+    ids_ollama = [rid for rid, _ in store.iter_embeddings("claim", "ollama-nomic-embed-text")]
     assert ids_hash == ["mem_a"]
     assert ids_ollama == ["mem_b"]
 
@@ -100,7 +100,7 @@ def test_pipeline_defers_when_interpreter_unavailable(store, cfg, embedder):
     assert report.deferred is True
     assert report.interpretation_status == "deferred"
     assert report.inserted == []
-    assert store.list_memories() == []
+    assert store.list_claims() == []
     # deferred means retryable — the Percept is still pending
     assert store.get_interpretation(percept.id).status == "deferred"
     assert store.percepts_pending_interpretation(max_attempts=6) != []

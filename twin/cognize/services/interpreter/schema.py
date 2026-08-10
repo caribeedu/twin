@@ -12,7 +12,7 @@ guess.
 Deterministic governance downstream (dedupe, source policy, confidentiality
 floor, review) is unchanged: this module only describes what the interpreter
 is allowed to *say*, never what the system is allowed to *do* with it. The
-bridge to :class:`ExtractedMemory` keeps the existing persistence path intact
+bridge to :class:`ExtractedClaim` keeps the existing persistence path intact
 so is an evolution of the pipeline, not a rewrite.
 """
 
@@ -24,7 +24,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from twin.config import ALL_DOMAINS
-from ..schema import MEMORY_TYPES, SENSITIVITIES, ExtractedMemory, ExtractedRelation
+from ..schema import CLAIM_TYPES, SENSITIVITIES, ExtractedClaim, ExtractedRelation
 
 
 class CognitiveAct(str, Enum):
@@ -59,7 +59,7 @@ UNSETTLED_ACTS = frozenset({
 # The interpreter may catalogue a rejected alternative as its own item; it
 # maps onto a decision carrying ``payload.rejected_alternative = True`` so the
 # memory model needs no new type.
-INTERPRETATION_TYPES = MEMORY_TYPES + ["rejected_alternative"]
+INTERPRETATION_TYPES = CLAIM_TYPES + ["rejected_alternative"]
 
 
 class InterpretedItem(BaseModel):
@@ -97,14 +97,14 @@ class InterpretedItem(BaseModel):
         """
         if self.memory_type == "rejected_alternative":
             return "decision", True
-        if self.memory_type not in MEMORY_TYPES:
+        if self.memory_type not in CLAIM_TYPES:
             raise ValueError(
                 f"invalid memory_type {self.memory_type!r}; "
                 f"allowed={list(INTERPRETATION_TYPES)}"
             )
         return self.memory_type, False
 
-    def to_extracted(self) -> ExtractedMemory:
+    def to_extracted(self) -> ExtractedClaim:
         """Bridge to the persistence-facing schema, preserving the cognitive
         act, attribution and unresolved references in the payload so nothing
         the interpreter established is lost on the way to storage.
@@ -145,7 +145,7 @@ class InterpretedItem(BaseModel):
         sensitivity = (
             self.sensitivity if self.sensitivity in SENSITIVITIES else "internal"
         )
-        return ExtractedMemory(
+        return ExtractedClaim(
             type=mem_type,
             title=self.title,
             summary=self.summary,

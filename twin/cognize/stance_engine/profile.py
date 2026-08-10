@@ -2,7 +2,7 @@
 
 Durable judgment lives in the database (canonical). ``judgment.yaml`` remains
 a human-readable bootstrap/export. Tools must not silently rewrite identity:
-``promote_memory`` creates a *proposal*, never an active judgment item.
+``promote_claim`` creates a *proposal*, never an active judgment item.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import yaml
 from twin.clock import now_iso
 
 if TYPE_CHECKING:
-    from twin.store.models import MemoryItem
+    from twin.store.models import StoreClaim
     from twin.store.store.base import MemoryStore
 
 
@@ -34,7 +34,7 @@ _PROMOTION_SECTIONS = {
 }
 
 
-def promote_memory(path: Path | str, mem: "MemoryItem",
+def promote_claim(path: Path | str, mem: "StoreClaim",
                    store: Optional["MemoryStore"] = None) -> str:
     """Promote a memory into judgment.
 
@@ -58,10 +58,10 @@ def promote_memory(path: Path | str, mem: "MemoryItem",
     p = Path(path)
     profile = load_profile(p)
     entries: list[dict[str, Any]] = profile.setdefault(section, [])
-    if any(isinstance(e, dict) and e.get("memory_id") == mem.id for e in entries):
+    if any(isinstance(e, dict) and e.get("claim_id") == mem.id for e in entries):
         return section
     entries.append({
-        "memory_id": mem.id,
+        "claim_id": mem.id,
         "text": mem.summary,
         "domain": mem.domain,
         "promoted_at": now_iso(),
