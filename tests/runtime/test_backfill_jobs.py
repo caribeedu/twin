@@ -10,11 +10,11 @@ from twin.sense.connectors import (
     create_backfill_job,
     register_source_account,
 )
-from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
-from twin.runtime.models import JobKind, JobStatus
-from twin.runtime.queue import RuntimeQueue
-from twin.runtime.scheduler import RuntimeScheduler
-from twin.runtime.worker import RuntimeWorker
+from twin.interfaces.runtime.backfill_sched import enqueue_backfill_partition_jobs
+from twin.interfaces.runtime.models import JobKind, JobStatus
+from twin.interfaces.runtime.queue import RuntimeQueue
+from twin.interfaces.runtime.scheduler import RuntimeScheduler
+from twin.interfaces.runtime.worker import RuntimeWorker
 
 from tests.connectors.gmail.gmail_mock import FakeGmailAPI
 

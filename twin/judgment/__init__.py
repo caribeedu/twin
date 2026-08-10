@@ -1,13 +1,12 @@
-"""Judgment System — the prefrontal layer.
+"""Judgment System — transitional Stance / evaluative engine.
 
-Decides what may flow where (Domain Firewall), what must never leave the
-machine unmasked (PII filter) and how the user decides (evolving judgment
-model: versioned revisions, scoped application, proposal-driven).
+Domain Firewall and PII live in ``twin.privacy``. Stance proposals,
+revisions and versions remain here until folded into ``twin.cognize``.
 """
 
 from .application import applicable_pack, render_applicable
-from .firewall import Firewall, Verdict
-from .pii import detect, mask
+from twin.privacy.firewall import Firewall, Verdict
+from twin.privacy.pii import detect, mask
 from .profile import load_profile, promote_memory, render_profile
 from .proposals import (
     approve_proposal,

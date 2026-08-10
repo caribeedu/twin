@@ -74,7 +74,7 @@ def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
     )
     from twin.interfaces import cli
     from twin.interfaces.commands import cli_handlers
-    from twin.memory.store.sqlite import SqliteStore
+    from twin.store.store.sqlite import SqliteStore
 
     store = SqliteStore(str(tmp_path / "twin.db"))
     acc = SourceAccount(connector_type="github", source_owner=OwnershipClass.personal,

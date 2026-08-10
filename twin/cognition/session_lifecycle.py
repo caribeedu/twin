@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 from twin import ids
 from twin.clock import now_iso
 from twin.config import Config
-from twin.memory.embeddings import Embedder
-from twin.memory.models import CognitiveSession, SessionStatus
-from twin.memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.models import CognitiveSession, SessionStatus
+from twin.store.store.base import MemoryStore
 from twin.cognition.sessions import complete_session
 
 

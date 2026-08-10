@@ -13,7 +13,7 @@ from twin.cognize.models import (
     NarrativeStatus,
 )
 from twin.clock import now_iso
-from twin.memory.models import MemoryItem, MemoryStatus
+from twin.store.models import MemoryItem, MemoryStatus
 
 
 def memory_to_provisional(

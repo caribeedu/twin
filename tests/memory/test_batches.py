@@ -1,8 +1,8 @@
-"""Review batches (twin.memory.batches)."""
+"""Review batches (twin.store.batches)."""
 
 from twin import ids
-from twin.memory.batches import create_batch
-from twin.memory.models import MemoryItem
+from twin.store.batches import create_batch
+from twin.store.models import MemoryItem
 
 
 def _mem(store, embedder, **kw):

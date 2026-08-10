@@ -3,10 +3,10 @@ from pathlib import Path
 from tests.paths import EXAMPLES
 
 from twin.cognition import extract_pending
-from twin.cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from twin.cognition.observer import observe
-from twin.judgment.firewall import Firewall
-from twin.memory.search import search
+from twin.privacy.firewall import Firewall
+from twin.store.search import search
 from twin.sense.sensory import sense_paths
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
@@ -40,7 +40,7 @@ def test_search_blocks_cross_domain(store, cfg, embedder):
     _populate(store, cfg, embedder)
     # plant a relationship-domain memory that matches the query text
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     mem = MemoryItem(id=ids.memory_id(), type="fact", title="jantar de aniversário FastAPI piada",
                      summary="conversa pessoal mencionando FastAPI", domain="relationship",
@@ -94,7 +94,7 @@ def test_observer_without_domain_suggests_nothing(store, cfg, embedder):
 
 def _confirmed_mem(store, embedder, **kw):
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     base = dict(id=ids.memory_id(), type="fact", title="t", summary="s",
                 domain="technical", confidence=0.9, status="confirmed")
@@ -129,7 +129,7 @@ def test_pack_includes_confirmed(store, cfg, embedder):
 def test_pack_is_sectioned_with_evidence(store, cfg, embedder):
     from tests.authored import corpus_interpreter
     from twin.cognition import extract_percept, set_interpreter_override
-    from twin.memory.models import MemoryStatus
+    from twin.store.models import MemoryStatus
 
     # authored interpretation of the standup (a decision + a task) — the pack
     # sections by memory type, which only a real/authored interpreter provides
@@ -154,7 +154,7 @@ def test_pack_evidence_survives_tight_budgets(store, cfg, embedder):
     full pack can never silently squeeze the quotes out — and the flags say
     exactly what happened."""
     from twin.cognition import extract_percept
-    from twin.memory.models import MemoryStatus
+    from twin.store.models import MemoryStatus
 
     percepts, _ = sense_paths([EXAMPLES / "transcripts"])
     store.insert_percept(percepts[0])
@@ -212,8 +212,8 @@ def test_search_domain_affinity_boosts_same_domain(store, embedder):
 
 def test_inactive_statuses_excluded_from_search(store, embedder):
     from twin import ids
-    from twin.memory.lifecycle import archive_memory
-    from twin.memory.models import MemoryItem
+    from twin.store.lifecycle import archive_memory
+    from twin.store.models import MemoryItem
 
     live = MemoryItem(
         id=ids.memory_id(), type="fact", title="live fact",
@@ -239,7 +239,7 @@ def test_inactive_statuses_excluded_from_search(store, embedder):
 
 def test_include_rejected_surfaces_rejected(store, embedder):
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     live = MemoryItem(
         id=ids.memory_id(), type="decision", title="Use SQS",
@@ -270,7 +270,7 @@ def test_include_rejected_surfaces_rejected(store, embedder):
 
 def test_pack_modes_and_injection_screen(store, cfg, embedder):
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     access = _cli_access(store)
     good = MemoryItem(

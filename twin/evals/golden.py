@@ -14,12 +14,12 @@ from twin.cognition.session_lifecycle import (
 from twin.cognition.sessions import start_session
 from twin.clock import now_iso
 from twin.config import Config
-from twin.judgment.firewall import Firewall
-from twin.memory.embeddings import Embedder
-from twin.memory.formation import confirm_candidate, explain_memory, propose_or_corroborate
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.memory.search import search
-from twin.memory.store.base import MemoryStore
+from twin.privacy.firewall import Firewall
+from twin.store.embeddings import Embedder
+from twin.store.formation import confirm_candidate, explain_memory, propose_or_corroborate
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.search import search
+from twin.store.store.base import MemoryStore
 from twin.privacy.quarantine import detect_injection
 from twin.sense.sensory.percept import Percept
 

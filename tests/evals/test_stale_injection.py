@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from twin.cognize.commit import commit_narrative
 from twin.cognize.models import EpistemicStatus
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.embeddings import HashEmbedder
+from twin.inject.context_pack import build_context_pack
+from twin.store.embeddings import HashEmbedder
 from twin.sense.sensory.percept import Percept
 
 

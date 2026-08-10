@@ -25,11 +25,11 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from ..clock import now_iso
-from ..judgment.firewall import Firewall
-from ..memory.embeddings import Embedder
-from ..memory.models import INACTIVE_STATUSES, MemoryItem, MemoryStatus
-from ..memory.search import BlockedHit, SearchHit, SearchResult, search
-from ..memory.store.base import MemoryStore
+from twin.privacy.firewall import Firewall
+from twin.store.embeddings import Embedder
+from twin.store.models import INACTIVE_STATUSES, MemoryItem, MemoryStatus
+from twin.store.search import BlockedHit, SearchHit, SearchResult, search
+from twin.store.store.base import MemoryStore
 
 logger = logging.getLogger("twin.cognition.retrieval")
 

@@ -1,9 +1,9 @@
 """Optional local encryption at rest (percept content + evidence quotes)."""
 
 from twin import ids
-from twin.memory.crypto import build_codec
-from twin.memory.models import Evidence, MemoryItem
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.crypto import build_codec
+from twin.store.models import Evidence, MemoryItem
+from twin.store.store.sqlite import SqliteStore
 from twin.sense.sensory.percept import Percept
 
 

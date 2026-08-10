@@ -10,7 +10,7 @@ from twin.cognition.attention import (
 )
 from twin.cognition.session_lifecycle import append_session_delta, checkpoint_session
 from twin.cognition.sessions import start_session
-from twin.runtime.models import JobKind
+from twin.interfaces.runtime.models import JobKind
 
 
 def test_expected_value_prefers_silence_on_low_signal():

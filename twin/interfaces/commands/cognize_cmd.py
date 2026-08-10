@@ -201,7 +201,7 @@ def stance_list(ws, args) -> dict[str, Any]:
 
 
 def inject_pack(ws, args) -> dict[str, Any]:
-    from twin.cognition.context_pack import build_context_pack
+    from twin.inject.context_pack import build_context_pack
 
     pack = build_context_pack(
         ws.store,

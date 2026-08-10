@@ -1,7 +1,7 @@
 """Memory formation — deterministic identity, corroborate, confirm/reject/restore."""
 
 from twin.clock import now_iso
-from twin.memory.formation import (
+from twin.store.formation import (
     FormationState,
     as_candidate,
     confirm_candidate,
@@ -11,7 +11,7 @@ from twin.memory.formation import (
     reject_candidate,
     restore_candidate,
 )
-from twin.memory.models import Evidence, MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import Evidence, MemoryItem, MemoryStatus, MemoryType
 from twin.sense.sensory.percept import Percept
 
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from ..cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from ..cognition.sessions import (
     complete_session,
     observe_session,
@@ -35,7 +35,7 @@ from ..cognition.sessions import (
     start_session,
 )
 from ..judgment.profile import load_profile
-from ..memory.search import search
+from twin.store.search import search
 from ..workspace import Workspace
 from .mcp_auth import MCP_CLIENT_ENV, mcp_process_identity, resolve_mcp_access
 
@@ -695,7 +695,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def memory_provenance(memory_id: str) -> str:
         """Navigable lineage: memory → evidence → percept → artifact."""
-        from ..memory.provenance import memory_provenance as prov
+        from twin.store.provenance import memory_provenance as prov
         return json.dumps(prov(ws.store, memory_id), ensure_ascii=False, default=str)
 
     @mcp.tool()
@@ -708,7 +708,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def review_batch_get(batch_id: str) -> str:
         """Get a review batch and its progress."""
-        from ..memory.batches import get_batch
+        from twin.store.batches import get_batch
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             return json.dumps({"error": "not found"})
@@ -733,7 +733,7 @@ def create_server(home: Optional[str] = None):
         """Confirm a candidate memory. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..memory.models import MemoryStatus
+        from twin.store.models import MemoryStatus
         ws.store.set_status(memory_id, MemoryStatus.confirmed)
         return json.dumps(_memory_to_dict(ws.store.get_memory(memory_id)), ensure_ascii=False)
 
@@ -742,7 +742,7 @@ def create_server(home: Optional[str] = None):
         """Reject a candidate memory. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..memory.models import MemoryStatus
+        from twin.store.models import MemoryStatus
         ws.store.set_status(memory_id, MemoryStatus.rejected)
         return json.dumps(_memory_to_dict(ws.store.get_memory(memory_id)), ensure_ascii=False)
 
@@ -751,7 +751,7 @@ def create_server(home: Optional[str] = None):
         """Archive a memory (removed from default retrieval). Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..memory.lifecycle import archive_memory
+        from twin.store.lifecycle import archive_memory
         result = archive_memory(ws.store, memory_id)
         return json.dumps({"action": result.action, "operation_id": result.operation_id})
 
@@ -770,7 +770,7 @@ def create_server(home: Optional[str] = None):
         """
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply", "preview": memory_ids})
-        from ..memory.lifecycle import merge_memories
+        from twin.store.lifecycle import merge_memories
         kwargs: dict = {
             "title": title, "summary": summary, "embedder": ws.embedder,
             "confirm_cross_scope_merge": confirm_cross_scope_merge,
@@ -791,7 +791,7 @@ def create_server(home: Optional[str] = None):
         """Split a compound memory. parts are titles/summaries. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply", "parts": parts})
-        from ..memory.lifecycle import split_memory
+        from twin.store.lifecycle import split_memory
         result = split_memory(
             ws.store, memory_id,
             [{"title": p, "summary": p} for p in parts],

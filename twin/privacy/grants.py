@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import MemoryStore
 from .models import AccessRequest, GrantStatus, PermissionGrant, PolicyEffect, ResourceClassification
 
 # Grant allowed_effects → maximum PolicyEffect they authorize

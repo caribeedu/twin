@@ -1,8 +1,8 @@
 import pytest
 
 from twin.config import Config
-from twin.memory.embeddings import get_embedder
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.store.sqlite import SqliteStore
 
 
 @pytest.fixture()

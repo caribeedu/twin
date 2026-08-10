@@ -21,11 +21,11 @@ from typing import Any, Callable, Optional
 
 from .. import ids
 from ..config import Config
-from ..memory.embeddings import Embedder
-from ..memory.formation import propose_or_corroborate
-from ..memory.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
-from ..memory.search import search
-from ..memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.formation import propose_or_corroborate
+from twin.store.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
+from twin.store.search import search
+from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
 from .correlation.models import EpisodeLinkStatus
 from .correlation.text import rich_excerpt
@@ -591,7 +591,7 @@ def _attach_extra_evidence(
     store: MemoryStore, memory_id: str, claim: TrajectoryClaim, primary_pid: str,
     *, episode_id: str,
 ) -> None:
-    from ..memory.provenance import attach_corroborating_evidence
+    from twin.store.provenance import attach_corroborating_evidence
 
     seen_pid = {primary_pid}
     quotes = claim.evidence_quotes[1:] if claim.evidence_quotes else []
@@ -630,7 +630,7 @@ def _attach_cross_sense_evidence(
     dossier = getattr(brief, "dossier", None)
     if dossier is None:
         return
-    from ..memory.provenance import attach_corroborating_evidence
+    from twin.store.provenance import attach_corroborating_evidence
 
     by_ref = {b.ref: b for b in getattr(dossier, "cross_sense", [])}
     for ref in claim.cross_sense_refs:

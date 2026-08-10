@@ -8,9 +8,9 @@ from typing import Optional
 
 from .config import Config, load_config
 from .judgment.firewall import Firewall
-from .memory.crypto import build_codec
-from .memory.embeddings import Embedder, get_embedder_for_config
-from .memory.store import MemoryStore, create_store
+from .store.crypto import build_codec
+from .store.embeddings import Embedder, get_embedder_for_config
+from .store.store import MemoryStore, create_store
 
 
 class Workspace:

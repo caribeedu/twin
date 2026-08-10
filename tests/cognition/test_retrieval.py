@@ -2,7 +2,7 @@
 
 from twin import ids
 from twin.cognition.retrieval import retrieve
-from twin.memory.models import Evidence, MemoryItem
+from twin.store.models import Evidence, MemoryItem
 from twin.sense.sensory.percept import Percept
 
 

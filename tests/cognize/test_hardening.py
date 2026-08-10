@@ -29,7 +29,7 @@ from twin.cognize.orchestrator import (
     set_cognize_stage_override,
 )
 from twin.interfaces.commands import cognize_cmd
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType, Sensitivity
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType, Sensitivity
 from twin.sense.sensory.percept import Percept
 from twin import ids
 

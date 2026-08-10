@@ -9,9 +9,9 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.models import MemoryItem, MemoryStatus
-from ..memory.provenance import count_independent_sources, memory_source_keys
-from ..memory.store.base import MemoryStore
+from twin.store.models import MemoryItem, MemoryStatus
+from twin.store.provenance import count_independent_sources, memory_source_keys
+from twin.store.store.base import MemoryStore
 from .models import (
     ACTIONS_REQUIRING_TARGET,
     DURABLE_KINDS,

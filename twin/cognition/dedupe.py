@@ -13,9 +13,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..memory.embeddings import Embedder
-from ..memory.models import INACTIVE_STATUSES
-from ..memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.models import INACTIVE_STATUSES
+from twin.store.store.base import MemoryStore
 
 DUPLICATE_THRESHOLD = 0.92
 RELATED_THRESHOLD = 0.80

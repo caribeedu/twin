@@ -10,7 +10,7 @@ from twin.cognition.session_lifecycle import (
     resume_session,
 )
 from twin.cognition.sessions import start_session
-from twin.memory.models import SessionStatus
+from twin.store.models import SessionStatus
 
 
 def test_append_delta_ordered_and_gap(store, cfg, embedder):

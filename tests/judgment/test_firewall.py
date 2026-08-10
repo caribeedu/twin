@@ -1,7 +1,7 @@
 from twin import ids
 from twin.clock import now_iso
-from twin.judgment.firewall import Firewall
-from twin.memory.models import MemoryItem
+from twin.privacy.firewall import Firewall
+from twin.store.models import MemoryItem
 
 
 def _mem(**kw) -> MemoryItem:

@@ -22,8 +22,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
-from ..memory.embeddings import Embedder
-from ..memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.store.base import MemoryStore
 from . import sense_lenses
 from .correlation.partition import vault_for_record
 from .correlation.projects import resolve_project_for_record

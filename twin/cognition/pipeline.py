@@ -31,15 +31,15 @@ from typing import Optional
 
 from .. import ids
 from ..config import ALL_DOMAINS, SENSITIVITY_ORDER, Config
-from ..judgment.pii import mask
-from ..memory.calibration import calibrated_confidence, load_calibration
-from ..memory.embeddings import Embedder
-from ..memory.models import (
+from twin.privacy.pii import mask
+from twin.store.calibration import calibrated_confidence, load_calibration
+from twin.store.embeddings import Embedder
+from twin.store.models import (
     DetectionSignal, Evidence, ExtractorVersion, MemoryItem,
     PerceptInterpretation, Relation,
 )
-from ..memory.provenance import ensure_artifact_from_percept
-from ..memory.store.base import MemoryStore
+from twin.store.provenance import ensure_artifact_from_percept
+from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
 from .dedupe import check as dedupe_check
 from .extractors import heuristic as heuristic_detector
@@ -353,7 +353,7 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
         verdict = dedupe_check(store, embedder, extracted.type, dedupe_text)
 
         if verdict.action == "duplicate" and verdict.existing_id:
-            from ..memory.provenance import attach_corroborating_evidence
+            from twin.store.provenance import attach_corroborating_evidence
             from .correlation.independence import independence_group_for
             igroup = independence_group_for(percept, fallback=artifact_id or percept.id)
             attach_corroborating_evidence(
@@ -380,7 +380,7 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
                 f"similar to {verdict.existing_id} (cos={verdict.similarity:.2f}) — update or contradiction?"
             )
 
-        from ..memory.formation import propose_or_corroborate
+        from twin.store.formation import propose_or_corroborate
         from .correlation.independence import (
             evidence_directness_for,
             independence_group_for,

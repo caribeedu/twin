@@ -32,8 +32,8 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from ..config import UNCLASSIFIED_DOMAIN, Config
-from ..memory.embeddings import Embedder
-from ..memory.models import (
+from twin.store.embeddings import Embedder
+from twin.store.models import (
     FEEDBACK_SCOPES,
     CognitiveSession,
     ConsolidationStatus,
@@ -41,7 +41,7 @@ from ..memory.models import (
     Project,
     SessionStatus,
 )
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
 from .context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
 from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain

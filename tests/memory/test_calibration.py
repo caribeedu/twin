@@ -1,6 +1,6 @@
-"""Source calibration matrix (twin.memory.calibration)."""
+"""Source calibration matrix (twin.store.calibration)."""
 
-from twin.memory.calibration import calibrated_confidence
+from twin.store.calibration import calibrated_confidence
 
 
 def test_calibration_matrix():

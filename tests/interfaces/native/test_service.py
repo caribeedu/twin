@@ -26,9 +26,9 @@ from twin.interfaces.native.claude_code import (
 from twin.interfaces.native.events import HostCapabilities, HostEvent
 from twin.interfaces.native.redact import redact_text
 from twin.interfaces.native.service import NativeHostService
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.runtime.handlers import dispatch
-from twin.runtime.queue import RuntimeQueue
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.interfaces.runtime.handlers import dispatch
+from twin.interfaces.runtime.queue import RuntimeQueue
 
 
 def _drain_runtime_jobs(store, cfg, embedder, *, limit: int = 10) -> int:
@@ -417,7 +417,7 @@ def test_frozen_vault_on_binding(store, cfg, embedder):
 def test_is_unique_violation_narrow():
     import sqlite3
 
-    from twin.memory.store.host_binding_mixin import is_unique_violation
+    from twin.store.store.host_binding_mixin import is_unique_violation
 
     unique = sqlite3.IntegrityError("UNIQUE constraint failed: host_observed_events.event_id")
     assert is_unique_violation(unique)
@@ -448,7 +448,7 @@ def test_not_null_observed_event_not_silent_duplicate(store, cfg, embedder):
     """Integrity errors unrelated to unique must propagate, not become duplicates."""
     import sqlite3
 
-    from twin.memory.store.host_binding_mixin import is_unique_violation
+    from twin.store.store.host_binding_mixin import is_unique_violation
 
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
@@ -1170,8 +1170,8 @@ def test_hot_path_user_message_never_calls_llm(store, cfg, embedder, monkeypatch
 
 def test_pending_context_pack_emitted_on_next_user_message(store, cfg, embedder, monkeypatch):
     from twin.cognition.observer import ObserverReading
-    from twin.runtime.handlers import handle_session_domain_resolve
-    from twin.runtime.models import JobKind, RuntimeJob
+    from twin.interfaces.runtime.handlers import handle_session_domain_resolve
+    from twin.interfaces.runtime.models import JobKind, RuntimeJob
 
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
@@ -1283,7 +1283,7 @@ def test_pack_deadline_aborts_before_retrieve(store, cfg, embedder):
     """Deadline already past → PackDeadlineExceeded at before_retrieve."""
     import time
 
-    from twin.cognition.context_pack import PackDeadlineExceeded, build_context_pack
+    from twin.inject.context_pack import PackDeadlineExceeded, build_context_pack
 
     with pytest.raises(PackDeadlineExceeded) as exc:
         build_context_pack(

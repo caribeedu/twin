@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..memory.models import MemoryItem
+from twin.store.models import MemoryItem
 from .models import FieldSensitivity, ResourceClassification, SensitivityClass
 
 _DOMAIN_LABELS = {

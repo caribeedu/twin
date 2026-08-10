@@ -73,6 +73,6 @@ def extract(percept: Percept, text: str, base_url: str = "http://127.0.0.1:11434
 
 
 def available(base_url: str) -> bool:
-    from ...memory.embeddings import ollama_reachable
+    from twin.store.embeddings import ollama_reachable
 
     return ollama_reachable(base_url)

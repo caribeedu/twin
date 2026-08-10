@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import UNCLASSIFIED_DOMAIN, Config
-from ..judgment.firewall import Firewall
-from ..memory.embeddings import Embedder
-from ..memory.search import search
-from ..memory.store.base import MemoryStore
+from twin.privacy.firewall import Firewall
+from twin.store.embeddings import Embedder
+from twin.store.search import search
+from twin.store.store.base import MemoryStore
 
 logger = logging.getLogger("twin.cognition.observer")
 

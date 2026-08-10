@@ -237,7 +237,7 @@ class OllamaChatClient:
         self._client = client or httpx.Client(base_url=self.base_url, timeout=timeout)
 
     def available(self) -> bool:
-        from ..memory.embeddings import ollama_reachable
+        from twin.store.embeddings import ollama_reachable
         return ollama_reachable(self.base_url)
 
     def complete_json(

@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from ..cognition import extract_pending
-from ..cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from ..cognition.observer import observe
 from ..cognition.sessions import (
     complete_session,
@@ -29,13 +29,13 @@ from ..cognition.sessions import (
 from ..cognition.workspace import workspace_tick
 from ..config import ALL_DOMAINS, UNCLASSIFIED_DOMAIN
 from ..judgment.profile import load_profile
-from ..memory.models import (
+from twin.store.models import (
     FeedbackVerdict,
     FindingStatus,
     MemoryStatus,
     TaskProfile,
 )
-from ..memory.search import search
+from twin.store.search import search
 from ..workspace import Workspace
 from .web import STATIC_DIR, read_index
 
@@ -230,7 +230,7 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
     )
     if store is not None:
         try:
-            from ..memory.provenance import memory_source_summary
+            from twin.store.provenance import memory_source_summary
             src = memory_source_summary(store, mem.id)
             data["sources"] = src.get("sensors") or []
             data["source_label"] = src.get("label") or ""
@@ -305,7 +305,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/extract")
     def api_extract(auto_approve: bool = False):
-        from ..memory.models import MemoryStatus
+        from twin.store.models import MemoryStatus
 
         reports = extract_pending(ws.store, ws.cfg, ws.embedder)
         auto_approved: list[str] = []
@@ -368,7 +368,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_review(memory_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
         from ..clock import now_iso
-        from ..memory.lifecycle import archive_memory
+        from twin.store.lifecycle import archive_memory
         mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
@@ -399,7 +399,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/memory/candidates")
     def api_memory_candidates(state: Optional[str] = None, limit: int = 100):
-        from ..memory.formation import list_candidates
+        from twin.store.formation import list_candidates
         return [
             c.model_dump(mode="json")
             for c in list_candidates(ws.store, state=state, limit=limit)
@@ -420,7 +420,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_formation_confirm(
         memory_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
     ):
-        from ..memory.formation import confirm_candidate
+        from twin.store.formation import confirm_candidate
         try:
             return confirm_candidate(
                 ws.store, memory_id, note=req.note,
@@ -430,7 +430,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memory/candidates/{memory_id}/reject")
     def api_formation_reject(memory_id: str, req: FormationRejectRequest):
-        from ..memory.formation import reject_candidate
+        from twin.store.formation import reject_candidate
         try:
             return reject_candidate(
                 ws.store, memory_id, reason=req.reason,
@@ -440,7 +440,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memory/candidates/{memory_id}/edit")
     def api_formation_edit(memory_id: str, req: FormationEditRequest):
-        from ..memory.formation import edit_candidate
+        from twin.store.formation import edit_candidate
         try:
             return edit_candidate(
                 ws.store, memory_id,
@@ -451,7 +451,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memory/candidates/{memory_id}/restore")
     def api_formation_restore(memory_id: str):
-        from ..memory.formation import restore_candidate
+        from twin.store.formation import restore_candidate
         try:
             return restore_candidate(ws.store, memory_id).model_dump(mode="json")
         except ValueError as exc:
@@ -459,7 +459,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/memory/{memory_id}/explain")
     def api_memory_explain(memory_id: str):
-        from ..memory.formation import explain_memory
+        from twin.store.formation import explain_memory
         try:
             return explain_memory(ws.store, memory_id)
         except ValueError as exc:
@@ -467,7 +467,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/memory/{memory_id}/history")
     def api_memory_history(memory_id: str):
-        from ..memory.formation import explain_memory
+        from twin.store.formation import explain_memory
         try:
             return {"memory_id": memory_id, "history": explain_memory(ws.store, memory_id)["history"]}
         except ValueError as exc:
@@ -1038,7 +1038,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memories/{memory_id}/supersede/{old_id}")
     def api_supersede(memory_id: str, old_id: str):
-        from ..memory.lifecycle import supersede
+        from twin.store.lifecycle import supersede
 
         try:
             result = supersede(ws.store, memory_id, old_id)
@@ -1048,7 +1048,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memories/{memory_id}/contradict/{other_id}")
     def api_contradict(memory_id: str, other_id: str):
-        from ..memory.lifecycle import contradict
+        from twin.store.lifecycle import contradict
 
         try:
             result = contradict(ws.store, memory_id, other_id)
@@ -1058,7 +1058,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/metrics")
     def api_metrics():
-        from ..memory.metrics import compute_metrics
+        from twin.store.metrics import compute_metrics
 
         return compute_metrics(ws.store)
 
@@ -1103,8 +1103,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/runtime/jobs")
     def api_runtime_enqueue(req: RuntimeEnqueueRequest):
-        from ..runtime.models import JobKind
-        from ..runtime.queue import RuntimeQueue
+        from twin.interfaces.runtime.models import JobKind
+        from twin.interfaces.runtime.queue import RuntimeQueue
         try:
             kind = JobKind(req.kind)
         except ValueError as exc:
@@ -1145,7 +1145,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/runtime/jobs/{job_id}/retry")
     def api_runtime_retry(job_id: str):
-        from ..runtime.queue import RuntimeQueue
+        from twin.interfaces.runtime.queue import RuntimeQueue
         job = RuntimeQueue(ws.store).retry(job_id)
         if job is None:
             raise HTTPException(404, "job not found")
@@ -1153,7 +1153,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/runtime/jobs/{job_id}/cancel")
     def api_runtime_cancel(job_id: str):
-        from ..runtime.queue import RuntimeQueue
+        from twin.interfaces.runtime.queue import RuntimeQueue
         ok = RuntimeQueue(ws.store).cancel(job_id)
         if not ok:
             raise HTTPException(409, "job not cancellable")
@@ -1180,29 +1180,29 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/backup")
     def api_backup_create(req: BackupCreateRequest):
         from pathlib import Path
-        from ..sovereignty.backup import create_backup
+        from twin.interfaces.sovereignty.backup import create_backup
         db_path = Path(ws.store.path) if hasattr(ws.store, "path") else None
         manifest = create_backup(ws.store, req.dest, copy_sqlite_db=db_path)
         return manifest.model_dump(mode="json")
 
     @app.post("/api/backup/validate")
     def api_backup_validate(req: BackupValidateRequest):
-        from ..sovereignty.backup import validate_backup
+        from twin.interfaces.sovereignty.backup import validate_backup
         return validate_backup(req.bundle)
 
     @app.post("/api/restore/validate")
     def api_restore_validate(req: BackupValidateRequest):
-        from ..sovereignty.backup import validate_backup
+        from twin.interfaces.sovereignty.backup import validate_backup
         return validate_backup(req.bundle)
 
     @app.post("/api/restore")
     def api_restore(req: BackupRestoreRequest):
-        from ..sovereignty.backup import restore_sqlite_backup
+        from twin.interfaces.sovereignty.backup import restore_sqlite_backup
         return restore_sqlite_backup(req.bundle, req.target_db)
 
     @app.get("/api/health/cognition")
     def api_health_cognition():
-        from ..sovereignty.integrity import run_integrity_checks
+        from twin.interfaces.sovereignty.integrity import run_integrity_checks
         return run_integrity_checks(ws.store)
 
     class SessionEventRequest(BaseModel):
@@ -1399,13 +1399,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/review/batches")
     def api_create_batch(req: BatchCreateRequest):
-        from ..memory.batches import create_batch
+        from twin.store.batches import create_batch
         batch = create_batch(ws.store, req.name, query=req.query, memory_ids=req.memory_ids or None)
         return batch.model_dump()
 
     @app.get("/api/review/batches/{batch_id}")
     def api_get_batch(batch_id: str):
-        from ..memory.batches import get_batch
+        from twin.store.batches import get_batch
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             raise HTTPException(404, "batch not found")
@@ -1413,8 +1413,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/review/batches/{batch_id}/apply")
     def api_apply_batch(batch_id: str, req: BatchApplyRequest):
-        from ..memory.automation import batch_apply, batch_preview
-        from ..memory.batches import get_batch
+        from twin.store.automation import batch_apply, batch_preview
+        from twin.store.batches import get_batch
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             raise HTTPException(404, "batch not found")
@@ -1498,7 +1498,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/memories/{memory_id}/resolve")
     def api_resolve(memory_id: str, req: ResolveRequest):
         from ..clock import now_iso
-        from ..memory.lifecycle import (
+        from twin.store.lifecycle import (
             archive_memory,
             contradict,
             merge_memories,
@@ -1634,7 +1634,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/memories/{memory_id}/provenance")
     def api_provenance(memory_id: str):
-        from ..memory.provenance import memory_provenance
+        from twin.store.provenance import memory_provenance
         try:
             return memory_provenance(ws.store, memory_id)
         except ValueError as exc:
@@ -1642,8 +1642,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memories/merge")
     def api_merge(req: MergeRequest):
-        from ..memory.lifecycle import merge_memories
-        from ..memory.models import CanonicalClaim
+        from twin.store.lifecycle import merge_memories
+        from twin.store.models import CanonicalClaim
         merge_kwargs: dict[str, Any] = {
             "title": req.title,
             "summary": req.summary,
@@ -1670,7 +1670,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memories/{memory_id}/split")
     def api_split(memory_id: str, req: SplitRequest):
-        from ..memory.lifecycle import split_memory
+        from twin.store.lifecycle import split_memory
         try:
             result = split_memory(ws.store, memory_id, req.parts, embedder=ws.embedder)
         except ValueError as exc:
@@ -1680,7 +1680,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/memories/{memory_id}/archive")
     def api_archive(memory_id: str):
-        from ..memory.lifecycle import archive_memory
+        from twin.store.lifecycle import archive_memory
         try:
             result = archive_memory(ws.store, memory_id)
         except ValueError as exc:
@@ -1710,7 +1710,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.delete("/api/artifacts/{artifact_id}")
     def api_delete_artifact(artifact_id: str, dry_run: bool = True):
-        from ..memory.retention import delete_artifact
+        from twin.store.retention import delete_artifact
         try:
             return delete_artifact(ws.store, artifact_id, dry_run=dry_run)
         except ValueError as exc:
@@ -2251,7 +2251,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def ui_review(memory_id: str, action: str = Form(...), domain: str = Form(None),
                   sensitivity: str = Form(None), neighbor_id: str = Form(None)):
         from ..clock import now_iso
-        from ..memory.lifecycle import archive_memory, contradict, merge_memories, supersede
+        from twin.store.lifecycle import archive_memory, contradict, merge_memories, supersede
         mem = ws.store.get_memory(memory_id)
         if mem is None:
             raise HTTPException(404, "memory not found")

@@ -16,8 +16,8 @@ from typing import Any, Optional
 from twin import ids
 from twin.clock import now_iso
 from twin.config import Config
-from twin.memory.embeddings import Embedder
-from twin.memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.store.base import MemoryStore
 
 
 class AttentionKind(str, Enum):
@@ -381,8 +381,8 @@ def maybe_enqueue_attention_job(store: MemoryStore, session_id: str, *, text: st
     """Enqueue durable attention_evaluate job if runtime store is available."""
     if not hasattr(store, "insert_runtime_job"):
         return ""
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
     job = RuntimeQueue(store).enqueue(
         JobKind.attention_evaluate,
         payload={"session_id": session_id, "text": text},

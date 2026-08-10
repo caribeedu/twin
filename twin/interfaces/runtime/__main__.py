@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     from twin.interfaces import ux
-    from twin.runtime.service import TwinRuntime
+    from twin.interfaces.runtime.service import TwinRuntime
     from twin.workspace import Workspace
 
     ws = Workspace(args.home)

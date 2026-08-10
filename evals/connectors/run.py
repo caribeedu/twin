@@ -33,7 +33,7 @@ from twin.sense.connectors import (
     register_source_account,
     sync_connector,
 )
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.store.sqlite import SqliteStore
 
 _CASES = Path(__file__).resolve().parent / "cases"
 
@@ -302,7 +302,7 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
                 InterpretedItem,
             )
             from twin.config import Config
-            from twin.memory.embeddings import get_embedder
+            from twin.store.embeddings import get_embedder
             authored = {
                 "We decided to use Redis for the queue.": "Use Redis",
                 "We decided to use PostgreSQL advisory locks for the queue.":
@@ -378,7 +378,7 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
 
             from twin.cognition import extract_pending
             from twin.config import Config
-            from twin.memory.embeddings import get_embedder
+            from twin.store.embeddings import get_embedder
             cfg = Config(home=Path(tmp) / "twin-home")
             cfg.extractor = "echo"
             cfg.embedder = "hash"
@@ -823,7 +823,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
         SourceAccount,
         idempotency_key,
     )
-    from twin.memory.models import FindingType
+    from twin.store.models import FindingType
 
     exp = case["expected"]
     root = exp["lineage_root"]

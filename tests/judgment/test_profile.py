@@ -3,9 +3,9 @@
 import pytest
 
 from twin import ids
-from twin.cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from twin.judgment.profile import load_profile, promote_memory, render_profile
-from twin.memory.models import MemoryItem
+from twin.store.models import MemoryItem
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
 

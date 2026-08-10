@@ -15,8 +15,8 @@ from twin.interfaces.native.claude_code import (
 )
 from twin.interfaces.native.events import HostEvent
 from twin.interfaces.native.service import NativeHostService
-from twin.memory.embeddings import get_embedder
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.store.sqlite import SqliteStore
 
 CASES = Path(__file__).parent / "cases"
 

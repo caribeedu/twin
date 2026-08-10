@@ -2,10 +2,10 @@
 
 from pathlib import Path
 
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.memory.store.sqlite import SqliteStore
-from twin.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
-from twin.sovereignty.integrity import run_integrity_checks
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.store.sqlite import SqliteStore
+from twin.interfaces.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
+from twin.interfaces.sovereignty.integrity import run_integrity_checks
 from twin.sense.sensory.percept import Percept
 from twin.clock import now_iso
 from twin import ids
@@ -25,7 +25,7 @@ def test_backup_validate_and_sqlite_restore(store, tmp_path):
         domain="technical", confidence=0.9, status=MemoryStatus.confirmed,
     )
     store.insert_memory(mem)
-    from twin.memory.models import Evidence
+    from twin.store.models import Evidence
     store.insert_evidence(Evidence(
         id=ids.evidence_id(), memory_id=mem.id, percept_id=p.id,
         quote="SQLite backups",

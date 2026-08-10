@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from twin.cognize.models import Reflection, ReflectionStatus
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.embeddings import HashEmbedder
+from twin.inject.context_pack import build_context_pack
+from twin.store.embeddings import HashEmbedder
 from twin.privacy.models import AccessRequest
 
 

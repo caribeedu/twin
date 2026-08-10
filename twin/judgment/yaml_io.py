@@ -9,7 +9,7 @@ import yaml
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import MemoryStore
 from .models import (
     JudgmentItem,
     JudgmentKind,

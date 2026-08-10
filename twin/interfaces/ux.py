@@ -708,7 +708,7 @@ def run_runtime_with_live(rt, *, live: bool = True) -> None:
     from rich.live import Live
 
     # Keep INFO logs from fighting the Live redraw; panel is the signal.
-    for name in ("twin.runtime", "twin.runtime.worker"):
+    for name in ("twin.interfaces.runtime", "twin.interfaces.runtime.worker"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
     renderable = build_runtime_dashboard(rt.snapshot())

@@ -28,7 +28,7 @@ from twin.sense.connectors.models import (
     SourceAccount,
     idempotency_key,
 )
-from twin.memory.models import MemoryStatus, MemoryType
+from twin.store.models import MemoryStatus, MemoryType
 
 _OUTCOME_WORDS = ("merged", "shipped", "released", "closed", "resolved")
 _PIVOT_WORDS = ("revert", "instead", "switch to", "supersed", "pivot")
@@ -372,7 +372,7 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
     """Consolidate retrieves confirmed/candidate/rejected neighbors."""
     from twin import ids
     from twin.cognition.episode_reflect import gather_related_memories
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     acc, inst = _acct(store, account_id="acct_rel")
     ep = _pivot_episode(store, cfg, embedder, acc, inst)

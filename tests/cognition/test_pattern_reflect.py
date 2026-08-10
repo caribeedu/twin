@@ -18,7 +18,7 @@ from twin.sense.connectors.models import (
     SourceAccount,
     idempotency_key,
 )
-from twin.memory.models import MemoryStatus, MemoryType
+from twin.store.models import MemoryStatus, MemoryType
 
 
 @pytest.fixture(autouse=True)

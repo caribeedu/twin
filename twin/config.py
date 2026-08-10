@@ -5,7 +5,7 @@ Layered architecture:
  External World
  ↓ twin.sense.sensory (sensors → normalized percepts)
  ↓ twin.cognition (extraction, dedupe, recall, attention)
- ↕ twin.memory (stores, embeddings, search)
+ ↕ twin.store (stores, embeddings, search)
  ↕ twin.judgment (PII, domain firewall, judgment profile)
  ↑ twin.interfaces (CLI, HTTP API, MCP)
 

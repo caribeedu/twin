@@ -3,8 +3,8 @@ import pytest
 
 from twin import ids
 from twin.clock import now_iso
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.models import MemoryItem
+from twin.inject.context_pack import build_context_pack
+from twin.store.models import MemoryItem
 from twin.privacy.canaries import place_canary, scan_for_canaries
 from twin.privacy.engine import evaluate_access, explain_decision
 from twin.privacy.grants import consume_grant, create_grant
@@ -293,7 +293,7 @@ def test_mcp_identity_resolve_restricted():
         resolve_execution_location,
     )
     from twin.privacy.yaml_io import bootstrap_policy_set
-    from twin.memory.store.sqlite import SqliteStore
+    from twin.store.store.sqlite import SqliteStore
     import tempfile
     from pathlib import Path
     with tempfile.TemporaryDirectory() as d:
@@ -532,7 +532,7 @@ def test_consent_requires_full_category_cover(store, embedder):
 
 def test_artifact_delete_preserves_partial_memory(store, embedder):
     from twin.privacy.deletion import execute_deletion, preview_deletion
-    from twin.memory.models import Evidence
+    from twin.store.models import Evidence
     from twin.sense.sensory.percept import Percept
     mem = _mem(store, embedder, domain="technical", title="multi-src",
                summary="supported by two artifacts")

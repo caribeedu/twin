@@ -21,15 +21,15 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from ..config import UNCLASSIFIED_DOMAIN, Config
-from ..memory.embeddings import Embedder
-from ..memory.models import (
+from twin.store.embeddings import Embedder
+from twin.store.models import (
     HostSessionBinding,
     InterventionRecommendation,
     MemoryStatus,
     SessionStatus,
 )
-from ..memory.store.base import MemoryStore
-from ..memory.store.host_binding_mixin import is_unique_violation
+from twin.store.store.base import MemoryStore
+from twin.store.store.host_binding_mixin import is_unique_violation
 from .context_pack import ContextPack, build_context_pack
 from .sessions import SessionStart, complete_session, observe_session, start_session
 
@@ -746,8 +746,8 @@ def maybe_enqueue_domain_resolve(
         return ""
     if not hasattr(store, "insert_runtime_job"):
         return ""
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
 
     job = RuntimeQueue(store).enqueue(
         JobKind.session_domain_resolve,
@@ -775,8 +775,8 @@ def maybe_enqueue_session_complete(
     """Enqueue background session consolidation + extract (twin-runtime)."""
     if not hasattr(store, "insert_runtime_job"):
         return ""
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
 
     job = RuntimeQueue(store).enqueue(
         JobKind.session_complete,

@@ -2,11 +2,11 @@
 
 from datetime import datetime, timedelta, timezone
 
-from twin.runtime.handlers import HandlerError, dispatch
-from twin.runtime.models import ErrorClass, JobKind, JobStatus, RuntimeJob
-from twin.runtime.queue import RuntimeQueue
-from twin.runtime.scheduler import RuntimeScheduler
-from twin.runtime.worker import RuntimeWorker
+from twin.interfaces.runtime.handlers import HandlerError, dispatch
+from twin.interfaces.runtime.models import ErrorClass, JobKind, JobStatus, RuntimeJob
+from twin.interfaces.runtime.queue import RuntimeQueue
+from twin.interfaces.runtime.scheduler import RuntimeScheduler
+from twin.interfaces.runtime.worker import RuntimeWorker
 
 
 def test_enqueue_idempotent(store):
@@ -162,7 +162,7 @@ def test_worker_runs_integrity_check(store, cfg, embedder):
 
 
 def test_runtime_snapshot_tracks_inflight_and_recent(store, cfg, embedder):
-    from twin.runtime.service import TwinRuntime
+    from twin.interfaces.runtime.service import TwinRuntime
 
     rt = TwinRuntime(store, cfg, embedder, workers=1, schedule_interval=3600)
     q = RuntimeQueue(store)
@@ -247,7 +247,7 @@ def test_dispatch_missing_handler_payload(store, cfg, embedder):
 
 def test_session_complete_job_consolidates(store, cfg, embedder):
     from twin.cognition.sessions import observe_session, start_session
-    from twin.memory.models import ConsolidationStatus
+    from twin.store.models import ConsolidationStatus
 
     ses = start_session(
         store, cfg, embedder, "task", domain="technical", client="cli",

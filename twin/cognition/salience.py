@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..memory.models import INACTIVE_STATUSES
-from ..memory.store.base import MemoryStore
+from twin.store.models import INACTIVE_STATUSES
+from twin.store.store.base import MemoryStore
 
 
 @dataclass

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import MemoryStore
 from .application import applicable_pack, record_trace
 from .models import AppliedJudgmentEffect, JudgmentContext
 

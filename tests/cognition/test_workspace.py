@@ -15,7 +15,7 @@ from twin.cognition.interpreter.schema import (
 from twin.cognition.observer import ObserverReading, ObserverSuggestion
 from twin.cognition.salience import SalienceScores
 from twin.cognition.workspace import workspace_tick
-from twin.memory.models import MemoryItem, MemoryStatus
+from twin.store.models import MemoryItem, MemoryStatus
 
 
 def _mem(store, embedder, **kw):
@@ -293,7 +293,7 @@ def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monk
 
 def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
     from twin.cognition.workspace import text_content_hash
-    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+    from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     cfg.extractor = "auto"
     calls = {"n": 0}
@@ -371,7 +371,7 @@ def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedd
 
 def test_second_retry_claim_is_blocked_concurrent(store, cfg, embedder):
     """After one atomic reclaim, a second retry must not execute."""
-    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+    from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     text = "retry race"
     tick = WorkspaceTickRecord(

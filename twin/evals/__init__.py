@@ -12,15 +12,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .. import ids
-from ..cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from ..cognition.pipeline import extract_percept
 from ..cognition.retrieval import retrieve
 from ..clock import now_iso
 from ..config import Config
-from ..judgment.firewall import Firewall
-from ..memory.embeddings import Embedder, get_embedder
-from ..memory.models import Evidence, MemoryItem
-from ..memory.store.sqlite import SqliteStore
+from twin.privacy.firewall import Firewall
+from twin.store.embeddings import Embedder, get_embedder
+from twin.store.models import Evidence, MemoryItem
+from twin.store.store.sqlite import SqliteStore
 from twin.sense.sensory.percept import Percept
 
 _DEFAULT_POLICIES = Path(__file__).resolve().parent.parent / "defaults" / "policies.yaml"

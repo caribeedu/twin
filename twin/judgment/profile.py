@@ -15,8 +15,8 @@ import yaml
 from ..clock import now_iso
 
 if TYPE_CHECKING:
-    from ..memory.models import MemoryItem
-    from ..memory.store.base import MemoryStore
+    from twin.store.models import MemoryItem
+    from twin.store.store.base import MemoryStore
 
 
 def load_profile(path: Path | str) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 
 import httpx
 
-from twin.memory.embeddings import ollama_reachable, sanitize_base_url
+from twin.store.embeddings import ollama_reachable, sanitize_base_url
 
 
 def test_sanitize_base_url_strips_surrogates_and_junk():

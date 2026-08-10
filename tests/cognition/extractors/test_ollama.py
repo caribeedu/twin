@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from twin.cognition.extractors import ollama as ollama_extractor
-from twin.memory.embeddings import OllamaEmbedder, get_embedder
+from twin.store.embeddings import OllamaEmbedder, get_embedder
 from twin.sense.sensory.percept import Percept
 
 FAKE_EXTRACTION = {

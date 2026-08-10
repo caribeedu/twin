@@ -1,4 +1,4 @@
-"""Safe quality automation and batch apply (twin.memory.automation)."""
+"""Safe quality automation and batch apply (twin.store.automation)."""
 
 from twin import ids
 from twin.cognition.quality import (
@@ -6,8 +6,8 @@ from twin.cognition.quality import (
     build_duplicate_groups,
     select_canonical_survivor,
 )
-from twin.memory.automation import apply_safe_automations, batch_apply, batch_preview
-from twin.memory.models import MemoryItem, MemoryStatus
+from twin.store.automation import apply_safe_automations, batch_apply, batch_preview
+from twin.store.models import MemoryItem, MemoryStatus
 
 
 def _mem(store, embedder, **kw):

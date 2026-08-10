@@ -12,8 +12,8 @@ from typing import Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.embeddings import Embedder
-from ..memory.models import (
+from twin.store.embeddings import Embedder
+from twin.store.models import (
     CanonicalClaim,
     DuplicateGroup,
     FindingStatus,
@@ -24,7 +24,7 @@ from ..memory.models import (
     ReviewFinding,
     SuggestedAction,
 )
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import MemoryStore
 
 ANALYZER_VERSION = "quality-v3"
 

@@ -424,6 +424,6 @@ def interpret(percept: Percept, text: str, *,
 
 
 def available(base_url: str) -> bool:
-    from ...memory.embeddings import ollama_reachable
+    from twin.store.embeddings import ollama_reachable
 
     return ollama_reachable(base_url)

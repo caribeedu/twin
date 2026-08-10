@@ -24,10 +24,10 @@ from typing import Any, Optional
 from ..clock import now_iso
 from ..config import Config
 from twin.sense.connectors.errors import sanitize_error
-from ..memory.automation import apply_safe_automations
-from ..memory.embeddings import Embedder
-from ..memory.store.base import MemoryStore
-from ..memory.store.workspace_ops_mixin import ConsolidationRunRecord
+from twin.store.automation import apply_safe_automations
+from twin.store.embeddings import Embedder
+from twin.store.store.base import MemoryStore
+from twin.store.store.workspace_ops_mixin import ConsolidationRunRecord
 from .quality import analyze_candidates
 
 
@@ -268,7 +268,7 @@ def prepare_review_backlog(
     store: MemoryStore, *, limit: int = 100, dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """List candidates awaiting review; optionally stamp formation_state."""
-    from ..memory.formation import FormationState, as_candidate
+    from twin.store.formation import FormationState, as_candidate
 
     rows = store.list_memories(status="candidate", needs_review=True, limit=limit)
     if len(rows) < limit:
@@ -304,7 +304,7 @@ def prepare_review_backlog(
 
 
 def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[str, Any]:
-    from ..memory.formation import derive_formation_state
+    from twin.store.formation import derive_formation_state
 
     counts: dict[str, int] = {}
     corroborating = 0

@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..memory.lifecycle import merge_memories
-from ..memory.models import FindingType, INACTIVE_STATUSES, MemoryItem
+from twin.store.lifecycle import merge_memories
+from twin.store.models import FindingType, INACTIVE_STATUSES, MemoryItem
 from .quality import altitude_rank, memory_altitude
 
 

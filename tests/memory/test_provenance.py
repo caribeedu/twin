@@ -1,14 +1,14 @@
-"""Artifact provenance and retention propagation (twin.memory.provenance/retention)."""
+"""Artifact provenance and retention propagation (twin.store.provenance/retention)."""
 
 from twin import ids
 from twin.clock import now_iso
-from twin.memory.models import Artifact, Evidence, MemoryItem, MemoryStatus
-from twin.memory.provenance import (
+from twin.store.models import Artifact, Evidence, MemoryItem, MemoryStatus
+from twin.store.provenance import (
     ensure_artifact_from_percept,
     memory_provenance,
     memory_source_summary,
 )
-from twin.memory.retention import delete_artifact
+from twin.store.retention import delete_artifact
 from twin.sense.sensory.percept import Percept
 
 

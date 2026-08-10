@@ -203,8 +203,8 @@ def jobs_snapshot(ws: Workspace, *, limit: int = 20) -> dict[str, Any]:
 
 
 def enqueue_job(ws: Workspace, kind: str) -> dict[str, Any]:
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
 
     q = RuntimeQueue(ws.store)
     jk = JobKind(kind)

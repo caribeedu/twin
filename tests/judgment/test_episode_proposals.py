@@ -7,7 +7,7 @@ from twin.judgment.proposals import (
     propose_from_episode,
     propose_from_episode_patterns,
 )
-from twin.memory.models import CanonicalClaim, MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import CanonicalClaim, MemoryItem, MemoryStatus, MemoryType
 
 
 def _confirmed_trajectory_memory(store, *, episode_id, title, summary,

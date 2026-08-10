@@ -11,7 +11,7 @@ from twin.cognition.observer import (
     resolve_context_domain,
 )
 from twin.cognition.sessions import ensure_project
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType
 
 
 def test_ambiguous_personal_text_stays_unclassified_without_llm(store, cfg):

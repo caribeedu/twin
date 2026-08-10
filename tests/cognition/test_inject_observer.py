@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from twin.cognition.inject_observer import (
+from twin.inject.inject_observer import (
     NoOpInjectObserver,
     get_inject_observer,
     inject_observer_enabled,

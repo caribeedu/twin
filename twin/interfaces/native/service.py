@@ -27,7 +27,7 @@ _PROTO_DENY_EXTRAS = frozenset({
     "traceback", "traceback_tail", "stack", "error_class",
 })
 
-from ...cognition.context_pack import PackDeadlineExceeded
+from twin.inject.context_pack import PackDeadlineExceeded
 from ...cognition.host_session import (
     BindingScopeError,
     NativeSessionStart,
@@ -41,9 +41,9 @@ from ...cognition.host_session import (
     resolve_active_binding,
 )
 from ...config import Config
-from ...memory.embeddings import Embedder
-from ...memory.models import HostSessionBinding, InterventionRecommendation
-from ...memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.models import HostSessionBinding, InterventionRecommendation
+from twin.store.store.base import MemoryStore
 from .events import ALLOWED_HOST_EVENT_KINDS, PACK_EMIT_KINDS, HostEvent
 
 logger = logging.getLogger("twin.interfaces.native")
@@ -167,7 +167,7 @@ class NativeHostService:
     def handle(self, event: HostEvent) -> NativeEventResult:
         try:
             try:
-                from twin.cognition.inject_observer import get_inject_observer
+                from twin.inject.inject_observer import get_inject_observer
 
                 get_inject_observer().observe_turn(
                     self.store,

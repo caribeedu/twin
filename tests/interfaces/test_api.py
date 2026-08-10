@@ -260,7 +260,7 @@ def test_review_ui_form_roundtrip(client):
 def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     """Review workbench resolve endpoint: merge, contradict, dismiss finding."""
     from twin import ids
-    from twin.memory.models import (
+    from twin.store.models import (
         FindingType,
         MemoryItem,
         ReviewFinding,

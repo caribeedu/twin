@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ...config import ALL_DOMAINS
-from ...memory.models import MemoryType
+from twin.store.models import MemoryType
 
 if TYPE_CHECKING:  # avoid import cycle at module load
     from ..episode_reflect import EpisodeBrief, TrajectoryClaim

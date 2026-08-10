@@ -9,9 +9,9 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..judgment.firewall import Firewall
-from ..memory.models import MemoryItem
-from ..memory.store.base import MemoryStore
+from twin.privacy.firewall import Firewall
+from twin.store.models import MemoryItem
+from twin.store.store.base import MemoryStore
 from .classify import classify_memory
 from .grants import (
     consume_grant,

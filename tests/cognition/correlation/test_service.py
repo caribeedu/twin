@@ -25,7 +25,7 @@ from twin.sense.connectors.models import (
     SourceAccount,
     idempotency_key,
 )
-from twin.memory.models import FindingType
+from twin.store.models import FindingType
 from twin.sense.sensory.percept import Percept
 
 

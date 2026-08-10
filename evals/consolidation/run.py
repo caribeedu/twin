@@ -18,9 +18,9 @@ from twin.cognition.consolidation_cycle import run_consolidation_cycle
 from twin.cognition.recall import RecallPolicy, apply_recall_policy
 from twin.cognition.workspace import workspace_tick
 from twin.config import Config
-from twin.memory.embeddings import get_embedder
-from twin.memory.models import MemoryItem
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.models import MemoryItem
+from twin.store.store.sqlite import SqliteStore
 
 _CASES = Path(__file__).resolve().parent / "cases"
 

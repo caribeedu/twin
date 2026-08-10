@@ -5,9 +5,9 @@ from __future__ import annotations
 from twin.cognize.commit import commit_narrative
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.models import NarrativeStatus
-from twin.cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from twin.judgment.proposals import propose_from_narrative
-from twin.memory.embeddings import HashEmbedder
+from twin.store.embeddings import HashEmbedder
 
 
 def test_pack_serve_writes_trace(store, cfg):

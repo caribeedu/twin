@@ -1,13 +1,5 @@
-"""Memory System — consolidation and retrieval.
+"""Deprecated shim — use ``twin.store``.
 
-Persistent stores (PostgreSQL + pgvector as the primary backend, SQLite for
-dev/tests), embeddings and hybrid search.
+Kept for one migration window while call sites move.
 """
-
-from .models import Entity, Evidence, MemoryItem, MemoryStatus, MemoryType, Relation, Sensitivity
-from .store import MemoryStore, create_store
-
-__all__ = [
-    "Entity", "Evidence", "MemoryItem", "MemoryStatus", "MemoryType",
-    "Relation", "Sensitivity", "MemoryStore", "create_store",
-]
+from twin.store import *  # noqa: F403

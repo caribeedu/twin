@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(not PG_URL, reason="TWIN_TEST_PG_URL not set")
 def pg_store():
     import psycopg
 
-    from twin.memory.store.postgres import PostgresStore
+    from twin.store.store.postgres import PostgresStore
 
     # isolated schema per test run
     admin = psycopg.connect(PG_URL, autocommit=True)
@@ -53,8 +53,8 @@ def test_percept_roundtrip_and_dedup(pg_store):
 
 def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
     from twin.cognition import extract_pending
-    from twin.judgment.firewall import Firewall
-    from twin.memory.search import search
+    from twin.privacy.firewall import Firewall
+    from twin.store.search import search
     from twin.sense.sensory import sense_paths
 
     percepts, _ = sense_paths([EXAMPLES])
@@ -72,7 +72,7 @@ def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
     assert "FastAPI" in " ".join(h.memory.summary for h in result.hits[:3])
 
     # review lifecycle
-    from twin.memory.models import MemoryStatus
+    from twin.store.models import MemoryStatus
 
     pg_store.set_status(inserted[0], MemoryStatus.confirmed)
     assert pg_store.get_memory(inserted[0]).status.value == "confirmed"
@@ -87,7 +87,7 @@ def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
 
 def test_pgvector_server_side_similarity(pg_store, embedder):
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     for i, text in enumerate(["FastAPI no backend", "jantar em família"]):
         mem = MemoryItem(id=ids.memory_id(), type="fact", title=text, summary=text)
@@ -158,8 +158,8 @@ def test_projects_and_sessions_on_postgres(pg_store, cfg, embedder):
 def test_firewall_log_on_postgres(pg_store, cfg):
     from twin import ids
     from twin.clock import now_iso
-    from twin.judgment.firewall import Firewall
-    from twin.memory.models import MemoryItem
+    from twin.privacy.firewall import Firewall
+    from twin.store.models import MemoryItem
 
     mem = MemoryItem(id=ids.memory_id(), type="fact", title="x", summary="x",
                      domain="relationship", status="confirmed", confidence=0.9,
@@ -174,8 +174,8 @@ def test_firewall_log_on_postgres(pg_store, cfg):
 def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
     """Same fault-injection as SQLite — Postgres must roll back structural merge."""
     from twin import ids
-    from twin.memory.lifecycle import merge_memories
-    from twin.memory.models import MemoryItem, MemoryStatus
+    from twin.store.lifecycle import merge_memories
+    from twin.store.models import MemoryItem, MemoryStatus
 
     def _mem(**kw):
         base = dict(
@@ -498,7 +498,7 @@ def test_detection_signals_on_postgres(pg_store, cfg, embedder):
 
 def test_workspace_tick_running_blocks_on_postgres(pg_store, cfg, embedder):
     from twin.cognition.workspace import text_content_hash, workspace_tick
-    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+    from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     text = "postgres concurrent tick must not double-run"
     existing = WorkspaceTickRecord(
@@ -541,7 +541,7 @@ def test_consolidation_window_unique_on_postgres(pg_store, cfg, embedder):
 
 def test_retry_cas_on_postgres(pg_store):
     from twin.clock import now_iso
-    from twin.memory.store.workspace_ops_mixin import (
+    from twin.store.store.workspace_ops_mixin import (
         ConsolidationRunRecord,
         WorkspaceTickRecord,
     )

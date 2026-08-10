@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from twin.memory.store.base import MemoryStore
+from twin.store.store.base import MemoryStore
 
 
 def explain_judgment_snapshot(

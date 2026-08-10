@@ -34,7 +34,7 @@ from twin.sense.connectors.models import (
     HealthStatus,
 )
 from twin.sense.connectors.ops import doctor_connector_checks
-from twin.memory.metrics import compute_metrics
+from twin.store.metrics import compute_metrics
 
 PRINCIPAL = "principal_ops"
 

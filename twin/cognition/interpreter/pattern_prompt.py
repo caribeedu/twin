@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ...config import ALL_DOMAINS
-from ...memory.models import MemoryType
+from twin.store.models import MemoryType
 
 if TYPE_CHECKING:
     from ..analysis_dossier import AnalysisDossier

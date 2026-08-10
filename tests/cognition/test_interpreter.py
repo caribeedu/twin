@@ -309,7 +309,7 @@ def test_paraphrase_is_not_accepted_as_verbatim_evidence(store, interpreting_cfg
 def test_evidence_grounding_uses_masked_source(store, interpreting_cfg, embedder):
     """The span is checked against the MASKED text the interpreter read, so an
     item quoting a PII placeholder is accepted and no removed PII returns."""
-    from twin.judgment.pii import mask
+    from twin.privacy.pii import mask
 
     content = "Contact alice@example.com to confirm we decided to use PostgreSQL."
     masked, _ = mask(content)

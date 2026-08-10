@@ -1,7 +1,7 @@
 """Atomic retry claims for workspace ticks / consolidation runs."""
 
 from twin.clock import now_iso
-from twin.memory.store.workspace_ops_mixin import (
+from twin.store.store.workspace_ops_mixin import (
     ConsolidationRunRecord,
     WorkspaceTickRecord,
 )

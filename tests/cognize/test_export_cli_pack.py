@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from twin.cognize.commit import commit_narrative
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.embeddings import HashEmbedder
-from twin.sovereignty.export import collect_export
-from twin.sovereignty.integrity import run_integrity_checks
-from twin.sovereignty.manifest import SCHEMA_VERSION
+from twin.inject.context_pack import build_context_pack
+from twin.store.embeddings import HashEmbedder
+from twin.interfaces.sovereignty.export import collect_export
+from twin.interfaces.sovereignty.integrity import run_integrity_checks
+from twin.interfaces.sovereignty.manifest import SCHEMA_VERSION
 
 
 def test_cli_cognize_help():

@@ -228,7 +228,7 @@ def cmd_interpret(args) -> None:
 
 def cmd_review(args) -> None:
     from twin.cognition.quality import analyze_candidates, review_queue
-    from twin.memory.models import MemoryStatus
+    from twin.store.models import MemoryStatus
     from twin.interfaces import ux
 
     ws = Workspace(args.home)
@@ -323,7 +323,7 @@ def cmd_review(args) -> None:
 
 def cmd_review_batch(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.batches import create_batch, get_batch
+    from twin.store.batches import create_batch, get_batch
 
     ws = Workspace(args.home)
     if args.batch_command == "create":
@@ -379,9 +379,9 @@ def cmd_review_batch(args) -> None:
 
 def _narrative_lifecycle(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
+    from twin.store.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
 
-    from twin.memory.provenance import memory_provenance
+    from twin.store.provenance import memory_provenance
 
     ws = Workspace(args.home)
     if args.narrative_command == "diff":
@@ -515,7 +515,7 @@ def cmd_eval(args) -> None:
 
 def cmd_source(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.calibration import load_calibration, source_report
+    from twin.store.calibration import load_calibration, source_report
 
     ws = Workspace(args.home)
     cal = load_calibration(ws.cfg.calibration_path)
@@ -531,7 +531,7 @@ def cmd_source(args) -> None:
 
 def cmd_retention(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.retention import apply_retention_policies
+    from twin.store.retention import apply_retention_policies
 
     ws = Workspace(args.home)
     dry = not getattr(args, "apply", False)
@@ -551,7 +551,7 @@ def cmd_retention(args) -> None:
 
 def cmd_delete_source(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.retention import delete_by_source_system
+    from twin.store.retention import delete_by_source_system
 
     ws = Workspace(args.home)
     dry = not getattr(args, "apply", False)
@@ -571,7 +571,7 @@ def cmd_delete_source(args) -> None:
 
 def cmd_undo(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import undo_operation
+    from twin.store.lifecycle import undo_operation
 
     ws = Workspace(args.home)
     out = undo_operation(ws.store, args.operation_id)
@@ -585,7 +585,7 @@ def cmd_undo(args) -> None:
 
 
 def cmd_search(args) -> None:
-    from twin.memory.search import search
+    from twin.store.search import search
     from twin.interfaces import ux
 
     ws = Workspace(args.home)
@@ -774,10 +774,10 @@ def cmd_consolidate(args) -> None:
 
 def cmd_runtime(args) -> None:
     from twin.interfaces import ux
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
-    from twin.runtime.scheduler import RuntimeScheduler
-    from twin.runtime.service import TwinRuntime
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.scheduler import RuntimeScheduler
+    from twin.interfaces.runtime.service import TwinRuntime
 
     ws = Workspace(args.home)
     cmd = args.runtime_command
@@ -1845,8 +1845,8 @@ def cmd_connector(args) -> None:
             _emit(args, out, pretty)
             return
         if getattr(args, "run", False):
-            from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
-            from twin.runtime.queue import RuntimeQueue
+            from twin.interfaces.runtime.backfill_sched import enqueue_backfill_partition_jobs
+            from twin.interfaces.runtime.queue import RuntimeQueue
 
             job_id = getattr(args, "job_id", None)
             if not job_id:
@@ -2256,7 +2256,7 @@ def cmd_connector(args) -> None:
 
 def cmd_supersede(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import supersede
+    from twin.store.lifecycle import supersede
 
     ws = Workspace(args.home)
     result = supersede(ws.store, args.new_id, args.old_id)
@@ -2274,7 +2274,7 @@ def cmd_supersede(args) -> None:
 
 def cmd_contradict(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import contradict
+    from twin.store.lifecycle import contradict
 
     ws = Workspace(args.home)
     result = contradict(ws.store, args.id_a, args.id_b)
@@ -2292,7 +2292,7 @@ def cmd_contradict(args) -> None:
 
 def cmd_stats(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.metrics import compute_metrics
+    from twin.store.metrics import compute_metrics
 
     ws = Workspace(args.home)
     metrics = compute_metrics(ws.store)
@@ -2328,7 +2328,7 @@ def cmd_backup(args) -> None:
     from pathlib import Path
 
     from twin.interfaces import ux
-    from twin.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
+    from twin.interfaces.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
 
     ws = Workspace(args.home)
     cmd = args.backup_command

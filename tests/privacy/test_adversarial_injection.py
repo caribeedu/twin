@@ -1,9 +1,9 @@
 """Adversarial privacy / injection checks for."""
 
 from twin import ids
-from twin.judgment.firewall import Firewall
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.memory.search import search
+from twin.privacy.firewall import Firewall
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.search import search
 from twin.privacy.quarantine import detect_injection
 
 

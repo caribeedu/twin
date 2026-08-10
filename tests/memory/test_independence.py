@@ -7,9 +7,9 @@ neighbor (a Slack symptom next to a GitHub fix) is a genuine second source.
 from __future__ import annotations
 
 from twin.clock import now_iso
-from twin.memory.formation import propose_or_corroborate
-from twin.memory.models import MemoryItem, MemoryType
-from twin.memory.provenance import (
+from twin.store.formation import propose_or_corroborate
+from twin.store.models import MemoryItem, MemoryType
+from twin.store.provenance import (
     attach_corroborating_evidence,
     count_independent_sources,
     memory_source_keys,

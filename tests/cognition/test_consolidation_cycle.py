@@ -10,7 +10,7 @@ from twin.cognition.consolidation_cycle import (
     run_consolidation_cycle,
 )
 from twin.cognition.sessions import ensure_project
-from twin.memory.models import MemoryItem, MemoryStatus
+from twin.store.models import MemoryItem, MemoryStatus
 
 
 def _belief(store, embedder, **kw):

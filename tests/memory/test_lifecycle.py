@@ -1,16 +1,16 @@
-"""Explicit memory lifecycle (twin.memory.lifecycle)."""
+"""Explicit memory lifecycle (twin.store.lifecycle)."""
 
 import pytest
 
 from twin import ids
-from twin.memory.lifecycle import (
+from twin.store.lifecycle import (
     contradict,
     merge_memories,
     split_memory,
     supersede,
     undo_operation,
 )
-from twin.memory.models import Evidence, MemoryItem, MemoryStatus
+from twin.store.models import Evidence, MemoryItem, MemoryStatus
 from twin.sense.sensory.percept import Percept
 
 
@@ -51,7 +51,7 @@ def test_meeting_candidate_supersedes_prior_decision_after_confirm(store, embedd
     is an explicit Memory lifecycle action.
     """
     from twin.clock import now_iso
-    from twin.memory.models import Evidence, MemoryStatus
+    from twin.store.models import Evidence, MemoryStatus
     from twin.sense.sensory.percept import Percept
 
     pr = Percept(

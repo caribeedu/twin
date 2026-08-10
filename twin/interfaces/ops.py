@@ -105,7 +105,7 @@ def doctor(cfg: Config) -> list[Check]:
     # store connectivity + backend capabilities (also runs migrations)
     url = cfg.resolved_db_url
     try:
-        from ..memory.store import create_store
+        from twin.store.store import create_store
 
         store = create_store(url)
         backend = type(store).__name__
@@ -129,7 +129,7 @@ def doctor(cfg: Config) -> list[Check]:
 
     # LLM + models (provider-aware)
     from ..llm import llm_available, provider_kind
-    from ..memory.embeddings import get_embedder_for_config, ollama_reachable
+    from twin.store.embeddings import get_embedder_for_config, ollama_reachable
 
     provider = cfg.normalized_llm_provider
     kind = provider_kind(provider)
@@ -200,7 +200,7 @@ def doctor(cfg: Config) -> list[Check]:
     # encryption
     if cfg.encryption_key:
         try:
-            from ..memory.crypto import build_codec
+            from twin.store.crypto import build_codec
 
             build_codec(cfg.encryption_key, cfg.home)
             checks.append(Check("encryption", OK, "at-rest encryption active"))
@@ -222,7 +222,7 @@ def doctor(cfg: Config) -> list[Check]:
     # connector schedule / credentials / instance health
     try:
         from twin.sense.connectors.ops import doctor_connector_checks
-        from ..memory.store import create_store
+        from twin.store.store import create_store
 
         conn_store = create_store(cfg.resolved_db_url)
         try:
@@ -242,7 +242,7 @@ def doctor(cfg: Config) -> list[Check]:
 def setup_ollama(cfg: Config) -> list[str]:
     """Pull the configured models (via the ollama CLI when available)."""
     lines: list[str] = []
-    from ..memory.embeddings import ollama_reachable
+    from twin.store.embeddings import ollama_reachable
 
     if not ollama_reachable(cfg.ollama_url):
         lines.append(f"Ollama unreachable at {cfg.ollama_url}.")
@@ -270,7 +270,7 @@ def setup_postgres(cfg: Config) -> list[str]:
             "  export TWIN_DB_URL=postgresql://twin:twin@localhost:5432/twin",
         ]
     try:
-        from ..memory.store.postgres import PostgresStore
+        from twin.store.store.postgres import PostgresStore
 
         store = PostgresStore(url)
         pg = "pgvector active" if store.has_pgvector else "pgvector MISSING"

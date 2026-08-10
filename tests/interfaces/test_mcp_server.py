@@ -84,7 +84,7 @@ async def test_operational_workflow_end_to_end(tmp_path, monkeypatch):
     # existing state: a known project and one confirmed prior decision
     from twin import ids
     from twin.cognition.sessions import ensure_project
-    from twin.memory.models import MemoryItem, MemoryStatus
+    from twin.store.models import MemoryItem, MemoryStatus
     from twin.workspace import Workspace
 
     ws = Workspace(str(home))

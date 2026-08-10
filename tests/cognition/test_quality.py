@@ -7,7 +7,7 @@ from twin.cognition.quality import (
     review_priority,
     review_queue,
 )
-from twin.memory.models import MemoryItem
+from twin.store.models import MemoryItem
 
 
 def _mem(store, embedder, **kw):

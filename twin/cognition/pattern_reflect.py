@@ -19,10 +19,10 @@ from typing import Any, Callable, Optional
 
 from .. import ids
 from ..config import Config
-from ..memory.embeddings import Embedder
-from ..memory.formation import propose_or_corroborate
-from ..memory.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
-from ..memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.formation import propose_or_corroborate
+from twin.store.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
+from twin.store.store.base import MemoryStore
 from twin.sense.sensory.percept import Percept
 from .analysis_dossier import AnalysisDossier, compile_window_dossier
 

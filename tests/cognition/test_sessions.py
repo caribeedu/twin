@@ -15,7 +15,7 @@ from twin.cognition.sessions import (
     stale_sessions,
     start_session,
 )
-from twin.memory.models import ConsolidationStatus, SessionStatus
+from twin.store.models import ConsolidationStatus, SessionStatus
 
 def test_ensure_project_creates_and_reuses(store):
     project = ensure_project(store, "Atlas", repos=["atlas-api"], aliases=["atlas"])
@@ -73,7 +73,7 @@ def test_start_session_unclassified_is_default_deny(store, cfg, embedder):
     """No domain evidence + no explicit domain → the session opens
     unclassified with an EMPTY pack: no memories, no judgment profile."""
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     mem = MemoryItem(id=ids.memory_id(), type="fact", title="Webhook stack",
                      summary="Webhooks run on FastAPI.", domain="technical",
@@ -450,7 +450,7 @@ def test_record_feedback_validates_verdicts_and_scopes(store, cfg, embedder):
 
 def test_feedback_memory_must_belong_to_the_session(store, cfg, embedder):
     from twin import ids
-    from twin.memory.models import MemoryItem
+    from twin.store.models import MemoryItem
 
     supplied = MemoryItem(id=ids.memory_id(), type="decision",
                           title="Use FastAPI", summary="Decision: FastAPI.",

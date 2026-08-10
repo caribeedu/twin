@@ -10,9 +10,9 @@ from twin import ids
 from twin.config import Config
 from twin.interfaces.native.events import HostCapabilities, HostEvent
 from twin.interfaces.native.service import NativeHostService
-from twin.memory.embeddings import get_embedder
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.models import MemoryItem, MemoryStatus, MemoryType
+from twin.store.store.sqlite import SqliteStore
 
 # Claude-specific hook names / adapter imports must stay out of the generic
 # service and cognition host-session modules. Provider names may appear only

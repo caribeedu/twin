@@ -13,7 +13,7 @@ from typing import Optional
 
 from ... import ids
 from ...clock import now_iso
-from ...memory.models import (
+from twin.store.models import (
     FindingStatus,
     FindingType,
     ReviewFinding,
