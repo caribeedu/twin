@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from twin.clock import now_iso
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     BackfillJob,
     ConnectorBatch,
     ConnectorCheckpoint,
@@ -25,7 +25,7 @@ from twin.connectors.models import (
     RawConnectorItem,
     SourceAccount,
 )
-from twin.connectors.persistence import (
+from twin.sense.connectors.persistence import (
     account_to_row,
     backfill_job_to_row,
     batch_to_row,
@@ -820,7 +820,7 @@ class ConnectorStoreMixin:
         worker_id: str, claim_token: int,
     ) -> bool:
         """True when the worker still holds a non-expired partition claim."""
-        from twin.connectors.mail.backfill import claim_is_held
+        from twin.sense.connectors.mail.backfill import claim_is_held
 
         job = self.get_backfill_job(job_id)
         if job is None:
@@ -835,7 +835,7 @@ class ConnectorStoreMixin:
         worker_id: str, claim_token: int,
     ) -> bool:
         """Heartbeat: extend claim TTL under CAS. False if fence lost."""
-        from twin.connectors.mail.backfill import renew_partition_claim
+        from twin.sense.connectors.mail.backfill import renew_partition_claim
 
         job = self.get_backfill_job(job_id)
         if job is None:

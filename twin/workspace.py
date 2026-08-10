@@ -22,7 +22,7 @@ class Workspace:
         self.embedder: Embedder = get_embedder_for_config(self.cfg)
         # Record LLM token/cost usage to the home ledger (idempotent per home).
         try:
-            from .cognition.llm.usage import install_ledger_sink
+            from .llm.usage import install_ledger_sink
             install_ledger_sink(self.cfg.home)
         except Exception:
             pass

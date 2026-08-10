@@ -33,7 +33,7 @@ from twin.cognition.correlation.projects import (
     resolve_project_for_record,
 )
 from twin.cognition.sessions import ensure_project
-from twin.connectors.models import ConnectorRecord, idempotency_key
+from twin.sense.connectors.models import ConnectorRecord, idempotency_key
 
 
 def _rec(**kwargs) -> ConnectorRecord:

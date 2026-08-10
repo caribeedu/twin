@@ -26,7 +26,7 @@ def cognize_status(ws, args) -> dict[str, Any]:
 
     from twin.cognize.gate import require_chat_llm
     from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
-    from twin.cognition.llm import llm_available
+    from twin.llm import llm_available
 
     pending = []
     if hasattr(ws.store, "percepts_pending_interpretation"):

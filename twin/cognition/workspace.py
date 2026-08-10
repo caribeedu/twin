@@ -25,12 +25,12 @@ from typing import Any, Literal, Optional
 from .. import ids
 from ..clock import now_iso
 from ..config import UNCLASSIFIED_DOMAIN, Config
-from ..connectors.errors import sanitize_error
+from twin.sense.connectors.errors import sanitize_error
 from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder
 from ..memory.store.base import MemoryStore
 from ..memory.store.workspace_ops_mixin import WorkspaceTickRecord
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .observer import observe, read_context
 from .pipeline import extract_percept
 from .recall import RecallPolicy, RecallResult, apply_recall_policy

@@ -2,8 +2,8 @@
 the shared key that bridges cross-sense correlation."""
 from __future__ import annotations
 
-from twin.connectors import runtime as rt
-from twin.connectors.models import (
+from twin.sense.connectors import runtime as rt
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     SourceAccount,

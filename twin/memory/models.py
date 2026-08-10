@@ -1,6 +1,6 @@
 """Memory-layer data model: Memory Items, Entities, Relations, Evidence.
 
-(The Percept model — the input contract — lives in ``twin.sensory.percept``.)
+(The Percept model — the input contract — lives in ``twin.sense.sensory.percept``.)
 """
 
 from __future__ import annotations

@@ -20,7 +20,7 @@ from pathlib import Path
 from twin.cognition.interpreter import ollama_interpreter
 from twin.cognition.interpreter.grounding import evidence_span_is_grounded
 from twin.config import Config
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 _CASES = Path(__file__).resolve().parent / "cases"
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from ...clock import now_iso
+from twin.clock import now_iso
 
 TERMINAL_STATUSES = frozenset({"complete", "failed"})
 INCOMPLETE_STATUSES = frozenset({"live", "processing", "partial"})

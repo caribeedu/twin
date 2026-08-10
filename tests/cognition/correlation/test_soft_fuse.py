@@ -4,7 +4,7 @@ from __future__ import annotations
 from twin.cognition.correlation.episodes import correlate_records
 from twin.cognition.correlation.projects import link_project
 from twin.cognition.sessions import ensure_project
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,

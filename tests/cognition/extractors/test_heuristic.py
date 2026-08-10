@@ -9,7 +9,7 @@ confidence. In ``TWIN_EXTRACTOR=heuristic`` the pipeline records
 from tests.paths import EXAMPLES
 
 from twin.cognition import extract_pending, extract_percept
-from twin.sensory import sense_paths
+from twin.sense.sensory import sense_paths
 
 
 def _percept(store, subpath):

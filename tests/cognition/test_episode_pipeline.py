@@ -11,7 +11,7 @@ from twin.cognition import (
     set_stage_override,
 )
 from twin.cognition.episode_pipeline import STAGE_ORDER
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,

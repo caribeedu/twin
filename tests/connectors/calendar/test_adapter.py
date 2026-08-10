@@ -4,13 +4,13 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
     sync_connector,
 )
-from twin.connectors.meeting.correlate import correlation_fingerprint
+from twin.sense.connectors.meeting.correlate import correlation_fingerprint
 
 from tests.connectors.calendar.calendar_mock import FakeCalendarAPI
 
@@ -26,7 +26,7 @@ def creds(tmp_path):
 @pytest.fixture()
 def calendar(monkeypatch):
     api = FakeCalendarAPI()
-    from twin.connectors.calendar import client as cclient
+    from twin.sense.connectors.calendar import client as cclient
     real_build = cclient._build_http
 
     def fake_build(base_url, token):
@@ -57,8 +57,8 @@ def _mk(store, creds, *, calendars=(CAL,), secret=TOKEN, extra=None):
 
 
 def test_parse_stream_continuous_and_backfill():
-    from twin.connectors.calendar.adapter import _parse_stream
-    from twin.connectors.protocol import ConnectorError
+    from twin.sense.connectors.calendar.adapter import _parse_stream
+    from twin.sense.connectors.protocol import ConnectorError
 
     assert _parse_stream("calendar:primary") == "primary"
     assert _parse_stream(

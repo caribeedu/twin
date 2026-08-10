@@ -11,7 +11,7 @@ from twin.memory.lifecycle import (
     undo_operation,
 )
 from twin.memory.models import Evidence, MemoryItem, MemoryStatus
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _mem(store, embedder, **kw):
@@ -52,7 +52,7 @@ def test_meeting_candidate_supersedes_prior_decision_after_confirm(store, embedd
     """
     from twin.clock import now_iso
     from twin.memory.models import Evidence, MemoryStatus
-    from twin.sensory.percept import Percept
+    from twin.sense.sensory.percept import Percept
 
     pr = Percept(
         id=ids.new_id("pct"),

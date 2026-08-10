@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from typing import Iterable, Optional
 
 from ...clock import now_iso  # re-export for backends
-from ...sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from ..embeddings import cosine, from_blob
 from ..models import (
     CognitiveSession, DetectionSignal, Entity, Evidence, MemoryItem, MemoryStatus,

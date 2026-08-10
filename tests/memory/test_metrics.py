@@ -7,7 +7,7 @@ from tests.paths import EXAMPLES
 from twin.cognition import extract_percept
 from twin.memory.metrics import compute_metrics
 from twin.memory.models import MemoryStatus
-from twin.sensory import sense_paths
+from twin.sense.sensory import sense_paths
 
 def _populate(store, cfg, embedder):
     percepts, _ = sense_paths([EXAMPLES])

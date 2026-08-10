@@ -30,7 +30,7 @@ from twin.cognize.models import (
 )
 from twin.cognize.stale import mark_stale_for_new_percept
 from twin.config import Config
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 class CognizeStage(str, Enum):
@@ -184,7 +184,7 @@ def run_cognize(
     reachable = chat_reachable
     if reachable is None and not has_overrides:
         try:
-            from twin.cognition.llm import llm_available
+            from twin.llm import llm_available
 
             reachable = llm_available(cfg)
         except Exception:
@@ -241,7 +241,7 @@ def run_cognize(
 
     llm = None
     if not has_overrides:
-        from twin.cognition.llm import get_chat_client
+        from twin.llm import get_chat_client
 
         llm = get_chat_client(cfg)
 

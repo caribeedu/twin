@@ -27,7 +27,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
@@ -209,7 +209,7 @@ def _github_env():
         sys.path.insert(0, str(tests_dir))
     from tests.connectors.github.github_mock import FakeGitHubAPI, _user
 
-    from twin.connectors.github import client as ghclient
+    from twin.sense.connectors.github import client as ghclient
 
     api = FakeGitHubAPI()
     real_build = ghclient._build_http
@@ -402,7 +402,7 @@ def _slack_env():
         sys.path.insert(0, str(tests_dir))
     from tests.connectors.slack.slack_mock import FakeSlackAPI
 
-    from twin.connectors.slack import client as slclient
+    from twin.sense.connectors.slack import client as slclient
 
     api = FakeSlackAPI()
     real_build = slclient._build_http
@@ -483,7 +483,7 @@ def _gmail_env():
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
     from tests.connectors.gmail.gmail_mock import FakeGmailAPI
-    from twin.connectors.gmail import client as gclient
+    from twin.sense.connectors.gmail import client as gclient
 
     api = FakeGmailAPI()
     real_build = gclient._build_http
@@ -505,7 +505,7 @@ def _gmail_env():
 def _calendar_env():
     import httpx
     from tests.connectors.calendar.calendar_mock import FakeCalendarAPI
-    from twin.connectors.calendar import client as cclient
+    from twin.sense.connectors.calendar import client as cclient
 
     api = FakeCalendarAPI()
     real_build = cclient._build_http
@@ -527,7 +527,7 @@ def _calendar_env():
 def _fireflies_env():
     import httpx
     from tests.connectors.fireflies.fireflies_mock import FakeFirefliesAPI
-    from twin.connectors.fireflies import client as fclient
+    from twin.sense.connectors.fireflies import client as fclient
 
     api = FakeFirefliesAPI()
     real_build = fclient._build_http
@@ -815,7 +815,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
         run_correlation_pass,
     )
     from twin.cognition.sessions import ensure_project
-    from twin.connectors.models import (
+    from twin.sense.connectors.models import (
         ConnectorInstance,
         ConnectorRecord,
         ConnectorStatus,
@@ -930,7 +930,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
 
 def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
     """Health snapshot, metrics, and setup/preview never ingest."""
-    from twin.connectors import (
+    from twin.sense.connectors import (
         backfill_preview,
         compute_connector_metrics,
         connector_health,

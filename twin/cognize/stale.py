@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from twin.cognize.models import EpistemicStatus
 from twin.clock import now_iso
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _vault_for_percept(percept: Percept) -> str:

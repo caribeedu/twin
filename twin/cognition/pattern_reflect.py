@@ -23,7 +23,7 @@ from ..memory.embeddings import Embedder
 from ..memory.formation import propose_or_corroborate
 from ..memory.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
 from ..memory.store.base import MemoryStore
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .analysis_dossier import AnalysisDossier, compile_window_dossier
 
 PatternReflectorFn = Callable[[AnalysisDossier, Config], list[Any]]
@@ -52,7 +52,7 @@ class PatternReflectResult:
 def _select_reflector(cfg: Config) -> Optional[PatternReflectorFn]:
     if _OVERRIDE is not None:
         return _OVERRIDE
-    from .llm import get_chat_client
+    from twin.llm import get_chat_client
 
     if cfg.extractor in (
         "auto", "ollama", "openai", "openai_compatible",
@@ -60,7 +60,7 @@ def _select_reflector(cfg: Config) -> Optional[PatternReflectorFn]:
     ):
         try:
             from .interpreter.pattern_prompt import reflect_patterns_with_model
-            from .llm.usage import usage_context
+            from twin.llm.usage import usage_context
 
             client = get_chat_client(cfg)
             if client.available():

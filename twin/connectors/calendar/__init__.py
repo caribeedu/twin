@@ -1,5 +1,2 @@
-"""Calendar professional connector."""
-
-from .adapter import CalendarConnector
-
-__all__ = ["CalendarConnector"]
+"""Deprecated shim — use ``twin.sense.connectors.calendar``."""
+from twin.sense.connectors.calendar import *  # noqa: F403

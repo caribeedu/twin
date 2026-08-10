@@ -1,6 +1,6 @@
 """GitHub and Slack adapters meet the production-ready contract."""
 
-from twin.connectors import (
+from twin.sense.connectors import (
     check_adapter_contract,
     production_ready_adapters,
 )

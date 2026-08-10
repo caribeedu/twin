@@ -1880,8 +1880,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     # never implies connector authority, and credentials never return.
     from fastapi import Header
 
-    from ..connectors import build_credential_store as _bcs
-    from ..connectors import (
+    from twin.sense.connectors import build_credential_store as _bcs
+    from twin.sense.connectors import (
         CAP_BACKFILL,
         CAP_CONFIGURE,
         CAP_CREDENTIALS,
@@ -2149,11 +2149,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                    connector_id)
         try:
             if job_id:
-                from ..connectors import run_backfill_partition
+                from twin.sense.connectors import run_backfill_partition
                 return run_backfill_partition(
                     ws.store, _conn_creds(), job_id)
             if create:
-                from ..connectors import create_backfill_job
+                from twin.sense.connectors import create_backfill_job
                 job = create_backfill_job(
                     ws.store, _conn_creds(), connector_id)
                 return {
@@ -2180,7 +2180,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         # Authenticated by HMAC against a dedicated webhook secret — never by
         # twin identity, never by the API token. A valid delivery only nudges
         # the scheduler; the payload never becomes canonical state.
-        from ..connectors.github.webhook import WebhookRejected, handle_github_webhook
+        from twin.sense.connectors.github.webhook import WebhookRejected, handle_github_webhook
         body = await request.body()
         try:
             return handle_github_webhook(
@@ -2194,7 +2194,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/webhooks/slack/{connector_id}")
     async def api_slack_webhook(connector_id: str, request: Request):
-        from ..connectors.slack.webhook import WebhookRejected, handle_slack_webhook
+        from twin.sense.connectors.slack.webhook import WebhookRejected, handle_slack_webhook
         body = await request.body()
         try:
             return handle_slack_webhook(

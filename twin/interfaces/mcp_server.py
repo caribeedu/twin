@@ -949,8 +949,8 @@ def create_server(home: Optional[str] = None):
     def connector_list() -> str:
         """List connector instances (type, status, ownership) this client is
         allowed to see. Requires capability connector:read. No secrets."""
-        from ..connectors import CAP_READ, authorize_connector, connector_health
-        from ..connectors import visible_connectors
+        from twin.sense.connectors import CAP_READ, authorize_connector, connector_health
+        from twin.sense.connectors import visible_connectors
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ)
         if not auth.allowed:
@@ -972,7 +972,7 @@ def create_server(home: Optional[str] = None):
     def connector_status(connector_id: str) -> str:
         """Health, last batch, checkpoints and dead-letter depth for a
         connector. Requires capability connector:read on that connector."""
-        from ..connectors import CAP_READ, authorize_connector, connector_health
+        from twin.sense.connectors import CAP_READ, authorize_connector, connector_health
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ,
                                    connector_id=connector_id)
@@ -984,8 +984,8 @@ def create_server(home: Optional[str] = None):
     def connector_health_all() -> str:
         """Aggregate health across the connectors this client may read.
         Requires capability connector:read."""
-        from ..connectors import CAP_READ, authorize_connector, connector_health
-        from ..connectors import visible_connectors
+        from twin.sense.connectors import CAP_READ, authorize_connector, connector_health
+        from twin.sense.connectors import visible_connectors
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ)
         if not auth.allowed:
@@ -1000,7 +1000,7 @@ def create_server(home: Optional[str] = None):
     def connector_dead_letters(connector_id: str) -> str:
         """Open dead letters for a connector (sanitized errors only).
         Requires capability connector:read (or connector:read:errors)."""
-        from ..connectors import CAP_READ_ERRORS, authorize_connector
+        from twin.sense.connectors import CAP_READ_ERRORS, authorize_connector
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ_ERRORS,
                                    connector_id=connector_id)
@@ -1020,7 +1020,7 @@ def create_server(home: Optional[str] = None):
         vault, ingestion policy and provider-side volume estimates. Read
         only: previewing never starts ingestion. Requires capability
         connector:backfill on that connector."""
-        from ..connectors import (
+        from twin.sense.connectors import (
             CAP_BACKFILL,
             authorize_connector,
             backfill_preview,
@@ -1055,7 +1055,7 @@ def create_server(home: Optional[str] = None):
         identity). Then call again with confirm=true and that token; if the
         connector changed in between, the token no longer matches and a fresh
         preview is required. Never returns raw payloads."""
-        from ..connectors import (
+        from twin.sense.connectors import (
             CAP_SYNC,
             authorize_connector,
             build_credential_store,

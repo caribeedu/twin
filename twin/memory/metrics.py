@@ -167,7 +167,7 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
 def _connector_block(store: MemoryStore) -> dict[str, Any]:
     """ — connector counters nested under the same metrics payload."""
     try:
-        from ..connectors.metrics import compute_connector_metrics
+        from twin.sense.connectors.metrics import compute_connector_metrics
     except Exception:
         return {"connectors": {"available": False}}
     return compute_connector_metrics(store)

@@ -4,13 +4,13 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
     sync_connector,
 )
-from twin.connectors.protocol import ConnectorError
+from twin.sense.connectors.protocol import ConnectorError
 
 from tests.connectors.outlook.outlook_mock import FakeOutlookAPI
 
@@ -26,7 +26,7 @@ def creds(tmp_path):
 @pytest.fixture()
 def outlook(monkeypatch):
     api = FakeOutlookAPI()
-    from twin.connectors.outlook import client as oclient
+    from twin.sense.connectors.outlook import client as oclient
     real_build = oclient._build_http
 
     def fake_build(base_url, token):
@@ -63,7 +63,7 @@ def test_empty_folders_await_configuration(store, creds, outlook):
 def test_backfill_floor_anchors_at_oldest_message(store, creds, outlook):
     """Backfill starts at the oldest message date, not the planner's blind
     10-year default (which yields many empty month partitions)."""
-    from twin.connectors import create_backfill_job
+    from twin.sense.connectors import create_backfill_job
 
     outlook.add_message("m_new", conversation_id="c1", subject="new", body="hi",
                         received="2025-06-10T09:00:00Z")
@@ -199,7 +199,7 @@ def test_move_outside_allowlist_tombs(store, creds, outlook):
 
 
 def test_nextlink_rate_limit_raises(store, creds, outlook):
-    from twin.connectors.outlook.client import OutlookClient
+    from twin.sense.connectors.outlook.client import OutlookClient
     client = OutlookClient(TOKEN)
     # Patch http to mock transport
     client._http = httpx.Client(

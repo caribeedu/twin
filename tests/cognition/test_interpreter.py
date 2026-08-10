@@ -16,7 +16,7 @@ from twin.cognition.interpreter.schema import (
     InterpretationStatus,
     InterpretedItem,
 )
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 @pytest.fixture()

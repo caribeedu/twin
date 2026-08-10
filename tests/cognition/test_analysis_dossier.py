@@ -14,7 +14,7 @@ from twin.cognition.analysis_dossier import (
     compile_episode_dossier,
     compile_window_dossier,
 )
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorStatus,
     ConnectorRecord,

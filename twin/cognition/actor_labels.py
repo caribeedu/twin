@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 _SLACK_UID = re.compile(r"\b(U[A-Z0-9]{8,})\b")
 _SLACK_CID = re.compile(r"\b(C[A-Z0-9]{8,})\b")

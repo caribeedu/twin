@@ -126,7 +126,7 @@ def _open_gate(cfg: Config) -> _Gate:
         # No model, but not blocked — stages defer unless a test override exists.
         return _Gate()
     try:
-        from .llm import get_chat_client
+        from twin.llm import get_chat_client
 
         chat = get_chat_client(cfg)
         return _Gate(chat=chat, available=bool(chat.available()))
@@ -226,7 +226,7 @@ def _classify(members: list[dict[str, Any]], cfg: Config, gate: _Gate):
         return StageStatus.deferred, {}, "model unavailable"
     try:
         from .interpreter.classify_prompt import classify_members
-        from .llm.usage import usage_context
+        from twin.llm.usage import usage_context
 
         with usage_context(stage=BrainStage.amygdala.value, role="llm"):
             roles = classify_members(gate.chat, members)
@@ -252,7 +252,7 @@ def _understand(phases: list[dict[str, Any]], quotes: dict[str, str],
         return StageStatus.deferred, [], "model unavailable"
     try:
         from .interpreter.understand_prompt import understand_edges
-        from .llm.usage import usage_context
+        from twin.llm.usage import usage_context
 
         with usage_context(stage=BrainStage.cortex.value, role="llm"):
             return StageStatus.ok, understand_edges(gate.chat, phases, quotes), "llm"

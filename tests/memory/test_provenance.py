@@ -9,7 +9,7 @@ from twin.memory.provenance import (
     memory_source_summary,
 )
 from twin.memory.retention import delete_artifact
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _mem(store, embedder, **kw):

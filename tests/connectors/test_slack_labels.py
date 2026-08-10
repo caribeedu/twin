@@ -1,7 +1,7 @@
 """Slack messages should expose human names, not bare U… ids."""
 from __future__ import annotations
 
-from twin.connectors.slack import normalize as norm
+from twin.sense.connectors.slack import normalize as norm
 
 
 def test_display_label_prefers_profile_display_name():

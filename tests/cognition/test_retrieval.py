@@ -3,7 +3,7 @@
 from twin import ids
 from twin.cognition.retrieval import retrieve
 from twin.memory.models import Evidence, MemoryItem
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _mem(store, embedder, title, summary, **kw):

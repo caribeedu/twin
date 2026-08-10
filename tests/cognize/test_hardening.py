@@ -30,7 +30,7 @@ from twin.cognize.orchestrator import (
 )
 from twin.interfaces.commands import cognize_cmd
 from twin.memory.models import MemoryItem, MemoryStatus, MemoryType, Sensitivity
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from twin import ids
 
 

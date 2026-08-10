@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
     sync_connector,
 )
-from twin.connectors.folder.scanner import FolderScanner, validate_roots
-from twin.connectors.protocol import ConnectorError
+from twin.sense.connectors.folder.scanner import FolderScanner, validate_roots
+from twin.sense.connectors.protocol import ConnectorError
 
 
 @pytest.fixture()
@@ -35,7 +35,7 @@ def _mk(store, creds, roots, *, extra=None):
 
 
 def test_base_stream_strips_backfill_namespace():
-    from twin.connectors.folder.adapter import _base_stream
+    from twin.sense.connectors.folder.adapter import _base_stream
 
     assert _base_stream("folder:eng-docs") == "folder:eng-docs"
     assert _base_stream(
@@ -50,7 +50,7 @@ def test_parse_stream_accepts_backfill_namespace(store, creds, tmp_path):
     _acc, inst = _mk(store, creds, roots=[{
         "id": "eng-docs", "label": "eng-docs", "path": str(root),
     }])
-    from twin.connectors.folder.adapter import FolderConnector
+    from twin.sense.connectors.folder.adapter import FolderConnector
 
     account = store.get_source_account(inst.account_id)
     adapter = FolderConnector(inst, account, None)
@@ -219,7 +219,7 @@ def test_exclude_globs(store, creds, tmp_path):
 
 
 def test_match_any_does_not_treat_starstar_as_basename():
-    from twin.connectors.folder.scanner import _match_any
+    from twin.sense.connectors.folder.scanner import _match_any
 
     assert _match_any("rfc.md", ("**/*.md",))
     assert not _match_any("rfc.md", ("**/.git/**", "**/node_modules/**"))
@@ -228,7 +228,7 @@ def test_match_any_does_not_treat_starstar_as_basename():
 
 
 def test_list_roots_reports_readability(store, creds, tmp_path):
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.registry import build_adapter
     root = tmp_path / "docs"
     root.mkdir()
     _acc, inst = _mk(store, creds, roots=[

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from twin.connectors.mail.backfill import (
+from twin.sense.connectors.mail.backfill import (
     base_stream_resolved,
     discover_earliest_month,
     incomplete_base_streams,

@@ -7,7 +7,7 @@ from twin.cognition.context_pack import build_context_pack
 from twin.cognition.observer import observe
 from twin.judgment.firewall import Firewall
 from twin.memory.search import search
-from twin.sensory import sense_paths
+from twin.sense.sensory import sense_paths
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
 

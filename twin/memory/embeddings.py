@@ -109,7 +109,7 @@ class OpenAICompatEmbedder:
     def embed(self, text: str) -> list[float]:
         import time as _time
 
-        from ..cognition.llm.usage import emit_usage
+        from ..llm.usage import emit_usage
 
         path = "/embeddings" if self.base_url.endswith("/v1") else "/v1/embeddings"
         _t0 = _time.perf_counter()
@@ -150,7 +150,7 @@ class GeminiEmbedder:
     def embed(self, text: str) -> list[float]:
         import time as _time
 
-        from ..cognition.llm.usage import emit_usage
+        from ..llm.usage import emit_usage
 
         model = self.model
         if not model.startswith("models/"):

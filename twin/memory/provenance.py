@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .models import Artifact, Evidence, MemoryItem
 from .store.base import MemoryStore
 

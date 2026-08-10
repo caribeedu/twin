@@ -4,7 +4,7 @@ from twin.clock import now_iso
 from twin.cognition.evidence_text import fold_summary_line, sanitize_evidence_quote
 from twin.memory.formation import propose_or_corroborate
 from twin.memory.models import MemoryItem, MemoryType
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_fold_summary_line_uses_human_labels():

@@ -37,7 +37,7 @@ def test_pgvector_available(pg_store):
 
 
 def test_percept_roundtrip_and_dedup(pg_store):
-    from twin.sensory import sense_paths
+    from twin.sense.sensory import sense_paths
 
     percepts, _ = sense_paths([EXAMPLES / "docs"])
     percept = percepts[0]
@@ -55,7 +55,7 @@ def test_full_pipeline_on_postgres(pg_store, cfg, embedder):
     from twin.cognition import extract_pending
     from twin.judgment.firewall import Firewall
     from twin.memory.search import search
-    from twin.sensory import sense_paths
+    from twin.sense.sensory import sense_paths
 
     percepts, _ = sense_paths([EXAMPLES])
     for p in percepts:
@@ -223,13 +223,13 @@ def test_connector_framework_on_postgres(pg_store, tmp_path):
     """The connector spine holds the same invariants on Postgres: atomic
     finalize, lease exclusion, CAS checkpoints, collision handling and
     partial batches that expose nothing cognitive."""
-    from twin.connectors import (
+    from twin.sense.connectors import (
         add_connector_instance,
         build_credential_store,
         register_source_account,
         sync_connector,
     )
-    from twin.connectors.models import ConnectorCheckpoint
+    from twin.sense.connectors.models import ConnectorCheckpoint
 
     creds = build_credential_store(tmp_path / "pg-creds")
     acc = register_source_account(
@@ -308,13 +308,13 @@ def test_github_connector_on_postgres(pg_store, tmp_path, monkeypatch):
     import httpx
 
     from tests.connectors.github.github_mock import FakeGitHubAPI
-    from twin.connectors import (
+    from twin.sense.connectors import (
         add_connector_instance,
         build_credential_store,
         register_source_account,
         sync_connector,
     )
-    from twin.connectors.github import client as ghclient
+    from twin.sense.connectors.github import client as ghclient
 
     api = FakeGitHubAPI()
     repo = "acme/atlas"
@@ -379,14 +379,14 @@ def test_github_connector_on_postgres(pg_store, tmp_path, monkeypatch):
 
 def test_connector_counter_claim_bump_atomic_on_postgres(pg_store, tmp_path):
     """Claim + bump share one Postgres transaction — crash rolls the ledger back."""
-    from twin.connectors import (
+    from twin.sense.connectors import (
         add_connector_instance,
         build_credential_store,
         record_batch_counters,
         register_source_account,
     )
-    from twin.connectors.counters import batch_contribution
-    from twin.connectors.models import BatchStatus, ConnectorBatch
+    from twin.sense.connectors.counters import batch_contribution
+    from twin.sense.connectors.models import BatchStatus, ConnectorBatch
 
     class _Crash(Exception):
         pass
@@ -436,7 +436,7 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
         InterpretationStatus,
         InterpretedItem,
     )
-    from twin.sensory.percept import Percept
+    from twin.sense.sensory.percept import Percept
 
     cfg.extractor = "auto"
     cfg.ollama_url = "http://127.0.0.1:1"  # unreachable → defer
@@ -479,7 +479,7 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
 def test_detection_signals_on_postgres(pg_store, cfg, embedder):
     """Heuristic mode records DetectionSignals (never memories) on Postgres."""
     from twin.cognition import extract_percept
-    from twin.sensory.percept import Percept
+    from twin.sense.sensory.percept import Percept
 
     cfg.extractor = "heuristic"
     p = Percept(percept_type="document", source_sensor="document",

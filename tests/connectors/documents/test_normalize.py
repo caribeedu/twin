@@ -1,13 +1,13 @@
 """Shared document model and normalize helpers."""
 from __future__ import annotations
 
-from twin.connectors.documents import (
+from twin.sense.connectors.documents import (
     DocumentRecord,
     DocumentRevision,
     records_from_document,
     revision_for_document,
 )
-from twin.connectors.documents.normalize import (
+from twin.sense.connectors.documents.normalize import (
     AUTHOR_LABEL_CONFIDENCE,
     MAX_CHUNK_CHARS,
     chunk_document_body,

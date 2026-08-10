@@ -1,10 +1,10 @@
 """Extraction upgrades: self-contained claims and prompt discriminators."""
 from __future__ import annotations
 
-import twin.cognition.llm as llm_mod
+import twin.llm as llm_mod
 from twin.cognition.interpreter import ollama_interpreter as oi
 from twin.cognition.interpreter.service import InterpretationRuntime
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _gh_percept() -> Percept:

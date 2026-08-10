@@ -21,7 +21,7 @@ from ..judgment.firewall import Firewall
 from ..memory.embeddings import Embedder, get_embedder
 from ..memory.models import Evidence, MemoryItem
 from ..memory.store.sqlite import SqliteStore
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 _DEFAULT_POLICIES = Path(__file__).resolve().parent.parent / "defaults" / "policies.yaml"
 

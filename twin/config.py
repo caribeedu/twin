@@ -3,7 +3,7 @@
 Layered architecture:
 
  External World
- ↓ twin.sensory (sensors → normalized percepts)
+ ↓ twin.sense.sensory (sensors → normalized percepts)
  ↓ twin.cognition (extraction, dedupe, recall, attention)
  ↕ twin.memory (stores, embeddings, search)
  ↕ twin.judgment (PII, domain firewall, judgment profile)
@@ -129,19 +129,19 @@ class Config:
 
     @property
     def normalized_llm_provider(self) -> str:
-        from .cognition.llm import normalize_provider
+        from .llm import normalize_provider
         return normalize_provider(self.llm_provider)
 
     @property
     def llm_provider_kind(self) -> str:
-        from .cognition.llm import provider_kind
+        from .llm import provider_kind
         return provider_kind(self.llm_provider)
 
     @property
     def resolved_llm_base_url(self) -> str:
         if self.llm_base_url.strip():
             return self.llm_base_url.rstrip("/")
-        from .cognition.llm import PROVIDER_PRESETS, normalize_provider
+        from .llm import PROVIDER_PRESETS, normalize_provider
         preset = PROVIDER_PRESETS.get(normalize_provider(self.llm_provider), {})
         kind = preset.get("kind", "ollama")
         # Ollama's live URL is TWIN_OLLAMA_URL — never prefer the preset
@@ -157,7 +157,7 @@ class Config:
     def resolved_llm_model(self) -> str:
         if self.llm_model.strip():
             return self.llm_model.strip()
-        from .cognition.llm import PROVIDER_PRESETS, normalize_provider
+        from .llm import PROVIDER_PRESETS, normalize_provider
         preset = PROVIDER_PRESETS.get(normalize_provider(self.llm_provider), {})
         if preset.get("kind") == "ollama":
             return self.ollama_model
@@ -165,7 +165,7 @@ class Config:
 
     @property
     def resolved_llm_api_key(self) -> str:
-        from .cognition.llm import resolve_api_key
+        from .llm import resolve_api_key
         return resolve_api_key(self)
 
     @property

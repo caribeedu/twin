@@ -116,7 +116,7 @@ def review_snapshot(ws: Workspace) -> dict[str, Any]:
 
 
 def connector_rows(ws: Workspace) -> list[dict[str, Any]]:
-    from twin.connectors.health import connector_health
+    from twin.sense.connectors.health import connector_health
 
     rows = []
     if not hasattr(ws.store, "list_connector_instances"):
@@ -139,21 +139,21 @@ def connector_rows(ws: Workspace) -> list[dict[str, Any]]:
 
 
 def connector_pause(ws: Workspace, connector_id: str) -> dict[str, Any]:
-    from twin.connectors.service import pause_connector
+    from twin.sense.connectors.service import pause_connector
 
     inst = pause_connector(ws.store, connector_id)
     return {"ok": True, "id": inst.id, "status": getattr(inst, "status", "paused")}
 
 
 def connector_resume(ws: Workspace, connector_id: str) -> dict[str, Any]:
-    from twin.connectors.service import resume_connector
+    from twin.sense.connectors.service import resume_connector
 
     inst = resume_connector(ws.store, connector_id)
     return {"ok": True, "id": inst.id, "status": getattr(inst, "status", "active")}
 
 
 def connector_test(ws: Workspace, connector_id: str) -> dict[str, Any]:
-    from twin.connectors.health import connector_health
+    from twin.sense.connectors.health import connector_health
 
     return {"ok": True, "id": connector_id, "health": connector_health(ws.store, connector_id)}
 

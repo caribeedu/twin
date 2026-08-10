@@ -15,7 +15,7 @@ import threading
 from typing import Any, Iterable, Optional
 
 from ... import ids
-from ...sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from ..crypto import ContentCodec, NullCodec
 from ..embeddings import to_blob
 from ..models import (

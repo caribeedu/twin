@@ -1,5 +1,2 @@
-"""Fireflies meeting connector."""
-
-from .adapter import FirefliesConnector, meeting_from_fireflies
-
-__all__ = ["FirefliesConnector", "meeting_from_fireflies"]
+"""Deprecated shim — use ``twin.sense.connectors.fireflies``."""
+from twin.sense.connectors.fireflies import *  # noqa: F403

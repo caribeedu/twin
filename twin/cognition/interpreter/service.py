@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from ...config import Config
-from ...sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from . import echo, ollama_interpreter
 from .schema import InterpretationResult, InterpretationStatus
 

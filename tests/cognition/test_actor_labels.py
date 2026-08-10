@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from twin.cognition.actor_labels import humanize_record_text, rewrite_labels
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance, ConnectorRecord, ConnectorStatus, OwnershipClass,
     SourceAccount, idempotency_key,
 )

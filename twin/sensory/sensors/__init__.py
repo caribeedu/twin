@@ -1,6 +1,2 @@
-from .document import DocumentSensor
-from .git import GitSensor
-from .meeting import MeetingSensor
-from .slack import SlackSensor
-
-__all__ = ["DocumentSensor", "GitSensor", "MeetingSensor", "SlackSensor"]
+"""Deprecated shim — use ``twin.sense.sensory.sensors``."""
+from twin.sense.sensory.sensors import *  # noqa: F403

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from twin.clock import now_iso
-from twin.connectors.errors import sanitize_error
+from twin.sense.connectors.errors import sanitize_error
 from twin.memory.store.host_binding_mixin import is_unique_violation
 from twin.runtime.models import (
     ErrorClass,

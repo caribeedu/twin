@@ -21,7 +21,7 @@ from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
 from twin.memory.search import search
 from twin.memory.store.base import MemoryStore
 from twin.privacy.quarantine import detect_injection
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def run_golden_work_loop(

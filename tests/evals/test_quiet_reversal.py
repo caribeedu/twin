@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from twin.cognize.commit import commit_narrative
 from twin.cognize.models import EpistemicStatus, Reflection, ReflectionStatus
-from twin.sensory.percept import Percept, SourceClass
+from twin.sense.sensory.percept import Percept, SourceClass
 
 
 def test_eval_quiet_reversal_marks_stale_and_raises_gap(store):

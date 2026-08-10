@@ -33,7 +33,7 @@ def _gate(cfg: Any):
 
     reachable = None
     try:
-        from twin.cognition.llm import llm_available
+        from twin.llm import llm_available
 
         reachable = llm_available(cfg)
     except Exception:
@@ -60,7 +60,7 @@ def draft_stance_after_commit(
         gate = _gate(cfg)
         if not gate.halted:
             try:
-                from twin.cognition.llm import get_chat_client
+                from twin.llm import get_chat_client
 
                 llm = get_chat_client(cfg)
                 nar = store.get_narrative(narrative_id)
@@ -110,7 +110,7 @@ def run_consolidation_judgment(
     drafts: list[dict[str, Any]] = []
     budget = max_tokens
     try:
-        from twin.cognition.llm import get_chat_client
+        from twin.llm import get_chat_client
 
         llm = get_chat_client(cfg)
         if llm is None:
@@ -181,7 +181,7 @@ def run_fade_judgment(
             "recommendations": recs,
         }
     try:
-        from twin.cognition.llm import get_chat_client
+        from twin.llm import get_chat_client
 
         llm = get_chat_client(cfg)
         if llm is None:

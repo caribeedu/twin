@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from ...sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .schema import (
     INTERPRETATION_JSON_SCHEMA,
     INTERPRETATION_TYPES,
@@ -392,7 +392,7 @@ def interpret(percept: Percept, text: str, *,
               chat=None) -> InterpretationResult:
     """Run the cognitive interpreter.
 
-    Prefer passing ``chat`` (a :class:`~twin.cognition.llm.ChatClient`) so
+    Prefer passing ``chat`` (a :class:`~twin.llm.ChatClient`) so
     Ollama *or* OpenAI-compatible providers work. Legacy ``base_url`` /
     ``model`` / ``client`` still build an Ollama chat client.
     """

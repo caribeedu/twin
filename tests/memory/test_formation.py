@@ -12,7 +12,7 @@ from twin.memory.formation import (
     restore_candidate,
 )
 from twin.memory.models import Evidence, MemoryItem, MemoryStatus, MemoryType
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _seed_percept(store, text="We decided to use SQLite for local store."):

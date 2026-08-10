@@ -1,5 +1,2 @@
-"""Local/shared folder professional connector."""
-
-from .adapter import FolderConnector
-
-__all__ = ["FolderConnector"]
+"""Deprecated shim — use ``twin.sense.connectors.folder``."""
+from twin.sense.connectors.folder import *  # noqa: F403

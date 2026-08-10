@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from ...clock import now_iso
+from twin.clock import now_iso
 from ..base import Sensor
 from ..percept import Percept
 

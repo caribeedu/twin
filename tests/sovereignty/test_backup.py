@@ -6,7 +6,7 @@ from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
 from twin.memory.store.sqlite import SqliteStore
 from twin.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
 from twin.sovereignty.integrity import run_integrity_checks
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from twin.clock import now_iso
 from twin import ids
 

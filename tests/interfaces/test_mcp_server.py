@@ -307,7 +307,7 @@ async def test_session_tools_roundtrip(tmp_path, monkeypatch):
 
 @pytest.mark.anyio
 async def test_connector_list_dry_run(tmp_path, monkeypatch):
-    from twin.connectors import add_connector_instance, build_credential_store, register_source_account
+    from twin.sense.connectors import add_connector_instance, build_credential_store, register_source_account
     from twin.interfaces.mcp_auth import MCP_CLIENT_ENV, MCP_TOKEN_ENV
 
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")

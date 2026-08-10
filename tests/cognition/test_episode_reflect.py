@@ -20,7 +20,7 @@ from twin.cognition.episode_reflect import (
     build_episode_brief,
     reflect_episode,
 )
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,

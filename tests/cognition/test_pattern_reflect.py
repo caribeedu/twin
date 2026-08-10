@@ -10,7 +10,7 @@ import pytest
 
 from twin.cognition.episode_reflect import TrajectoryClaim
 from twin.cognition.pattern_reflect import pattern_reflect, set_pattern_override
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorStatus,
     ConnectorRecord,

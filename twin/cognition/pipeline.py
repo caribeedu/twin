@@ -40,7 +40,7 @@ from ..memory.models import (
 )
 from ..memory.provenance import ensure_artifact_from_percept
 from ..memory.store.base import MemoryStore
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .dedupe import check as dedupe_check
 from .extractors import heuristic as heuristic_detector
 from .interpreter import service as interp_service

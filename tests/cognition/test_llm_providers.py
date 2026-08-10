@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from twin.cognition.llm import (
+from twin.llm import (
     AnthropicChatClient,
     GeminiChatClient,
     OpenAICompatChatClient,

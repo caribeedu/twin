@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from twin.cognition.llm import usage as u
+from twin.llm import usage as u
 
 
 @pytest.fixture(autouse=True)

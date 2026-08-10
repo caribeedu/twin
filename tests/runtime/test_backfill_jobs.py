@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     create_backfill_job,
@@ -32,7 +32,7 @@ def creds(tmp_path, monkeypatch):
 @pytest.fixture()
 def gmail(monkeypatch):
     api = FakeGmailAPI()
-    from twin.connectors.gmail import client as gclient
+    from twin.sense.connectors.gmail import client as gclient
     real_build = gclient._build_http
 
     def fake_build(base_url, token):
@@ -129,7 +129,7 @@ def test_worker_drains_backfill_job(store, creds, gmail, cfg, embedder, monkeypa
 
 
 def test_watch_backfill_already_terminal(store, creds, gmail, cfg, monkeypatch):
-    from twin.connectors.models import BackfillJobStatus
+    from twin.sense.connectors.models import BackfillJobStatus
     from twin.interfaces import ux
 
     home, creds_store = creds

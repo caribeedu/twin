@@ -806,7 +806,7 @@ class SlackConnector:
         if store is None:
             return
         try:
-            from ...cognition.correlation.identity import upsert_external_identity
+            from twin.cognition.correlation.identity import upsert_external_identity
             from .normalize import actor_id as _actor_id
 
             self._ensure_team_id()

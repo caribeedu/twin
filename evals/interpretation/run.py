@@ -28,7 +28,7 @@ from twin.cognition.pipeline import extract_percept
 from twin.config import Config
 from twin.memory.embeddings import get_embedder
 from twin.memory.store.sqlite import SqliteStore
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 _CASES = Path(__file__).resolve().parent / "cases"
 

@@ -4,7 +4,7 @@ from twin import ids
 from twin.memory.crypto import build_codec
 from twin.memory.models import Evidence, MemoryItem
 from twin.memory.store.sqlite import SqliteStore
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_encryption_at_rest_roundtrip(tmp_path):

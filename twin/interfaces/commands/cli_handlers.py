@@ -1482,7 +1482,7 @@ def cmd_privacy(args) -> None:
 
 def _connector_adapter(ws, creds, connector_id: str):
     """Build a live adapter for discovery helpers (raises if not found)."""
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.registry import build_adapter
 
     inst = ws.store.get_connector_instance(connector_id)
     if inst is None:
@@ -1553,7 +1553,7 @@ def cmd_connector(args) -> None:
     import json as _json
 
     from twin.interfaces import ux
-    from twin.connectors import (
+    from twin.sense.connectors import (
         add_connector_instance,
         build_credential_store,
         connector_health,
@@ -1653,14 +1653,14 @@ def cmd_connector(args) -> None:
             ws.store.update_connector_instance(
                 args.connector_id, configuration=_json.loads(args.config))
         if args.secret:
-            from twin.connectors import set_credential
+            from twin.sense.connectors import set_credential
             set_credential(ws.store, creds, args.connector_id, args.secret)
         if getattr(args, "webhook_secret", None):
             inst = ws.store.get_connector_instance(args.connector_id)
             if inst and inst.connector_type == "slack":
-                from twin.connectors.slack.webhook import set_webhook_secret
+                from twin.sense.connectors.slack.webhook import set_webhook_secret
             else:
-                from twin.connectors.github.webhook import set_webhook_secret
+                from twin.sense.connectors.github.webhook import set_webhook_secret
             set_webhook_secret(ws.store, creds, args.connector_id,
                                args.webhook_secret)
         inst = ws.store.get_connector_instance(args.connector_id)
@@ -1818,7 +1818,7 @@ def cmd_connector(args) -> None:
         if getattr(args, "run_partition", False):
             if not args.job_id:
                 raise SystemExit("--run-partition requires --job-id")
-            from twin.connectors import run_backfill_partition
+            from twin.sense.connectors import run_backfill_partition
             out = run_backfill_partition(
                 ws.store, creds, args.job_id,
                 emit_percepts=not getattr(args, "no_percepts", False),
@@ -1903,7 +1903,7 @@ def cmd_connector(args) -> None:
         if getattr(args, "cancel", False):
             if not args.job_id:
                 raise SystemExit("--cancel requires --job-id")
-            from twin.connectors import cancel_backfill_job
+            from twin.sense.connectors import cancel_backfill_job
             job = cancel_backfill_job(ws.store, args.job_id)
             data = {"job": job.id, "status": job.status.value}
 
@@ -1919,7 +1919,7 @@ def cmd_connector(args) -> None:
             _emit(args, data, pretty)
             return
         if getattr(args, "create", False):
-            from twin.connectors import create_backfill_job
+            from twin.sense.connectors import create_backfill_job
             job = create_backfill_job(ws.store, creds, args.connector_id)
             total = (job.progress or {}).get("total_partitions")
             data = {"job": job.id, "status": job.status.value, "partitions": total}
@@ -1975,7 +1975,7 @@ def cmd_connector(args) -> None:
                 "BackfillJob, --jobs to list, --run to watch runtime drain, "
                 "or --run-partition --job-id ID for one-shot debug "
                 "(previewing never ingests)")
-        from twin.connectors import backfill_preview
+        from twin.sense.connectors import backfill_preview
         preview = backfill_preview(ws.store, creds, args.connector_id,
                                    principal_id="principal_local_cli")
 
@@ -2067,7 +2067,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, {"dead_letters": rows}, pretty)
     elif cmd == "replay":
-        from twin.connectors import retry_dead_letter
+        from twin.sense.connectors import retry_dead_letter
         dlq = retry_dead_letter(ws.store, creds, args.dead_letter_id)
         data = {"id": dlq.id, "status": dlq.status.value, "attempts": dlq.attempts,
                 "last_error": dlq.last_error}
@@ -2103,7 +2103,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, {"deletion_events": rows}, pretty)
     elif cmd == "setup":
-        from twin.connectors import plan_connector_setup
+        from twin.sense.connectors import plan_connector_setup
         plan = plan_connector_setup(
             ws.store,
             connector_type=args.connector_type,
@@ -2160,7 +2160,7 @@ def cmd_connector(args) -> None:
         if not plan.get("ok"):
             raise SystemExit(1)
     elif cmd == "due":
-        from twin.connectors import list_due_connectors
+        from twin.sense.connectors import list_due_connectors
         due = list_due_connectors(ws.store, ws.cfg.home)
 
         def pretty():
@@ -2180,7 +2180,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, due, pretty)
     elif cmd == "sync-due":
-        from twin.connectors import run_sync_due
+        from twin.sense.connectors import run_sync_due
         rows = run_sync_due(
             ws.store, creds, ws.cfg.home,
             emit_percepts=not getattr(args, "no_percepts", False),
@@ -2201,7 +2201,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, {"results": rows, "count": len(rows)}, pretty)
     elif cmd == "contract":
-        from twin.connectors import contract_matrix
+        from twin.sense.connectors import contract_matrix
         matrix = contract_matrix()
 
         def pretty():
@@ -2225,7 +2225,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, matrix, pretty)
     elif cmd == "production-ready":
-        from twin.connectors import production_ready_adapters
+        from twin.sense.connectors import production_ready_adapters
         report = production_ready_adapters()
 
         def pretty():
@@ -3232,7 +3232,7 @@ def cmd_doctor(args) -> None:
     try:
         from datetime import datetime, timedelta, timezone
 
-        from twin.cognition.llm.usage import JsonlLedger, default_ledger_path, summarize
+        from twin.llm.usage import JsonlLedger, default_ledger_path, summarize
         _since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         _rows = JsonlLedger(default_ledger_path(ws.cfg.home)).read(since=_since)
         if _rows:
@@ -3308,7 +3308,7 @@ def cmd_usage(args) -> None:
     from datetime import datetime, timedelta, timezone
 
     from twin.interfaces import ux
-    from twin.cognition.llm.usage import JsonlLedger, default_ledger_path, summarize
+    from twin.llm.usage import JsonlLedger, default_ledger_path, summarize
 
     ws = Workspace(args.home)
     ledger = JsonlLedger(default_ledger_path(ws.cfg.home))

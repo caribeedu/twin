@@ -12,7 +12,7 @@ from twin.memory.embeddings import HashEmbedder
 from twin.memory.models import Artifact
 from twin.memory.retention import delete_artifact
 from twin.privacy.models import AccessRequest
-from twin.sensory.percept import Percept, SourceClass
+from twin.sense.sensory.percept import Percept, SourceClass
 
 
 def test_intersect_sensitivity_picks_strictest():

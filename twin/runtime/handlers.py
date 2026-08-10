@@ -186,8 +186,8 @@ def handle_connector_reconcile(
     """Run due connector syncs via the shared scheduler (recovery path)."""
     if not hasattr(store, "list_connector_instances"):
         return {"reconciled": 0, "note": "connectors unavailable"}
-    from twin.connectors.credentials import build_credential_store
-    from twin.connectors.scheduler import sync_due
+    from twin.sense.connectors.credentials import build_credential_store
+    from twin.sense.connectors.scheduler import sync_due
 
     payload = job.payload or {}
     emit = bool(payload.get("emit_percepts", True))
@@ -214,8 +214,8 @@ def handle_backfill_partition(
     """Advance one BackfillJob partition (historical; not continuous sync)."""
     if not hasattr(store, "get_backfill_job"):
         return {"done": True, "note": "backfill unavailable"}
-    from twin.connectors.credentials import build_credential_store
-    from twin.connectors.service import run_backfill_partition
+    from twin.sense.connectors.credentials import build_credential_store
+    from twin.sense.connectors.service import run_backfill_partition
     from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
     from twin.runtime.queue import RuntimeQueue
 

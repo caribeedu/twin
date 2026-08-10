@@ -17,7 +17,7 @@ from twin.cognition.correlation.independence import evidence_directness_for
 from twin.cognition.correlation.models import EpisodeLinkStatus
 from twin.cognition.correlation.projects import link_project, resolve_project_for_record
 from twin.cognition.sessions import ensure_project
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,
@@ -26,7 +26,7 @@ from twin.connectors.models import (
     idempotency_key,
 )
 from twin.memory.models import FindingType
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _acct(store, *, vault_id: str, account_id: str, connector_type: str = "github"):

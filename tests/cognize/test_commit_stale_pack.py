@@ -8,7 +8,7 @@ from twin.cognize.models import EpistemicStatus
 from twin.cognition.context_pack import build_context_pack
 from twin.memory.embeddings import HashEmbedder
 from twin.memory.models import MemoryItem, MemoryStatus, MemoryType, Sensitivity
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_commit_requires_evidence_and_actor(store):

@@ -26,7 +26,7 @@ from ..memory.formation import propose_or_corroborate
 from ..memory.models import CanonicalClaim, ExtractorVersion, MemoryItem, MemoryType
 from ..memory.search import search
 from ..memory.store.base import MemoryStore
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .correlation.models import EpisodeLinkStatus
 from .correlation.text import rich_excerpt
 
@@ -328,7 +328,7 @@ def _select_reflector(cfg: Config) -> Optional[ReflectorFn]:
     """
     if _OVERRIDE is not None:
         return _OVERRIDE
-    from .llm import get_chat_client
+    from twin.llm import get_chat_client
 
     # Reflect runs on the single configured chat model (TWIN_LLM_*).
     if cfg.extractor in (
@@ -346,7 +346,7 @@ def _select_reflector(cfg: Config) -> Optional[ReflectorFn]:
 
 def _make_llm_reflector(client) -> ReflectorFn:
     from .interpreter.reflect_prompt import reflect_with_model
-    from .llm.usage import usage_context
+    from twin.llm.usage import usage_context
 
     def _reflector(brief: EpisodeBrief, cfg: Config) -> list[TrajectoryClaim]:
         # A model / parse failure must not fabricate. It also must not crash the

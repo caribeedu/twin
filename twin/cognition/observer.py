@@ -165,8 +165,8 @@ class ObserverReading:
 
 def _deep_read(store: MemoryStore, cfg: Config, text: str,
                seed: ObserverReading, client=None) -> ObserverReading:
-    from .llm import get_chat_client
-    from .llm.usage import usage_context
+    from twin.llm import get_chat_client
+    from twin.llm.usage import usage_context
 
     projects = store.list_projects()
     chat = get_chat_client(cfg, client=client, timeout=60)
@@ -228,7 +228,7 @@ def read_context(store: MemoryStore, cfg: Config, text: str,
     Prefer ``resolve_context_domain`` at session boundaries — it tries
     retrieval votes before calling this.
     """
-    from .llm import llm_available
+    from twin.llm import llm_available
 
     seed = ObserverReading(
         domain=UNCLASSIFIED_DOMAIN,

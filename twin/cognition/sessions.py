@@ -42,7 +42,7 @@ from ..memory.models import (
     SessionStatus,
 )
 from ..memory.store.base import MemoryStore
-from ..sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from .context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
 from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain
 from .pipeline import extract_percept

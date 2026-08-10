@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from ...sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 from ..schema import EXTRACTION_JSON_SCHEMA, ExtractedMemory, ExtractionResult
 
 SYSTEM_PROMPT = """\

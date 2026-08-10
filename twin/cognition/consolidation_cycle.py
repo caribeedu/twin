@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from ..clock import now_iso
 from ..config import Config
-from ..connectors.errors import sanitize_error
+from twin.sense.connectors.errors import sanitize_error
 from ..memory.automation import apply_safe_automations
 from ..memory.embeddings import Embedder
 from ..memory.store.base import MemoryStore

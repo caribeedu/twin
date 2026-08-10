@@ -20,7 +20,7 @@ from twin.cognize.orchestrator import (
     run_cognize,
     set_cognize_stage_override,
 )
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _install_overrides():

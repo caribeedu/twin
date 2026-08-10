@@ -14,7 +14,7 @@ from twin.memory.provenance import (
     count_independent_sources,
     memory_source_keys,
 )
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _percept(store, text, sensor="test"):

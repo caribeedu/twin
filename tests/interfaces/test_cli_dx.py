@@ -69,7 +69,7 @@ def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
     and never crashes on a repo the credential cannot see."""
     import types
 
-    from twin.connectors.models import (
+    from twin.sense.connectors.models import (
         ConnectorInstance, ConnectorStatus, OwnershipClass, SourceAccount,
     )
     from twin.interfaces import cli

@@ -7,7 +7,7 @@ from twin.cognize.models import EpistemicStatus
 from twin.cognition.context_pack import build_context_pack
 from twin.interfaces.native.service import _pack_extras
 from twin.memory.embeddings import HashEmbedder
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_native_pack_extras_include_epistemic_fields(store, cfg):

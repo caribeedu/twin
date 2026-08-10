@@ -128,7 +128,7 @@ def doctor(cfg: Config) -> list[Check]:
         checks.append(Check("store:connection", FAIL, f"{url} → {exc}"))
 
     # LLM + models (provider-aware)
-    from ..cognition.llm import llm_available, provider_kind
+    from ..llm import llm_available, provider_kind
     from ..memory.embeddings import get_embedder_for_config, ollama_reachable
 
     provider = cfg.normalized_llm_provider
@@ -221,7 +221,7 @@ def doctor(cfg: Config) -> list[Check]:
 
     # connector schedule / credentials / instance health
     try:
-        from ..connectors.ops import doctor_connector_checks
+        from twin.sense.connectors.ops import doctor_connector_checks
         from ..memory.store import create_store
 
         conn_store = create_store(cfg.resolved_db_url)

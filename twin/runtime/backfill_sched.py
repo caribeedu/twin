@@ -30,11 +30,11 @@ def enqueue_backfill_partition_jobs(
     if not hasattr(store, "list_active_backfill_jobs"):
         return []
 
-    from twin.connectors.mail.backfill import (
+    from twin.sense.connectors.mail.backfill import (
         has_live_partition_claim,
         next_runnable_partition,
     )
-    from twin.connectors.models import BackfillJobStatus
+    from twin.sense.connectors.models import BackfillJobStatus
 
     if backfill_job_id:
         job = store.get_backfill_job(backfill_job_id)

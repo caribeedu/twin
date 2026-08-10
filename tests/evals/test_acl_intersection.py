@@ -6,7 +6,7 @@ from twin.cognize.commit import commit_narrative
 from twin.cognition.context_pack import build_context_pack
 from twin.memory.embeddings import HashEmbedder
 from twin.privacy.models import AccessRequest
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_eval_acl_intersection_private_slack_plus_public_pr(store, cfg):

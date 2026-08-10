@@ -6,7 +6,7 @@ from twin.cognize.commit import commit_narrative
 from twin.cognize.models import EpistemicStatus
 from twin.cognition.context_pack import build_context_pack
 from twin.memory.embeddings import HashEmbedder
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_eval_stale_injection(store, cfg):

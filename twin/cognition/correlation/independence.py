@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ...sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _meta_source(percept_or_meta: Percept | dict[str, Any]) -> dict[str, Any]:

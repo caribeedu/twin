@@ -1,22 +1,2 @@
-"""Shared document cognitive layer.
-
-Provider adapters live alongside this package (``folder`` now; Drive /
-OneDrive / Notion later) and normalize into ``DocumentRecord``.
-"""
-
-from .model import DocumentRecord, DocumentRevision
-from .normalize import (
-    chunk_document_body,
-    records_from_document,
-    revision_for_document,
-)
-from .provider import DocumentProvider
-
-__all__ = [
-    "DocumentProvider",
-    "DocumentRecord",
-    "DocumentRevision",
-    "chunk_document_body",
-    "records_from_document",
-    "revision_for_document",
-]
+"""Deprecated shim — use ``twin.sense.connectors.documents``."""
+from twin.sense.connectors.documents import *  # noqa: F403

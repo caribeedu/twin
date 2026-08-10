@@ -18,7 +18,7 @@ from twin.cognition.correlation.models import (
     EpisodePhaseKind,
 )
 from twin.cognition.correlation.service import run_correlation_pass
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,

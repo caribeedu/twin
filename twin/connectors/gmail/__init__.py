@@ -1,5 +1,2 @@
-"""Gmail professional connector."""
-
-from .adapter import GmailConnector
-
-__all__ = ["GmailConnector"]
+"""Deprecated shim — use ``twin.sense.connectors.gmail``."""
+from twin.sense.connectors.gmail import *  # noqa: F403
