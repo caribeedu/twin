@@ -81,7 +81,6 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
             # proxy for duplicate rate (README: "taxa de memórias duplicadas")
             "duplicate_evidence_ratio": round((evidence_total - total) / total, 3) if total else 0.0,
             "review_backlog_ratio": round(needs_review / total, 3) if total else 0.0,
-            # v0.3 consolidation metrics
             "duplicate_rate": round(
                 sum(1 for m in memories if "exact_duplicate" in m.quality_flags
                     or "near_duplicate" in m.quality_flags) / total, 3

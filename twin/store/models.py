@@ -1,6 +1,12 @@
-"""Memory-layer data model: Memory Items, Entities, Relations, Evidence.
+"""Store dual-read data model — legacy claim rows, entities, relations, evidence.
 
-(The Percept model — the input contract — lives in ``twin.sense.sensory.percept``.)
+Product durable units are **Narrative** / **Interpretation** / **Evidence**
+([GLOSSARY.md](../../docs/GLOSSARY.md)). Class and column names still say
+``Memory*`` / ``memory_id`` because they are the dual-read schema; Cognize
+maps confirmed rows toward Narratives and candidates toward Interpretations.
+Do not treat these types as the product noun “memory.”
+
+Percept (Sense input) lives in ``twin.sense.sensory.percept``.
 """
 
 from __future__ import annotations
@@ -14,6 +20,8 @@ from twin import ids
 
 
 class MemoryType(str, Enum):
+    """Claim kind on a dual-read row (not a Narrative grain)."""
+
     event = "event"
     fact = "fact"
     decision = "decision"
@@ -34,12 +42,14 @@ class Sensitivity(str, Enum):
 
 
 class MemoryStatus(str, Enum):
+    """Lifecycle of a dual-read claim row."""
+
     candidate = "candidate"
     confirmed = "confirmed"
     rejected = "rejected"
     deprecated = "deprecated"
     contradicted = "contradicted"
-    # v0.3 consolidation statuses
+    # consolidation / lifecycle
     merged = "merged"
     split = "split"
     archived = "archived"
@@ -72,7 +82,7 @@ class EvidenceType(str, Enum):
 
 class Evidence(BaseModel):
     id: str
-    memory_id: str
+    memory_id: str  # dual-read claim id (FK)
     percept_id: str
     quote: str
     evidence_type: EvidenceType = EvidenceType.verbatim
@@ -96,17 +106,17 @@ class Entity(BaseModel):
 
 class Relation(BaseModel):
     id: str
-    subject_id: str  # entity id or memory id
+    subject_id: str  # entity id or dual-read claim id
     predicate: str  # works_on | prefers | affects | produced | supersedes | contradicts | merged_into | split_into | ...
-    object_id: str  # entity id or memory id
-    memory_id: Optional[str] = None  # memory that asserted this relation
+    object_id: str  # entity id or dual-read claim id
+    memory_id: Optional[str] = None  # dual-read claim that asserted this relation
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     created_at: str = ""
 
 
 class CanonicalClaim(BaseModel):
-    """Propositional core of a memory — separate from human/LLM wording."""
+    """Propositional core of a dual-read claim — separate from wording."""
 
     subject: str = ""
     predicate: str = ""
@@ -123,20 +133,18 @@ class ExtractorVersion(BaseModel):
 
 
 class DetectionSignal(BaseModel):
-    """v0.7 conservative lexical detection — explicitly NOT a memory.
+    """Non-cognitive span hint — never a Narrative, Interpretation, or claim row.
 
-    The heuristic detector may say "this span looks like it could contain a
-    decision/task" to prioritize a Percept, seed a review queue or drive
-    operational metrics. It may NOT establish a memory type, domain, entity,
-    title, summary or cognitive confidence — only a cognitive interpreter can.
-    A DetectionSignal therefore carries a *candidate category*, the source
-    span that triggered it and a detection confidence, and never becomes a
-    MemoryItem on its own."""
+    May prioritize a Percept for review or metrics. Must not establish type,
+    domain, entities, title, summary, or cognitive confidence. Only Cognize
+    (LLM-or-halt) may form meaning; this record never becomes a durable account
+    on its own.
+    """
 
     id: str
     percept_id: str
-    kind: str                 # candidate category (decision|task|…) — a hint, not a type
-    span: str                 # the source span that triggered detection
+    kind: str                 # candidate category hint (decision|task|…) — not a type
+    span: str                 # source span that triggered detection
     reason: str = ""
     confidence: float = 0.0   # detection confidence, NOT cognitive confidence
     created_at: str = ""
@@ -144,17 +152,13 @@ class DetectionSignal(BaseModel):
 
 
 class PerceptInterpretation(BaseModel):
-    """v0.7 execution record of interpreting one Percept.
+    """Execution record of interpreting one Percept (metadata only).
 
-    Lightweight, metadata-only: it tracks *whether and how* a Percept was
-    understood (status + model/prompt/schema versions + attempt count), not
-    the interpreted semantics themselves — those still flow into memories and
-    evidence. It exists so the pipeline can tell three states apart that the
-    old "no evidence yet" heuristic conflated: never interpreted, interpreted
-    and legitimately empty, and deferred because no model was available.
-
-    ``content_hash`` pins the record to the exact Percept content, so an
-    edited Percept is re-interpreted instead of being considered done."""
+    Tracks whether/how a Percept was understood (status + model/prompt/schema
+    + attempts), not the semantics — those flow into claim rows / evidence.
+    Distinguishes: never interpreted, interpreted-and-empty, and deferred
+    because no chat model was available.
+    """
 
     percept_id: str
     # interpretation execution status:
@@ -166,8 +170,7 @@ class PerceptInterpretation(BaseModel):
     # prolonged outage never consumes a Percept's retry budget:
     #   unavailable | transient | input | schema | permanent | ""
     failure_class: str = ""
-    # whether the cognitive interpreter was actually invoked (False for
-    # quarantine and heuristic detection — those never interpret)
+    # whether the cognitive interpreter was actually invoked
     interpretation_attempted: bool = False
     # a terminal record is never retried (poison input exhausted its budget)
     terminal: bool = False
@@ -182,14 +185,15 @@ class PerceptInterpretation(BaseModel):
     unresolved_count: int = 0
     detail: str = ""
     content_hash: str = ""
-    # per-stage counters for observability (§v0.7 metrics): emitted, grounded,
-    # ungrounded, policy_dropped, deduplicated, inserted, review_bound, invalid
+    # per-stage counters: emitted, grounded, ungrounded, policy_dropped, …
     stage_counts: dict[str, int] = Field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
 
 
 class MemoryItem(BaseModel):
+    """Dual-read claim row — prefer Narrative / Interpretation in product surfaces."""
+
     id: str
     type: MemoryType
     title: str
@@ -209,7 +213,7 @@ class MemoryItem(BaseModel):
     project_id: Optional[str] = None
     percept_ids: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)  # entity names (resolved to ids in store)
-    # v0.3 quality / review fields (recomputable analysis lives partly here)
+    # quality / review (recomputable analysis lives partly here)
     review_priority: float = 0.0
     quality_score: float = 0.0
     quality_flags: list[str] = Field(default_factory=list)
@@ -446,7 +450,6 @@ class CognitiveSession(BaseModel):
     consolidation_error: Optional[str] = None   # error type/summary, never content
     summary_percept_id: Optional[str] = None    # deterministic idempotency anchor
     judgment_snapshot_id: Optional[str] = None  # pack snapshot that influenced this session
-    # v0.5 authorization context captured at session start
     principal_id: Optional[str] = None
     persona: str = "individual"
     purpose: str = "task_execution"
@@ -485,10 +488,10 @@ class HostSessionBinding(BaseModel):
 
 
 class InterventionRecommendation(BaseModel):
-    """Display-only heuristic cue — does not act on the host.
+    """Display-only attention cue — does not act on the host.
 
-    Reasons are *possible decision reversal cues*, not proven semantic
-    contradictions. May false-positive; never modifies host state.
+    Reasons are possible decision-reversal cues, not proven contradictions.
+    May false-positive; never modifies host state.
     """
 
     type: str = "warning"                   # warning | info

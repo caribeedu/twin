@@ -80,7 +80,6 @@ class ContextPack:
     # quotes made it in and, if not, that the budget was the reason
     evidence_included: bool = False
     evidence_omitted_due_to_budget: bool = False
-    # v0.9.5 structured fields
     mode: str = "compact"
     request_scope: str = ""
     active: dict = field(default_factory=dict)

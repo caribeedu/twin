@@ -365,7 +365,6 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
             continue
 
         review_reason = _needs_review(cfg, extracted, percept)
-        # v0.7 cognitive-act governance: a proposal, question, hypothesis,
         # opinion or third-party claim is born needing review, however
         # confident the interpreter was about the classification.
         act = extracted.payload.get("cognitive_act")

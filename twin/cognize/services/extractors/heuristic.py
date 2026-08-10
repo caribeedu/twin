@@ -1,18 +1,16 @@
-"""Conservative lexical detector.
+"""Non-cognitive span detector — never forms meaning.
 
-This module NO LONGER produces memories. In lexical rules may only
-*detect* that a span looks like it might carry a decision, task, preference,
-constraint or rejected alternative — a routing/prioritization signal, never a
-cognitive conclusion. Establishing the memory type, domain, entities, title,
-summary and cognitive confidence is the cognitive interpreter's job.
+Lexical rules may only *detect* that a span looks like it might carry a
+decision, task, preference, constraint or rejected alternative — a routing
+or prioritization signal. Establishing type, domain, entities, title, summary
+and cognitive confidence is Cognize’s job (LLM-or-halt).
 
-Two consumers use ``scan``:
+Consumers of ``scan``:
 
-- ``heuristic`` mode persists each hit as a ``DetectionSignal`` (never a
- ``MemoryItem``);
-- the offline *stub interpreter* (the deterministic test/CI stand-in for the
- LLM) turns hits into grounded ``InterpretedItem``s so the interpreter path
- can be exercised without a model.
+- ``TWIN_EXTRACTOR=heuristic`` persists each hit as a ``DetectionSignal``
+  (never a dual-read claim row or Narrative); Cognize refuses this mode for
+  meaning (gate → halt);
+- tests/CI use authored interpreter overrides, not this detector as cognition.
 """
 
 from __future__ import annotations

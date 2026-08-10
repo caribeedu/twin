@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> None:
     pistatus.set_defaults(func=cmd_interpret)
     pisd = pis.add_parser("deferred", help="percepts awaiting a cognitive interpreter")
     pisd.set_defaults(func=cmd_interpret)
-    pisig = pis.add_parser("signals", help="heuristic detection hints (never memories)")
+    pisig = pis.add_parser("signals", help="non-cognitive detection hints (never Narratives)")
     pisig.set_defaults(func=cmd_interpret)
     _add_json_flag_tree(pi)
 

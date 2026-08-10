@@ -826,7 +826,6 @@ class SqliteStore(
             " artifact_id TEXT NOT NULL, percept_id TEXT NOT NULL,"
             " PRIMARY KEY (artifact_id, percept_id))"
         )
-        # v0.4 judgment additive columns / tables
         self.conn.executescript(
             "CREATE TABLE IF NOT EXISTS judgment_revisions ("
             " id TEXT PRIMARY KEY, judgment_id TEXT NOT NULL, revision INTEGER NOT NULL,"
@@ -873,9 +872,7 @@ class SqliteStore(
             ):
                 if name not in jc_cols:
                     self.conn.execute(f"ALTER TABLE judgment_conflicts ADD COLUMN {name} {ddl}")
-        # v0.5 privacy tables
         self.conn.executescript(PRIVACY_SCHEMA)
-        # v0.6 connector framework tables
         self.conn.executescript(CONNECTOR_SCHEMA)
         css_cols = {r[1] for r in self.conn.execute(
             "PRAGMA table_info(connector_sync_state)")}
