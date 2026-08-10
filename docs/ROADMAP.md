@@ -10,12 +10,12 @@ Destination: [README](../README.md).
 ## Correlation depth (remainder)
 
 Goal: deepen the correlation layer from clustered evidence into an
-explainable, incrementally maintained work-episode model — without turning
-correlation into Memory or Judgment.
+explainable, incrementally maintained work-episode / Situation model —
+without turning correlation into Narrative or Stance.
 
 What already shipped (episode arc, LLM cognition stages, reflect,
-`twin meditate`, soft-fuse, review resolve surfaces) is recorded in
-[CHANGELOG.md](CHANGELOG.md). Runtime contract:
+soft-fuse, review surfaces) is recorded in [CHANGELOG.md](CHANGELOG.md).
+Runtime contract:
 [ARCHITECTURE → Brain analogies and CLI stages](ARCHITECTURE.md#brain-analogies-and-cli-stages).
 This section tracks only what remains.
 
@@ -27,12 +27,12 @@ Narrative / Situation pipeline where applicable).
 
 1. **Multi-factor confidence** — compose link strength × source diversity × independence-group count × evidence quality / source trust beyond a single rebuild-max heuristic. Twin v2 retargets “confidence” to **read-time** derivation over evidence + independence Relations ([v2.md](v2.md) §2.3).
 2. **Identity as a small graph** — keep conservative auto-propose rules; let confirmed `IdentityLink`s form a vault-scoped graph that Entity resolution can consume later.
-3. **Explainability as broader product surface** — `twin episode graph` / Narrative relations surfaces; stable HTTP/MCP metadata for anchors, merge vs contextual edges, independence groups, finding_key claim set, vault partition.
+3. **Explainability as broader product surface** — Situation / Narrative relations in [Web Command Center](#v2--longitudinal-narratives-sense--cognize--inject); stable HTTP/MCP metadata for anchors, merge vs contextual edges, independence groups, finding_key claim set, vault partition.
 4. **Hardening tests / evals** — full rebuild replay; incremental ≡ batch under load; multi-vault / multi-org isolation; large ConnectorRecord volumes.
 
 #### Non-goals
 
-- Auto-confirm Narrative, Stance, Memory, Judgment, or Entity from correlation (Cognize / reflect emit candidates; humans commit).
+- Auto-confirm Narrative, Stance, or Entity from correlation (Cognize emits candidates; humans commit).
 - Cross-vault merge without an explicit, audited cross-domain action.
 - Forming episodes / situations from temporal proximity alone.
 
@@ -59,10 +59,11 @@ detail, not a fourth architecture wall.
 
 | Twin package | Theme | Ships when |
 |---|---|---|
-| **v2.0** | Narrative substrate | Cognize LLM-or-halt through Evidence audit; human Commit Narrative; deterministic stale floor; Inject EpistemicState; `twin cognize` / `narrative` / `stance` verbs; dual-read of legacy memories; stale-injection eval |
-| **v2.1** | Epistemics + host surfaces | Read-time confidence / independence; open Reflections in packs; ACL ∩ + revoke tombstone; Stance drafts; MCP / REST / Native v2 pack contract; legacy CLI aliases deprecated |
+| **v2.0** | Narrative substrate | Cognize LLM-or-halt through Evidence audit; human Commit Narrative; deterministic stale floor; Inject EpistemicState; `twin cognize` / `narrative` / `stance` verbs; dual-read; stale-injection eval |
+| **v2.1** | Epistemics + host surfaces | Read-time confidence / independence; open Reflections in packs; ACL ∩ + revoke tombstone; Stance drafts; MCP / REST / Native pack contract |
 | **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals |
-| **v2.3** | Command Center | Bare `twin` TUI cockpit; docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only |
+| **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit; docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only |
+| **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): purpose-shaped UI for every Cognize entity (§2.2); Explore + Review + Sense + Inject panes; retire Memory-as-product web UI |
 
 Non-goals for v2 (deferred to later majors or explicit follow-ons):
 

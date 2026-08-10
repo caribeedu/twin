@@ -23,6 +23,8 @@ enters the TUI.
 
 Screens call `twin.interfaces.center.actions` — same store/CLI functions, no duplicated logic.
 
+Web visibility cockpit (single route, all Cognize entities): [WEB_CENTER.md](WEB_CENTER.md).
+
 ## Exit
 
 `q` prompts: **Yes — stop** supervised children · **Leave running** · **Cancel**.

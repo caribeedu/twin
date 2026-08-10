@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Twin — Persistent Cognitive Core</title>
+  <title>Twin — Command Center</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/static/favicon.png" type="image/png" sizes="32x32" />
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
@@ -12,34 +12,37 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
-<body>
+<body class="center-body">
   <div class="mesh" aria-hidden="true"></div>
 
-  <header class="top">
-    <a class="brand" href="#home" data-nav="home">
-      <img class="mark" src="/static/logo.svg" width="34" height="34" alt="" />
-      <span class="brand-text">
-        <strong>Twin</strong>
-        <em>Persistent Cognitive Core</em>
-      </span>
-    </a>
-    <nav class="nav" aria-label="Primary">
-      <a href="#home" data-nav="home">Core</a>
-      <a href="#review" data-nav="review">Review</a>
-      <a href="#narratives" data-nav="narratives">Narratives</a>
-      <a href="#search" data-nav="search">Search</a>
-      <a href="#pack" data-nav="pack">Pack</a>
-      <a href="#memories" data-nav="memories">Memories</a>
-      <a href="#status" data-nav="status">Status</a>
-    </nav>
-  </header>
+  <div class="center-shell">
+    <aside class="rail" aria-label="Command Center">
+      <a class="brand rail-brand" href="#home" data-nav="home">
+        <img class="mark" src="/static/logo.svg" width="32" height="32" alt="" />
+        <span class="brand-text">
+          <strong>Twin</strong>
+          <em>Command Center</em>
+        </span>
+      </a>
+      <nav class="rail-nav">
+        <a href="#home" data-nav="home">Home</a>
+        <a href="#explore" data-nav="explore">Explore</a>
+        <a href="#review" data-nav="review">Review</a>
+        <a href="#cognize" data-nav="cognize">Cognize</a>
+        <a href="#sense" data-nav="sense">Sense</a>
+        <a href="#inject" data-nav="inject">Inject</a>
+        <a href="#ops" data-nav="ops">Ops</a>
+      </nav>
+    </aside>
 
-  <main id="app" class="app"></main>
-
-  <footer class="foot">
-    <img class="mark sm" src="/static/logo.svg" width="18" height="18" alt="" />
-    <p>One evolving mind across every interface</p>
-  </footer>
+    <div class="center-main">
+      <header class="center-top">
+        <p class="pane-eyebrow" id="pane-eyebrow">Home</p>
+        <h1 class="pane-title" id="pane-title">Overview</h1>
+      </header>
+      <main id="app" class="app center-app"></main>
+    </div>
+  </div>
 
   <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js" type="module"></script>

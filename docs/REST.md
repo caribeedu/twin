@@ -20,8 +20,10 @@ Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
 | Domain | Typical prefixes | Role |
 |---|---|---|
 | Ingest & extract | `/api/ingest`, `/api/extract`, `/api/percepts`, `/api/artifacts` | Artifact → percept → extraction |
-| Memories & review | `/api/memories`, `/api/review` | List, provenance, quality, resolve (merge/conflict/…), batches |
-| Narratives & reflections | `/api/narratives`, `/api/narratives/{id}`, `/api/narratives/commit`, `/api/narratives/commit-preview`, `/api/reflections` | List, EpistemicState badges, human commit with preview fingerprint |
+| Memories & review | `/api/memories`, `/api/review` | Dual-read / legacy review helpers |
+| Narratives & reflections | `/api/narratives`, `/api/narratives/{id}`, `/api/narratives/commit`, `/api/narratives/commit-preview`, `/api/reflections`, `/api/reflections/{id}` | List, EpistemicState, human commit with preview fingerprint |
+| Cognize entities | `/api/situations`, `/api/interpretations`, `/api/relations`, `/api/evidence`, `/api/traces`, `/api/stances`, `/api/percepts/{id}` | Web Command Center list+show ([WEB_CENTER.md](WEB_CENTER.md)) |
+| Center summary | `/api/center/summary`, `/api/runtime/jobs` | Overview counts; job list |
 | Search & packs | `/api/search`, `/api/context_pack`, `/api/observer` | Hybrid retrieval and firewall-filtered packs |
 | Sessions & runtime | `/api/sessions`, `/api/attention`, `/api/runtime`, `/api/health` | Cognitive sessions, attention, worker health |
 | Connectors | `/api/connectors`, `/api/webhooks` | Connector ops and inbound webhooks |

@@ -5,7 +5,7 @@ Audience: an implementer (human or LLM) **with no prior chat context**. Every ta
 
 **Source of truth for product intent:** `docs/v2.md`  
 **Source of truth for current shipped behavior:** `docs/CHANGELOG.md`, `docs/ARCHITECTURE.md`, code under `twin/`  
-**This file does not redefine the redesign** — it decomposes it into tasks and maps them to Twin package versions (`v2.0` … `v2.3`).
+**This file does not redefine the redesign** — it decomposes it into tasks and maps them to Twin package versions (`v2.0` … `v2.4`).
 
 > **Version wording:** `v2` / `v2.x` always mean the **Twin product version**. `docs/v2.md` is a filename for the redesign note, not a “documentation version.”
 
@@ -39,7 +39,7 @@ Copy these into PR descriptions. Violating any of them fails the task regardless
 
 1. **LLM-or-halt for Cognize.** No heuristic / echo / lexical / regex path may raise Reflections, form Interpretations, assert Relations, run Narrative Revision, Evidence audit, Stance drafts, or Fade/Remarkable *judgment*. If chat LLM is unavailable → Cognize hard-stops with an explicit halt reason; Sense I/O and Domain Firewall may still run.
 2. **Three hard modules only:** Sense (deterministic I/O) → Cognize (LLM brain) → Inject (firewall + pack + Observer slot). Host conversation is **not** a fourth module or product “mode.”
-3. **No product “memory”.** User-facing / CLI / MCP / Review / docs that define the product use Reflection, Interpretation, Narrative, Stance, Evidence, Situation. `Memory*` / `twin memory` survive only as deprecated aliases during migration.
+3. **No product “memory”.** User-facing / CLI / MCP / Review / Web / docs that define the product use Reflection, Interpretation, Narrative, Stance, Evidence, Situation. Internal `Memory*` dual-read may remain in store code; no argv or primary UI labeled Memory.
 4. **Understanding is emergent**, not a schema root / table.
 5. **Human gates durability.** Stages 8–9: humans commit Narratives; Cognize proposes. No `extract -A`-style silent Narrative commit.
 6. **Stale before Cognize finishes.** When a relevant Percept lands, mark overlapping Narratives `stale` **deterministically** before re-synthesis, so Inject never serves stale-as-fresh.
@@ -54,29 +54,26 @@ Copy these into PR descriptions. Violating any of them fails the task regardless
 
 `v2.x` below are **Twin product / package versions** (`twin-cognition` / `__version__`), not documentation draft numbers. `docs/v2.md` is the redesign intent for the Twin **v2** line.
 
-A version ships only when **every required task** for that version is `done` and its release gate passes. Engineering phases (P0–P12) are implementation order; versions are the shippable product cuts.
+A version ships only when **every required task** for that version is `done` and its release gate passes. Engineering phases (P0–P13) are implementation order; versions are the shippable product cuts.
 
 | Twin version | Codename / theme | Product bar (user-visible) | Required tasks | Release gate |
 |---|---|---|---|---|
 | **v2.0** | Narrative substrate | Sense → Cognize → Inject with committed **Narratives**; LLM-or-halt; human commit; deterministic stale floor; `twin cognize` / `narrative` / `stance` verbs; dual-read of legacy memories | T-000 T-001 T-002 · T-010–T-015 · T-020–T-023 · T-030–T-038 · T-040 T-041 · T-060 T-070 · T-080 T-081 · T-110 | `twin cognize run` halts without LLM; commit Narrative + pack with EpistemicState; stale-injection eval green; package `2.0.0` |
 | **v2.1** | Epistemics + host surfaces | Read-time confidence / independence; open Reflections in packs; ACL ∩ + revoke tombstone; Stance drafts; MCP / REST / Native serve v2 pack contract; legacy CLI aliases deprecated | T-050 · T-061 · T-071–T-074 · T-082 · T-100–T-102 · T-111 T-114 | Independence + ACL evals green; MCP/Native pack contract tests green; package `2.1.0` |
 | **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals; research logging for surprise | T-051 T-052 · T-112 T-113 T-115 | Consolidation never auto-commits; fade/trace tests green; package `2.2.0` |
-| **v2.3** | Command Center | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
+| **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
+| **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): browse **all** Cognize entities with purpose-shaped UI; operator panes aligned with TUI Center; retire Memory-as-product UI | T-130–T-139 | Every §2.2 entity list+detail reachable; no Memory nav; REST contract tests green; package `2.4.0` |
 
 ### Completing this tracker ≠ ROADMAP v3 “Extended Brain”
 
-[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.3** here completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + Command Center) and unblocks v3.
+[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.4** completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + TUI Center + **Web Command Center**) and unblocks v3.
 
 ### Version dependency
 
 ```text
-v2.0  →  v2.1  →  v2.2
-              ↘
-               v2.3   (Command Center may start after v2.0 CLI extraction;
-                       full screens need v2.1 surfaces; ship after or with v2.2)
+v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web Command Center)
 ```
 
-Recommended ship order: **v2.0 → v2.1 → v2.2 → v2.3**. T-090 (Center MVP) may be prototyped on a branch after v2.0, but the **v2.3** release must not ship before v2.1 pack/MCP contracts exist.
 
 ### Per-version checklist (copy into CHANGELOG when cutting)
 
@@ -107,11 +104,17 @@ Recommended ship order: **v2.0 → v2.1 → v2.2 → v2.3**. T-090 (Center MVP) 
 - [x] T-112 T-113 T-115
 - [x] `__version__ = 2.2.0` + CHANGELOG + tag `v2.2.0`
 
-#### v2.3 — Command Center
+#### v2.3 — Command Center (TUI)
 
 - [x] T-090 T-091 T-092
 - [x] T-120 T-121
 - [x] `__version__ = 2.3.0` + CHANGELOG + tag `v2.3.0`
+
+#### v2.4 — Web Command Center
+
+- [x] T-130 T-131 T-132 T-133 T-134
+- [x] T-135 T-136 T-137 T-138 T-139
+- [x] `__version__ = 2.4.0` + CHANGELOG + tag `v2.4.0`
 
 ---
 
@@ -133,9 +136,10 @@ P9  Command Center TUI
 P10 MCP / REST / Review UI / Native pack surfaces
 P11 Experiments + evals (§9.3 priority)
 P12 Doc split (ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH) + README trim
+P13 Web Command Center — single-route entity visibility + operator panes
 ```
 
-Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must not claim “fresh Narratives” until P1+P6 exist.
+Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must not claim “fresh Narratives” until P1+P6 exist. P13 starts after v2.3 ships.
 
 ---
 
@@ -194,6 +198,16 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-115 | **v2.2** | P11 | Research logging: surprise / explanatory_delta (§9.3 #7) | done |
 | T-120 | **v2.3** | P12 | Split docs: ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH | done |
 | T-121 | **v2.3** | P12 | README stays architecture-layer only; add COMMAND_CENTER.md | done |
+| T-130 | **v2.4** | P13 | Web Command Center shell — single route, rail IA | done |
+| T-131 | **v2.4** | P13 | REST list/show for all §2.2 entities | done |
+| T-132 | **v2.4** | P13 | Narrative + EpistemicState purpose UI | done |
+| T-133 | **v2.4** | P13 | Reflection / Interpretation / Situation purpose UI | done |
+| T-134 | **v2.4** | P13 | Stance / Evidence / Relation / Trace purpose UI | done |
+| T-135 | **v2.4** | P13 | Sense strip — Percepts + Connectors + Jobs in web | done |
+| T-136 | **v2.4** | P13 | Unify Review + Commit inside web Center | done |
+| T-137 | **v2.4** | P13 | Visual language — entity-coherent design system | done |
+| T-138 | **v2.4** | P13 | Docs: WEB_CENTER + REST/COMMAND_CENTER sync | done |
+| T-139 | **v2.4** | P13 | QA gate — entity routes, no Memory product UI | done |
 
 
 ---
@@ -2180,6 +2194,397 @@ Update GLOSSARY/COGNITION/IDENTITY cross-links.
 
 ---
 
+## T-130 — Web Command Center shell — single route, rail IA
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-092, T-101, T-121  
+**Blocks:** T-132–T-137, T-139
+
+### Description
+
+Replace the fragmented hash workbench (`#home` / `#review` / `#memories` / …) with one **Command Center** SPA served by `twin serve`:
+
+```text
+/   ← only product route (hash or client path segments are panes, not separate apps)
+├── Rail (always visible): Home · Explore · Review · Cognize · Sense · Inject · Ops
+├── Main: active pane
+└── Detail: selected entity inspector (slides/splits — never a second app)
+```
+
+- Mirror TUI Center information architecture (`v2.md` §12.3) where it makes sense in the browser.
+- **Explore** is the entity cockpit: pick a type → browse → open detail without leaving `/`.
+- Deep-links: `#explore/narrative/<id>`, `#review`, `#cognize`, etc. still resolve inside the same shell.
+- Retire primary nav label **Memories**; dual-read rows may appear only as migration affordance under Explore if needed, never as a product tab.
+- Home rail: doctor summary, open Reflections count, cognize halt, serve/runtime attach status (read-only if TUI owns supervision).
+
+### Exit criteria
+
+- [x] `twin serve` loads a single shell; all panes switch without full reload.
+- [x] Nav has no “Memories” product entry.
+- [x] Rail includes Explore + Review + Cognize + Sense + Inject + Ops (names may shorten; purposes fixed).
+- [x] Deep-link to a Narrative id opens Explore detail in-shell.
+
+### Assumptions
+
+- TUI Center remains the process supervisor; web Center is visibility + human gates (review/commit/approve), not a second job runner unless Ops already exposes enqueue via REST.
+- Keep static HTML/JS/CSS under `twin/interfaces/web/` unless a later task introduces a build step (out of scope unless needed for design system).
+
+### Expected QA
+
+- Manual: open `/`, walk every rail item, browser back/forward works.
+- Automated: smoke that index serves and shell markers exist (no Memory nav string).
+
+### Resources
+
+- `docs/v2.md` §§2.2, 12.1–12.3, 9.4
+- `docs/COMMAND_CENTER.md`, `twin/interfaces/web/static/{index.html,app.js}`
+
+---
+
+## T-131 — REST list/show for all §2.2 entities
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-010, T-011, T-012, T-013  
+**Blocks:** T-132–T-135, T-139
+
+### Description
+
+Expose stable HTTP list + show (and minimal filter) for every Cognize entity in `v2.md` §2.2:
+
+| Entity | Minimum API |
+|---|---|
+| Percept | list (vault/source filters), show |
+| Situation | list, show (+ member percept ids) |
+| Reflection | list (`status=open` default), show |
+| Interpretation | list (`competing` filter), show |
+| Relation | list by endpoint id / type, show |
+| Narrative | list, show (+ embedded EpistemicState summary) |
+| EpistemicState | show by narrative (or embedded — no orphan CRUD) |
+| Stance | list, show, proposals list |
+| Evidence | list by narrative/interpretation, show |
+| Trace | list recent for a narrative / vault |
+
+Rules:
+
+- Response shapes use product vocabulary (no “memory” field names in JSON keys meant for UI).
+- Read-time confidence / independence only on Narrative (and pack) responses — computed, not stored scalar.
+- Pagination + vault scope on every list.
+- Reuse store methods; do not invent parallel schemas.
+
+### Exit criteria
+
+- [x] Each entity above has documented list+show in `docs/REST.md`.
+- [x] Contract tests cover 200 shapes and empty lists.
+- [x] Narrative show includes epistemic status + evidence_ids + grain when present.
+
+### Assumptions
+
+- Write/mutate paths for commit Narrative / approve Stance already exist; this task is **read visibility** first. Mutations stay on existing commit/approve endpoints (extended in T-136 if needed).
+
+### Expected QA
+
+- `pytest` REST contract suite for new routes.
+- OpenAPI or REST.md table matches handlers.
+
+### Resources
+
+- `docs/v2.md` §2.2–2.3, `docs/REST.md`, `twin/interfaces/` HTTP routers
+
+---
+
+## T-132 — Narrative + EpistemicState purpose UI
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130, T-131, T-070, T-071  
+**Blocks:** T-139
+
+### Description
+
+Explore → Narrative must look like a **governed account**, not a memory card:
+
+- Account body (serif / readable); actors / causality when present in payload.
+- Epistemic badges: `fresh` \| `stale` \| `superseded` \| `tombstoned` + stale_reason.
+- Read-time confidence / independence display (derived).
+- Grain: episode \| arc \| domain.
+- Evidence list with retain-dissent visibility (superseded / lower-weight still listed).
+- Relations: `part-of`, `continues`, `supersedes`, `same_originating_decision`, …
+- Open Reflections that overlap the Narrative’s domain (always visible nearby — `v2.md` §10 #1).
+- Actions: open commit flow only when reviewing Interpretations (link to Review), not “edit account as text blob.”
+
+### Exit criteria
+
+- [x] List + detail for Narratives in Explore.
+- [x] Stale Narrative never presented as fresh (badge + copy).
+- [x] Evidence and relations reachable from detail without leaving shell.
+
+### Assumptions
+
+- Forest/Trees (`v2.md` §2.4 / §5.1 Spotlight) may be a list grouping by grain in v2.4; full graph canvas is optional stretch, not required.
+
+### Expected QA
+
+- Fixture Narrative with stale EpistemicState renders correctly.
+- Screenshot or DOM assert on epistemic badge classes.
+
+### Resources
+
+- `docs/v2.md` §§2.2–2.4, 6, 9.4 · `docs/EPISTEMICS.md`
+
+---
+
+## T-133 — Reflection / Interpretation / Situation purpose UI
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130, T-131, T-040  
+**Blocks:** T-136, T-139
+
+### Description
+
+Purpose-shaped panes (not one generic table with a “type” column):
+
+| Entity | UI emphasizes |
+|---|---|
+| **Reflection** | Open question / tension; status open→answered/superseded/faded; links to Situations & Interpretations |
+| **Interpretation** | Competing explanation; supports/contradicts; path to Review → commit |
+| **Situation** | Working cluster: member percepts, open Reflections count, lifecycle working→concluded |
+
+Default Explore landing may spotlight **open Reflections** (operator attention), then Interpretations needing review.
+
+### Exit criteria
+
+- [x] Each of the three has list + detail with fields matching §2.2 lifecycle language.
+- [x] From Interpretation detail, one click to Review/commit path (T-136).
+- [x] Open Reflections always visible from Home and Explore.
+
+### Assumptions
+
+- Competing Interpretations stay non-durable until human commit (no “confirm memory” wording).
+
+### Expected QA
+
+- Seeded open Reflection appears on Home count and Explore filter `open`.
+
+### Resources
+
+- `docs/v2.md` §2.1–2.2, §10 #1 · `docs/COGNIZE.md`
+
+---
+
+## T-134 — Stance / Evidence / Relation / Trace purpose UI
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130, T-131, T-050, T-052  
+**Blocks:** T-139
+
+### Description
+
+| Entity | UI emphasizes |
+|---|---|
+| **Stance** | Evaluative posture ≠ Narrative fact; pending proposals; preview→approve (token); active list |
+| **Evidence** | Anchored percept span; source, time, ACL tags; attach context (which Interpretation/Narrative) |
+| **Relation** | Typed edges among entities; filter by type especially `same_originating_decision` / contradicts / supports |
+| **Trace** | Append-only accessibility / retrieval events feeding Fade·Remarkable — display, do not “edit” |
+
+Stance approve uses the same preview-token discipline as CLI/TUI.
+
+### Exit criteria
+
+- [x] Stance proposals approvable from web with preview token.
+- [x] Evidence and Relations browsable from Explore and from Narrative detail.
+- [x] Trace list for a Narrative or vault (read-only).
+
+### Assumptions
+
+- Graph visualization is nice-to-have; a typed edge list with hop-to-endpoint is enough for v2.4 gate.
+
+### Expected QA
+
+- Approve path rejects missing/mismatched token.
+- Relation list filters by type.
+
+### Resources
+
+- `docs/v2.md` §§2.2, 2.3, stage 10–12 · `docs/EPISTEMICS.md`
+
+---
+
+## T-135 — Sense strip — Percepts + Connectors + Jobs in web
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130, T-131, T-091  
+**Blocks:** T-139
+
+### Description
+
+**Sense** pane in the web Center:
+
+- Percept browser (immutable observations): source, time, vault, link into Situations.
+- Connectors: list status (active/paused), last sync — actions that already exist over REST/shared handlers (test/pause/resume) if safe; otherwise deep-link copy for CLI/TUI.
+- Jobs: queue depth + recent job kinds (`cognize_batch`, consolidate, backfill) read-only or enqueue if REST already supports it.
+
+Keeps Sense vs Cognize wall visible: this pane is **I/O and queue**, not meaning.
+
+### Exit criteria
+
+- [x] Percept list+show in Explore or Sense pane.
+- [x] Connectors and Jobs visible without leaving `/`.
+- [x] UI copy never calls percepts “memories.”
+
+### Assumptions
+
+- Full connector setup wizards may stay TUI/CLI; web is visibility + light controls.
+
+### Expected QA
+
+- Empty connectors state guides to `twin connector setup` / TUI without dead ends.
+
+### Resources
+
+- `docs/v2.md` §1, §12.2 · `docs/INTERFACES.md` · Center `actions.py`
+
+---
+
+## T-136 — Unify Review + Commit inside web Center
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130, T-133, T-041, T-101  
+**Blocks:** T-139
+
+### Description
+
+Fold today’s Review workbench + `#narratives` commit into the Center:
+
+- Review queue = **Interpretations** (+ always-visible Open Reflections), not Memory candidates as product.
+- Commit Narrative: preview token → commit (existing API), reachable from Review and from Interpretation detail.
+- Keyboard/a11y: keep efficient queue stepping; do not regress T-101 gates.
+- Remove or demote memory-resolve UX (merge/split as Narrative dual-read helpers only if still required — label honestly, not as product Memory).
+
+### Exit criteria
+
+- [x] Operator can review → commit Narrative entirely in `/` without the old Memories flow.
+- [x] Open Reflections visible on Review pane at all times.
+- [x] Commit requires preview token when `--require-token` semantics apply.
+
+### Assumptions
+
+- CLI `twin review` remains for TTY; web is the rich surface.
+
+### Expected QA
+
+- End-to-end browser or API+DOM test: competing Interpretation → commit → Narrative appears in Explore.
+
+### Resources
+
+- `docs/v2.md` stages 8–9, §9.4 · existing `/api/narratives/commit*`
+
+---
+
+## T-137 — Visual language — entity-coherent design system
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130  
+**Blocks:** T-139
+
+### Description
+
+One composition for the web Center (not a dashboard of unrelated cards):
+
+- Define CSS variables / type roles: **account** (Narrative body), **question** (Reflection), **candidate** (Interpretation), **posture** (Stance), **warrant** (Evidence), **observation** (Percept).
+- Status color language shared with epistemic badges (fresh/stale/tombstoned) and job health.
+- Motion: 2–3 intentional transitions (pane switch, detail open, toast) — no noise.
+- Follow project frontend rules: expressive type (already Outfit / Source Serif), avoid purple-on-white AI-slop defaults if redesigning tokens; brand Twin mark remains hero of Home, not buried.
+- Mobile: rail collapses; entity detail usable on narrow viewports.
+
+### Exit criteria
+
+- [x] Documented token map in `docs/WEB_CENTER.md` (or CSS comment block referenced from docs).
+- [x] Each entity type visually distinguishable by purpose, not only by icon tint.
+- [x] Lighthouse/a11y smoke: focus order, contrast on badges.
+
+### Assumptions
+
+- No new npm design-system package required; evolve `app.css`.
+
+### Expected QA
+
+- Side-by-side: Reflection vs Narrative vs Stance screenshots reviewed against §2.2 definitions.
+
+### Resources
+
+- `docs/v2.md` §9.4 Tone · `twin/interfaces/web/static/app.css`
+
+---
+
+## T-138 — Docs: WEB_CENTER + REST/COMMAND_CENTER sync
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130, T-131  
+**Blocks:** T-139
+
+### Description
+
+1. Add `docs/WEB_CENTER.md` — single-route IA, entity map, how it relates to TUI Command Center (TUI = supervise processes; Web = see substrate + human gates).
+2. Update `docs/COMMAND_CENTER.md` with pointer to web Center (not duplicate screen tables).
+3. Update `docs/REST.md` for entity list/show.
+4. Update `docs/OPERATIONS.md` / `docs/CLI.md` serve section: open web Center as primary visibility surface.
+5. ROADMAP / tracker already list v2.4 — keep links honest.
+
+### Exit criteria
+
+- [x] WEB_CENTER.md exists and links from COMMAND_CENTER + REST + OPERATIONS.
+- [x] No doc teaches Memories tab as product UI.
+- [x] README stays architecture-layer only (link to WEB_CENTER, no stage dump).
+
+### Assumptions
+
+- Editorial only plus link audit; no PyPI notes beyond CHANGELOG at cut time.
+
+### Expected QA
+
+- Link check for new doc paths.
+- Fresh-reader: can find “where do I see Reflections?” in under a minute.
+
+### Resources
+
+- `docs/v2.md` §§0−, 12 · existing doc set
+
+---
+
+## T-139 — QA gate — entity routes, no Memory product UI
+
+**Twin version:** `v2.4` · **Phase:** P13 · **Status:** `done`  
+**Depends on:** T-130–T-138  
+**Blocks:** none (release gate for `2.4.0`)
+
+### Description
+
+Release checklist for package `2.4.0`:
+
+1. Automated: every §2.2 entity list+show 200; shell has no Memories nav; Stance approve token negative test; Narrative stale badge.
+2. Manual: walk Sense → Cognize halt/status → Review commit → Explore Narrative/Stance → Inject pack pane.
+3. Regression: TUI Center still launches; aliases stay absent (`extract` etc.).
+4. CHANGELOG + `__version__ = 2.4.0` + tag.
+
+### Exit criteria
+
+- [x] All T-130–T-138 exit criteria checked off.
+- [x] CI green on entity REST + web smoke.
+- [x] Package `2.4.0` recorded in CHANGELOG.
+
+### Assumptions
+
+- Patch releases after 2.4.0 use normal hardening PRs, not new tracker versions unless scope expands.
+
+### Expected QA
+
+- Full `pytest` slice for interfaces/web + REST entity contracts + `tests/evals` still green.
+
+### Resources
+
+- This tracker version map · `docs/CHANGELOG.md`
+
+---
+
 ## Out of scope / explicit non-tasks (do not invent work)
 
 Unless a new tracker ID is added, do **not**:
@@ -2190,27 +2595,28 @@ Unless a new tracker ID is added, do **not**:
 - Make Twin a query-time KB synthesizer (GBrain mode).
 - Auto-confirm Narrative/Stance.
 - Store incrementable confidence scalars.
-- Replace MCP/Native with the Command Center.
+- Replace MCP/Native with the Command Center (TUI or Web).
 - Remote SSH Twin home management (§12.10 #4).
 - Literary L1–L4 narrative ontology as schema (§2.4).
+- Full interactive force-directed graph as a v2.4 release requirement (typed Relation lists are enough).
+- Re-introducing product “Memory” tabs or CLI aliases removed in 2.3.2.
 
 ---
 
 ## Suggested first slice (if starting cold)
 
-Aim at **Twin v2.0** first:
+**v2.0–v2.3 are shipped.** For **v2.4**:
 
-1. T-000, T-001, T-002 (docs lock)
-2. T-010 → T-011 → T-012 → T-013 (schema) + T-014 / T-015
-3. T-020 → T-021 → T-022 → T-023 (LLM-or-halt)
-4. T-030 → T-031…T-038 (pipeline)
-5. T-060 early (stale latch) parallel to late P3
-6. T-040 → T-041 → T-070 (commit + inject floor)
-7. T-080 → T-081 + T-110 (CLI verbs + stale eval) → cut package **2.0.0**
-8. Then **v2.1** surfaces/epistemics → **v2.2** consolidation → **v2.3** Command Center
+1. T-131 (REST entity visibility) can start in parallel with T-130 (shell).
+2. T-137 early tokens while T-132–T-134 land pane content.
+3. T-136 after Interpretation/Reflection panes exist (T-133).
+4. T-135 Sense strip anytime after T-130+T-131.
+5. T-138 docs alongside UI; T-139 cuts `2.4.0`.
+
+Historical cold-start for v2.0 remains: T-000…T-110 → then v2.1 → v2.2 → v2.3.
 
 ---
 
-*Tracker for Twin package line **v2.0–v2.3** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, CLI command center).*
+*Tracker for Twin package line **v2.0–v2.4** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, TUI + Web command center).*
 
 ATTENTION: Do not mention task numbers in any Git resource (PR/release/commit).

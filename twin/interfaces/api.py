@@ -1,10 +1,9 @@
-"""Local HTTP API + Twin review / continuity UI.
+"""Local HTTP API + Twin Web Command Center.
 
 Run: twin serve → http://127.0.0.1:8765
 
 JSON API powers MCP, CLI and the static SPA under ``twin/interfaces/web``.
-The UI follows the Twin brand (purple + white) — review, search, pack,
-memories and system status without a build step.
+The SPA is a single-route operator cockpit over Sense → Cognize → Inject.
 """
 
 from __future__ import annotations
@@ -313,8 +312,16 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ]
 
     @app.get("/api/percepts")
-    def api_percepts():
-        return [p.model_dump() for p in ws.store.list_percepts()]
+    def api_percepts(limit: int = 200):
+        rows = ws.store.list_percepts()
+        return [p.model_dump(mode="json") for p in rows[: max(1, min(limit, 2000))]]
+
+    @app.get("/api/percepts/{percept_id}")
+    def api_percept(percept_id: str):
+        p = ws.store.get_percept(percept_id)
+        if p is None:
+            raise HTTPException(404, "percept not found")
+        return p.model_dump(mode="json")
 
     @app.get("/api/memories")
     def api_memories(
@@ -532,8 +539,200 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         if status == "open" and hasattr(ws.store, "list_open_reflections"):
             return [r.model_dump(mode="json") for r in ws.store.list_open_reflections(vault)]
         if hasattr(ws.store, "list_reflections"):
-            return [r.model_dump(mode="json") for r in ws.store.list_reflections(vault)]
+            rows = [r.model_dump(mode="json") for r in ws.store.list_reflections(vault)]
+            if status and status != "all":
+                rows = [r for r in rows if r.get("status") == status]
+            return rows
         return []
+
+    @app.get("/api/reflections/{reflection_id}")
+    def api_reflection(reflection_id: str):
+        if not hasattr(ws.store, "get_reflection"):
+            raise HTTPException(404, "reflection not found")
+        ref = ws.store.get_reflection(reflection_id)
+        if ref is None:
+            raise HTTPException(404, "reflection not found")
+        return ref.model_dump(mode="json")
+
+    @app.get("/api/situations")
+    def api_situations(vault: str = "default"):
+        if not hasattr(ws.store, "list_situations"):
+            return []
+        return [s.model_dump(mode="json") for s in ws.store.list_situations(vault)]
+
+    @app.get("/api/situations/{situation_id}")
+    def api_situation(situation_id: str):
+        if not hasattr(ws.store, "get_situation"):
+            raise HTTPException(404, "situation not found")
+        sit = ws.store.get_situation(situation_id)
+        if sit is None:
+            raise HTTPException(404, "situation not found")
+        return sit.model_dump(mode="json")
+
+    @app.get("/api/interpretations")
+    def api_interpretations(vault: str = "default", status: Optional[str] = "competing"):
+        if not hasattr(ws.store, "list_cognize_interpretations"):
+            return []
+        st = None if status in (None, "", "all") else status
+        return [
+            i.model_dump(mode="json")
+            for i in ws.store.list_cognize_interpretations(vault, status=st)
+        ]
+
+    @app.get("/api/interpretations/{interpretation_id}")
+    def api_interpretation(interpretation_id: str):
+        if not hasattr(ws.store, "get_cognize_interpretation"):
+            raise HTTPException(404, "interpretation not found")
+        item = ws.store.get_cognize_interpretation(interpretation_id)
+        if item is None:
+            raise HTTPException(404, "interpretation not found")
+        return item.model_dump(mode="json")
+
+    @app.get("/api/relations")
+    def api_relations(
+        vault: str = "default",
+        type: Optional[str] = None,
+        from_id: Optional[str] = None,
+        to_id: Optional[str] = None,
+    ):
+        if not hasattr(ws.store, "list_relations"):
+            return []
+        rows = ws.store.list_relations(vault, rel_type=type)
+        out = [r.model_dump(mode="json") for r in rows]
+        if from_id:
+            out = [r for r in out if r.get("from_id") == from_id]
+        if to_id:
+            out = [r for r in out if r.get("to_id") == to_id]
+        return out
+
+    @app.get("/api/relations/{relation_id}")
+    def api_relation(relation_id: str):
+        if not hasattr(ws.store, "get_relation"):
+            raise HTTPException(404, "relation not found")
+        rel = ws.store.get_relation(relation_id)
+        if rel is None:
+            raise HTTPException(404, "relation not found")
+        return rel.model_dump(mode="json")
+
+    @app.get("/api/evidence")
+    def api_evidence(
+        vault: str = "default",
+        target_kind: Optional[str] = None,
+        target_id: Optional[str] = None,
+    ):
+        if not hasattr(ws.store, "list_evidence_anchors"):
+            return []
+        return [
+            a.model_dump(mode="json")
+            for a in ws.store.list_evidence_anchors(
+                vault, target_kind=target_kind, target_id=target_id
+            )
+        ]
+
+    @app.get("/api/evidence/{evidence_id}")
+    def api_evidence_one(evidence_id: str):
+        if not hasattr(ws.store, "get_evidence_anchor"):
+            raise HTTPException(404, "evidence not found")
+        a = ws.store.get_evidence_anchor(evidence_id)
+        if a is None:
+            raise HTTPException(404, "evidence not found")
+        return a.model_dump(mode="json")
+
+    @app.get("/api/traces")
+    def api_traces(
+        vault: str = "default",
+        resource_id: Optional[str] = None,
+        event_kind: Optional[str] = None,
+        limit: int = 200,
+    ):
+        if not hasattr(ws.store, "list_traces"):
+            return []
+        return [
+            t.model_dump(mode="json")
+            for t in ws.store.list_traces(
+                vault,
+                event_kind=event_kind,
+                resource_id=resource_id,
+                limit=max(1, min(limit, 2000)),
+            )
+        ]
+
+    @app.get("/api/traces/{trace_id}")
+    def api_trace(trace_id: str):
+        if not hasattr(ws.store, "get_trace"):
+            raise HTTPException(404, "trace not found")
+        t = ws.store.get_trace(trace_id)
+        if t is None:
+            raise HTTPException(404, "trace not found")
+        return t.model_dump(mode="json")
+
+    @app.get("/api/stances")
+    def api_stances(vault: str = "default"):
+        from twin.cognize.stance import list_stances
+
+        return [s.model_dump(mode="json") for s in list_stances(ws.store, vault_id=vault)]
+
+    @app.get("/api/stances/proposals")
+    def api_stance_proposals(status: Optional[str] = "pending"):
+        if not hasattr(ws.store, "list_judgment_proposals"):
+            return []
+        props = ws.store.list_judgment_proposals(status=status, limit=200)
+        return [
+            {
+                "id": p.id,
+                "status": p.status.value if hasattr(p.status, "value") else p.status,
+                "reason": p.reason,
+                "statement": (p.proposed_item or {}).get("statement"),
+                "narrative_id": (p.metadata or {}).get("narrative_id"),
+            }
+            for p in props
+        ]
+
+    @app.get("/api/stances/{stance_id}")
+    def api_stance(stance_id: str, vault: str = "default"):
+        from twin.cognize.stance import judgment_to_stance
+
+        if not hasattr(ws.store, "get_judgment_item"):
+            raise HTTPException(404, "stance not found")
+        item = ws.store.get_judgment_item(stance_id)
+        if item is None:
+            raise HTTPException(404, "stance not found")
+        return judgment_to_stance(item, vault_id=vault).model_dump(mode="json")
+
+    @app.get("/api/center/summary")
+    def api_center_summary(vault: str = "default"):
+        open_refs = 0
+        competing = 0
+        narratives = 0
+        if hasattr(ws.store, "list_open_reflections"):
+            open_refs = len(ws.store.list_open_reflections(vault))
+        if hasattr(ws.store, "list_competing_interpretations"):
+            competing = len(ws.store.list_competing_interpretations(vault))
+        if hasattr(ws.store, "list_narratives"):
+            narratives = len(ws.store.list_narratives(vault))
+        halt = ""
+        if hasattr(ws.store, "last_cognize_run"):
+            try:
+                run = ws.store.last_cognize_run(vault)
+                if run and run.get("halt_reason"):
+                    halt = str(run.get("halt_reason"))
+            except Exception:
+                pass
+        queue = {}
+        if hasattr(ws.store, "runtime_queue_depth"):
+            queue = ws.store.runtime_queue_depth() or {}
+        connectors = 0
+        if hasattr(ws.store, "list_connector_instances"):
+            connectors = len(ws.store.list_connector_instances())
+        return {
+            "vault": vault,
+            "open_reflections": open_refs,
+            "competing_interpretations": competing,
+            "narratives": narratives,
+            "cognize_halt": halt,
+            "jobs_pending": int(queue.get("pending") or queue.get("ready") or 0),
+            "connectors": connectors,
+        }
 
     @app.post("/api/narratives/commit")
     def api_narrative_commit(req: NarrativeCommitRequest):
@@ -800,6 +999,23 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         if job is None:
             raise HTTPException(404, "job not found")
         return job.model_dump(mode="json")
+
+    @app.get("/api/runtime/jobs")
+    def api_runtime_jobs(
+        status: Optional[str] = None,
+        kind: Optional[str] = None,
+        vault_id: Optional[str] = None,
+        limit: int = 100,
+    ):
+        if not hasattr(ws.store, "list_runtime_jobs"):
+            return []
+        jobs = ws.store.list_runtime_jobs(
+            status=status,
+            kind=kind,
+            vault_id=vault_id,
+            limit=max(1, min(limit, 500)),
+        )
+        return [j.model_dump(mode="json") for j in jobs]
 
     @app.post("/api/runtime/jobs/{job_id}/retry")
     def api_runtime_retry(job_id: str):
