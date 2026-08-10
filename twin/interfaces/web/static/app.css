@@ -1201,6 +1201,20 @@ a.entity-row:hover {
 .entity-candidate .candidate-body { border-left: 3px solid var(--orange); padding-left: 0.85rem; }
 .entity-posture .posture-body { border-left: 3px solid var(--green); padding-left: 0.85rem; }
 .entity-account .account-body { border-left: 3px solid var(--purple); padding-left: 0.85rem; }
+.entity-cluster .cluster-body { border-left: 3px solid var(--gray); padding-left: 0.85rem; font-family: var(--serif); font-size: 1.1rem; }
+.entity-warrant .warrant-body { border-left: 3px solid var(--blue); padding-left: 0.85rem; font-family: var(--serif); }
+.open-refs-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px dashed var(--blue);
+  border-radius: var(--radius-sm);
+  background: rgba(74, 143, 214, 0.06);
+}
+.epistemic-badge .tag.warn { font-weight: 700; }
 .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; margin: 0 0 1rem; }
 .kv dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .kv dd { margin: 0.15rem 0 0; }

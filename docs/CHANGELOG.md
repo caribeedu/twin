@@ -5,6 +5,14 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.4.1 — Web Center exit-criteria hardening
+
+Narrative show returns derived confidence, relations, evidence, and open
+Reflections; commit requires preview token; Stance proposal preview/approve
+on Ops (JSON body binding fixed); Situation/Evidence/Relation/Trace purpose UI;
+Explore always shows open Reflections; contract tests and WEB_CENTER visual
+tokens.
+
 ### v2.4.0 — Web Command Center
 
 Single-route web cockpit (`twin serve`): Explore every Cognize entity with

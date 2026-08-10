@@ -141,8 +141,19 @@ async function paneExplore(parts) {
   ).join("");
 
   if (id) {
-    app.innerHTML = `<div class="explore-layout"><div class="explore-tabs">${tabs}</div><div class="detail entity-${meta.role}">Loading…</div></div>`;
+    app.innerHTML = `<div class="explore-layout">
+      <div id="explore-open-refs" class="open-refs-strip entity-question"></div>
+      <div class="explore-tabs">${tabs}</div>
+      <div class="detail entity-${meta.role}">Loading…</div>
+    </div>`;
     try {
+      const openRefs = await api(`/api/reflections?vault=${encodeURIComponent(VAULT)}&status=open`);
+      const refs = Array.isArray(openRefs) ? openRefs : [];
+      $("#explore-open-refs", app).innerHTML = refs.length
+        ? `<strong>Open Reflections</strong> ${refs.slice(0, 5).map((r) =>
+            `<a class="chip" href="#explore/reflection/${encodeURIComponent(r.id)}">${esc(truncate(r.text || r.id, 48))}</a>`
+          ).join("")}`
+        : `<strong>Open Reflections</strong> <span class="muted">none</span>`;
       const row = await api(meta.show(id));
       $(".detail", app).innerHTML = renderDetail(meta, row);
     } catch (err) {
@@ -151,8 +162,21 @@ async function paneExplore(parts) {
     return;
   }
 
-  app.innerHTML = `<div class="explore-layout"><div class="explore-tabs">${tabs}</div><div class="entity-list entity-${meta.role}">Loading…</div></div>`;
+  app.innerHTML = `<div class="explore-layout">
+    <div id="explore-open-refs" class="open-refs-strip entity-question"></div>
+    <div class="explore-tabs">${tabs}</div>
+    <div class="entity-list entity-${meta.role}">Loading…</div>
+  </div>`;
   try {
+    const openRefs = await api(`/api/reflections?vault=${encodeURIComponent(VAULT)}&status=open`);
+    const refs = Array.isArray(openRefs) ? openRefs : [];
+    const strip = $("#explore-open-refs", app);
+    strip.innerHTML = refs.length
+      ? `<strong>Open Reflections</strong> ${refs.slice(0, 5).map((r) =>
+          `<a class="chip" href="#explore/reflection/${encodeURIComponent(r.id)}">${esc(truncate(r.text || r.id, 48))}</a>`
+        ).join("")}${refs.length > 5 ? `<span class="muted">+${refs.length - 5}</span>` : ""}`
+      : `<strong>Open Reflections</strong> <span class="muted">none</span>`;
+
     const rows = await api(`${meta.list}${meta.list.includes("?") ? "&" : "?"}vault=${encodeURIComponent(VAULT)}`);
     const list = Array.isArray(rows) ? rows : (rows.items || rows.stances || []);
     const box = $(".entity-list", app);
@@ -180,12 +204,19 @@ function renderDetail(meta, row) {
   const back = `<a class="btn ghost" href="#explore/${meta.id}">← ${esc(meta.label)}</a>`;
   if (meta.id === "narrative") {
     const eps = row.epistemic || {};
+    const derived = row.derived_confidence || {};
+    const indep = derived.independence || {};
+    const epsStatus = eps.status || row.status || "";
+    const evidence = row.evidence || [];
+    const relations = row.relations || [];
+    const openRefs = row.open_reflections || [];
     return `${back}
-      <article class="detail-card entity-account">
+      <article class="detail-card entity-account" data-epistemic="${esc(epsStatus)}">
         <header class="detail-head">
           <h2>Narrative</h2>
-          ${badge(eps.status || row.status)}
+          <span class="epistemic-badge">${badge(epsStatus)}</span>
           ${row.grain ? `<span class="tag type">${esc(row.grain)}</span>` : ""}
+          ${derived.label ? `<span class="tag">${esc(derived.label)} confidence</span>` : ""}
         </header>
         <div class="account-body">${esc(row.account)}</div>
         <dl class="kv">
@@ -193,10 +224,32 @@ function renderDetail(meta, row) {
           <div><dt>Sensitivity</dt><dd>${esc(row.sensitivity || "—")}</dd></div>
           <div><dt>Committed by</dt><dd>${esc(row.committed_by || "—")}</dd></div>
           <div><dt>Stale reason</dt><dd>${esc(eps.stale_reason || "—")}</dd></div>
+          <div><dt>Independence</dt><dd>${esc(indep.display || "—")}</dd></div>
+          <div><dt>Derived</dt><dd>${esc(derived.rationale || "read-time")}</dd></div>
         </dl>
         <h3>Evidence</h3>
-        <ul class="plain">${(row.evidence_ids || []).map((e) =>
-          `<li><a href="#explore/evidence/${encodeURIComponent(e)}">${esc(e)}</a></li>`).join("") || "<li class='muted'>None</li>"}</ul>
+        <ul class="plain">${evidence.length
+          ? evidence.map((e) => `<li>
+              <a href="#explore/evidence/${encodeURIComponent(e.id)}">${esc(e.id)}</a>
+              ${e.dissent ? badge("dissent") : ""}
+              <span class="muted">${esc(truncate(e.quote || "", 80))}</span>
+            </li>`).join("")
+          : (row.evidence_ids || []).map((e) =>
+              `<li><a href="#explore/evidence/${encodeURIComponent(e)}">${esc(e)}</a></li>`).join("")
+            || "<li class='muted'>None</li>"}</ul>
+        <h3>Relations</h3>
+        <ul class="plain">${relations.length
+          ? relations.map((r) => `<li>
+              <a href="#explore/relation/${encodeURIComponent(r.id)}">${esc(r.type)}</a>
+              <span class="muted">${esc(r.from_id)} → ${esc(r.to_id)}</span>
+            </li>`).join("")
+          : "<li class='muted'>None</li>"}</ul>
+        <h3 class="entity-question">Open Reflections</h3>
+        <ul class="plain">${openRefs.length
+          ? openRefs.map((r) => `<li>
+              <a href="#explore/reflection/${encodeURIComponent(r.id)}">${esc(truncate(r.text || r.id))}</a>
+            </li>`).join("")
+          : "<li class='muted'>None in domain</li>"}</ul>
       </article>`;
   }
   if (meta.id === "reflection") {
@@ -204,6 +257,10 @@ function renderDetail(meta, row) {
       <article class="detail-card entity-question">
         <header class="detail-head"><h2>Reflection</h2>${badge(row.status)}</header>
         <p class="question-body">${esc(row.text || row.question || "")}</p>
+        <dl class="kv">
+          <div><dt>Situations</dt><dd>${esc((row.situation_ids || []).join(", ") || "—")}</dd></div>
+          <div><dt>Evidence</dt><dd>${esc((row.evidence_ids || []).join(", ") || "—")}</dd></div>
+        </dl>
         <p class="muted">${esc(row.id)}</p>
       </article>`;
   }
@@ -212,7 +269,28 @@ function renderDetail(meta, row) {
       <article class="detail-card entity-candidate">
         <header class="detail-head"><h2>Interpretation</h2>${badge(row.status)}</header>
         <p class="candidate-body">${esc(row.explanation || "")}</p>
+        <dl class="kv">
+          <div><dt>Reflections</dt><dd>${esc((row.reflection_ids || []).join(", ") || "—")}</dd></div>
+          <div><dt>Situations</dt><dd>${esc((row.situation_ids || []).join(", ") || "—")}</dd></div>
+        </dl>
         <a class="btn primary" href="#review">Open Review</a>
+      </article>`;
+  }
+  if (meta.id === "situation") {
+    return `${back}
+      <article class="detail-card entity-cluster">
+        <header class="detail-head"><h2>Situation</h2>${badge(row.status)}</header>
+        <p class="cluster-body">${esc(row.summary || "Working cluster")}</p>
+        <dl class="kv">
+          <div><dt>Domain</dt><dd>${esc(row.domain || "—")}</dd></div>
+          <div><dt>Lifecycle</dt><dd>${esc(row.status || "—")}</dd></div>
+          <div><dt>Percepts</dt><dd>${esc(String((row.percept_ids || []).length))}</dd></div>
+        </dl>
+        <h3 class="entity-observation">Member percepts</h3>
+        <ul class="plain">${(row.percept_ids || []).length
+          ? row.percept_ids.map((p) =>
+              `<li><a href="#explore/percept/${encodeURIComponent(p)}">${esc(p)}</a></li>`).join("")
+          : "<li class='muted'>None linked</li>"}</ul>
       </article>`;
   }
   if (meta.id === "stance") {
@@ -224,6 +302,37 @@ function renderDetail(meta, row) {
         <dl class="kv">
           <div><dt>Domain</dt><dd>${esc(row.domain || "—")}</dd></div>
           <div><dt>Strength</dt><dd>${esc(row.strength ?? "—")}</dd></div>
+        </dl>
+      </article>`;
+  }
+  if (meta.id === "evidence") {
+    return `${back}
+      <article class="detail-card entity-warrant">
+        <header class="detail-head"><h2>Evidence</h2>${row.dissent ? badge("dissent") : ""}</header>
+        <p class="warrant-body">${esc(row.quote || "")}</p>
+        <dl class="kv">
+          <div><dt>Percept</dt><dd><a href="#explore/percept/${encodeURIComponent(row.percept_id || "")}">${esc(row.percept_id || "—")}</a></dd></div>
+          <div><dt>Target</dt><dd>${esc(row.target_kind || "")} ${esc(row.target_id || "")}</dd></div>
+          <div><dt>Source</dt><dd>${esc(row.source_id || "—")}</dd></div>
+          <div><dt>ACL</dt><dd>${esc((row.acl_tags || []).join(", ") || "—")}</dd></div>
+        </dl>
+      </article>`;
+  }
+  if (meta.id === "relation") {
+    return `${back}
+      <article class="detail-card entity-edge">
+        <header class="detail-head"><h2>Relation</h2><span class="tag type">${esc(row.type)}</span></header>
+        <p><code>${esc(row.from_id)}</code> → <code>${esc(row.to_id)}</code></p>
+        <p class="muted">${esc(row.rationale || "")}</p>
+      </article>`;
+  }
+  if (meta.id === "trace") {
+    return `${back}
+      <article class="detail-card entity-ledger">
+        <header class="detail-head"><h2>Trace</h2><span class="tag">${esc(row.event_kind)}</span></header>
+        <dl class="kv">
+          <div><dt>Resource</dt><dd>${esc(row.resource_kind || "")} ${esc(row.resource_id || "")}</dd></div>
+          <div><dt>When</dt><dd>${esc(row.created_at || "—")}</dd></div>
         </dl>
       </article>`;
   }
@@ -284,9 +393,13 @@ async function paneReview() {
     });
     $("#nar-commit-form").addEventListener("submit", async (ev) => {
       ev.preventDefault();
+      if (!previewToken) {
+        toast("Preview a token before commit", false);
+        return;
+      }
       const fd = new FormData(ev.target);
       try {
-        const body = { ...commitBody(fd), preview_token: previewToken || null };
+        const body = { ...commitBody(fd), preview_token: previewToken };
         const out = await api("/api/narratives/commit", { method: "POST", body: JSON.stringify(body) });
         toast(`Committed ${out.narrative_id}`);
         location.hash = `#explore/narrative/${out.narrative_id}`;
@@ -356,7 +469,7 @@ async function paneSense() {
       <h3>Connectors</h3>
       ${clist.length ? clist.map((c) =>
         `<div class="entity-row"><strong>${esc(c.connector_type || c.id)}</strong>
-          ${badge(c.status)}${c.id ? `<span class="muted">${esc(c.id)}</span>` : ""}</div>`).join("") : empty("No connectors")}
+          ${badge(c.status)}${c.id ? `<span class="muted">${esc(c.id)}</span>` : ""}</div>`).join("") : empty("No connectors yet", "twin connector setup · or TUI Connectors")}
       <h3>Jobs</h3>
       ${jlist.length ? jlist.map((j) =>
         `<div class="entity-row"><strong>${esc(j.kind || j.id)}</strong>${badge(j.status)}</div>`).join("") : empty("No jobs")}`;
@@ -401,7 +514,7 @@ async function paneInject() {
 }
 
 async function paneOps() {
-  setChrome("Ops", "Health & runtime");
+  setChrome("Ops", "Health & Stance proposals");
   app.innerHTML = `<div class="stack">Loading…</div>`;
   try {
     const [health, runtime, proposals] = await Promise.all([
@@ -415,15 +528,68 @@ async function paneOps() {
         <div class="detail-card">
           <h3>Cognition health</h3>
           <pre class="json-block">${esc(JSON.stringify(health, null, 2))}</pre>
-        </div>
-        <div class="detail-card">
           <h3>Runtime</h3>
           <pre class="json-block">${esc(JSON.stringify(runtime, null, 2))}</pre>
-          <h3 class="entity-posture">Pending Stance proposals</h3>
-          ${props.length ? props.map((p) =>
-            `<div class="entity-row"><strong>${esc(truncate(p.statement || p.id))}</strong>${badge(p.status)}</div>`).join("") : empty("No pending proposals")}
+        </div>
+        <div class="detail-card entity-posture" id="stance-ops">
+          <h3>Pending Stance proposals</h3>
+          ${props.length ? props.map((p) => `
+            <div class="entity-row stance-prop" data-id="${esc(p.id)}">
+              <div class="entity-row-main">
+                <strong>${esc(truncate(p.statement || p.id))}</strong>
+                <span class="muted">${esc(p.id)}</span>
+              </div>
+              ${badge(p.status)}
+              <div class="cta-row">
+                <button type="button" class="btn stance-preview" data-id="${esc(p.id)}">Preview</button>
+                <button type="button" class="btn primary stance-approve" data-id="${esc(p.id)}" disabled>Approve</button>
+              </div>
+            </div>`).join("") : empty("No pending proposals", "Approve requires preview token")}
+          <p id="stance-token" class="muted">Preview a proposal to unlock Approve.</p>
         </div>
       </section>`;
+
+    const tokens = {};
+    app.querySelectorAll(".stance-preview").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        try {
+          const prev = await api(`/api/stances/proposals/${encodeURIComponent(id)}/preview`, {
+            method: "POST",
+            body: JSON.stringify({}),
+          });
+          tokens[id] = prev.preview_token || prev.token || "";
+          const row = btn.closest(".stance-prop");
+          row?.querySelector(".stance-approve")?.removeAttribute("disabled");
+          $("#stance-token").textContent = tokens[id]
+            ? `Token for ${id}: ${tokens[id]}`
+            : "Preview returned no token";
+          toast("Stance preview ready");
+        } catch (err) {
+          toast(err.message, false);
+        }
+      });
+    });
+    app.querySelectorAll(".stance-approve").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        const token = tokens[id];
+        if (!token) {
+          toast("Preview first", false);
+          return;
+        }
+        try {
+          await api(`/api/stances/proposals/${encodeURIComponent(id)}/approve`, {
+            method: "POST",
+            body: JSON.stringify({ preview_token: token }),
+          });
+          toast(`Approved ${id}`);
+          paneOps();
+        } catch (err) {
+          toast(err.message, false);
+        }
+      });
+    });
   } catch (err) {
     app.innerHTML = empty("Ops failed", err.message);
   }
