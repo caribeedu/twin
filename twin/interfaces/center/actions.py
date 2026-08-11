@@ -11,7 +11,6 @@ def cognize_status(ws: Workspace) -> dict[str, Any]:
     import os
 
     from twin.cognize.gate import require_chat_llm
-    from twin.interfaces.commands import cognize_cmd
 
     gate = require_chat_llm(
         extractor=ws.cfg.extractor,
@@ -33,6 +32,41 @@ def cognize_status(ws: Workspace) -> dict[str, Any]:
             {"id": r.id, "text": (r.text or "")[:120]} for r in refs[:8]
         ],
         "last_run": last,
+    }
+
+
+def cognize_runs_page(
+    ws: Workspace,
+    *,
+    page: int = 0,
+    page_size: int = 5,
+    vault: str = "default",
+) -> dict[str, Any]:
+    page = max(0, int(page))
+    page_size = max(1, min(int(page_size), 50))
+    total = 0
+    runs: list[dict[str, Any]] = []
+    if hasattr(ws.store, "count_cognize_runs"):
+        total = int(ws.store.count_cognize_runs(vault) or 0)
+    if hasattr(ws.store, "list_cognize_runs"):
+        runs = ws.store.list_cognize_runs(
+            vault, limit=page_size, offset=page * page_size,
+        )
+    elif hasattr(ws.store, "last_cognize_run") and page == 0:
+        last = ws.store.last_cognize_run(vault)
+        runs = [last] if last else []
+        total = len(runs)
+    pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    if page >= pages:
+        page = pages - 1
+    return {
+        "runs": runs,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "pages": pages,
+        "has_prev": page > 0,
+        "has_next": page + 1 < pages and total > 0,
     }
 
 
@@ -115,6 +149,53 @@ def review_snapshot(ws: Workspace) -> dict[str, Any]:
     }
 
 
+def connector_resource_summary(connector_type: str, configuration: dict[str, Any]) -> str:
+    """Human one-liner of selected Sense resources for a connector type."""
+    cfg = configuration or {}
+    ctype = (connector_type or "").lower()
+
+    def _join(items: list[Any], *, empty: str = "(none selected)") -> str:
+        vals = [str(x).strip() for x in items if str(x).strip()]
+        return ", ".join(vals) if vals else empty
+
+    if ctype == "github":
+        return f"repos: {_join(list(cfg.get('repositories') or []))}"
+    if ctype == "folder":
+        roots = cfg.get("roots") or []
+        paths: list[str] = []
+        for root in roots:
+            if isinstance(root, dict):
+                paths.append(str(root.get("path") or root.get("root") or root))
+            else:
+                paths.append(str(root))
+        return f"paths: {_join(paths)}"
+    if ctype == "slack":
+        channels = list(cfg.get("channels") or [])
+        meta = cfg.get("channel_metadata") or {}
+        labels = []
+        for cid in channels:
+            info = meta.get(cid) if isinstance(meta, dict) else None
+            if isinstance(info, dict) and info.get("name"):
+                labels.append(f"#{info['name']}")
+            else:
+                labels.append(str(cid))
+        return f"channels: {_join(labels)}"
+    if ctype == "gmail":
+        return f"labels: {_join(list(cfg.get('labels') or []))}"
+    if ctype == "calendar":
+        return f"calendars: {_join(list(cfg.get('calendars') or []))}"
+    if ctype == "outlook":
+        return f"folders: {_join(list(cfg.get('folders') or []))}"
+    if ctype == "fireflies":
+        email = cfg.get("account_email") or ""
+        return f"account: {email}" if email else "account: (default)"
+    # Fallback: show any list-ish scope keys if present
+    for key in ("repositories", "channels", "labels", "calendars", "folders", "roots", "paths"):
+        if key in cfg and cfg[key]:
+            return f"{key}: {_join(list(cfg[key]) if isinstance(cfg[key], list) else [cfg[key]])}"
+    return "(no resources configured)"
+
+
 def connector_rows(ws: Workspace) -> list[dict[str, Any]]:
     from twin.sense.connectors.health import connector_health
 
@@ -123,6 +204,8 @@ def connector_rows(ws: Workspace) -> list[dict[str, Any]]:
         return rows
     for inst in ws.store.list_connector_instances():
         hid = getattr(inst, "id", "")
+        ctype = getattr(inst, "connector_type", getattr(inst, "type", ""))
+        cfg = getattr(inst, "configuration", None) or {}
         health = {}
         try:
             health = connector_health(ws.store, hid)
@@ -130,9 +213,9 @@ def connector_rows(ws: Workspace) -> list[dict[str, Any]]:
             health = {"error": str(exc)}
         rows.append({
             "id": hid,
-            "type": getattr(inst, "connector_type", getattr(inst, "type", "")),
-            "status": getattr(inst, "status", ""),
+            "type": ctype,
             "health": health.get("status") or health.get("instance_status") or "",
+            "resources": connector_resource_summary(ctype, cfg),
             "detail": health,
         })
     return rows
@@ -223,7 +306,7 @@ def doctor_summary(ws: Workspace) -> dict[str, Any]:
         if c.status != OK
     ][:8]
     return {
-        "home": str(ws.home),
+        "home": str(ws.cfg.home),
         "checks_ok": ok,
         "checks_total": len(checks),
         "warnings": warn,

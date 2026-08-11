@@ -484,9 +484,27 @@ class CognizeStoreMixin:
         self._c_insert("cognize_runs", row)
         return run_id
 
-    def last_cognize_run(self, vault_id: str = "") -> Optional[dict[str, Any]]:
+    def _decode_cognize_run(self, row: Any) -> dict[str, Any]:
         import json
 
+        data = dict(row) if not isinstance(row, dict) else row
+        payload = data.get("payload") or "{}"
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        return {
+            "id": data.get("id") or "",
+            "vault_id": data.get("vault_id") or "",
+            "status": data.get("status") or "",
+            "halt_reason": data.get("halt_reason") or "",
+            "detail": data.get("detail") or "",
+            "created_at": data.get("created_at") or "",
+            "payload": payload,
+        }
+
+    def last_cognize_run(self, vault_id: str = "") -> Optional[dict[str, Any]]:
         if vault_id:
             row = self._j_fetchone(
                 "SELECT * FROM cognize_runs WHERE vault_id = ? "
@@ -500,18 +518,44 @@ class CognizeStoreMixin:
             )
         if not row:
             return None
-        payload = row.get("payload") or "{}"
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except Exception:
-                payload = {}
-        return {
-            "id": row["id"],
-            "vault_id": row.get("vault_id") or "",
-            "status": row.get("status") or "",
-            "halt_reason": row.get("halt_reason") or "",
-            "detail": row.get("detail") or "",
-            "created_at": row.get("created_at") or "",
-            "payload": payload,
-        }
+        return self._decode_cognize_run(row)
+
+    def list_cognize_runs(
+        self,
+        vault_id: str = "",
+        *,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
+        if vault_id:
+            rows = self._j_fetchall(
+                "SELECT * FROM cognize_runs WHERE vault_id = ? "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (vault_id, limit, offset),
+            )
+        else:
+            rows = self._j_fetchall(
+                "SELECT * FROM cognize_runs ORDER BY created_at DESC "
+                "LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        return [self._decode_cognize_run(r) for r in (rows or [])]
+
+    def count_cognize_runs(self, vault_id: str = "") -> int:
+        if vault_id:
+            row = self._j_fetchone(
+                "SELECT COUNT(*) AS n FROM cognize_runs WHERE vault_id = ?",
+                (vault_id,),
+            )
+        else:
+            row = self._j_fetchone("SELECT COUNT(*) AS n FROM cognize_runs", ())
+        if not row:
+            return 0
+        data = dict(row) if not isinstance(row, dict) else row
+        try:
+            return int(data.get("n") or data.get("COUNT(*)") or 0)
+        except (TypeError, ValueError):
+            return 0
+

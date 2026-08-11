@@ -71,7 +71,7 @@ def _add_json_flag_tree(parser) -> None:
 
 def cmd_init(args) -> None:
     from twin.interfaces import ux
-    from .setup_wizard import run_setup_wizard
+    from twin.interfaces.setup_wizard import run_setup_wizard
 
     ws = Workspace(args.home)
     interactive = not getattr(args, "skip_setup", False)
@@ -2313,13 +2313,13 @@ def cmd_stats(args) -> None:
 
 
 def cmd_serve(args) -> None:
-    from .api import main as serve_main
+    from twin.interfaces.api import main as serve_main
 
     serve_main(args.home, host=args.host, port=args.port)
 
 
 def cmd_mcp(args) -> None:
-    from .mcp_server import main as mcp_main
+    from twin.interfaces.mcp_server import main as mcp_main
 
     mcp_main(args.home)
 
@@ -3219,7 +3219,7 @@ def cmd_watch(args) -> None:
 
 def cmd_doctor(args) -> None:
     from twin.interfaces import ux
-    from .ops import doctor
+    from twin.interfaces.ops import doctor
 
     ws = Workspace(args.home)
     ux.print_rule("doctor")
@@ -3418,7 +3418,7 @@ def cmd_usage(args) -> None:
 
 def cmd_setup(args) -> None:
     from twin.interfaces import ux
-    from .ops import setup_mcp, setup_ollama, setup_postgres
+    from twin.interfaces.ops import setup_mcp, setup_ollama, setup_postgres
 
     ws = Workspace(args.home)
     ux.print_rule(f"setup {args.target}")

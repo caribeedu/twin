@@ -72,6 +72,14 @@ def draft_stance_after_commit(
                             "Return JSON {statement, rationale}."
                         ),
                         user=f"Narrative account:\n{nar.account}",
+                        schema={
+                            "type": "object",
+                            "properties": {
+                                "statement": {"type": "string"},
+                                "rationale": {"type": "string"},
+                            },
+                            "additionalProperties": True,
+                        },
                     )
                     stmt = str(data.get("statement") or nar.account)[:500]
                     return propose_from_narrative(
@@ -134,6 +142,15 @@ def run_consolidation_judgment(
                     "Return JSON {action: promote|keep_episodic|skip, statement?, rationale}."
                 ),
                 user=f"Account:\n{nar.account}\nDomain:{nar.domain}",
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "statement": {"type": "string"},
+                        "rationale": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
             )
             used = max(200, len(nar.account or "") // 4)
             budget -= used
@@ -203,6 +220,14 @@ def run_fade_judgment(
                     f"account={nar.account}\ntrace_hits={rec.get('trace_hits')}\n"
                     f"stance_linked={rec.get('stance_linked')}"
                 ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "recommended": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
             )
             label = str(data.get("recommended") or rec["recommended"])
             reason = str(data.get("reason") or rec["reason"])

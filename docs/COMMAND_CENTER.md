@@ -11,7 +11,7 @@ enters the TUI.
 | Key | Screen | Role |
 |---|---|---|
 | Home | status | doctor summary, serve/runtime state, backlog, open Reflections |
-| `s` | Services | start/stop supervised `twin serve` + `twin runtime`; shows serve URL |
+| `s` | Services | start/stop supervised `twin serve` **and** `twin runtime` **in parallel**; Start both / Stop both; serve URL |
 | `c` | Connectors | list + **test / pause / resume** (revoke stays CLI-confirmed) |
 | `j` | Jobs | queue depth; enqueue `cognize_batch` / `consolidate_daily` / `backfill_partition`; backfill progress |
 | `g` | Cognize | halt reason + open reflections; **Run cognize** via shared handler |

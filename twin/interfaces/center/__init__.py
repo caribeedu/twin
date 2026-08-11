@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -105,7 +106,7 @@ def home_snapshot(ws: Workspace) -> dict[str, Any]:
         except Exception:
             pass
     return {
-        "home": str(ws.home),
+        "home": str(ws.cfg.home),
         "review_backlog": backlog,
         "open_reflections": reflections,
         "cognize_halt": halt,
@@ -122,31 +123,143 @@ def fuzzy_palette(query: str) -> list[str]:
     return [p for p in pool if q in p.lower()][:20]
 
 
-def start_serve(state: CenterState, port: int = 8765) -> str:
+DEFAULT_SERVE_PORT = 8765
+
+
+def pids_listening_on(port: int) -> list[int]:
+    """PIDs with a TCP LISTEN socket on ``port`` (best-effort, no extra deps)."""
+    pids: list[int] = []
+    try:
+        out = subprocess.check_output(
+            ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        pids.extend(int(x) for x in out.split() if x.strip().isdigit())
+    except Exception:
+        pass
+    if pids:
+        return sorted(set(pids))
+    try:
+        out = subprocess.check_output(
+            ["ss", "-tlnp", f"sport = :{port}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        import re
+        for m in re.finditer(r"pid=(\d+)", out):
+            pids.append(int(m.group(1)))
+    except Exception:
+        pass
+    return sorted(set(pids))
+
+
+def free_listen_port(port: int, *, exclude: Optional[set[int]] = None) -> list[int]:
+    """SIGTERM then SIGKILL listeners on ``port``. Returns killed PIDs."""
+    exclude = exclude or set()
+    killed: list[int] = []
+    for pid in pids_listening_on(port):
+        if pid in exclude or pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed.append(pid)
+        except ProcessLookupError:
+            continue
+        except Exception:
+            continue
+    if killed:
+        time.sleep(0.35)
+    still = [p for p in pids_listening_on(port) if p not in exclude and p != os.getpid()]
+    for pid in still:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            if pid not in killed:
+                killed.append(pid)
+        except Exception:
+            pass
+    if still:
+        time.sleep(0.2)
+    return killed
+
+
+def read_log_tail(path: Optional[Path], *, lines: int = 120) -> str:
+    if path is None or not Path(path).exists():
+        return "(no log file yet)"
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return f"(failed to read log: {exc})"
+    parts = text.splitlines()
+    if not parts:
+        return "(empty log)"
+    return "\n".join(parts[-lines:])
+
+
+def start_serve(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> str:
     if state.serve.proc and state.serve.proc.poll() is None:
-        return state.serve.url or f"http://127.0.0.1:{port}"
+        # Tracked child alive — but port may still be held by an orphan.
+        if not pids_listening_on(port) or (
+            state.serve.proc.pid in pids_listening_on(port)
+        ):
+            # If our child isn't the listener, reclaim the port and restart.
+            listeners = set(pids_listening_on(port))
+            if state.serve.proc.pid in listeners or not listeners:
+                return state.serve.url or f"http://127.0.0.1:{port}"
+        stop_serve(state, port=port)
+    else:
+        # Drop stale handle; free orphan listeners before bind.
+        state.serve.proc = None
+        free_listen_port(port)
+
     log = state.home / "logs" / "center-serve.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     state.serve.log_path = log
+    # Global --home must precede the subcommand (argparse parent options).
     state.serve.proc = subprocess.Popen(
-        [sys.executable, "-c",
-         "from twin.interfaces.cli import main; main()",
-         "serve", "--home", str(state.home), "--port", str(port)],
+        [
+            sys.executable, "-c",
+            "from twin.interfaces.cli import main; main()",
+            "--home", str(state.home),
+            "serve", "--port", str(port),
+        ],
         stdout=log.open("a"),
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     state.serve.url = f"http://127.0.0.1:{port}"
+    # Brief wait so bind errors surface in poll().
+    time.sleep(0.6)
+    if state.serve.proc.poll() is not None:
+        # Failed — often address-in-use; reclaim and retry once.
+        free_listen_port(port)
+        state.serve.proc = subprocess.Popen(
+            [
+                sys.executable, "-c",
+                "from twin.interfaces.cli import main; main()",
+                "--home", str(state.home),
+                "serve", "--port", str(port),
+            ],
+            stdout=log.open("a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        time.sleep(0.6)
     return state.serve.url
 
 
-def stop_serve(state: CenterState) -> None:
+def stop_serve(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> None:
     if state.serve.proc and state.serve.proc.poll() is None:
         try:
             os.killpg(state.serve.proc.pid, signal.SIGTERM)
         except Exception:
-            state.serve.proc.terminate()
+            try:
+                state.serve.proc.terminate()
+            except Exception:
+                pass
     state.serve.proc = None
+    # Always clear the port — orphans from prior Center sessions break restart.
+    free_listen_port(port)
 
 
 def start_runtime(state: CenterState) -> str:
@@ -156,9 +269,12 @@ def start_runtime(state: CenterState) -> str:
     log.parent.mkdir(parents=True, exist_ok=True)
     state.runtime.log_path = log
     state.runtime.proc = subprocess.Popen(
-        [sys.executable, "-c",
-         "from twin.interfaces.cli import main; main()",
-         "runtime", "start", "--home", str(state.home), "--no-live"],
+        [
+            sys.executable, "-c",
+            "from twin.interfaces.cli import main; main()",
+            "--home", str(state.home),
+            "runtime", "start", "--no-live",
+        ],
         stdout=log.open("a"),
         stderr=subprocess.STDOUT,
         start_new_session=True,
@@ -175,9 +291,17 @@ def stop_runtime(state: CenterState) -> None:
     state.runtime.proc = None
 
 
-def stop_all_supervised(state: CenterState) -> None:
-    stop_serve(state)
+def stop_all_supervised(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> None:
+    stop_serve(state, port=port)
     stop_runtime(state)
+
+
+def start_all_supervised(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> dict[str, str]:
+    """Start serve and runtime together — they are meant to run in parallel."""
+    return {
+        "serve": start_serve(state, port=port),
+        "runtime": start_runtime(state),
+    }
 
 
 def launch_command_center(home: Optional[str] = None) -> int:
@@ -185,7 +309,7 @@ def launch_command_center(home: Optional[str] = None) -> int:
     from twin.interfaces.center.app import TwinCenterApp
 
     ws = Workspace(home)
-    state = CenterState(home=Path(ws.home))
+    state = CenterState(home=Path(ws.cfg.home))
     app = TwinCenterApp(ws=ws, state=state)
     app.run()
     if state.exit_choice == "stop":

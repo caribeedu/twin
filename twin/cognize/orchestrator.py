@@ -331,12 +331,21 @@ def _run_stage(
     return _llm_stage(store, cfg, stage, ctx, dry_run=dry_run)
 
 
+_OPEN_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": True,
+}
+
+
 def _llm_json(ctx: dict[str, Any], system: str, user: str) -> dict[str, Any]:
     llm = ctx.get("llm")
     if llm is None:
         raise RuntimeError("chat LLM unavailable for Cognize stage")
     return llm.complete_json(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        system=system,
+        user=user,
+        schema=_OPEN_JSON_SCHEMA,
     )
 
 
