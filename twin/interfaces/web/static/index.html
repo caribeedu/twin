@@ -15,30 +15,32 @@
 <body class="center-body">
   <div class="mesh" aria-hidden="true"></div>
 
-  <div class="center-shell">
-    <aside class="rail" aria-label="Command Center">
-      <a class="brand rail-brand" href="#home" data-nav="home">
+  <div class="center-shell center-shell--flat">
+    <header class="center-brandbar">
+      <a class="brand" href="#home">
         <img class="mark" src="/static/logo.svg" width="32" height="32" alt="" />
         <span class="brand-text">
           <strong>Twin</strong>
           <em>Command Center</em>
         </span>
       </a>
-      <nav class="rail-nav">
-        <a href="#home" data-nav="home">Home</a>
-        <a href="#explore" data-nav="explore">Explore</a>
-        <a href="#review" data-nav="review">Review</a>
-        <a href="#cognize" data-nav="cognize">Cognize</a>
-        <a href="#sense" data-nav="sense">Sense</a>
-        <a href="#inject" data-nav="inject">Inject</a>
-        <a href="#ops" data-nav="ops">Ops</a>
-      </nav>
-    </aside>
+    </header>
+
+    <nav class="center-tabs" aria-label="Main">
+      <a class="center-tab" href="#home" data-nav="home">Home</a>
+      <a class="center-tab" href="#explore" data-nav="explore">Explore</a>
+      <a class="center-tab" href="#review" data-nav="review">Review</a>
+      <a class="center-tab" href="#cognize" data-nav="cognize">Cognize</a>
+      <a class="center-tab" href="#sense" data-nav="sense">Sense</a>
+      <a class="center-tab" href="#inject" data-nav="inject">Inject</a>
+      <a class="center-tab" href="#ops" data-nav="ops">Ops</a>
+      <a class="center-tab" href="#sessions" data-nav="sessions">Sessions</a>
+    </nav>
 
     <div class="center-main">
-      <header class="center-top">
+      <header class="center-top" id="center-top">
         <p class="pane-eyebrow" id="pane-eyebrow">Home</p>
-        <h1 class="pane-title" id="pane-title">Overview</h1>
+        <h1 class="pane-title" id="pane-title">General</h1>
       </header>
       <main id="app" class="app center-app"></main>
     </div>

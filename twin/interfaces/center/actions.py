@@ -79,6 +79,24 @@ def cognize_run(ws: Workspace, *, until: str = "evidence_audit", limit: int = 20
     return cognize_cmd.cognize_run(ws, args)
 
 
+def cognize_estimate(
+    ws: Workspace,
+    *,
+    until: str = "evidence_audit",
+    limit: int = 20,
+    vault: str = "default",
+) -> dict[str, Any]:
+    from twin.cognize.estimate import estimate_cognize_run
+
+    return estimate_cognize_run(
+        ws.store,
+        ws.cfg,
+        until=until,
+        limit=limit,
+        vault_id=vault,
+    )
+
+
 def narrative_list(ws: Workspace, vault: str = "default") -> list[dict[str, Any]]:
     if not hasattr(ws.store, "list_narratives"):
         return []
@@ -97,6 +115,120 @@ def narrative_list(ws: Workspace, vault: str = "default") -> list[dict[str, Any]
             "stale_reason": eps.stale_reason if eps else "",
             "grain": nar.grain.value if nar.grain else "",
             "domain": nar.domain,
+        })
+    return rows
+
+
+def reflection_list(ws: Workspace, vault: str = "default", *, limit: int = 40) -> list[dict[str, Any]]:
+    if not hasattr(ws.store, "list_reflections"):
+        return []
+    rows = []
+    for r in ws.store.list_reflections(vault)[:limit]:
+        status = r.status.value if hasattr(r.status, "value") else str(r.status)
+        rows.append({
+            "id": r.id,
+            "status": status,
+            "text": (r.text or "")[:160],
+        })
+    return rows
+
+
+def interpretation_list(
+    ws: Workspace, vault: str = "default", *, limit: int = 40,
+) -> list[dict[str, Any]]:
+    lister = None
+    if hasattr(ws.store, "list_cognize_interpretations"):
+        lister = ws.store.list_cognize_interpretations
+    elif hasattr(ws.store, "list_interpretations"):
+        lister = ws.store.list_interpretations
+    if lister is None:
+        return []
+    try:
+        items = lister(vault)
+    except TypeError:
+        items = lister()
+    rows = []
+    for i in list(items)[:limit]:
+        status = getattr(i, "status", "")
+        if hasattr(status, "value"):
+            status = status.value
+        expl = getattr(i, "explanation", None) or getattr(i, "text", "") or ""
+        rows.append({
+            "id": getattr(i, "id", "") or getattr(i, "percept_id", ""),
+            "status": status,
+            "explanation": str(expl)[:160],
+        })
+    return rows
+
+
+def situation_list(ws: Workspace, vault: str = "default", *, limit: int = 40) -> list[dict[str, Any]]:
+    if not hasattr(ws.store, "list_situations"):
+        return []
+    rows = []
+    for s in ws.store.list_situations(vault)[:limit]:
+        status = s.status.value if hasattr(s.status, "value") else str(s.status)
+        rows.append({
+            "id": s.id,
+            "status": status,
+            "domain": getattr(s, "domain", "") or "",
+            "summary": (getattr(s, "summary", "") or "")[:160],
+            "percepts": len(getattr(s, "percept_ids", None) or []),
+        })
+    return rows
+
+
+def relation_list(ws: Workspace, vault: str = "default", *, limit: int = 40) -> list[dict[str, Any]]:
+    if not hasattr(ws.store, "list_relations"):
+        return []
+    rows = []
+    for r in ws.store.list_relations(vault)[:limit]:
+        rtype = r.type.value if hasattr(r.type, "value") else str(r.type)
+        rows.append({
+            "id": r.id,
+            "type": rtype,
+            "from_id": getattr(r, "from_id", "") or "",
+            "to_id": getattr(r, "to_id", "") or "",
+            "rationale": (getattr(r, "rationale", "") or "")[:100],
+        })
+    return rows
+
+
+def trace_list(ws: Workspace, vault: str = "default", *, limit: int = 40) -> list[dict[str, Any]]:
+    if not hasattr(ws.store, "list_traces"):
+        return []
+    rows = []
+    for t in ws.store.list_traces(vault, limit=limit)[:limit]:
+        rows.append({
+            "id": t.id,
+            "event_kind": getattr(t, "event_kind", "") or "",
+            "resource_kind": getattr(t, "resource_kind", "") or "",
+            "resource_id": getattr(t, "resource_id", "") or "",
+            "created_at": getattr(t, "created_at", "") or "",
+            "summary": str(
+                (getattr(t, "metadata", None) or {}).get("summary")
+                or (getattr(t, "metadata", None) or {}).get("detail")
+                or ""
+            )[:120],
+        })
+    return rows
+
+
+def percept_list(ws: Workspace, *, limit: int = 40) -> list[dict[str, Any]]:
+    if not hasattr(ws.store, "list_percepts"):
+        return []
+    items = list(ws.store.list_percepts())
+    # newest first when ingested_at present
+    try:
+        items.sort(key=lambda p: getattr(p, "ingested_at", "") or "", reverse=True)
+    except Exception:
+        pass
+    rows = []
+    for p in items[:limit]:
+        rows.append({
+            "id": p.id,
+            "sensor": getattr(p, "source_sensor", "") or getattr(p, "sensor", "") or "",
+            "content": (getattr(p, "content", "") or "").replace("\n", " ")[:120],
+            "ingested_at": getattr(p, "ingested_at", "") or "",
         })
     return rows
 
@@ -285,14 +417,36 @@ def jobs_snapshot(ws: Workspace, *, limit: int = 20) -> dict[str, Any]:
     return {"depth": depth, "jobs": jobs, "backfills": backfills}
 
 
-def enqueue_job(ws: Workspace, kind: str) -> dict[str, Any]:
+def enqueue_job(
+    ws: Workspace,
+    kind: str,
+    *,
+    payload: Optional[dict[str, Any]] = None,
+    vault_id: str = "default",
+) -> dict[str, Any]:
     from twin.interfaces.runtime.models import JobKind
     from twin.interfaces.runtime.queue import RuntimeQueue
 
     q = RuntimeQueue(ws.store)
     jk = JobKind(kind)
-    job = q.enqueue(jk, payload={}, vault_id="default")
+    job = q.enqueue(jk, payload=dict(payload or {}), vault_id=vault_id)
     return {"ok": True, "job_id": job.id, "kind": jk.value}
+
+
+def enqueue_cognize(
+    ws: Workspace,
+    *,
+    until: str = "evidence_audit",
+    limit: int = 20,
+    vault: str = "default",
+) -> dict[str, Any]:
+    """Queue cognize_batch for the runtime worker (non-blocking for the TUI)."""
+    return enqueue_job(
+        ws,
+        "cognize_batch",
+        payload={"until": until, "limit": limit, "vault_id": vault},
+        vault_id=vault,
+    )
 
 
 def doctor_summary(ws: Workspace) -> dict[str, Any]:

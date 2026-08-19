@@ -14,10 +14,9 @@ enters the TUI.
 | `s` | Services | start/stop supervised `twin serve` **and** `twin runtime` **in parallel**; Start both / Stop both; serve URL |
 | `c` | Connectors | list + **test / pause / resume** (revoke stays CLI-confirmed) |
 | `j` | Jobs | queue depth; enqueue `cognize_batch` / `consolidate_daily` / `backfill_partition`; backfill progress |
-| `g` | Cognize | halt reason + open reflections; **Run cognize** via shared handler |
+| `g` | Cognize | halt reason + open reflections; **Run cognize** queues `cognize_batch` after cost estimate confirm |
 | `r` | Review | backlog + open Reflections + Fade recommendations + workbench URL |
-| `n` | Narratives | list with epistemic status / grain |
-| `t` | Stance | list + approve pending proposal (preview token) |
+| `b` | Browse | Narratives · Stance · Reflections · Interpretations · Situations · Relations · Traces · Percepts |
 | `m` | MCP | client env + narrative/stance tool names |
 | `/` | Palette | fuzzy over Cognize / Narrative / Stance / Inject verbs |
 

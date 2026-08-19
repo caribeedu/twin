@@ -10,7 +10,7 @@ const ENTITY_TYPES = [
   { id: "interpretation", label: "Interpretations", role: "candidate", list: "/api/interpretations?status=all", show: (id) => `/api/interpretations/${id}` },
   { id: "situation", label: "Situations", role: "cluster", list: "/api/situations", show: (id) => `/api/situations/${id}` },
   { id: "stance", label: "Stances", role: "posture", list: "/api/stances", show: (id) => `/api/stances/${id}` },
-  { id: "evidence", label: "Evidence", role: "warrant", list: "/api/evidence", show: (id) => `/api/evidence/${id}` },
+  { id: "evidence", label: "Evidences", role: "warrant", list: "/api/evidence", show: (id) => `/api/evidence/${id}` },
   { id: "relation", label: "Relations", role: "edge", list: "/api/relations", show: (id) => `/api/relations/${id}` },
   { id: "trace", label: "Traces", role: "ledger", list: "/api/traces", show: (id) => `/api/traces/${id}` },
   { id: "percept", label: "Percepts", role: "observation", list: "/api/percepts?limit=200", show: (id) => `/api/percepts/${id}` },
@@ -57,17 +57,44 @@ function parseHash() {
   return { pane: pane || "home", parts: rest };
 }
 
-function setChrome(eyebrow, title) {
+function setChrome(eyebrow, title, { home = false } = {}) {
+  const top = $("#center-top");
   const e = $("#pane-eyebrow");
   const t = $("#pane-title");
+  if (top) top.hidden = !!home;
   if (e) e.textContent = eyebrow;
   if (t) t.textContent = title;
 }
 
 function setActiveNav(pane) {
-  document.querySelectorAll(".rail-nav a").forEach((a) => {
-    a.classList.toggle("active", a.dataset.nav === pane);
+  const key = pane === "explore" ? "explore" : pane;
+  document.querySelectorAll(".center-tabs [data-nav]").forEach((a) => {
+    a.classList.toggle("active", a.dataset.nav === key);
   });
+}
+
+function sectionGo(href, label = "Open") {
+  return `<a class="section-go" href="${esc(href)}"><span>${esc(label)}</span><span class="section-go-arrow" aria-hidden="true">→</span></a>`;
+}
+
+/** Mock until host session telemetry exists. */
+const MOCK_SESSIONS = [
+  { provider: "Claude", open: 2 },
+  { provider: "ChatGPT", open: 1 },
+  { provider: "Antigravity", open: 0 },
+  { provider: "Cursor", open: 3 },
+];
+
+function fuzzyScore(query, text) {
+  const q = String(query || "").trim().toLowerCase();
+  const t = String(text || "").toLowerCase();
+  if (!q) return 0;
+  if (t.includes(q)) return 100 - Math.min(40, t.indexOf(q));
+  let qi = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) qi++;
+  }
+  return qi === q.length ? 40 : 0;
 }
 
 function badge(status) {
@@ -103,31 +130,481 @@ function truncate(s, n = 140) {
 
 /* ---------- panes ---------- */
 
+function pascalKind(kind, label) {
+  if (label) return label;
+  const s = String(kind || "");
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : "Item";
+}
+
+function pascalStatus(status) {
+  const s = String(status || "").trim();
+  if (!s) return "";
+  return s
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join("");
+}
+
+function reviewStatusClass(status) {
+  const key = String(status || "").toLowerCase().replace(/[_\s]+/g, "-");
+  const known = new Set([
+    "open", "competing", "pending", "active", "committed", "fresh",
+    "stale", "closed", "resolved", "rejected", "deprecated", "working",
+  ]);
+  if (known.has(key)) return `review-status review-status--${key}`;
+  if (["open", "active", "committed", "fresh", "resolved"].includes(key)) {
+    return "review-status review-status--open";
+  }
+  if (["competing", "pending", "stale", "working"].includes(key)) {
+    return "review-status review-status--competing";
+  }
+  if (["rejected", "deprecated", "closed"].includes(key)) {
+    return "review-status review-status--rejected";
+  }
+  return "review-status";
+}
+
+function formatWhen(iso) {
+  if (!iso) return "";
+  const d = String(iso);
+  return d.length >= 16 ? d.slice(0, 16).replace("T", " ") : d;
+}
+
+function reviewMetaLine(meta) {
+  const m = meta || {};
+  const situations = m.situations ?? 0;
+  const evidence = m.evidence ?? 0;
+  return `Situations: ${situations} - Evidence: ${evidence}`;
+}
+
+function reviewCard(item) {
+  const kind = pascalKind(item.kind, item.kind_label);
+  const statusLabel = pascalStatus(item.status);
+  const metaLine = reviewMetaLine(item.meta);
+  const title = item.title || truncate(item.text || item.id, 100);
+  const body = item.text && item.text !== title ? truncate(item.text, 180) : "";
+  return `
+    <a class="review-home-card" href="${esc(item.href)}">
+      <div class="review-home-top">
+        <span class="review-kind">${esc(kind)}</span>
+        ${statusLabel
+          ? `<span class="${reviewStatusClass(item.status)}">${esc(statusLabel)}</span>`
+          : ""}
+        <span class="review-id muted">${esc(item.id)}</span>
+      </div>
+      <strong class="review-title">${esc(title)}</strong>
+      ${body ? `<p class="review-excerpt">${esc(body)}</p>` : ""}
+      <div class="review-home-foot muted">
+        ${formatWhen(item.created_at) ? `<span>${esc(formatWhen(item.created_at))}</span>` : ""}
+        ${metaLine ? `<span>${esc(metaLine)}</span>` : ""}
+      </div>
+    </a>`;
+}
+
 async function paneHome() {
-  setChrome("Home", "Overview");
-  app.innerHTML = `<div class="center-grid loading">Loading…</div>`;
+  setChrome("Home", "General");
+  app.innerHTML = `<div class="home-dash loading">Loading…</div>`;
   try {
     const sum = await api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`);
+    const counts = sum.counts || {};
+    const review = sum.review_items || [];
+    const reviewOpen =
+      (sum.open_reflections ?? 0) + (sum.competing_interpretations ?? 0);
+    const domains = sum.domains || [];
+    const entityTiles = [
+      ["narratives", "Narratives", "#explore/narrative"],
+      ["reflections", "Reflections", "#explore/reflection"],
+      ["interpretations", "Interpretations", "#explore/interpretation"],
+      ["situations", "Situations", "#explore/situation"],
+      ["stances", "Stances", "#explore/stance"],
+      ["evidence", "Evidences", "#explore/evidence"],
+      ["relations", "Relations", "#explore/relation"],
+      ["traces", "Traces", "#explore/trace"],
+      ["percepts", "Percepts", "#explore/percept"],
+    ];
+    const domainOptions = domains.length
+      ? domains.map((d) =>
+          `<option value="${esc(d.id)}">${esc(d.label)} (${d.count})</option>`
+        ).join("")
+      : `<option value="" disabled selected>No domains with content yet</option>`;
+
     app.innerHTML = `
-      <section class="hero-block entity-account">
-        <p class="lede">Sense captures. Cognize forms accounts. Inject projects — with receipts.</p>
-        <div class="stat-row">
-          <div class="stat"><span class="stat-n">${sum.open_reflections}</span><span class="stat-l">Open Reflections</span></div>
-          <div class="stat"><span class="stat-n">${sum.competing_interpretations}</span><span class="stat-l">Competing Interpretations</span></div>
-          <div class="stat"><span class="stat-n">${sum.narratives}</span><span class="stat-l">Narratives</span></div>
-          <div class="stat"><span class="stat-n">${sum.jobs_pending}</span><span class="stat-l">Jobs pending</span></div>
-          <div class="stat"><span class="stat-n">${sum.connectors}</span><span class="stat-l">Connectors</span></div>
+      <div class="home-dash">
+        <section class="home-card home-sessions home-card--compact">
+          ${sectionGo("#sessions", "Sessions")}
+          <h2 class="home-card-title">Active sessions</h2>
+          <div class="session-grid">
+            ${MOCK_SESSIONS.map((s) => `
+              <div class="session-pill">
+                <span class="session-n">${s.open}</span>
+                <span class="session-l">${esc(s.provider)}</span>
+              </div>`).join("")}
+          </div>
+        </section>
+
+        <section class="home-card home-jobs home-card--compact">
+          ${sectionGo("#sense", "Jobs")}
+          <h2 class="home-card-title">Jobs</h2>
+          <div class="jobs-pair">
+            <div class="job-stat">
+              <span class="stat-n">${sum.jobs_running ?? 0}</span>
+              <span class="stat-l">Running</span>
+            </div>
+            <div class="job-stat">
+              <span class="stat-n">${sum.jobs_pending ?? 0}</span>
+              <span class="stat-l">Pending</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="home-card home-entities">
+          ${sectionGo("#explore", "Explore")}
+          <h2 class="home-card-title">Substrate</h2>
+          <div class="entity-count-row">
+            ${entityTiles.map(([key, label, href]) => `
+              <a class="entity-count" href="${href}">
+                <span class="stat-n">${counts[key] ?? 0}</span>
+                <span class="stat-l">${esc(label)}</span>
+              </a>`).join("")}
+          </div>
+        </section>
+
+        <section class="home-card home-review">
+          ${sectionGo("#review", "Review")}
+          <h2 class="home-card-title">To review (${reviewOpen})</h2>
+          <div class="review-home-list">
+            ${review.length
+              ? review.map(reviewCard).join("")
+              : `<div class="empty"><strong>Nothing waiting</strong><p>Open Reflections and competing Interpretations land here.</p></div>`}
+          </div>
+        </section>
+
+        <div class="home-rail">
+          <section class="home-card home-health">
+            ${sectionGo("#ops", "Health")}
+            <h2 class="home-card-title">Health</h2>
+            <div id="home-health-body" class="home-health-body">
+              <div class="muted">Loading doctor…</div>
+            </div>
+          </section>
+
+          <section class="home-card home-search">
+            ${sectionGo("#explore", "Explore")}
+            <h2 class="home-card-title">Search</h2>
+            <div class="search-bar">
+              <select id="home-search-type" aria-label="Entity type">
+                <option value="all">All entities</option>
+                ${ENTITY_TYPES.map((e) => `<option value="${e.id}">${esc(e.label)}</option>`).join("")}
+              </select>
+              <input id="home-search-q" type="search" placeholder="Fuzzy search…" autocomplete="off" />
+            </div>
+            <div id="home-search-results" class="search-results" hidden></div>
+          </section>
+
+          <section class="home-card home-inject">
+            <h2 class="home-card-title">Inject</h2>
+            <p class="home-card-sub muted">Build a context pack in place</p>
+            <form id="home-pack-form" class="stack-form compact">
+              <label>Query<input name="query" required placeholder="What was decided about…?" /></label>
+              <label>Domain
+                <select name="domain" ${domains.length ? "required" : "disabled"}>
+                  ${domainOptions}
+                </select>
+              </label>
+              <button class="btn primary" type="submit" ${domains.length ? "" : "disabled"}>Build pack</button>
+            </form>
+            <div id="home-pack-meta" class="muted"></div>
+            <pre id="home-pack-out" class="json-block" hidden></pre>
+          </section>
         </div>
-        ${sum.cognize_halt ? `<div class="health-banner warn">Cognize halt: ${esc(sum.cognize_halt)}</div>` : `<div class="health-banner ok">Cognize gate clear</div>`}
-        <div class="cta-row">
-          <a class="btn primary" href="#explore/reflection">Explore Reflections</a>
-          <a class="btn" href="#review">Review</a>
-          <a class="btn ghost" href="#inject">Inject pack</a>
-        </div>
-      </section>`;
+      </div>`;
+
+    wireHomeSearch();
+    wireHomeInject();
+    loadHomeDoctor(sum).finally(() => syncReviewToRailHeight());
+    syncReviewToRailHeight();
   } catch (err) {
     app.innerHTML = empty("Could not load overview", err.message);
   }
+}
+
+let _reviewRailSync = null;
+
+function syncReviewToRailHeight() {
+  const review = $(".home-review", app);
+  const rail = $(".home-rail", app);
+  if (!review || !rail) return;
+
+  const apply = () => {
+    // Match Review card to Search + Inject + Health (gaps + padding included).
+    const h = Math.round(rail.getBoundingClientRect().height);
+    if (h > 0) review.style.height = `${h}px`;
+  };
+  apply();
+
+  if (_reviewRailSync) {
+    _reviewRailSync.disconnect();
+    _reviewRailSync = null;
+  }
+  if (typeof ResizeObserver === "function") {
+    _reviewRailSync = new ResizeObserver(() => apply());
+    _reviewRailSync.observe(rail);
+  }
+}
+
+function friendlyDoctorName(name) {
+  const raw = String(name || "");
+  const map = {
+    "dependency:fastapi": "FastAPI",
+    "dependency:mcp": "MCP SDK",
+    "dependency:psycopg": "Postgres driver",
+    "dependency:cryptography": "Crypto library",
+    "store:sqlite": "SQLite store",
+    "store:postgres": "Postgres store",
+    "store:migrations": "Schema migrations",
+    "store:connection": "Store connection",
+    "review:queue": "Review queue",
+    "runtime:queue": "Runtime queue",
+    "llm:provider": "LLM provider",
+    "llm:server": "LLM server",
+    "llm:api_key": "LLM API key",
+    "embedder": "Embeddings",
+    "config:policies": "Policies",
+    "config:judgment": "Judgment profile",
+    "encryption": "Encryption key",
+    "mcp:cursor": "Cursor MCP",
+    "mcp:claude-code": "Claude Code MCP",
+    "mcp:claude-desktop": "Claude Desktop MCP",
+    "connectors:schedule": "Connector schedule",
+    "connectors:credentials": "Connector credentials",
+    "connectors:instances": "Connector instances",
+    "connectors:due": "Due connectors",
+    "acc:feed": "Analysis feed",
+    "ollama:extraction": "Ollama extraction model",
+    "ollama:embeddings": "Ollama embedding model",
+    "ollama:models": "Ollama models",
+    "ollama:server": "Ollama server",
+  };
+  if (map[raw]) return map[raw];
+  if (raw.startsWith("connectors:auth:")) return "Connector auth";
+  if (raw.startsWith("mcp:")) {
+    const client = raw.slice(4).replace(/[-_]/g, " ");
+    return `${client.replace(/\b\w/g, (c) => c.toUpperCase())} MCP`;
+  }
+  if (raw.startsWith("dependency:")) {
+    return `${raw.slice(11)} package`;
+  }
+  return raw
+    .split(":")
+    .map((part) => part.replace(/[_-]/g, " "))
+    .map((part) => part.replace(/\b\w/g, (c) => c.toUpperCase()))
+    .join(" · ");
+}
+
+function friendlyDoctorDetail(name, detail) {
+  let d = String(detail || "").trim();
+  if (!d) return "";
+  // Shorten absolute sqlite URLs / home paths
+  d = d.replace(/sqlite:\/\/+/, "");
+  d = d.replace(/\/home\/[^/]+\//g, "~/");
+  if (name === "store:sqlite" || name === "store:postgres") {
+    const leaf = d.split("/").pop();
+    if (leaf) d = leaf;
+  }
+  if (name && name.startsWith("connectors:auth:")) {
+    const id = name.slice("connectors:auth:".length);
+    d = `${id.slice(0, 14)}${id.length > 14 ? "…" : ""} · ${d}`;
+  }
+  if (name === "llm:server") {
+    d = d.replace(/^https?:\/\/[^ ]+\s*·\s*/, "");
+  }
+  return truncate(d, 72);
+}
+
+async function loadHomeDoctor(sum) {
+  const box = $("#home-health-body");
+  if (!box) return;
+  try {
+    let doc = null;
+    let lastErr = null;
+    for (const path of ["/api/health/doctor", "/api/doctor"]) {
+      try {
+        doc = await api(path);
+        break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!doc) throw lastErr || new Error("doctor unavailable");
+
+    const checks = Array.isArray(doc.checks) ? doc.checks : [];
+    const counts = doc.counts || {
+      ok: checks.filter((c) => c.status === "ok").length,
+      warn: checks.filter((c) => c.status === "warn").length,
+      fail: checks.filter((c) => c.status === "fail").length,
+    };
+    const ordered = [
+      ...checks.filter((c) => c.status === "fail"),
+      ...checks.filter((c) => c.status === "warn"),
+      ...checks.filter((c) => c.status === "ok"),
+    ];
+    const mark = (status) => (
+      status === "fail" ? "✗" : (status === "warn" ? "!" : "✓")
+    );
+    box.innerHTML = `
+      <div class="doctor-compact">
+        <div class="doctor-score" aria-label="Doctor counts">
+          <span class="doctor-chip doctor-chip--ok">✓ ${counts.ok ?? 0}</span>
+          <span class="doctor-chip doctor-chip--warn">! ${counts.warn ?? 0}</span>
+          <span class="doctor-chip doctor-chip--fail">✗ ${counts.fail ?? 0}</span>
+        </div>
+        <p class="doctor-kv muted">
+          <span>${esc(doc.llm || "—")}</span>
+          <span>${esc(doc.model || "—")}</span>
+          <span>embed ${esc(doc.embedder || "—")}</span>
+        </p>
+        ${sum?.cognize_halt
+          ? `<p class="doctor-halt">cognize halt · ${esc(sum.cognize_halt)}</p>`
+          : ""}
+        <ul class="doctor-issues doctor-issues--all">
+          ${ordered.map((c) => {
+            const label = friendlyDoctorName(c.name);
+            const detail = friendlyDoctorDetail(c.name, c.detail);
+            return `
+            <li>
+              <span class="doctor-mark doctor-mark--${esc(c.status)}">${mark(c.status)}</span>
+              <span class="doctor-issue-text">
+                <strong>${esc(label)}</strong>
+                ${detail ? ` <span class="muted">${esc(detail)}</span>` : ""}
+              </span>
+            </li>`;
+          }).join("")}
+        </ul>
+      </div>`;
+  } catch (err) {
+    box.innerHTML = `
+      ${sum?.cognize_halt
+        ? `<div class="health-banner warn">Cognize halt · ${esc(sum.cognize_halt)}</div>`
+        : `<div class="health-banner ok">Cognize gate clear</div>`}
+      <p class="muted">Doctor unavailable · ${esc(err.message)} — restart <code>twin serve</code></p>`;
+  }
+}
+
+function wireHomeInject() {
+  const form = $("#home-pack-form");
+  if (!form) return;
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const out = $("#home-pack-out");
+    const meta = $("#home-pack-meta");
+    out.hidden = true;
+    try {
+      const pack = await api("/api/context_pack", {
+        method: "POST",
+        body: JSON.stringify({
+          query: fd.get("query"),
+          target_domain: fd.get("domain") || "technical",
+        }),
+      });
+      meta.textContent = `Narratives: ${(pack.narratives || []).length} · Reflections: ${(pack.open_reflections || []).length}`;
+      out.hidden = false;
+      out.textContent = pack.context_pack || JSON.stringify(pack, null, 2);
+      toast("Pack built");
+    } catch (err) {
+      toast(err.message, false);
+    }
+  });
+}
+
+let _searchCache = null;
+async function loadSearchCorpus() {
+  if (_searchCache) return _searchCache;
+  const items = [];
+  await Promise.all(ENTITY_TYPES.map(async (meta) => {
+    try {
+      const rows = await api(`${meta.list}${meta.list.includes("?") ? "&" : "?"}vault=${encodeURIComponent(VAULT)}`);
+      const list = Array.isArray(rows) ? rows : (rows.items || rows.stances || []);
+      for (const row of list.slice(0, 200)) {
+        const headline = entityHeadline(row, meta.id);
+        items.push({
+          type: meta.id,
+          label: meta.label,
+          id: row.id,
+          text: `${headline} ${row.id}`,
+          headline,
+          href: `#explore/${meta.id}/${encodeURIComponent(row.id)}`,
+        });
+      }
+    } catch {
+      /* skip missing endpoints */
+    }
+  }));
+  _searchCache = items;
+  return items;
+}
+
+function wireHomeSearch() {
+  const input = $("#home-search-q");
+  const typeEl = $("#home-search-type");
+  const box = $("#home-search-results");
+  if (!input || !box) return;
+
+  let timer = null;
+  const run = async () => {
+    const q = input.value.trim();
+    const type = typeEl.value;
+    if (q.length < 2) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML = `<div class="muted">Searching…</div>`;
+    try {
+      const corpus = await loadSearchCorpus();
+      const hits = corpus
+        .filter((item) => type === "all" || item.type === type)
+        .map((item) => ({ ...item, score: fuzzyScore(q, item.text) }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
+      box.innerHTML = hits.length
+        ? hits.map((h) => `
+            <a class="search-hit" href="${h.href}">
+              <span class="tag">${esc(h.label)}</span>
+              <strong>${esc(truncate(h.headline, 72))}</strong>
+              <span class="muted">${esc(h.id)}</span>
+            </a>`).join("")
+        : `<div class="muted">No matches</div>`;
+    } catch (err) {
+      box.innerHTML = `<div class="muted">${esc(err.message)}</div>`;
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(run, 180);
+  });
+  typeEl.addEventListener("change", run);
+}
+
+async function paneSessions() {
+  setChrome("Sessions", "Active host sessions");
+  const total = MOCK_SESSIONS.reduce((n, s) => n + s.open, 0);
+  app.innerHTML = `
+    <section class="detail-card">
+      <p class="lede">Mock telemetry — ${total} open sessions across providers.</p>
+      <div class="session-grid session-grid--lg">
+        ${MOCK_SESSIONS.map((s) => `
+          <div class="session-pill">
+            <span class="session-n">${s.open}</span>
+            <span class="session-l">${esc(s.provider)}</span>
+          </div>`).join("")}
+      </div>
+      <p class="muted">Real host session counts will replace this when the provider bridge lands.</p>
+    </section>`;
 }
 
 async function paneExplore(parts) {
@@ -136,24 +613,28 @@ async function paneExplore(parts) {
   const meta = ENTITY_TYPES.find((e) => e.id === type) || ENTITY_TYPES[0];
   setChrome("Explore", meta.label);
 
-  const tabs = ENTITY_TYPES.map((e) =>
-    `<a class="chip ${e.id === meta.id ? "ok" : ""}" href="#explore/${e.id}">${esc(e.label)}</a>`
-  ).join("");
+  let counts = {};
+  try {
+    const sum = await api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`);
+    counts = sum.counts || {};
+    if (counts.evidence == null && sum.evidence != null) counts.evidence = sum.evidence;
+  } catch {
+    counts = {};
+  }
+
+  const tabs = ENTITY_TYPES.map((e) => {
+    const key = e.id === "evidence" ? "evidence" : `${e.id}s`;
+    const n = counts[key] ?? 0;
+    const active = e.id === meta.id ? " active" : "";
+    return `<a class="chip${active}" href="#explore/${e.id}">${esc(e.label)} (${n})</a>`;
+  }).join("");
 
   if (id) {
     app.innerHTML = `<div class="explore-layout">
-      <div id="explore-open-refs" class="open-refs-strip entity-question"></div>
       <div class="explore-tabs">${tabs}</div>
       <div class="detail entity-${meta.role}">Loading…</div>
     </div>`;
     try {
-      const openRefs = await api(`/api/reflections?vault=${encodeURIComponent(VAULT)}&status=open`);
-      const refs = Array.isArray(openRefs) ? openRefs : [];
-      $("#explore-open-refs", app).innerHTML = refs.length
-        ? `<strong>Open Reflections</strong> ${refs.slice(0, 5).map((r) =>
-            `<a class="chip" href="#explore/reflection/${encodeURIComponent(r.id)}">${esc(truncate(r.text || r.id, 48))}</a>`
-          ).join("")}`
-        : `<strong>Open Reflections</strong> <span class="muted">none</span>`;
       const row = await api(meta.show(id));
       $(".detail", app).innerHTML = renderDetail(meta, row);
     } catch (err) {
@@ -163,20 +644,10 @@ async function paneExplore(parts) {
   }
 
   app.innerHTML = `<div class="explore-layout">
-    <div id="explore-open-refs" class="open-refs-strip entity-question"></div>
     <div class="explore-tabs">${tabs}</div>
     <div class="entity-list entity-${meta.role}">Loading…</div>
   </div>`;
   try {
-    const openRefs = await api(`/api/reflections?vault=${encodeURIComponent(VAULT)}&status=open`);
-    const refs = Array.isArray(openRefs) ? openRefs : [];
-    const strip = $("#explore-open-refs", app);
-    strip.innerHTML = refs.length
-      ? `<strong>Open Reflections</strong> ${refs.slice(0, 5).map((r) =>
-          `<a class="chip" href="#explore/reflection/${encodeURIComponent(r.id)}">${esc(truncate(r.text || r.id, 48))}</a>`
-        ).join("")}${refs.length > 5 ? `<span class="muted">+${refs.length - 5}</span>` : ""}`
-      : `<strong>Open Reflections</strong> <span class="muted">none</span>`;
-
     const rows = await api(`${meta.list}${meta.list.includes("?") ? "&" : "?"}vault=${encodeURIComponent(VAULT)}`);
     const list = Array.isArray(rows) ? rows : (rows.items || rows.stances || []);
     const box = $(".entity-list", app);
@@ -597,9 +1068,11 @@ async function paneOps() {
 
 async function route() {
   const { pane, parts } = parseHash();
-  setActiveNav(pane === "explore" ? "explore" : pane);
+  setActiveNav(pane);
+  _searchCache = null;
   const views = {
     home: () => paneHome(),
+    sessions: () => paneSessions(),
     explore: () => paneExplore(parts),
     review: () => paneReview(),
     cognize: () => paneCognize(),

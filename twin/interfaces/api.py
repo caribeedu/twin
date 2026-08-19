@@ -825,15 +825,48 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/center/summary")
     def api_center_summary(vault: str = "default"):
-        open_refs = 0
-        competing = 0
-        narratives = 0
-        if hasattr(ws.store, "list_open_reflections"):
-            open_refs = len(ws.store.list_open_reflections(vault))
-        if hasattr(ws.store, "list_competing_interpretations"):
-            competing = len(ws.store.list_competing_interpretations(vault))
-        if hasattr(ws.store, "list_narratives"):
-            narratives = len(ws.store.list_narratives(vault))
+        def _count(attr: str, *args, **kwargs) -> int:
+            if not hasattr(ws.store, attr):
+                return 0
+            try:
+                rows = getattr(ws.store, attr)(*args, **kwargs)
+                return len(list(rows) if rows is not None else [])
+            except TypeError:
+                try:
+                    rows = getattr(ws.store, attr)(*args)
+                    return len(list(rows) if rows is not None else [])
+                except Exception:
+                    return 0
+            except Exception:
+                return 0
+
+        open_refs = _count("list_open_reflections", vault)
+        competing = _count("list_competing_interpretations", vault)
+        narratives = _count("list_narratives", vault)
+        reflections = _count("list_reflections", vault)
+        interpretations = _count("list_cognize_interpretations", vault)
+        if interpretations == 0:
+            interpretations = _count("list_interpretations", vault)
+        situations = _count("list_situations", vault)
+        stances = 0
+        try:
+            from twin.cognize.stance import list_stances
+
+            stances = len(list_stances(ws.store) or [])
+        except Exception:
+            stances = _count("list_stances", vault)
+        evidence = _count("list_evidence_anchors", vault)
+        if evidence == 0:
+            evidence = _count("list_evidence", vault)
+        relations = _count("list_relations", vault)
+        traces = 0
+        if hasattr(ws.store, "list_traces"):
+            try:
+                traces = len(ws.store.list_traces(vault, limit=5000) or [])
+            except Exception:
+                traces = 0
+        percepts = _count("list_percepts")
+
         halt = ""
         if hasattr(ws.store, "last_cognize_run"):
             try:
@@ -845,17 +878,131 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         queue = {}
         if hasattr(ws.store, "runtime_queue_depth"):
             queue = ws.store.runtime_queue_depth() or {}
+        jobs_pending = int(
+            queue.get("pending")
+            or queue.get("ready")
+            or queue.get("queued")
+            or 0
+        )
+        jobs_running = int(queue.get("running") or 0)
         connectors = 0
         if hasattr(ws.store, "list_connector_instances"):
             connectors = len(ws.store.list_connector_instances())
+
+        review_items: list[dict[str, Any]] = []
+        if hasattr(ws.store, "list_open_reflections"):
+            for r in (ws.store.list_open_reflections(vault) or [])[:8]:
+                text = (r.text or "").strip()
+                status = r.status.value if hasattr(r.status, "value") else str(r.status or "open")
+                review_items.append({
+                    "kind": "reflection",
+                    "kind_label": "Reflection",
+                    "id": r.id,
+                    "status": status,
+                    "title": (text.split("\n")[0] or text)[:120],
+                    "text": text[:280],
+                    "created_at": getattr(r, "created_at", "") or "",
+                    "meta": {
+                        "situations": len(getattr(r, "situation_ids", None) or []),
+                        "evidence": len(getattr(r, "evidence_ids", None) or []),
+                    },
+                    "href": f"#explore/reflection/{r.id}",
+                })
+        if hasattr(ws.store, "list_competing_interpretations"):
+            for i in (ws.store.list_competing_interpretations(vault) or [])[:8]:
+                text = (getattr(i, "explanation", "") or "").strip()
+                status = i.status.value if hasattr(i.status, "value") else str(i.status or "competing")
+                review_items.append({
+                    "kind": "interpretation",
+                    "kind_label": "Interpretation",
+                    "id": i.id,
+                    "status": status,
+                    "title": (text.split("\n")[0] or text)[:120],
+                    "text": text[:280],
+                    "created_at": getattr(i, "created_at", "") or "",
+                    "meta": {
+                        "situations": len(getattr(i, "situation_ids", None) or []),
+                        "evidence": len(getattr(i, "evidence_ids", None) or []),
+                    },
+                    "href": f"#explore/interpretation/{i.id}",
+                })
+
+        # Domains that actually have substrate content (empty ones stay hidden).
+        from collections import Counter
+
+        from twin.config import UNCLASSIFIED_DOMAIN
+
+        domain_counts: Counter[str] = Counter()
+
+        def _bump_domain(raw: Any) -> None:
+            if raw is None:
+                return
+            value = getattr(raw, "value", raw)
+            value = str(value or "").strip()
+            if not value or value == UNCLASSIFIED_DOMAIN:
+                return
+            domain_counts[value] += 1
+
+        if hasattr(ws.store, "list_narratives"):
+            for nar in ws.store.list_narratives(vault) or []:
+                _bump_domain(getattr(nar, "domain", None))
+        if hasattr(ws.store, "list_situations"):
+            for sit in ws.store.list_situations(vault) or []:
+                _bump_domain(getattr(sit, "domain", None))
+        if hasattr(ws.store, "list_claims"):
+            try:
+                for claim in ws.store.list_claims(limit=2000) or []:
+                    _bump_domain(getattr(claim, "domain", None))
+            except Exception:
+                pass
+        try:
+            from twin.cognize.stance import list_stances
+
+            for st in list_stances(ws.store) or []:
+                _bump_domain(getattr(st, "domain", None))
+        except Exception:
+            pass
+
+        domains = [
+            {
+                "id": name,
+                "count": int(n),
+                "label": name.replace("_", " ").title(),
+            }
+            for name, n in sorted(domain_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+            if n > 0
+        ]
+
         return {
             "vault": vault,
             "open_reflections": open_refs,
             "competing_interpretations": competing,
             "narratives": narratives,
+            "reflections": reflections or open_refs,
+            "interpretations": interpretations or competing,
+            "situations": situations,
+            "stances": stances,
+            "evidence": evidence,
+            "relations": relations,
+            "traces": traces,
+            "percepts": percepts,
             "cognize_halt": halt,
-            "jobs_pending": int(queue.get("pending") or queue.get("ready") or 0),
+            "jobs_pending": jobs_pending,
+            "jobs_running": jobs_running,
             "connectors": connectors,
+            "review_items": review_items[:12],
+            "domains": domains,
+            "counts": {
+                "narratives": narratives,
+                "reflections": reflections or open_refs,
+                "interpretations": interpretations or competing,
+                "situations": situations,
+                "stances": stances,
+                "evidence": evidence,
+                "relations": relations,
+                "traces": traces,
+                "percepts": percepts,
+            },
         }
 
     @app.post("/api/narratives/commit")
@@ -1204,6 +1351,36 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_health_cognition():
         from twin.interfaces.sovereignty.integrity import run_integrity_checks
         return run_integrity_checks(ws.store)
+
+    @app.get("/api/health/doctor")
+    @app.get("/api/doctor")
+    def api_doctor():
+        """Item-by-item ``twin doctor`` snapshot for the Web Center health card."""
+        from twin.interfaces.ops import FAIL, OK, WARN, doctor
+
+        checks = doctor(ws.cfg)
+        rows = [
+            {
+                "name": c.name,
+                "status": c.status,
+                "detail": c.detail or "",
+            }
+            for c in checks
+        ]
+        n_ok = sum(1 for c in checks if c.status == OK)
+        n_warn = sum(1 for c in checks if c.status == WARN)
+        n_fail = sum(1 for c in checks if c.status == FAIL)
+        return {
+            "checks_ok": n_ok,
+            "checks_total": len(checks),
+            "counts": {"ok": n_ok, "warn": n_warn, "fail": n_fail},
+            "checks": rows,
+            "extractor": ws.cfg.extractor,
+            "embedder": ws.cfg.embedder,
+            "llm": getattr(ws.cfg, "normalized_llm_provider", ""),
+            "model": getattr(ws.cfg, "resolved_llm_model", "") or "",
+            "home": str(ws.cfg.home),
+        }
 
     class SessionEventRequest(BaseModel):
         text: str = ""

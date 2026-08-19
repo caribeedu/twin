@@ -8,19 +8,33 @@ long-lived processes. This surface is **visibility and human gates**: browse
 every Cognize entity, review Interpretations, commit Narratives, inspect
 Sense I/O, and build Inject packs.
 
-## Rail
+## Shell
+
+No side rail. Home is a dashboard of linked sections; deep links stay in-shell
+(`#explore/narrative/<id>`, `#review`, `#sense`, `#ops`, `#sessions`, …).
+A brand bar + **← Home** recovers navigation from any pane.
+
+| Home section | Role | Full view |
+|---|---|---|
+| Sessions | Open sessions by provider (mock until telemetry) | `#sessions` |
+| Jobs | Running / pending | `#sense` |
+| Substrate | Entity counts | `#explore` |
+| To review | Open Reflections + competing Interpretations | `#review` |
+| Search | Fuzzy match across entity types | `#explore` |
+| Inject | Inline context pack builder (no deep-link) | — |
+| Health | Cognize gate + connectors | `#ops` |
+
+## Former rail panes
 
 | Pane | Role |
 |---|---|
-| Home | Counts, Cognize halt, shortcuts |
+| Home | Dashboard above |
 | Explore | List + detail for all substrate entities |
 | Review | Open Reflections, competing Interpretations, Narrative commit |
 | Cognize | Halt / health (runs stay CLI or TUI) |
 | Sense | Percepts, connectors, jobs |
 | Inject | Context pack builder |
 | Ops | Health, runtime queue, Stance proposals |
-
-Deep-links stay in-shell: `#explore/narrative/<id>`, `#review`, `#sense`, …
 
 ## Entities (Explore)
 

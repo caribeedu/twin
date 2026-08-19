@@ -177,7 +177,20 @@ ListItem.-highlight {
     color: $twin-mist;
 }
 #exit-dialog Label {
+    color: $twin-soft;
+    text-style: bold;
+    margin-bottom: 1;
+}
+#cognize-confirm {
+    background: $twin-panel;
+    border: tall $twin-soft;
+    padding: 1 2;
+    width: 72;
+    height: auto;
     color: $twin-mist;
+}
+#cognize-confirm Label {
+    color: $twin-soft;
     text-style: bold;
     margin-bottom: 1;
 }
@@ -213,6 +226,57 @@ class ExitPrompt(ModalScreen[str]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id or "cancel")
+
+
+def _format_cognize_estimate(est: dict[str, Any]) -> str:
+    priced = est.get("priced")
+    cost_line = (
+        f"~${est.get('cost_usd_est', 0):.4f}  "
+        f"(range ${est.get('cost_usd_low', 0):.4f}–${est.get('cost_usd_high', 0):.4f})"
+        if priced
+        else "unpriced model — add rates in pricing.json"
+    )
+    stages = " → ".join(est.get("stages") or []) or "—"
+    return (
+        f"[bold #7b6bc4]model[/]  {est.get('model') or '—'}  "
+        f"[#9a94b0]({est.get('provider') or '—'})[/]\n"
+        f"[bold #7b6bc4]tokenizer[/]  {est.get('tokenizer') or '—'}\n"
+        f"[bold #7b6bc4]percepts[/]  {est.get('percepts', 0)}  ·  "
+        f"until {est.get('until') or '—'}\n"
+        f"[#9a94b0]stages[/]  {stages}\n\n"
+        f"[bold #7b6bc4]tokens[/]  in {est.get('input_tokens', 0):,}  ·  "
+        f"out ~{est.get('output_tokens_est', 0):,}  "
+        f"(range {est.get('output_tokens_low', 0):,}–{est.get('output_tokens_high', 0):,})\n"
+        f"[bold #7b6bc4]cost[/]  {cost_line}\n\n"
+        f"[#9a94b0]{est.get('disclaimer') or 'Estimate only.'}[/]"
+    )
+
+
+class CognizeConfirm(ModalScreen[bool]):
+    """Show preflight estimate; run only if the user confirms."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, estimate: dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._estimate = estimate
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Label("Confirm cognize (queue to runtime)"),
+            Static(_format_cognize_estimate(self._estimate), classes="page-sub"),
+            Horizontal(
+                Button("Queue cognize", id="confirm", variant="primary"),
+                Button("Cancel", id="cancel"),
+            ),
+            id="cognize-confirm",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class LogViewer(ModalScreen[None]):
@@ -265,11 +329,8 @@ class _NavMixin:
     def action_goto_review(self) -> None:
         self.app.push_screen(ReviewScreen())
 
-    def action_goto_narratives(self) -> None:
-        self.app.push_screen(NarrativesScreen())
-
-    def action_goto_stance(self) -> None:
-        self.app.push_screen(StanceScreen())
+    def action_goto_browse(self) -> None:
+        self.app.push_screen(BrowseScreen())
 
     def action_goto_mcp(self) -> None:
         self.app.push_screen(McpScreen())
@@ -288,8 +349,7 @@ class HomeScreen(_NavMixin, Screen):
         Binding("j", "goto_jobs", "Jobs"),
         Binding("g", "goto_cognize", "Cognize"),
         Binding("r", "goto_review", "Review"),
-        Binding("n", "goto_narratives", "Narratives"),
-        Binding("t", "goto_stance", "Stance"),
+        Binding("b", "goto_browse", "Browse"),
         Binding("m", "goto_mcp", "MCP"),
         Binding("slash", "palette", "Palette"),
         Binding("q", "quit_center", "Quit"),
@@ -311,8 +371,8 @@ class HomeScreen(_NavMixin, Screen):
             yield Static(id="home-health", classes="panel")
             yield Static(
                 "[#9a94b0]s[/] services  [#9a94b0]c[/] connectors  [#9a94b0]j[/] jobs  "
-                "[#9a94b0]g[/] cognize  [#9a94b0]r[/] review  [#9a94b0]n[/] narratives  "
-                "[#9a94b0]t[/] stance  [#9a94b0]m[/] mcp  [#9a94b0]/[/] palette  "
+                "[#9a94b0]g[/] cognize  [#9a94b0]r[/] review  [#9a94b0]b[/] browse  "
+                "[#9a94b0]m[/] mcp  [#9a94b0]/[/] palette  "
                 "[#9a94b0]q[/] quit",
                 classes="hint",
             )
@@ -801,13 +861,31 @@ class CognizeScreen(Screen):
             return
         if bid == "cog-run":
             try:
-                out = actions.cognize_run(app.ws)
-                label = "halted" if out.get("halted") else ("ok" if out.get("ok") else "error")
-                self.notify(f"cognize {label}")
-                self._page = 0
+                est = actions.cognize_estimate(app.ws)
             except Exception as exc:
-                self.notify(str(exc), severity="error")
-            self._refresh()
+                self.notify(f"estimate failed: {exc}", severity="error")
+                return
+
+            def _after_confirm(ok: bool) -> None:
+                if not ok:
+                    self.notify("cognize cancelled")
+                    return
+                try:
+                    out = actions.enqueue_cognize(app.ws)
+                    self.notify(
+                        f"queued {out['kind']} {out['job_id'][:12]} — runtime will run it"
+                    )
+                    if not _alive(app.state.runtime.proc):
+                        self.notify(
+                            "runtime is stopped — start it on Services",
+                            severity="warning",
+                        )
+                    self._page = 0
+                except Exception as exc:
+                    self.notify(str(exc), severity="error")
+                self._refresh()
+
+            self.app.push_screen(CognizeConfirm(est), _after_confirm)
 
 
 class ReviewScreen(Screen):
@@ -845,85 +923,187 @@ class ReviewScreen(Screen):
         self.query_one("#review-body", Static).update(body)
 
 
-class NarrativesScreen(Screen):
+class BrowseScreen(Screen):
+    """One menu for Cognize entities — Narratives, Stance, Reflections, …"""
+
     BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
+    KINDS = (
+        "narratives",
+        "stance",
+        "reflections",
+        "interpretations",
+        "situations",
+        "relations",
+        "traces",
+        "percepts",
+    )
+
+    def __init__(self, kind: str = "narratives", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._kind = kind if kind in self.KINDS else "narratives"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(classes="page"):
-            yield Label("Narratives", classes="page-title")
-            yield Static("Committed accounts · epistemic status · grain", classes="page-sub")
-            yield VerticalScroll(Static(id="narratives-body", classes="panel"), classes="body")
-        yield Footer()
-
-    def on_mount(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        rows = actions.narrative_list(app.ws)
-        if not rows:
-            body = "[#9a94b0](none)[/]"
-        else:
-            lines = ["[bold #7b6bc4]id · status/epistemic · grain · account[/]"]
-            for n in rows:
-                lines.append(
-                    f"[#7b6bc4]{n['id'][:12]}[/]  "
-                    f"[{n['status']}/{n['epistemic']}]  "
-                    f"grain={n['grain'] or '—'}  "
-                    f"{(n['account'] or '')[:70]}"
-                )
-            body = "\n".join(lines)
-        self.query_one("#narratives-body", Static).update(body)
-
-
-class StanceScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        with Vertical(classes="page"):
-            yield Label("Stance", classes="page-title")
-            yield Static("Active posture · pending proposals", classes="page-sub")
-            yield Input(placeholder="proposal id to approve", id="proposal-id")
+            yield Label("Browse", classes="page-title")
+            yield Static(
+                "Cognize entities — pick a submenu",
+                classes="page-sub",
+            )
             with Horizontal(classes="toolbar"):
-                yield Button("Refresh", id="st-refresh")
-                yield Button("Approve proposal", id="st-approve", variant="primary")
-            yield VerticalScroll(Static(id="stance-body", classes="panel"), classes="body")
+                for k in self.KINDS:
+                    yield Button(
+                        k.capitalize(),
+                        id=f"br-{k}",
+                        variant="primary" if k == self._kind else "default",
+                    )
+            with Horizontal(classes="toolbar"):
+                yield Button("Refresh", id="br-refresh")
+                yield Input(placeholder="proposal id (stance)", id="proposal-id")
+                yield Button("Approve proposal", id="br-approve")
+            yield VerticalScroll(Static(id="browse-body", classes="panel"), classes="body")
         yield Footer()
 
     def on_mount(self) -> None:
         self._refresh()
 
-    def _refresh(self) -> None:
+    def _set_kind(self, kind: str) -> None:
+        if kind not in self.KINDS:
+            return
+        self._kind = kind
+        for k in self.KINDS:
+            btn = self.query_one(f"#br-{k}", Button)
+            btn.variant = "primary" if k == kind else "default"
+        self._refresh()
+
+    def _format_body(self) -> str:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
-        ov = actions.stance_overview(app.ws)
-        stances = ov.get("stances") or []
-        proposals = ov.get("proposals") or []
-        if stances:
+        kind = self._kind
+        header = f"[bold #7b6bc4]{kind}[/]"
+
+        if kind == "narratives":
+            rows = actions.narrative_list(app.ws)
+            if not rows:
+                return f"{header}\n[#9a94b0](none)[/]"
+            lines = [header, "[bold #7b6bc4]id · status/epistemic · grain · account[/]"]
+            for n in rows:
+                lines.append(
+                    f"[#7b6bc4]{n['id'][:12]}[/] · {n['status']}/{n['epistemic']} · "
+                    f"{n['grain'] or '—'} · {(n['account'] or '')[:70]}"
+                )
+            return "\n".join(lines)
+
+        if kind == "stance":
+            ov = actions.stance_overview(app.ws)
+            stances = ov.get("stances") or []
+            proposals = ov.get("proposals") or []
             s_lines = [
-                f"  [#7b6bc4]•[/] {s['id'][:12]}  [{s['status']}]  {(s['statement'] or '')[:70]}"
+                f"[#7b6bc4]{s['id'][:12]}[/] · {s['status']} · {(s['statement'] or '')[:70]}"
                 for s in stances
-            ]
-        else:
-            s_lines = ["  [#9a94b0](no active stances)[/]"]
-        if proposals:
+            ] or ["[#9a94b0](no active stances)[/]"]
             p_lines = [
-                f"  [#c9842a]•[/] {p['id'][:12]}  nar={p.get('narrative_id') or '—'}  "
+                f"[#c9842a]{p['id'][:12]}[/] · nar={p.get('narrative_id') or '—'} · "
                 f"{(p.get('reason') or '')[:50]}"
                 for p in proposals
-            ]
-        else:
-            p_lines = ["  [#9a94b0](none)[/]"]
-        body = (
-            f"[bold #7b6bc4]active[/]\n" + "\n".join(s_lines)
-            + f"\n\n[bold #7b6bc4]pending proposals[/]\n" + "\n".join(p_lines)
-        )
-        self.query_one("#stance-body", Static).update(body)
+            ] or ["[#9a94b0](none)[/]"]
+            return (
+                f"{header}\n[bold #7b6bc4]id · status · statement[/]\n"
+                + "\n".join(s_lines)
+                + "\n\n[bold #7b6bc4]pending proposals[/]\n"
+                + "\n".join(p_lines)
+            )
+
+        if kind == "reflections":
+            rows = actions.reflection_list(app.ws)
+            if not rows:
+                return f"{header}\n[#9a94b0](none)[/]"
+            lines = [header, "[bold #7b6bc4]id · status · text[/]"]
+            for r in rows:
+                lines.append(
+                    f"[#7b6bc4]{r['id'][:12]}[/] · {r['status']} · {r['text']}"
+                )
+            return "\n".join(lines)
+
+        if kind == "interpretations":
+            rows = actions.interpretation_list(app.ws)
+            if not rows:
+                return f"{header}\n[#9a94b0](none)[/]"
+            lines = [header, "[bold #7b6bc4]id · status · explanation[/]"]
+            for r in rows:
+                lines.append(
+                    f"[#7b6bc4]{str(r['id'])[:12]}[/] · {r['status']} · {r['explanation']}"
+                )
+            return "\n".join(lines)
+
+        if kind == "situations":
+            rows = actions.situation_list(app.ws)
+            if not rows:
+                return f"{header}\n[#9a94b0](none)[/]"
+            lines = [header, "[bold #7b6bc4]id · status · domain · percepts · summary[/]"]
+            for r in rows:
+                lines.append(
+                    f"[#7b6bc4]{r['id'][:12]}[/] · {r['status']} · {r['domain'] or '—'} · "
+                    f"{r['percepts']} · {r['summary']}"
+                )
+            return "\n".join(lines)
+
+        if kind == "relations":
+            rows = actions.relation_list(app.ws)
+            if not rows:
+                return f"{header}\n[#9a94b0](none)[/]"
+            lines = [header, "[bold #7b6bc4]id · type · from · to[/]"]
+            for r in rows:
+                lines.append(
+                    f"[#7b6bc4]{r['id'][:12]}[/] · {r['type']} · "
+                    f"{str(r['from_id'])[:10]} → {str(r['to_id'])[:10]}"
+                )
+                if r.get("rationale"):
+                    lines.append(f"  [#9a94b0]{r['rationale']}[/]")
+            return "\n".join(lines)
+
+        if kind == "traces":
+            rows = actions.trace_list(app.ws)
+            if not rows:
+                return f"{header}\n[#9a94b0](none)[/]"
+            lines = [header, "[bold #7b6bc4]id · event · resource · at[/]"]
+            for r in rows:
+                lines.append(
+                    f"[#7b6bc4]{r['id'][:12]}[/] · {r['event_kind'] or '—'} · "
+                    f"{r.get('resource_kind') or '—'} {str(r['resource_id'] or '—')[:12]} · "
+                    f"{str(r.get('created_at') or '—')[:19]}"
+                )
+                if r.get("summary"):
+                    lines.append(f"  [#9a94b0]{r['summary']}[/]")
+            return "\n".join(lines)
+
+        # percepts
+        rows = actions.percept_list(app.ws)
+        if not rows:
+            return f"{header}\n[#9a94b0](none)[/]"
+        lines = [header, "[bold #7b6bc4]id · sensor · at · content[/]"]
+        for r in rows:
+            lines.append(
+                f"[#7b6bc4]{r['id'][:12]}[/] · {r['sensor'] or '—'} · "
+                f"{str(r['ingested_at'] or '—')[:19]} · {r['content']}"
+            )
+        return "\n".join(lines)
+
+    def _refresh(self) -> None:
+        self.query_one("#browse-body", Static).update(self._format_body())
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
-        if event.button.id == "st-refresh":
+        bid = event.button.id or ""
+        if bid == "br-refresh":
             self._refresh()
             return
-        if event.button.id == "st-approve":
+        if bid.startswith("br-") and bid[3:] in self.KINDS:
+            self._set_kind(bid[3:])
+            return
+        if bid == "br-approve":
+            if self._kind != "stance":
+                self.notify("switch to Stance to approve proposals", severity="warning")
+                return
             pid = self.query_one("#proposal-id", Input).value.strip()
             if not pid:
                 self.notify("enter proposal id", severity="warning")
@@ -991,6 +1171,8 @@ class TwinCenterApp(App[None]):
     TITLE = "twin"
     SUB_TITLE = "Command Center"
     CSS = _TWIN_CSS
+    # Prefer `/` PaletteScreen — disable Textual's built-in ctrl+p command palette.
+    ENABLE_COMMAND_PALETTE = False
 
     def __init__(self, ws: Workspace, state: CenterState, **kwargs: Any) -> None:
         super().__init__(**kwargs)
