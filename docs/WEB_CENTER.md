@@ -4,9 +4,9 @@ Operator web cockpit for Twin — Sense → Cognize → Inject — served by
 `twin serve` at a single route (`/`).
 
 The TUI Command Center ([COMMAND_CENTER.md](COMMAND_CENTER.md)) supervises
-long-lived processes. This surface is **visibility and human gates**: browse
-every Cognize entity, review Interpretations, commit Narratives, inspect
-Sense I/O, and build Inject packs.
+long-lived processes on one screen (**Health · Services · MCP rail**). This
+surface is **visibility and human gates**: browse every Cognize entity, review
+Interpretations, commit Narratives, inspect Sense I/O, and build Inject packs.
 
 ## Shell
 
@@ -31,7 +31,7 @@ A brand bar + **← Home** recovers navigation from any pane.
 | Home | Dashboard above |
 | Explore | List + detail for all substrate entities |
 | Review | Open Reflections, competing Interpretations, Narrative commit |
-| Cognize | Halt / health (runs stay CLI or TUI) |
+| Cognize | Halt / health (runs stay CLI / Web Ops) |
 | Sense | Percepts, connectors, jobs |
 | Inject | Context pack builder |
 | Ops | Health, runtime queue, Stance proposals |

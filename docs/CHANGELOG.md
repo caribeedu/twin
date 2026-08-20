@@ -13,6 +13,9 @@ Retire `MemoryItem` / `memory_id` dual-read vocabulary in favor of store
 No `Memory*` / `memory_*` / `judgment_*` compatibility shims. Forward-only
 SQLite/Postgres migrations rename legacy `memories` / `memory_id` columns.
 
+TUI Command Center is a **single screen** (Health · Services · MCP right rail;
+no bottom bar). Browse / review / jobs / cognize live in Web Center + scripted CLI.
+
 ### v2.5.0 — Package walls
 
 Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,

@@ -119,5 +119,5 @@ Pack serve appends Trace `pack_serve` per Narrative.
 Fade / Remarkable recommendations live on
 `Narrative.metadata.accessibility_recommendation` and are visible via
 `twin narrative accessibility`, Review workbench reflections panel, and
-Command Center Review screen. Age-only deletion of Narratives is **not**
+Web Command Center Review. Age-only deletion of Narratives is **not**
 Cognize policy.

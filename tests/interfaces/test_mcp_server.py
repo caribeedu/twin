@@ -391,13 +391,14 @@ async def test_setup_mcp_provisions_env_identity(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    # Keep Claude Code user MCP under tmp (not real ~/.claude.json).
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     home = tmp_path / "twin-home"
     home.mkdir()
-    monkeypatch.chdir(tmp_path)
     cfg = Config(home=home)
     lines = setup_mcp(cfg, "claude-code")
     assert any("wrote" in line for line in lines)
-    mcp_path = tmp_path / ".mcp.json"
+    mcp_path = tmp_path / ".claude.json"
     data = json.loads(mcp_path.read_text(encoding="utf-8"))
     env = data["mcpServers"]["twin"]["env"]
     assert env[MCP_CLIENT_ENV] == "claude-code"

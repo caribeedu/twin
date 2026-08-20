@@ -525,7 +525,7 @@ concepts without hiding them.
 | **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — Sense → Cognize → Inject, data model, threat model |
 | **[COGNIZE.md](docs/COGNIZE.md)** | Cognize pipeline stages (internal — not the public architecture) |
 | **[EPISTEMICS.md](docs/EPISTEMICS.md)** | Freshness, independence, ACL on derived claims, read-time confidence |
-| **[COMMAND_CENTER.md](docs/COMMAND_CENTER.md)** | Bare `twin` TTY operator surface (Services, Jobs, Cognize, …) |
+| **[COMMAND_CENTER.md](docs/COMMAND_CENTER.md)** | Bare `twin` TTY — single screen (Health · Services · MCP rail) |
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
 | **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
 | **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |

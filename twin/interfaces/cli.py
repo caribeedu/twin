@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
         print(
             "twin — Sense → Cognize → Inject\n"
             "Usage: twin <command> …\n"
-            "TTY: bare `twin` opens Command Center.\n"
+            "TTY: bare `twin` opens Command Center (single screen).\n"
             "Try: twin doctor | twin cognize run | twin narrative search | twin --help",
             file=sys.stderr,
         )

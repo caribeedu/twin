@@ -1,31 +1,40 @@
-"""Command Center actions use shared handlers."""
+"""Command Center actions — health/doctor helpers."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from twin.cognize.commit import commit_narrative
 from twin.interfaces.center import actions
 
 
-def test_jobs_enqueue_cognize_batch_not_consolidate(store, cfg, embedder, tmp_path):
+def test_doctor_summary_shape(store, cfg, embedder, tmp_path):
     ws = SimpleNamespace(store=store, cfg=cfg, embedder=embedder, home=tmp_path)
-    out = actions.enqueue_job(ws, "cognize_batch")
-    assert out["ok"] is True
-    assert out["kind"] == "cognize_batch"
+    out = actions.doctor_summary(ws)
+    assert "checks_ok" in out
+    assert "checks_total" in out
+    assert "warnings" in out
+    assert out["checks_total"] >= out["checks_ok"]
+    assert out["home"]
 
 
-def test_narrative_list_and_cognize_status(store, cfg, embedder, tmp_path):
-    ws = SimpleNamespace(store=store, cfg=cfg, embedder=embedder, home=tmp_path)
-    commit_narrative(
-        store,
-        account="Center lists me",
-        vault_id="default",
-        evidence_ids=["ev_c1"],
-        committed_by="t",
-        domain="technical",
+def test_mcp_client_status_lists_providers(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    paths = {
+        "cursor": tmp_path / "cursor.json",
+        "claude-code": tmp_path / "code.json",
+        "claude-desktop": tmp_path / "desktop.json",
+    }
+    paths["cursor"].write_text(
+        '{"mcpServers": {"twin": {}}}', encoding="utf-8",
     )
-    rows = actions.narrative_list(ws)
-    assert any(r["account"] == "Center lists me" for r in rows)
-    st = actions.cognize_status(ws)
-    assert "halted" in st
+    monkeypatch.setattr(
+        "twin.interfaces.ops._mcp_config_paths",
+        lambda: {k: Path(v) for k, v in paths.items()},
+    )
+    rows = actions.mcp_client_status()
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["cursor"]["installed"] is True
+    assert by_id["claude-code"]["installed"] is False
+    assert by_id["claude-desktop"]["label"] == "Claude Desktop"
+    assert "path" in by_id["cursor"]

@@ -1,6 +1,7 @@
-"""Command Center — TTY operator surface for Twin (Sense / Cognize / Inject).
+"""Command Center — TTY operator surface for Twin.
 
 Launch: bare ``twin`` on a TTY. Non-TTY never enters the TUI.
+Screens: Health · Services · MCP.
 """
 
 from __future__ import annotations
@@ -12,26 +13,9 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from twin.workspace import Workspace
-
-PALETTE_VERBS = [
-    "cognize run",
-    "narrative search",
-    "narrative commit",
-    "narrative accessibility",
-    "stance list",
-    "inject pack",
-    "review",
-    "consolidate daily",
-    "consolidate weekly",
-    "connector list",
-    "runtime status",
-    "serve",
-    "doctor",
-    "research revisions",
-]
 
 
 @dataclass
@@ -70,57 +54,6 @@ def should_launch_center(argv: Optional[list[str]]) -> bool:
         cleaned.append(args[i])
         i += 1
     return len(cleaned) == 0 and is_tty()
-
-
-def home_snapshot(ws: Workspace) -> dict[str, Any]:
-    backlog = 0
-    try:
-        backlog = len(ws.store.list_claims(status="candidate", limit=500))
-    except Exception:
-        pass
-    reflections = 0
-    if hasattr(ws.store, "list_open_reflections"):
-        try:
-            reflections = len(ws.store.list_open_reflections("default"))
-        except Exception:
-            pass
-    halt = ""
-    if hasattr(ws.store, "last_cognize_run"):
-        try:
-            run = ws.store.last_cognize_run()
-            if run and run.get("halt_reason"):
-                halt = str(run.get("halt_reason"))
-        except Exception:
-            pass
-    connectors = 0
-    if hasattr(ws.store, "list_connector_instances"):
-        try:
-            connectors = len(ws.store.list_connector_instances())
-        except Exception:
-            pass
-    jobs_pending = 0
-    if hasattr(ws.store, "runtime_queue_depth"):
-        try:
-            q = ws.store.runtime_queue_depth() or {}
-            jobs_pending = int(q.get("pending") or q.get("ready") or 0)
-        except Exception:
-            pass
-    return {
-        "home": str(ws.cfg.home),
-        "review_backlog": backlog,
-        "open_reflections": reflections,
-        "cognize_halt": halt,
-        "connectors": connectors,
-        "jobs_pending": jobs_pending,
-    }
-
-
-def fuzzy_palette(query: str) -> list[str]:
-    q = (query or "").strip().lower()
-    pool = list(PALETTE_VERBS)
-    if not q:
-        return pool[:12]
-    return [p for p in pool if q in p.lower()][:20]
 
 
 DEFAULT_SERVE_PORT = 8765
@@ -194,6 +127,66 @@ def read_log_tail(path: Optional[Path], *, lines: int = 120) -> str:
     if not parts:
         return "(empty log)"
     return "\n".join(parts[-lines:])
+
+
+def _looks_like_runtime_cmd(args: str) -> bool:
+    """True when a process cmdline looks like ``twin runtime start``."""
+    if "runtime" not in args or "start" not in args:
+        return False
+    if "twin.interfaces.cli" in args:
+        return True
+    tokens = args.split()
+    for i, tok in enumerate(tokens):
+        base = Path(tok).name
+        if base in ("twin", "twin.exe"):
+            rest = tokens[i + 1 :]
+            if "runtime" in rest and "start" in rest:
+                return True
+    return False
+
+
+def runtime_pids() -> list[int]:
+    """Best-effort PIDs of ``twin runtime start`` workers (any home)."""
+    pids: list[int] = []
+    try:
+        out = subprocess.check_output(
+            ["ps", "-eo", "pid=,args="],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+    me = os.getpid()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        if pid == me:
+            continue
+        if _looks_like_runtime_cmd(parts[1]):
+            pids.append(pid)
+    return sorted(set(pids))
+
+
+def serve_is_up(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> bool:
+    """True when Center's serve child is alive or something listens on ``port``."""
+    if state.serve.proc and state.serve.proc.poll() is None:
+        return True
+    return bool(pids_listening_on(port))
+
+
+def runtime_is_up(state: CenterState) -> bool:
+    """True when Center's runtime child is alive or an external worker is found."""
+    if state.runtime.proc and state.runtime.proc.poll() is None:
+        return True
+    return bool(runtime_pids())
 
 
 def start_serve(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> str:
@@ -291,6 +284,31 @@ def stop_runtime(state: CenterState) -> None:
     state.runtime.proc = None
 
 
+def ensure_serve(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> str:
+    """Start serve only if nothing is already listening on ``port``."""
+    url = f"http://127.0.0.1:{port}"
+    state.serve.url = url
+    if state.serve.proc and state.serve.proc.poll() is None:
+        listeners = set(pids_listening_on(port))
+        if not listeners or state.serve.proc.pid in listeners:
+            return url
+        # Child alive but not the listener — reclaim via start_serve.
+        return start_serve(state, port=port)
+    if pids_listening_on(port):
+        # External serve already up — attach URL, do not kill/restart.
+        return url
+    return start_serve(state, port=port)
+
+
+def ensure_runtime(state: CenterState) -> str:
+    """Start runtime only if no worker (supervised or external) is running."""
+    if state.runtime.proc and state.runtime.proc.poll() is None:
+        return "attached"
+    if runtime_pids():
+        return "already"
+    return start_runtime(state)
+
+
 def stop_all_supervised(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> None:
     stop_serve(state, port=port)
     stop_runtime(state)
@@ -304,12 +322,22 @@ def start_all_supervised(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> 
     }
 
 
+def ensure_all_supervised(state: CenterState, port: int = DEFAULT_SERVE_PORT) -> dict[str, str]:
+    """Start serve + runtime only when they are not already running."""
+    return {
+        "serve": ensure_serve(state, port=port),
+        "runtime": ensure_runtime(state),
+    }
+
+
 def launch_command_center(home: Optional[str] = None) -> int:
     """Run the Textual Command Center. Returns process exit code."""
     from twin.interfaces.center.app import TwinCenterApp
 
     ws = Workspace(home)
     state = CenterState(home=Path(ws.cfg.home))
+    # Bring up HTTP/Web + job worker if missing; leave existing processes alone.
+    ensure_all_supervised(state)
     app = TwinCenterApp(ws=ws, state=state)
     app.run()
     if state.exit_choice == "stop":

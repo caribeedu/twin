@@ -30,6 +30,14 @@ class Check:
     detail: str = ""
 
 
+def _claude_code_user_mcp_path() -> Path:
+    """User-scoped Claude Code MCP config (`mcpServers` in ~/.claude.json)."""
+    override = (os.environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if override:
+        return Path(override).expanduser() / ".claude.json"
+    return Path.home() / ".claude.json"
+
+
 def _mcp_config_paths() -> dict[str, Path]:
     home = Path.home()
     if platform.system() == "Darwin":
@@ -41,8 +49,23 @@ def _mcp_config_paths() -> dict[str, Path]:
     return {
         "claude-desktop": desktop,
         "cursor": home / ".cursor/mcp.json",
-        "claude-code": Path.cwd() / ".mcp.json",
+        "claude-code": _claude_code_user_mcp_path(),
     }
+
+
+def _twin_entry_installed(path: Path) -> bool:
+    """True when ``path`` has an ``mcpServers.twin`` entry."""
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        try:
+            return '"twin"' in path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return False
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    return isinstance(servers, dict) and "twin" in servers
 
 
 def _runtime_queue_checks(store) -> list[Check]:
@@ -212,7 +235,7 @@ def doctor(cfg: Config) -> list[Check]:
     # MCP client configuration
     found_any = False
     for client, path in _mcp_config_paths().items():
-        if path.exists() and '"twin"' in path.read_text(encoding="utf-8", errors="ignore"):
+        if _twin_entry_installed(path):
             checks.append(Check(f"mcp:{client}", OK, str(path)))
             found_any = True
     if not found_any:
@@ -370,7 +393,7 @@ def setup_mcp(cfg: Config, client: str) -> list[str]:
     if client == "claude-desktop":
         lines.append("restart Claude Desktop to load the server")
     if client == "claude-code":
-        lines.append("scope: project (.mcp.json in the current directory)")
+        lines.append("scope: user (~/.claude.json mcpServers)")
         lines.append("restart Claude Code / reload MCP to pick up env")
     if client == "cursor":
         lines.append("reload Cursor MCP / restart to pick up env")

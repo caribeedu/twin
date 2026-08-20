@@ -166,24 +166,22 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 ### Claude Code
 
+`twin setup mcp claude-code` writes/merges into the **user** MCP config:
+
+- `~/.claude.json` → top-level `mcpServers.twin`
+- or `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set
+
 ```bash
-claude mcp add twin -- twin mcp
-# project scope (shareable via .mcp.json):
-claude mcp add --scope project twin -- twin mcp
+twin setup mcp claude-code
+# equivalent CLI:
+claude mcp add --scope user twin -- twin mcp
 ```
 
-Or directly in the project's `.mcp.json`:
+Project-scoped `.mcp.json` (shareable via git) remains optional and is **not**
+what Twin's doctor / Command Center treat as the install target:
 
-```json
-{
-  "mcpServers": {
-    "twin": {
-      "command": "twin",
-      "args": ["mcp"],
-      "env": { "TWIN_DB_URL": "postgresql://twin:twin@localhost:5432/twin" }
-    }
-  }
-}
+```bash
+claude mcp add --scope project twin -- twin mcp
 ```
 
 ### Claude Desktop
