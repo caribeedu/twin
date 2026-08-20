@@ -38,7 +38,12 @@ A brand bar + **← Home** recovers navigation from any pane.
 
 ## Entities (Explore)
 
-Purpose-shaped views — not a generic CRUD grid:
+Purpose-shaped accordion list — click a row to expand in place (no separate
+detail page). Status sits left of the title (PascalCase); expansion shows
+description, id/domain metadata, and a **Lineage** strip (from → here → to)
+built from Relations (`supersedes`, `continues`, `depends-on`, `part-of`, …).
+Lineage cards use entity titles; clicking a node stays in Explore and switches
+the entity-type pill when needed.
 
 | Entity | Emphasizes |
 |---|---|
@@ -47,10 +52,10 @@ Purpose-shaped views — not a generic CRUD grid:
 | Interpretation | Competing explanation → Review |
 | Situation | Working cluster |
 | Stance | Evaluative posture (≠ factual account); Ops preview→approve |
-| Evidence | Anchored warrant |
-| Relation | Typed edges |
+| Evidences | Anchored warrant |
 | Trace | Accessibility / retrieval ledger |
-| Percept | Immutable observation (Sense) |
+| Percept | Immutable observation (Sense); PR percepts surface state/branches as structured meta |
+| Relation | Full entity flowchart (last pill) — no accordion list |
 
 No product **Memories** tab.
 
