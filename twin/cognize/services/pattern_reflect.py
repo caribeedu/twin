@@ -1,14 +1,15 @@
-"""Pattern reflection — the nightly cross-window "dream" pass.
+"""Pattern-derived percepts — the nightly cross-window "dream" pass.
 
-Episode reflection asks "what does this unit of work mean?". Pattern reflection
-asks "what does a *window* of the user's activity reveal that they never
-bothered to state?" — durable preferences, procedures/habits and standing
-constraints mined from repeated choices across senses (GitHub, Slack, meetings,
-docs, sessions), optionally scoped to a project.
+Episode-derived percepts ask "what does this unit of work mean?". Pattern-
+derived percepts ask "what does a *window* of the user's activity reveal that
+they never bothered to state?" — durable preferences, procedures/habits and
+standing constraints mined from repeated choices across senses (GitHub, Slack,
+meetings, docs, sessions), optionally scoped to a project.
 
 It compiles an :class:`AnalysisDossier` over a window and hands it to a chat
-model. Output is MemoryCandidates only (``needs_review=True``,
+model. Output is StoreClaim review candidates only (``needs_review=True``,
 ``review_reason=pattern_reflect``). No model → defer. No lexical fallback.
+These are **Derived percepts**, not Cognize Reflections (open questions).
 """
 
 from __future__ import annotations
@@ -88,13 +89,16 @@ def _ensure_pattern_percept(
     digest = hashlib.sha256(
         f"{wkey}|{sorted(basis.items()) if isinstance(basis, dict) else basis}".encode()
     ).hexdigest()[:20]
-    pid = f"pct_pattern_{digest}"
+    pid = f"pct_derived_pattern_{digest}"
+    legacy_pid = f"pct_pattern_{digest}"
+    if hasattr(store, "get_percept") and store.get_percept(legacy_pid) is not None:
+        return legacy_pid
     body = claim.summary
     if claim.evidence_quotes:
         body = body + "\n\n" + "\n".join(claim.evidence_quotes)
     percept = Percept(
         id=pid,
-        percept_type="pattern_reflection",
+        percept_type="derived_pattern",
         source_sensor="pattern_reflect",
         occurred_at=claim.valid_from,
         content=body,

@@ -69,10 +69,10 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 
 | Command | What it does |
 |---|---|
-| `twin promote <mem_id>` | Open a Stance proposal from a memory (does **not** auto-write). |
+| `twin promote <claim_id>` | Open a Stance proposal from a claim (does **not** auto-write). |
 | `twin stance import\|export\|list\|show\|history\|versions` | Bootstrap and inspect Stance store. |
 | `twin stance proposals\|propose\|preview\|approve\|reject\|defer` | Proposal lifecycle (approve needs preview token). |
-| `twin stance propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory memories (`provenance.source=episode_pattern`; human approval only). |
+| `twin stance propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory claims (`provenance.source=episode_pattern`; human approval only). |
 | `twin stance simulate <query> --domain …` | Simulate applicable Stance. |
 | `twin stance conflicts [--refresh]` | List / refresh conflicts. |
 | `twin stance explain <trace_id>` | Explain a Stance application trace. |
@@ -99,7 +99,7 @@ Correlation proposes revisable structure over connector evidence — never Narra
 | `twin episode phases <id>` | List the `goal → decision → execution → outcome` arc phases (built by the `amygdala`/`cortex` stages). |
 | `twin episode edges <id>` | List proposed causal/narrative edges (`motivated\|superseded\|resolved\|continues\|contradicts`) from the `cortex` stage. |
 | `twin episode confirm-edge\|reject-edge <edge_id>` | Human decision on an edge (survives cortex rebuilds). |
-| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Defers if the model is unavailable. Complements `twin cognize run`. |
+| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **review candidates** ("intended X → chose Y") from the arc; StoreClaims with `needs_review`, `review_reason=episode_reflect`. Defers if the model is unavailable. Complements `twin cognize run`. |
 
 ## Native
 

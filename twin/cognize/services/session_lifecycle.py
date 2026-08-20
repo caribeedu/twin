@@ -47,7 +47,7 @@ class SessionCheckpoint(BaseModel):
 
 
 class SessionClosure(BaseModel):
-    """Structured close — candidates only; never confirms Memory/Judgment."""
+    """Structured close — candidates only; never auto-confirms Narratives/Stances."""
 
     id: str = Field(default_factory=ids.session_closure_id)
     session_id: str
@@ -226,7 +226,7 @@ def close_session_structured(
 ) -> tuple[CognitiveSession, SessionClosure]:
     """Complete the session and persist a structured closure record.
 
-    Closure never confirms Memory or Judgment — only records candidates /
+    Closure never auto-confirms Narratives or Stances — only records candidates /
     observations for later review.
     """
     session = complete_session(

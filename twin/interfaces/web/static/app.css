@@ -2005,11 +2005,11 @@ button.entity-row--toggle:hover {
   margin-bottom: 0.1rem;
 }
 .percept-kind--observed { color: #6e6688; }
-.percept-kind--reflection { color: #6b4f9a; }
+.percept-kind--derived { color: #6b4f9a; }
 .entity-item--observed {
   border-left: 3px solid #c4bfd4;
 }
-.entity-item--reflection {
+.entity-item--derived {
   border-left: 3px solid #b8a0d8;
 }
 .percept-group.is-filtered-out {

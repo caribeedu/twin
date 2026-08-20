@@ -5,7 +5,7 @@ platform: a merged PR is a team's final, versioned word; a bot comment is a
 notification wearing a comment costume. This is an initial calibration —
 corroboration and explicit user confirmation refine it downstream.
 
-Bots land BELOW the low-trust threshold (0.65), so every memory candidate
+Bots land BELOW the low-trust threshold (0.65), so every review candidate
 derived from them is born needing review — preparing the invariant that
 a notification never counts as independent evidence of its source object.
 """

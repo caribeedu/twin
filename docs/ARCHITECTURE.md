@@ -171,7 +171,7 @@ gates (`twin review`, `twin stance approve`).
 | 2 | `basal` | Basal ganglia | read episode lifecycle | lifecycle (report-only) | `twin cognize run` |
 | 3 | `hippocampus_bind` | Hippocampus (binding) | membership consolidation | links | `twin cognize run` |
 | 4 | `cortex` | Cortex (semantic) | understand arc: phases + edges | phases/edges (`method=llm`) | `twin cognize run` |
-| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | MemoryCandidates | `twin episode reflect` |
+| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | review candidates (StoreClaim) | `twin episode reflect` |
 | 6 | `prefrontal` | Prefrontal cortex | draft Stance | pending Stance proposal | `twin stance propose-episode` |
 
 Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin stance approve` is the executive gate for durable Stance. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
@@ -213,14 +213,14 @@ sequenceDiagram
     Client->>ExtLLM: twin cognize run
     ExtLLM->>Store: read pending percepts
     ExtLLM->>PII: mask before any cloud LLM
-    ExtLLM->>Store: atomic MemoryCandidates + evidence
+    ExtLLM->>Store: atomic review candidates + evidence
     ExtLLM->>Human: selective review queue
 
     Client->>Corr: twin cognize run
     Corr->>Store: WorkEpisode membership, phases, edges
     Note over Corr: Structural scaffold never invents an arc.<br/>Semantic stages defer without a model.
     Corr->>ACC: consolidate-ready episodes
-    ACC->>Store: trajectory MemoryCandidates
+    ACC->>Store: trajectory review candidates
     ACC->>Human: review (+ optional Stance drafts)
 
     Human->>Store: confirm / reject / merge / resolve
@@ -287,7 +287,7 @@ sequenceDiagram
     Native-->>Host: ok (fail-open if configured)
     Runtime->>Sess: fold dialogue + deliberate notes
     Runtime->>Store: session_summary Percept
-    Runtime->>ExtLLM: cognize → MemoryCandidates
+    Runtime->>ExtLLM: cognize → review candidates
     ExtLLM->>Store: candidates for human review
     Note over Host,Store: Inject governed understanding at the start;<br/>absorb the session as evidence at the end.<br/>Humans still confirm durable Narrative / Stance.
 ```
@@ -325,7 +325,7 @@ sequenceDiagram
     ACC-->>Orch: AnalysisDossier (deterministic)
     Orch->>LLM: judge dossier → trajectory / pattern claims
     LLM-->>Orch: claims with evidence refs
-    Orch->>Store: MemoryCandidates only<br/>(needs_review, never auto-confirm)
+    Orch->>Store: review candidates only<br/>(needs_review, never auto-confirm)
     Orch->>Review: twin review / Stance gates
     Note over Orch,Review: Model proposes understanding<br/>humans constitute Narrative and Stance
 ```
@@ -633,13 +633,13 @@ A store claim row must contain:
 
 Every memory must carry evidence, preferably a verbatim excerpt from the source.
 
-Without evidence, a memory is suspect.
+Without evidence, a claim is suspect.
 
-This reduces memory hallucination and enables human review.
+This reduces hallucinated accounts and enables human review.
 
 ### Temporality
 
-Memories must have temporal validity.
+Narratives and claims must have temporal validity.
 
 Example:
 
@@ -760,9 +760,9 @@ contradict, defer, archive and request_more_evidence.
 
 ## Evolving judgment model
 
-Memories say **what happened**.
+Narratives say **what happened**.
 
-Judgment says **how the user thinks** — preferences, beliefs, principles, values, heuristics and hard constraints.
+Stances say **how the user thinks** — preferences, beliefs, principles, values, heuristics and hard constraints.
 
 YAML under `~/.twin/judgment.yaml` remains bootstrap and export. The operational source of truth is the judgment store (SQLite/PostgreSQL): immutable revisions, versioned composition, proposals and snapshots.
 
@@ -931,7 +931,7 @@ Local-first personal cognitive OS. Assets: memories, judgment, connector secrets
    Secrets in encrypted credential store (`credential_ref` only in DB). Least-privilege health warnings. Revoke is resumable and honest about residual secrets.
 
 4. **Silent corruption of confirmed cognition**  
-   Confirm requires evidence + human actor. Consolidation and session closure never confirm Memory/Judgment. Revision collisions go to DLQ, never overwrite.
+   Confirm requires evidence + human actor. Consolidation and session closure never auto-confirm Narratives/Stances. Revision collisions go to DLQ, never overwrite.
 
 5. **Runtime poison / stuck workers**  
    CAS claim, leases, DLQ for permanent errors; `model_unavailable` stays retryable (never DLQ). Vault isolation on claim.

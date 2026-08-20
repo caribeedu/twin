@@ -58,7 +58,7 @@ def test_propose_from_episode_creates_pending_proposal(store):
 
 
 def test_propose_from_episode_support_counts_independent_sources(store):
-    # two confirmed trajectory memories from the SAME episode → one source,
+    # two confirmed trajectory claims from the SAME episode → one source,
     # not "support=2" (the memory count is surfaced separately).
     ep = "episode_shared"
     _confirmed_trajectory_memory(

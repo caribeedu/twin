@@ -443,7 +443,7 @@ def workspace_tick(
 
         stage = "done"
         result.stages.append("done")
-        result.notes.append("tick never confirms Memory or Judgment")
+        result.notes.append("tick never auto-confirms Narratives or Stances")
         result.status = "completed"
 
         tick.status = "completed"

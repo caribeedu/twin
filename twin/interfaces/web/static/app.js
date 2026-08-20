@@ -28,8 +28,8 @@ const CONNECTOR_LABELS = {
   document: "Document",
   folder: "Folder",
   git: "Git",
-  episode_reflect: "Episode reflection",
-  pattern_reflect: "Pattern reflection",
+  episode_reflect: "Derived",
+  pattern_reflect: "Derived",
 };
 
 function $(sel, root = document) {
@@ -137,9 +137,9 @@ function entityHeadline(row, type) {
   else if (type === "relation") raw = `${row.type || "rel"} · ${row.from_id} → ${row.to_id}`;
   else if (type === "trace") raw = `${row.event_kind || "event"} · ${row.resource_id || row.id}`;
   else if (type === "percept") {
-    if (isReflectionPercept(row)) {
+    if (isDerivedPercept(row)) {
       raw = row.content || row.summary || row.text
-        || connectorLabel(row.source_sensor) || "Reflection";
+        || connectorLabel(row.source_sensor) || "Derived percept";
     } else {
       const kind = [row.percept_type, row.source_sensor]
         .filter(Boolean)
@@ -346,22 +346,25 @@ function parseGithubPrContent(content) {
   return { repo, number, prTitle, state, mergedAt, base, head, note, body };
 }
 
-function isReflectionPercept(row) {
+function isDerivedPercept(row) {
   const id = String(row?.id || "");
   const t = String(row?.percept_type || "").toLowerCase();
   const s = String(row?.source_sensor || "").toLowerCase();
   return (
-    id.startsWith("pct_reflect_")
+    id.startsWith("pct_derived_")
+    || id.startsWith("pct_reflect_")
     || id.startsWith("pct_pattern_")
     || /^pctreflect/i.test(id)
     || /^pctpattern/i.test(id)
-    || t.includes("reflection")
+    || t === "derived"
+    || t.startsWith("derived_")
+    || t.includes("reflection") // legacy episode_reflection / pattern_reflection
     || s.includes("reflect")
   );
 }
 
 function perceptKindLabel(row) {
-  return isReflectionPercept(row) ? "Reflection" : "Observed";
+  return isDerivedPercept(row) ? "Derived" : "Observed";
 }
 
 function relationEdgeLabel(type) {
@@ -1090,14 +1093,14 @@ function originNodesFor(meta, row) {
       }
       break;
     case "percept": {
-      if (isReflectionPercept(row)) {
+      if (isDerivedPercept(row)) {
         const md = row.metadata || {};
         for (const id of md.source_percept_ids || md.percept_ids || []) {
           add(id, "source", "percept");
         }
         for (const id of md.evidence_ids || []) add(id, "evidence", "evidence");
         for (const e of md.evidence || []) add(e.id || e, "evidence", "evidence");
-        // Connector synthetic is wrong for Cognize reflections — skip it.
+        // Connector synthetic is wrong for Cognize-derived percepts — skip it.
         break;
       }
       let sensor = row.source_sensor || "";
@@ -1664,7 +1667,7 @@ async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDept
   });
   depth.set(entityId, 0);
 
-  // Structural origins on root (skip connector synthetic for reflection percepts)
+  // Structural origins on root (skip connector synthetic for derived percepts)
   for (const o of originNodesFor(meta, row)) {
     addNode(o);
     if (!depth.has(o.id)) depth.set(o.id, -1);
@@ -1764,10 +1767,10 @@ async function renderExpandBody(meta, row, relations) {
   add("Grain", row.grain);
   add("Committed by", row.committed_by);
   add("Stale reason", row.epistemic?.stale_reason);
-  add("Kind", row.kind || row.type || row.event_kind || (meta.id === "percept" && isReflectionPercept(row) ? "Reflection" : ""));
+  add("Kind", row.kind || row.type || row.event_kind || (meta.id === "percept" && isDerivedPercept(row) ? "Derived" : ""));
   add("Strength", row.strength);
   add("Source", row.source_id);
-  if (meta.id === "percept" && !isReflectionPercept(row)) {
+  if (meta.id === "percept" && !isDerivedPercept(row)) {
     const origin = connectorLabel(row.source_sensor);
     if (origin) add("Origin", origin);
   }
@@ -1882,7 +1885,7 @@ async function paneExplore(parts) {
       const statusLabel = pascalStatus(status);
       const open = focusId && rid === focusId;
       const kind = meta.id === "percept" ? perceptKindLabel(row) : "";
-      const kindSlug = kind === "Reflection" ? "reflection" : (kind === "Observed" ? "observed" : "");
+      const kindSlug = kind === "Derived" ? "derived" : (kind === "Observed" ? "observed" : "");
       return `<article class="entity-item${open ? " is-open" : ""}${kindSlug ? ` entity-item--${kindSlug}` : ""}" data-id="${esc(rid)}"${kindSlug ? ` data-percept-kind="${kindSlug}"` : ""}>
         <button type="button" class="entity-row entity-row--toggle" aria-expanded="${open ? "true" : "false"}">
           ${statusLabel
@@ -1900,23 +1903,23 @@ async function paneExplore(parts) {
     };
 
     if (meta.id === "percept") {
-      const observed = list.filter((r) => !isReflectionPercept(r));
-      const reflections = list.filter((r) => isReflectionPercept(r));
+      const observed = list.filter((r) => !isDerivedPercept(r));
+      const derived = list.filter((r) => isDerivedPercept(r));
       box.innerHTML = `
         <div class="percept-filters" role="tablist" aria-label="Percept kind">
           <button type="button" class="percept-filter is-active" data-filter="all" role="tab" aria-selected="true">All (${list.length})</button>
           <button type="button" class="percept-filter" data-filter="observed" role="tab" aria-selected="false">Observed (${observed.length})</button>
-          <button type="button" class="percept-filter" data-filter="reflection" role="tab" aria-selected="false">Reflections (${reflections.length})</button>
+          <button type="button" class="percept-filter" data-filter="derived" role="tab" aria-selected="false">Derived (${derived.length})</button>
         </div>
         ${observed.length ? `<section class="percept-group" data-percept-group="observed">
           <h3 class="percept-group-title">Observed</h3>
           <p class="percept-group-sub muted">Sense input from connectors</p>
           ${observed.map(renderArticle).join("")}
         </section>` : ""}
-        ${reflections.length ? `<section class="percept-group" data-percept-group="reflection">
-          <h3 class="percept-group-title">Reflections</h3>
-          <p class="percept-group-sub muted">Episode &amp; pattern reflections from Cognize</p>
-          ${reflections.map(renderArticle).join("")}
+        ${derived.length ? `<section class="percept-group" data-percept-group="derived">
+          <h3 class="percept-group-title">Derived</h3>
+          <p class="percept-group-sub muted">Cognize-synthesized percepts (episode &amp; pattern arcs)</p>
+          ${derived.map(renderArticle).join("")}
         </section>` : ""}`;
       const filters = $(".percept-filters", box);
       filters?.addEventListener("click", (ev) => {

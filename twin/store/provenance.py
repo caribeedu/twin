@@ -129,7 +129,8 @@ _SENSOR_LABELS = {
     "mail": "Mail",
     "email": "Email",
     "episode": "Episode",
-    "episode_reflect": "Episode reflection",
+    "episode_reflect": "Derived",
+    "pattern_reflect": "Derived",
     "pattern": "Pattern",
     "workspace": "Workspace",
     "unknown": "Unknown",
@@ -143,12 +144,17 @@ _KIND_LABELS = {
     "issue": "issue",
     "channel": "channel",
     "episode": "episode",
-    "episode_reflection": "reflection",
+    "episode_reflection": "derived",  # legacy
+    "pattern_reflection": "derived",  # legacy
+    "derived_episode": "derived",
+    "derived_pattern": "derived",
 }
 
 # Synthetic cognition sensors — show at most once, and only when there is no
 # concrete connector artifact to display instead.
-_SYNTHETIC_SENSORS = frozenset({"episode_reflect", "episode", "pattern", "workspace"})
+_SYNTHETIC_SENSORS = frozenset({
+    "episode_reflect", "pattern_reflect", "episode", "pattern", "workspace",
+})
 
 
 def _friendly_sensor(sensor: str) -> str:
@@ -257,9 +263,16 @@ def claim_source_summary(store: MemoryStore, claim_id: str) -> dict[str, Any]:
         elif payload.get("source") == "episode_reflect":
             sensors = ["episode_reflect"]
             refs.append({
-                "sensor": "episode_reflect", "kind": "episode_reflection",
+                "sensor": "episode_reflect", "kind": "derived_episode",
                 "id": None,
-                "label": "Episode reflection",
+                "label": "Derived percept",
+            })
+        elif payload.get("source") == "pattern_reflect":
+            sensors = ["pattern_reflect"]
+            refs.append({
+                "sensor": "pattern_reflect", "kind": "derived_pattern",
+                "id": None,
+                "label": "Derived percept",
             })
     friendly_sensors = [_friendly_sensor(s) for s in sensors]
     return {

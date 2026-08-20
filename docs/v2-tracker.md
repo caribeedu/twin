@@ -683,7 +683,7 @@ Wire gate into future orchestrator and, temporarily, into existing `extract` / `
 
 ### Exit criteria
 
-- [x] With LLM stopped: cognize/extract/meditate semantic paths halt; percepts remain pending/deferred — **no new MemoryCandidates invented by heuristics in interpreting modes**.
+- [x] With LLM stopped: cognize/extract/meditate semantic paths halt; percepts remain pending/deferred — **no new review candidates invented by heuristics in interpreting modes**.
 - [x] Status command/API shows last halt reason + timestamp.
 - [x] Unit test covers each halt reason.
 
@@ -985,7 +985,7 @@ Status `open` by default. Always visible in Review later (T-040).
 
 ### Description
 
-LLM forms competing **Interpretations** (candidate explanations) for Reflections/Situations — not “answers to user queries,” not MemoryCandidates.
+LLM forms competing **Interpretations** (candidate explanations) for Reflections/Situations — not “answers to user queries,” not StoreClaim review candidates.
 
 Each Interpretation must cite Evidence anchors (percept spans). Ungrounded items dropped (deterministic validation).
 

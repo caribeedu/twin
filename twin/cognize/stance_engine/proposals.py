@@ -210,7 +210,7 @@ def propose_from_episode(
     *,
     domain: Optional[str] = None,
 ) -> Optional[JudgmentProposal]:
-    """Seed a Judgment proposal from an episode's *confirmed* trajectory memories.
+    """Seed a Judgment proposal from an episode's *confirmed* trajectory claims.
 
     Only fires when the episode already has human-confirmed memories (from
     reflect, or otherwise linked). Never confirms Judgment — produces a pending
@@ -355,7 +355,7 @@ def propose_from_episode_patterns(
     min_evidence: int = 2,
     min_episodes: int = 2,
 ) -> list[JudgmentProposal]:
-    """Scan confirmed trajectory memories across episodes for a stable pattern.
+    """Scan confirmed trajectory claims across episodes for a stable pattern.
 
     Complements :func:`propose_from_pattern`; restricted to ``episode_reflect``
     trajectory decisions so it only generalizes cross-source arcs a human has

@@ -1,16 +1,21 @@
-"""Episode reflection — the hippocampus_consolidate cognition stage.
+"""Episode-derived percepts — the hippocampus_consolidate cognition stage.
 
 Atomic ``extract_percept`` sees one source at a time and can only say "Edu
-committed A, then B". Reflection reads a whole :class:`WorkEpisode` — its phase
+committed A, then B". This stage reads a whole :class:`WorkEpisode` — its phase
 arc and narrative edges — and synthesizes *trajectory* claims like "intended
-the Kafka path, then chose SQS". Those land as **MemoryCandidates only**
-(``needs_review=True``); reflection never confirms Memory or Judgment.
+the Kafka path, then chose SQS". Those land as **StoreClaim review candidates**
+only (``needs_review=True``); the stage never auto-confirms durable Narratives
+or Stances.
+
+Each claim is grounded by a **Derived percept** (synthetic Sense-shaped row)
+so provenance stays percept→evidence→claim. This is *not* a Cognize
+**Reflection** (open epistemic gap) — see docs/v2.md §2.2.
 
 This is a cognitive layer (not correlation): the cortex stage proposes the
-structure, reflect interprets it with a chat model. When no model is available
-the stage **defers** (like the interpreter) — it never falls back to lexical
-rules and never fabricates a trajectory. Tests inject a deterministic reflector
-via ``set_reflect_override`` or the ``reflector=`` argument.
+structure, consolidate interprets it with a chat model. When no model is
+available the stage **defers** (like the interpreter) — it never falls back to
+lexical rules and never fabricates a trajectory. Tests inject a deterministic
+reflector via ``set_reflect_override`` or the ``reflector=`` argument.
 """
 
 from __future__ import annotations
@@ -381,12 +386,13 @@ def reflect_episode(
     reflector: Optional[ReflectorFn] = None,
     session_id: Optional[str] = None,
 ) -> ReflectResult:
-    """Synthesize trajectory MemoryCandidates from one episode's arc.
+    """Synthesize trajectory review candidates from one episode's arc.
 
-    Emits candidates only (``needs_review=True``, ``review_reason=episode_reflect``).
-    Idempotent through formation identity: re-reflecting corroborates rather
-    than duplicating. Never confirms Memory or Judgment. Whether the arc
-    yields a claim is the model's job — there is no lexical pre-filter.
+    Emits StoreClaim candidates only (``needs_review=True``,
+    ``review_reason=episode_reflect``). Idempotent through formation identity:
+    re-running corroborates rather than duplicating. Never auto-confirms
+    Narratives or Stances. Whether the arc yields a claim is the model's job —
+    there is no lexical pre-filter.
     """
     brief = build_episode_brief(store, episode_id)
     if brief is None:
@@ -475,7 +481,7 @@ def reflect_episode(
         # The reflection is a cross-source reading; anchor its primary evidence
         # on a deterministic percept that captures what was read, so the memory
         # is grounded even when raw member percepts are unavailable.
-        primary_pid = _ensure_reflection_percept(store, brief, claim)
+        primary_pid = _ensure_derived_percept(store, brief, claim)
         evidence_quote = (
             claim.evidence_quotes[0] if claim.evidence_quotes else claim.summary
         )
@@ -554,21 +560,25 @@ def _claim_key(brief: EpisodeBrief, claim: TrajectoryClaim) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
 
 
-def _ensure_reflection_percept(
+def _ensure_derived_percept(
     store: MemoryStore, brief: EpisodeBrief, claim: TrajectoryClaim,
 ) -> str:
-    """Create (or reuse) the deterministic percept that grounds a reflection.
+    """Create (or reuse) the Derived percept that grounds a trajectory claim.
 
-    The id is derived from the episode + claim identity, so re-reflecting reuses
+    The id is derived from the episode + claim identity, so re-running reuses
     the same percept instead of creating duplicates.
     """
-    pid = f"pct_reflect_{_claim_key(brief, claim)}"
+    pid = f"pct_derived_{_claim_key(brief, claim)}"
+    # Legacy id kept for vaults that already stored pct_reflect_* rows.
+    legacy_pid = f"pct_reflect_{_claim_key(brief, claim)}"
+    if hasattr(store, "get_percept") and store.get_percept(legacy_pid) is not None:
+        return legacy_pid
     body = claim.summary
     if claim.evidence_quotes:
         body = body + "\n\n" + "\n".join(claim.evidence_quotes)
     percept = Percept(
         id=pid,
-        percept_type="episode_reflection",
+        percept_type="derived_episode",
         source_sensor="episode_reflect",
         occurred_at=claim.valid_from,
         content=body,

@@ -282,8 +282,8 @@ def cmd_review(args) -> None:
         title="queue",
     )
     ux.print_legend([
-        ("a", "approve — confirm memory (enters retrieval / packs)"),
-        ("r", "reject — discard memory (never retrieved)"),
+        ("a", "approve — confirm claim (enters retrieval / packs)"),
+        ("r", "reject — discard claim (never retrieved)"),
         ("s", "skip — leave as candidate, move to next"),
         ("q", "quit — stop review, keep remaining candidates"),
     ], title="legend")

@@ -76,8 +76,13 @@ FORMATION_POLICY: dict[str, dict[str, Any]] = {
 }
 
 
-class MemoryCandidate(BaseModel):
-    """Formation-facing view over a StoreClaim (not a second store)."""
+class ClaimCandidate(BaseModel):
+    """Formation-facing view over a StoreClaim awaiting human review.
+
+    Not a product “memory” entity. Twin’s durable substrate is Narrative /
+    Reflection / Interpretation / Stance / Evidence (docs/v2.md §2.2). This
+    type is the review-queue shape used by formation helpers.
+    """
 
     id: str
     formation_identity: str
@@ -88,6 +93,10 @@ class MemoryCandidate(BaseModel):
     reject_reason: str = ""
     policy: dict[str, Any] = Field(default_factory=dict)
     explanation: str = ""
+
+
+# Deprecated alias — prefer ClaimCandidate in new code.
+MemoryCandidate = ClaimCandidate
 
 
 def _norm(text: str) -> str:
@@ -150,7 +159,7 @@ def derive_formation_state(mem: StoreClaim) -> FormationState:
     return FormationState.candidate
 
 
-def as_candidate(store: MemoryStore, mem: StoreClaim) -> MemoryCandidate:
+def as_candidate(store: MemoryStore, mem: StoreClaim) -> ClaimCandidate:
     evidence = store.get_evidence(mem.id) if hasattr(store, "get_evidence") else []
     payload = mem.payload or {}
     identity = payload.get("formation_identity") or formation_identity(
@@ -167,7 +176,7 @@ def as_candidate(store: MemoryStore, mem: StoreClaim) -> MemoryCandidate:
     policy = FORMATION_POLICY.get(
         mem.type.value if hasattr(mem.type, "value") else str(mem.type), {},
     )
-    return MemoryCandidate(
+    return ClaimCandidate(
         id=mem.id,
         formation_identity=identity,
         formation_state=state,
@@ -398,7 +407,7 @@ def confirm_candidate(
     *,
     actor: str = "user",
     note: str = "",
-) -> MemoryCandidate:
+) -> ClaimCandidate:
     mem = store.get_claim(claim_id)
     if mem is None:
         raise ValueError(f"memory {claim_id} not found")
@@ -441,7 +450,7 @@ def reject_candidate(
     *,
     reason: str,
     actor: str = "user",
-) -> MemoryCandidate:
+) -> ClaimCandidate:
     if not (reason or "").strip():
         raise ValueError("reject requires a non-empty reason")
     mem = store.get_claim(claim_id)
@@ -478,7 +487,7 @@ def restore_candidate(
     claim_id: str,
     *,
     actor: str = "user",
-) -> MemoryCandidate:
+) -> ClaimCandidate:
     """Restore a rejected candidate back to awaiting_review / candidate."""
     mem = store.get_claim(claim_id)
     if mem is None:
@@ -518,7 +527,7 @@ def edit_candidate(
     summary: Optional[str] = None,
     domain: Optional[str] = None,
     actor: str = "user",
-) -> MemoryCandidate:
+) -> ClaimCandidate:
     mem = store.get_claim(claim_id)
     if mem is None:
         raise ValueError(f"memory {claim_id} not found")
@@ -547,7 +556,7 @@ def edit_candidate(
     return as_candidate(store, after)
 
 
-def mark_conflicting(store: MemoryStore, claim_id: str, *, reason: str = "") -> MemoryCandidate:
+def mark_conflicting(store: MemoryStore, claim_id: str, *, reason: str = "") -> ClaimCandidate:
     mem = store.get_claim(claim_id)
     if mem is None:
         raise ValueError(f"memory {claim_id} not found")
@@ -573,12 +582,12 @@ def list_candidates(
     *,
     state: Optional[str] = None,
     limit: int = 100,
-) -> list[MemoryCandidate]:
+) -> list[ClaimCandidate]:
     rows = store.list_claims(status=ClaimStatus.candidate.value, limit=limit * 2)
     # also surface rejected awaiting restore in review queues when asked
     if state in (None, FormationState.rejected.value):
         rows = rows + store.list_claims(status=ClaimStatus.rejected.value, limit=limit)
-    out: list[MemoryCandidate] = []
+    out: list[ClaimCandidate] = []
     for mem in rows:
         cand = as_candidate(store, mem)
         if state and cand.formation_state.value != state:

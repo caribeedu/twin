@@ -315,7 +315,7 @@ def evaluate_attention(
             session_id=session_id,
             kind=AttentionKind.memory_candidate,
             claim_id=mid,
-            summary="New memory candidate from interpretation",
+            summary="New review candidate from interpretation",
             reason="parallel_interpretation",
             expected_value=0.5,
             relevance=0.6,

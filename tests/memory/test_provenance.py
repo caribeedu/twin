@@ -90,7 +90,7 @@ def test_delete_artifact_does_not_cascade_by_hash(store, embedder):
 
 
 def test_source_summary_hides_duplicate_episode_reflect(store, embedder):
-    """Reflect percepts must not spam the UI when a GitHub artifact is present."""
+    """Derived percepts must not spam the UI when a GitHub artifact is present."""
     gh = Percept(
         id=ids.new_id("pct"),
         percept_type="pull_request",
@@ -104,14 +104,14 @@ def test_source_summary_hides_duplicate_episode_reflect(store, embedder):
     )
     r1 = Percept(
         id=ids.new_id("pct"),
-        percept_type="episode_reflection",
+        percept_type="derived_episode",
         source_sensor="episode_reflect",
         content="reflection a",
         metadata={},
     )
     r2 = Percept(
         id=ids.new_id("pct"),
-        percept_type="episode_reflection",
+        percept_type="derived_episode",
         source_sensor="episode_reflect",
         content="reflection b",
         metadata={},

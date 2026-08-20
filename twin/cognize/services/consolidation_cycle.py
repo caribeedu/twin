@@ -5,7 +5,7 @@ cycles run on a logical window over the store — quality analysis, safe
 automation, temporal belief/goal refresh, closed-session inventory, open
 tasks, review backlog prep, cognitive change report, episode cortex
 (sensory→cortex) + episode reflect (both daily and weekly), and (weekly)
-optional Stance *proposals*. They never confirm Memory or Stance.
+optional Stance *proposals*. They never auto-confirm Narratives or Stances.
 
 Interactive review and Stance drafting stay on human CLI paths
 (``twin review``, ``twin stance``); daily/weekly automation only runs the
@@ -329,7 +329,7 @@ def reflect_recent_episodes(
     scan_limit: int = 500,
     episode_ids: Optional[list[str]] = None,
 ) -> list[str]:
-    """Reflect episodes with a built arc into trajectory MemoryCandidates.
+    """Reflect episodes with a built arc into trajectory review candidates.
 
     The hippocampus_consolidate stage runs on episodes whose cortex stage
     produced an arc (≥2 phases); the reflect model decides whether that arc
@@ -793,7 +793,7 @@ def run_consolidation_cycle(
         result.candidate_stats = candidate_formation_stats(store)
 
         # Keep episode arcs current via sensory→cortex, then reflect
-        # reflectable arcs into MemoryCandidates. Not full meditate — no
+        # reflectable arcs into review candidates. Not full meditate — no
         # interactive review, no prefrontal, never auto-confirm.
         stage = "episode_cortex"
         result.stages.append("episode_cortex")

@@ -1,4 +1,4 @@
-"""Per-source memory candidate policy.
+"""Per-source StoreClaim / review-candidate policy.
 
 Connector-fed percepts don't get to propose every memory type: GitHub may
 propose decisions and constraints, but never beliefs or preferences; Slack

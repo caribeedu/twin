@@ -1,4 +1,4 @@
-"""hippocampus_consolidate — trajectory MemoryCandidates from an episode arc.
+"""hippocampus_consolidate — trajectory review candidates from an episode arc.
 
 Phases/edges are built by the cortex stage (deterministic overrides here) and
 the reflect stage is a chat model — simulated by ``set_reflect_override``. No

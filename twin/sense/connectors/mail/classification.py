@@ -2,7 +2,7 @@
 
 Classes are metadata for governance and extraction priority — never used to
 infer ``source_owner``. Only cognitively relevant classes should become
-memory candidates by default; newsletters/notifications stay searchable
+review candidates by default; newsletters/notifications stay searchable
 artifacts.
 """
 
@@ -87,5 +87,5 @@ def classify_message(
 
 
 def is_memory_relevant(classification: str) -> bool:
-    """Default: only human-authored mail feeds memory candidates."""
+    """Default: only human-authored mail feeds review candidates."""
     return classification == CLASS_HUMAN

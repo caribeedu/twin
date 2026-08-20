@@ -1,4 +1,4 @@
-"""Pattern reflection — nightly window mining into preference/procedure candidates.
+"""Pattern-derived percepts — nightly window mining into preference/procedure candidates.
 
 The model is simulated via ``set_pattern_override``; without a reflector the
 pass defers (no lexical fallback).

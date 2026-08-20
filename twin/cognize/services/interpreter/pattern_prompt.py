@@ -8,7 +8,7 @@ constraints revealed by repeated choices — the "Edu writes ``if`` without
 parentheses" / "Edu applies DRY on project X" class of memory, and equally the
 non-code kind (how Edu runs meetings, replies on Slack, prioritizes).
 
-Every claim still lands as a MemoryCandidate for human review. A parse/model
+Every claim still lands as a StoreClaim review candidate. A parse/model
 failure defers (never fabricates).
 """
 

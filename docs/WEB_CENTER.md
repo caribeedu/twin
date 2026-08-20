@@ -40,10 +40,10 @@ A brand bar + **← Home** recovers navigation from any pane.
 
 Purpose-shaped accordion list — click a row to expand in place (no separate
 detail page). Status sits left of the title (PascalCase); expansion shows
-description, id/domain metadata, and a **Lineage** strip (from → here → to)
-built from Relations (`supersedes`, `continues`, `depends-on`, `part-of`, …).
-Lineage cards use entity titles; clicking a node stays in Explore and switches
-the entity-type pill when needed.
+description, metadata, and a pan/zoom **Lineage** graph (multi-hop Past /
+Here / Next). Percepts split into **Observed** (Sense) and **Derived**
+(Cognize-synthesized). Relations is a flowchart-only pill (last). Clicking a
+lineage node stays in Explore and switches the entity-type pill when needed.
 
 | Entity | Emphasizes |
 |---|---|
@@ -54,7 +54,7 @@ the entity-type pill when needed.
 | Stance | Evaluative posture (≠ factual account); Ops preview→approve |
 | Evidences | Anchored warrant |
 | Trace | Accessibility / retrieval ledger |
-| Percept | Immutable observation (Sense); PR percepts surface state/branches as structured meta |
+| Percept | Observed Sense input, or **Derived** Cognize-synthesized percepts (episode/pattern arcs); PR meta is structured, not a card |
 | Relation | Full entity flowchart (last pill) — no accordion list |
 
 No product **Memories** tab.

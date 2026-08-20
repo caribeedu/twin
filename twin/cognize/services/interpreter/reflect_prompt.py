@@ -4,7 +4,7 @@ Given an :class:`EpisodeBrief`, ask a chat model to name the trajectory the
 phase arc implies (e.g. "intended Kafka, then chose SQS"). The model receives
 already-derived structure, denser member quotes, and related memories from
 search (confirmed / candidate / rejected). It returns 0..N claims. Every claim
-still lands as a MemoryCandidate for human review — the model never confirms
+still lands as a StoreClaim review candidate — the model never confirms
 anything. A parse/model failure defers (never fabricates).
 """
 

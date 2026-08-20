@@ -31,6 +31,10 @@ A raw piece of information collected from a connector or local source.
 A normalized, attributable observation produced by Sense from one or more
 artifacts. Immutable once stored.
 
+**Observed** percepts come from Sense connectors. **Derived** percepts are
+Cognize-synthesized (episode/pattern arcs) and are *not* Cognize Reflections
+(open epistemic gaps).
+
 ## Situation
 
 Clustering of percepts that appear to belong to the same happening

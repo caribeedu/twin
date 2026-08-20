@@ -10,7 +10,7 @@ plays (see ``docs/ARCHITECTURE.md`` → Brain analogies):
     basal                manage: read episode lifecycle              (over roles)
     hippocampus_bind     bind: membership consolidation              (structural)
     cortex               understand: phases + narrative edges        (LLM)
-    hippocampus_consolidate  reflect: trajectory MemoryCandidates    (LLM)
+    hippocampus_consolidate  reflect: trajectory review candidates   (LLM)
     prefrontal           conclude: draft JudgmentProposals           (from confirmed)
 
 Like the interpreter, a missing model **defers** a stage — it never falls back
@@ -301,7 +301,7 @@ def run_episode_cognition(
     when a model (or a test override) is available; otherwise they defer. Never
     writes confirmed Memory or Judgment: ``hippocampus_consolidate`` emits
     candidates and ``prefrontal`` drafts proposals from *already-confirmed*
-    trajectory memories.
+    trajectory review candidates.
     """
     until_stage = until if isinstance(until, BrainStage) else BrainStage(str(until))
     report = CognitionReport(mode=mode, until=until_stage.value)

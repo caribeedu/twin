@@ -625,7 +625,7 @@ def main(argv: list[str] | None = None) -> None:
     ep.set_defaults(func=cmd_episode)
     ep = ep_sub.add_parser(
         "reflect",
-        help="synthesize trajectory MemoryCandidates from the episode arc",
+        help="synthesize trajectory review candidates from the episode arc",
     )
     ep.add_argument("episode_id")
     ep.add_argument(
