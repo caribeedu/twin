@@ -39,7 +39,9 @@ A brand bar + **← Home** recovers navigation from any pane.
 ## Entities (Explore)
 
 Purpose-shaped accordion list — click a row to expand in place (no separate
-detail page). Status sits left of the title (PascalCase); expansion shows
+detail page). A per-type search bar filters the current pill; when the query
+is non-empty the chrome title becomes **Search in {Entity}** (e.g. Search in
+Relations). Status sits left of the title (PascalCase); expansion shows
 description, metadata, and a pan/zoom **Lineage** graph (multi-hop Past /
 Here / Next). Percepts split into **Observed** (Sense) and **Derived**
 (Cognize-synthesized). Relations is a flowchart-only pill (last). Clicking a

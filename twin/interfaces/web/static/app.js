@@ -82,6 +82,15 @@ function setChrome(eyebrow, title, { home = false } = {}) {
   if (t) t.textContent = title;
 }
 
+function setExploreChrome(meta, query = "") {
+  const q = String(query || "").trim();
+  setChrome("Explore", q ? `Search in ${meta.label}` : meta.label);
+}
+
+function rowSearchText(row, type) {
+  return `${entityHeadline(row, type)} ${row.id || ""} ${row.type || ""} ${row.from_id || ""} ${row.to_id || ""}`;
+}
+
 function setActiveNav(pane) {
   const key = pane === "explore" ? "explore" : pane;
   document.querySelectorAll(".center-tabs [data-nav]").forEach((a) => {
@@ -111,6 +120,13 @@ function fuzzyScore(query, text) {
     if (t[i] === q[qi]) qi++;
   }
   return qi === q.length ? 40 : 0;
+}
+
+/** Case-insensitive substring match (Explore search — no fuzzy subsequences). */
+function textIncludes(query, text) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  return String(text || "").toLowerCase().includes(q);
 }
 
 function badge(status) {
@@ -1797,13 +1813,11 @@ async function renderExpandBody(meta, row, relations) {
     </div>`;
 }
 
-/** Full-graph Explore view for Relations (no accordion list). */
-async function renderRelationsFlowchart(relations, focusId) {
+/** Build titled nodes/edges for the Relations flowchart (once per load). */
+async function buildRelationFlowData(relations) {
   const edges = (Array.isArray(relations) ? relations : [])
     .filter((r) => r?.from_id && r?.to_id)
     .map((r) => ({ from_id: r.from_id, to_id: r.to_id, type: r.type, id: r.id }));
-  if (!edges.length) return empty("No relations yet");
-
   const nodeMap = new Map();
   const ensure = (id) => {
     if (!nodeMap.has(id)) {
@@ -1819,9 +1833,39 @@ async function renderRelationsFlowchart(relations, focusId) {
   await Promise.all(nodes.map(async (n) => {
     n.title = await resolveNodeTitle({ id: n.id, type: n.type === "entity" ? null : n.type });
   }));
+  return { edges, nodes, nodeMap };
+}
 
+function filterRelationFlowData(data, query = "") {
+  const q = String(query || "").trim();
+  if (!q) return { edges: data.edges, nodes: data.nodes };
+  const { nodeMap } = data;
+  const nodeHit = (id) => {
+    const n = nodeMap.get(id);
+    return textIncludes(q, `${id} ${n?.title || ""} ${n?.type || ""}`);
+  };
+  const edges = data.edges.filter((e) =>
+    textIncludes(q, `${e.id || ""} ${e.type || ""} ${e.from_id} ${e.to_id}`)
+    || nodeHit(e.from_id)
+    || nodeHit(e.to_id));
+  const keep = new Set();
+  for (const e of edges) {
+    keep.add(e.from_id);
+    keep.add(e.to_id);
+  }
+  return { edges, nodes: data.nodes.filter((n) => keep.has(n.id)) };
+}
+
+/** Full-graph Explore view for Relations (no accordion list). */
+function renderRelationsFlowchart(data, focusId, query = "") {
+  const q = String(query || "").trim();
+  if (!data.edges.length) return empty("No relations yet");
+  const { edges, nodes } = filterRelationFlowData(data, q);
+  if (q && !edges.length) {
+    return empty("No matches", `Nothing in Relations for “${q}”`);
+  }
   return renderFlowGraph({
-    title: "Relations",
+    title: q ? "Search in Relations" : "Relations",
     subtitle: `${edges.length} edges · ${nodes.length} nodes · drag to pan`,
     nodes,
     edges,
@@ -1829,11 +1873,55 @@ async function renderRelationsFlowchart(relations, focusId) {
   });
 }
 
+function wireExploreSearch(meta, box, { onQuery } = {}) {
+  const input = $("#explore-search-q", app);
+  if (!input) return;
+
+  let timer = null;
+  const apply = () => {
+    const q = input.value;
+    setExploreChrome(meta, q);
+    if (onQuery) {
+      onQuery(q.trim());
+      return;
+    }
+    const term = q.trim();
+    let shown = 0;
+    box.querySelectorAll(".entity-item").forEach((item) => {
+      const hay = item.dataset.search || item.textContent || "";
+      const ok = !term || textIncludes(term, hay);
+      item.hidden = !ok;
+      if (ok) shown += 1;
+    });
+    box.querySelectorAll(".percept-group").forEach((g) => {
+      const any = [...g.querySelectorAll(".entity-item")].some((el) => !el.hidden);
+      g.classList.toggle("is-search-empty", !any);
+    });
+    let emptyEl = $(".explore-search-empty", box);
+    if (term && shown === 0) {
+      if (!emptyEl) {
+        emptyEl = document.createElement("div");
+        emptyEl.className = "explore-search-empty";
+        box.appendChild(emptyEl);
+      }
+      emptyEl.hidden = false;
+      emptyEl.innerHTML = empty("No matches", `Nothing in ${meta.label} for “${term}”`);
+    } else if (emptyEl) {
+      emptyEl.hidden = true;
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(apply, 120);
+  });
+}
+
 async function paneExplore(parts) {
   const type = parts[0] || "narrative";
   const focusId = parts[1] || "";
   const meta = ENTITY_TYPES.find((e) => e.id === type) || ENTITY_TYPES[0];
-  setChrome("Explore", meta.label);
+  setExploreChrome(meta);
 
   let counts = {};
   try {
@@ -1853,6 +1941,9 @@ async function paneExplore(parts) {
 
   app.innerHTML = `<div class="explore-layout">
     <div class="explore-tabs">${tabs}</div>
+    <div class="explore-search">
+      <input id="explore-search-q" type="search" placeholder="Search" autocomplete="off" aria-label="Search ${esc(meta.label)}" />
+    </div>
     <div class="entity-list entity-${meta.role}">Loading…</div>
   </div>`;
 
@@ -1863,8 +1954,13 @@ async function paneExplore(parts) {
       const rows = await api(`${meta.list}${meta.list.includes("?") ? "&" : "?"}vault=${encodeURIComponent(VAULT)}`);
       const list = Array.isArray(rows) ? rows : [];
       box.classList.add("entity-list--graph");
-      box.innerHTML = await renderRelationsFlowchart(list, focusId);
-      bindGraphPan(box);
+      const data = await buildRelationFlowData(list);
+      const paint = (q) => {
+        box.innerHTML = renderRelationsFlowchart(data, focusId, q);
+        bindGraphPan(box);
+      };
+      paint("");
+      wireExploreSearch(meta, box, { onQuery: paint });
     } catch (err) {
       box.innerHTML = empty("Load failed", err.message);
     }
@@ -1876,6 +1972,8 @@ async function paneExplore(parts) {
     const list = Array.isArray(rows) ? rows : (rows.items || rows.stances || []);
     if (!list.length) {
       box.innerHTML = empty(`No ${meta.label.toLowerCase()} yet`);
+      const input = $("#explore-search-q", app);
+      input?.addEventListener("input", () => setExploreChrome(meta, input.value));
       return;
     }
 
@@ -1886,7 +1984,8 @@ async function paneExplore(parts) {
       const open = focusId && rid === focusId;
       const kind = meta.id === "percept" ? perceptKindLabel(row) : "";
       const kindSlug = kind === "Derived" ? "derived" : (kind === "Observed" ? "observed" : "");
-      return `<article class="entity-item${open ? " is-open" : ""}${kindSlug ? ` entity-item--${kindSlug}` : ""}" data-id="${esc(rid)}"${kindSlug ? ` data-percept-kind="${kindSlug}"` : ""}>
+      const search = rowSearchText(row, meta.id);
+      return `<article class="entity-item${open ? " is-open" : ""}${kindSlug ? ` entity-item--${kindSlug}` : ""}" data-id="${esc(rid)}" data-search="${esc(search)}"${kindSlug ? ` data-percept-kind="${kindSlug}"` : ""}>
         <button type="button" class="entity-row entity-row--toggle" aria-expanded="${open ? "true" : "false"}">
           ${statusLabel
             ? `<span class="entity-status ${reviewStatusClass(status)}">${esc(statusLabel)}</span>`
@@ -2044,6 +2143,8 @@ async function paneExplore(parts) {
         }
       }
     }
+
+    wireExploreSearch(meta, box);
   } catch (err) {
     box.innerHTML = empty("Load failed", err.message);
   }

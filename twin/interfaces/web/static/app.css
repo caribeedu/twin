@@ -1747,11 +1747,33 @@ blockquote.evidence {
 .stat-n { display: block; font-size: 1.5rem; font-weight: 700; }
 .stat-l { font-size: 0.75rem; color: var(--muted); }
 .cta-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
-.explore-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+.explore-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
 .explore-tabs .chip { text-decoration: none; }
 .explore-tabs .chip.active {
   background: var(--purple);
   color: var(--white);
+}
+.explore-search {
+  margin-bottom: 1rem;
+}
+.explore-search input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  background: #fff;
+  color: var(--ink);
+}
+.explore-search input:focus {
+  outline: 2px solid var(--purple-line);
+  border-color: var(--purple-soft);
+}
+.explore-search-empty {
+  margin-top: 0.35rem;
+}
+.percept-group.is-search-empty {
+  display: none;
 }
 .explore-layout .empty,
 .explore-layout .empty strong {
