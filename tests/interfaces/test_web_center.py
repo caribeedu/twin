@@ -29,7 +29,10 @@ def test_center_shell_has_no_memories_nav(tmp_path, monkeypatch):
     html = client.get("/").text
     assert "Command Center" in html
     assert 'data-nav="explore"' in html
-    assert 'data-nav="sense"' in html
+    assert 'data-nav="cognize"' in html
+    assert 'data-nav="inject"' in html
+    assert 'data-nav="ops"' in html
+    assert 'data-nav="sense"' not in html
     assert "Memories" not in html
     assert 'data-nav="memories"' not in html
 
