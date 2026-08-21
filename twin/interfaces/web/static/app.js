@@ -2237,17 +2237,13 @@ async function paneReview(parts = []) {
 
       app.innerHTML = `
         <div class="review-deck">
-          <header class="review-nav">
+          <div class="review-stage">
             <button type="button" class="review-nav-btn" data-review-nav="-1" aria-label="Previous review" ${queue.length < 2 ? "disabled" : ""}>←</button>
-            <div class="review-nav-meta">
-              <span class="review-nav-count">${index + 1} / ${queue.length}</span>
-              <span class="review-nav-kind">${esc(kindLabel)}</span>
-            </div>
+            <article class="review-card entity-${meta?.role || "question"}" aria-busy="true">
+              <div class="muted">Loading…</div>
+            </article>
             <button type="button" class="review-nav-btn" data-review-nav="1" aria-label="Next review" ${queue.length < 2 ? "disabled" : ""}>→</button>
-          </header>
-          <article class="review-card entity-${meta?.role || "question"}" aria-busy="true">
-            <div class="muted">Loading…</div>
-          </article>
+          </div>
         </div>`;
 
       const card = $(".review-card", app);
@@ -2279,6 +2275,7 @@ async function paneReview(parts = []) {
             <div class="review-card-tags">
               <span class="review-kind">${esc(kindLabel)}</span>
               ${statusLabel ? `<span class="${reviewStatusClass(status)}">${esc(statusLabel)}</span>` : ""}
+              <span class="muted review-card-count">${index + 1} / ${queue.length}</span>
               <span class="muted review-card-id">${esc(row.id)}</span>
             </div>
             <h2 class="review-card-title">${titleHtml(row, item.kind)}</h2>
@@ -2727,16 +2724,6 @@ async function paneCognize() {
             </p>
           </section>
 
-          <section class="home-card cognize-live-pane">
-            <h2 class="home-card-title" id="cognize-live-title">Live run (${live.length})</h2>
-            <p class="home-card-sub muted">Stage progress · ETA · entities created in this job</p>
-            <div id="cognize-live">
-              ${live.length
-                ? live.map((j) => liveJobCard(j)).join("")
-                : empty("No live run", "Execute a batch to watch stage progress here")}
-            </div>
-          </section>
-
           <section class="home-card cognize-estimate">
             <h2 class="home-card-title">Estimate</h2>
             <p class="home-card-sub muted">${esc(plan.estimate_note || "Per-stage preview")}</p>
@@ -2769,6 +2756,16 @@ async function paneCognize() {
                   <span class="muted">${fmtUsd(s.cost_usd, s.priced)}</span>
                   <strong>${fmtTok(s.total_tokens_est)}</strong>
                 </div>`).join("") : empty("No stages")}
+            </div>
+          </section>
+
+          <section class="home-card cognize-live-pane">
+            <h2 class="home-card-title" id="cognize-live-title">Live run (${live.length})</h2>
+            <p class="home-card-sub muted">Stage progress · ETA · entities created in this job</p>
+            <div id="cognize-live">
+              ${live.length
+                ? live.map((j) => liveJobCard(j)).join("")
+                : empty("No live run", "Execute a batch to watch stage progress here")}
             </div>
           </section>
 
