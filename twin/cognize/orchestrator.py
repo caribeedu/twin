@@ -379,6 +379,67 @@ def _percept_brief(percepts: list[Percept], limit: int = 8) -> str:
     return "\n".join(lines)
 
 
+def _ctx_entity_ids(ctx: dict[str, Any]) -> dict[str, list[str]]:
+    return {
+        "situation_ids": [ctx["situation"].id] if ctx.get("situation") else [],
+        "reflection_ids": [r.id for r in (ctx.get("reflections") or [])],
+        "interpretation_ids": [r.id for r in (ctx.get("interpretations") or [])],
+        "relation_ids": [r.id for r in (ctx.get("relations") or [])],
+        "revision_ids": [ctx["revision"].id] if ctx.get("revision") else [],
+        "stale_narrative_ids": list(ctx.get("stale_narrative_ids") or []),
+    }
+
+
+def _progress_payload(
+    *,
+    stage: CognizeStage,
+    stage_index: int,
+    stage_total: int,
+    phase: str,
+    report: CognitionReport,
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Snapshot for runtime job.result.progress (and UI polling)."""
+    total = max(1, int(stage_total))
+    idx = max(0, min(int(stage_index), total))
+    if phase == "done":
+        percent = round(100.0 * min(idx + 1, total) / total, 1)
+    elif phase == "complete":
+        percent = 100.0
+    else:
+        percent = round(100.0 * idx / total, 1)
+    entities = _ctx_entity_ids(ctx)
+    # Fold ids already on the report (e.g. stale narratives marked before stages).
+    if report.stale_narrative_ids and not entities["stale_narrative_ids"]:
+        entities["stale_narrative_ids"] = list(report.stale_narrative_ids)
+    counts = {
+        "situations": len(entities["situation_ids"]),
+        "reflections": len(entities["reflection_ids"]),
+        "interpretations": len(entities["interpretation_ids"]),
+        "relations": len(entities["relation_ids"]),
+        "revisions": len(entities["revision_ids"]),
+        "stale_narratives": len(entities["stale_narrative_ids"]),
+    }
+    return {
+        "phase": phase,
+        "stage": stage.value,
+        "label": stage.value.replace("_", " ").title(),
+        "stage_index": idx,
+        "stage_total": total,
+        "percent": percent,
+        "stages_done": [
+            {
+                "stage": s.stage.value,
+                "status": s.status.value,
+                "counts": dict(s.counts),
+            }
+            for s in report.stages
+        ],
+        "counts": counts,
+        "entities": entities,
+    }
+
+
 def run_cognize(
     store: Any,
     cfg: Config,
@@ -389,10 +450,23 @@ def run_cognize(
     limit: int = 50,
     vault_id: Optional[str] = None,
     chat_reachable: Optional[bool] = None,
+    on_progress: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> CognitionReport:
-    """Run Cognize stages 0–7. Never commits Narratives."""
+    """Run Cognize stages 0–7. Never commits Narratives.
+
+    ``on_progress`` receives a dict after each stage start/finish (and once at
+    completion) so runtime jobs can expose live percent / entity ids.
+    """
     allow_echo = os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1"
     has_overrides = bool(_OVERRIDES)
+
+    def _emit(payload: dict[str, Any]) -> None:
+        if on_progress is None:
+            return
+        try:
+            on_progress(payload)
+        except Exception:
+            pass
 
     reachable = chat_reachable
     if reachable is None and not has_overrides:
@@ -473,6 +547,8 @@ def run_cognize(
     }
 
     stop_at = _until_index(until)
+    stage_total = stop_at + 1
+    ctx["stale_narrative_ids"] = list(report.stale_narrative_ids)
     try:
         for i, stage in enumerate(STAGE_ORDER):
             if i > stop_at:
@@ -484,8 +560,28 @@ def run_cognize(
                     )
                 )
                 continue
+            _emit(
+                _progress_payload(
+                    stage=stage,
+                    stage_index=i,
+                    stage_total=stage_total,
+                    phase="running",
+                    report=report,
+                    ctx=ctx,
+                )
+            )
             result = _run_stage(store, cfg, stage, ctx, dry_run=dry_run)
             report.stages.append(result)
+            _emit(
+                _progress_payload(
+                    stage=stage,
+                    stage_index=i,
+                    stage_total=stage_total,
+                    phase="done",
+                    report=report,
+                    ctx=ctx,
+                )
+            )
             if result.status is StageRunStatus.halted:
                 report.ok = False
                 report.halted = True
@@ -511,6 +607,16 @@ def run_cognize(
             (report.detail + "; " if report.detail else "")
             + f"ungrounded_dropped={ctx['ungrounded_dropped']}"
         )
+    _emit(
+        _progress_payload(
+            stage=STAGE_ORDER[min(stop_at, len(STAGE_ORDER) - 1)],
+            stage_index=stage_total - 1,
+            stage_total=stage_total,
+            phase="complete",
+            report=report,
+            ctx=ctx,
+        )
+    )
     _persist_run(store, vault, report)
     return report
 

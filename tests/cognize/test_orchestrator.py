@@ -120,6 +120,30 @@ def test_run_cognize_with_overrides(store, cfg):
         clear_cognize_stage_overrides()
 
 
+def test_run_cognize_emits_progress(store, cfg):
+    _install_overrides()
+    events = []
+    try:
+        p = Percept(
+            percept_type="message",
+            source_sensor="test",
+            content="Feature A blocks launch",
+            metadata={"vault_id": "default", "domain": "technical"},
+        )
+        store.insert_percept(p)
+        report = run_cognize(
+            store, cfg, percept_ids=[p.id], on_progress=events.append,
+        )
+        assert report.ok
+        assert events
+        assert events[0]["phase"] == "running"
+        assert events[-1]["phase"] == "complete"
+        assert events[-1]["percent"] == 100
+        assert any(e.get("entities", {}).get("reflection_ids") for e in events)
+    finally:
+        clear_cognize_stage_overrides()
+
+
 def test_cognize_halts_without_llm_or_override(store, cfg, monkeypatch):
     clear_cognize_stage_overrides()
     monkeypatch.setattr(cfg, "extractor", "heuristic")

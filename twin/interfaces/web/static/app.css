@@ -2611,6 +2611,7 @@ a.lineage-node:hover {
   align-items: stretch;
 }
 .cognize-run { grid-column: 1 / -1; }
+.cognize-live-pane { grid-column: 1 / -1; }
 .cognize-estimate,
 .cognize-items,
 .cognize-jobs-active,
@@ -2640,6 +2641,70 @@ a.lineage-node:hover {
   max-height: 20rem;
 }
 .cognize-health { grid-column: 1 / -1; }
+.cognize-live-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.95rem 1rem;
+  background: rgba(255, 255, 255, 0.72);
+  margin-top: 0.65rem;
+}
+.cognize-live-card + .cognize-live-card { margin-top: 0.75rem; }
+.cognize-live-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.cognize-progress {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.cognize-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink);
+  transition: width 0.35s ease;
+  min-width: 0;
+}
+.cognize-live-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  margin-top: 0.55rem;
+  font-size: 0.86rem;
+}
+.cognize-live-counts { margin: 0.45rem 0 0; font-size: 0.8rem; }
+.cognize-live-entities { margin-top: 0.85rem; }
+.cognize-live-ent-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.cognize-ent-group { margin-bottom: 0.55rem; }
+.cognize-ent-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.cognize-ent-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cognize-ent-links a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .cognize-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

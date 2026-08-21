@@ -31,7 +31,7 @@ A brand bar + **← Home** recovers navigation from any pane.
 | Home | Dashboard above |
 | Explore | List + detail for all substrate entities |
 | Review | One-at-a-time deck: Open Reflections + competing Interpretations; lineage graph; commit Narrative in-card |
-| Cognize | Run batch, per-stage token estimate, pending items, active/past jobs, integrity |
+| Cognize | Run batch, live stage progress (bar · ETA · entities), token estimate, jobs, integrity |
 | Inject | Context pack builder (domain select) |
 | Ops | Doctor, runtime queue, integrity (no raw JSON) |
 

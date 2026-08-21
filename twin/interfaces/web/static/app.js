@@ -2166,6 +2166,8 @@ async function paneExplore(parts) {
 }
 
 let _reviewAbort = null;
+let _cognizePoll = null;
+let _cognizeGen = 0;
 
 async function paneReview(parts = []) {
   _reviewAbort?.abort();
@@ -2434,6 +2436,12 @@ async function paneCognize() {
   setChrome("Cognize", "Run · estimate · jobs");
   app.innerHTML = `<div class="cognize-dash"><div class="muted">Loading…</div></div>`;
 
+  if (_cognizePoll) {
+    clearInterval(_cognizePoll);
+    _cognizePoll = null;
+  }
+  const paneGen = ++_cognizeGen;
+
   const fmtTok = (n) => {
     const v = Number(n) || 0;
     return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : String(v);
@@ -2447,16 +2455,195 @@ async function paneCognize() {
     return `$${v.toFixed(2)}`;
   };
 
-  const jobRow = (j) => {
+  const fmtDuration = (sec) => {
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    if (m < 60) return r ? `${m}m ${r}s` : `${m}m`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+  };
+
+  const jobProgress = (j) => {
+    const p = j?.result?.progress;
+    if (p && typeof p === "object") return p;
+    return null;
+  };
+
+  const etaSeconds = (j) => {
+    const prog = jobProgress(j);
+    const started = Date.parse(j.started_at || "");
+    if (!started || Number.isNaN(started)) return null;
+    const elapsed = (Date.now() - started) / 1000;
+    const status = String(j.status || "").toLowerCase();
+    if (status === "pending") return null;
+    const pct = Number(prog?.percent);
+    if (!(pct > 2) || elapsed < 1) return null;
+    const totalEst = elapsed / (pct / 100);
+    return Math.max(0, totalEst - elapsed);
+  };
+
+  const entityLinks = (prog) => {
+    const ents = prog?.entities || {};
+    const groups = [
+      ["situation", "Situations", ents.situation_ids],
+      ["reflection", "Reflections", ents.reflection_ids],
+      ["interpretation", "Interpretations", ents.interpretation_ids],
+      ["relation", "Relations", ents.relation_ids],
+      ["narrative", "Stale narratives", ents.stale_narrative_ids],
+    ];
+    const bits = [];
+    for (const [kind, label, ids] of groups) {
+      const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
+      if (!list.length) continue;
+      bits.push(`
+        <div class="cognize-ent-group">
+          <span class="cognize-ent-label">${esc(label)} (${list.length})</span>
+          <div class="cognize-ent-links">
+            ${list.slice(0, 8).map((id) =>
+              `<a href="#explore/${kind}/${encodeURIComponent(id)}">${esc(truncate(id, 28))}</a>`
+            ).join("")}
+            ${list.length > 8 ? `<span class="muted">+${list.length - 8}</span>` : ""}
+          </div>
+        </div>`);
+    }
+    return bits.length ? bits.join("") : `<p class="muted">No entities yet</p>`;
+  };
+
+  const liveJobCard = (j) => {
+    const status = String(j.status || "").toLowerCase();
+    const prog = jobProgress(j);
+    const pct = status === "pending" ? 0 : Math.min(100, Math.max(0, Number(prog?.percent) || 0));
+    const stageLabel = prog?.label
+      || (prog?.stage ? String(prog.stage).replace(/_/g, " ") : "")
+      || (status === "pending" ? "Queued" : (j.stage || "running"));
+    const stageIdx = Number(prog?.stage_index ?? 0) + 1;
+    const stageTotal = Number(prog?.stage_total || 8);
+    const started = Date.parse(j.started_at || "");
+    const elapsed = started && !Number.isNaN(started) ? (Date.now() - started) / 1000 : null;
+    const eta = etaSeconds(j);
+    const dry = j.payload?.dry_run ? " · dry-run" : "";
+    const counts = prog?.counts || {};
+    const countBits = [
+      counts.situations ? `${counts.situations} sit` : "",
+      counts.reflections ? `${counts.reflections} ref` : "",
+      counts.interpretations ? `${counts.interpretations} int` : "",
+      counts.relations ? `${counts.relations} rel` : "",
+    ].filter(Boolean).join(" · ");
+
+    return `
+      <article class="cognize-live-card" data-job-id="${esc(j.id)}">
+        <div class="cognize-live-head">
+          <div>
+            <strong>${esc(j.kind || "cognize_batch")}</strong>
+            <span class="muted"> ${esc(j.id)}${esc(dry)}</span>
+          </div>
+          ${badge(j.status)}
+        </div>
+        <div class="cognize-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(pct)}">
+          <div class="cognize-progress-bar" style="width:${esc(pct)}%"></div>
+        </div>
+        <div class="cognize-live-meta">
+          <span>${esc(Math.round(pct))}%</span>
+          <span>${esc(stageLabel)}${prog ? ` · ${stageIdx}/${stageTotal}` : ""}</span>
+          <span class="muted">${elapsed != null ? `elapsed ${fmtDuration(elapsed)}` : "waiting for worker"}</span>
+          <span class="muted">${eta != null ? `ETA ~${fmtDuration(eta)}` : (status === "running" ? "ETA …" : "")}</span>
+        </div>
+        ${countBits ? `<p class="muted cognize-live-counts">${esc(countBits)}</p>` : ""}
+        <div class="cognize-live-entities">
+          <h3 class="cognize-live-ent-title">Entities this run</h3>
+          ${entityLinks(prog)}
+        </div>
+      </article>`;
+  };
+
+  const jobRow = (j, { rich = false } = {}) => {
+    if (rich) return liveJobCard(j);
     const when = formatWhen(j.updated_at || j.created_at || j.finished_at || "");
     const dry = j.payload?.dry_run ? " · dry-run" : "";
+    const prog = jobProgress(j);
+    const pct = prog ? Math.round(Number(prog.percent) || 0) : null;
+    const stageBit = prog?.label || prog?.stage
+      ? ` · ${String(prog.label || prog.stage).replace(/_/g, " ")}`
+      : "";
     return `<div class="entity-row cognize-job">
       <div class="entity-row-main">
         <strong>${esc(j.kind || "job")}</strong>
-        <span class="muted">${esc(j.id)}${esc(dry)}${when ? ` · ${esc(when)}` : ""}</span>
+        <span class="muted">${esc(j.id)}${esc(dry)}${esc(stageBit)}${pct != null ? ` · ${pct}%` : ""}${when ? ` · ${esc(when)}` : ""}</span>
       </div>
       ${badge(j.status)}
     </div>`;
+  };
+
+  const stopPoll = () => {
+    if (_cognizePoll) {
+      clearInterval(_cognizePoll);
+      _cognizePoll = null;
+    }
+  };
+
+  const ensurePoll = (hasLive) => {
+    if (paneGen !== _cognizeGen) return;
+    if (!hasLive) {
+      stopPoll();
+      return;
+    }
+    if (_cognizePoll) return;
+    _cognizePoll = setInterval(() => {
+      if (paneGen !== _cognizeGen || !location.hash.startsWith("#cognize")) {
+        stopPoll();
+        return;
+      }
+      refreshLiveJobs().catch(() => {});
+    }, 1500);
+  };
+
+  const refreshLiveJobs = async () => {
+    if (paneGen !== _cognizeGen) return;
+    const jobsRaw = await api(`/api/runtime/jobs?kind=cognize_batch&limit=80`).catch(() => []);
+    const allJobs = Array.isArray(jobsRaw) ? jobsRaw : [];
+    const byRecent = (a, b) =>
+      String(b.updated_at || b.completed_at || b.created_at || "")
+        .localeCompare(String(a.updated_at || a.completed_at || a.created_at || ""));
+    const live = allJobs
+      .filter((j) => ["pending", "running"].includes(String(j.status || "").toLowerCase()))
+      .sort(byRecent);
+    const failed = allJobs
+      .filter((j) => String(j.status || "").toLowerCase() === "failed")
+      .sort(byRecent);
+    const past = allJobs
+      .filter((j) => ["completed", "cancelled", "dead_letter"].includes(String(j.status || "").toLowerCase()))
+      .sort(byRecent)
+      .slice(0, 20);
+
+    const liveEl = $("#cognize-live");
+    const activeEl = $("#cognize-jobs-active-list");
+    const pastEl = $("#cognize-jobs-past-list");
+    const liveTitle = $("#cognize-live-title");
+    const activeTitle = $("#cognize-jobs-active-title");
+    const pastTitle = $("#cognize-jobs-past-title");
+
+    if (liveEl) {
+      liveEl.innerHTML = live.length
+        ? live.map((j) => liveJobCard(j)).join("")
+        : empty("No live run", "Execute a batch to watch stage progress here");
+    }
+    if (liveTitle) liveTitle.textContent = `Live run (${live.length})`;
+    if (activeEl) {
+      const active = [...live, ...failed];
+      activeEl.innerHTML = active.length
+        ? active.map((j) => jobRow(j)).join("")
+        : empty("No active cognize jobs");
+      if (activeTitle) activeTitle.textContent = `Active jobs (${active.length})`;
+    }
+    if (pastEl) {
+      pastEl.innerHTML = past.length
+        ? past.map((j) => jobRow(j)).join("")
+        : empty("No past cognize jobs yet");
+      if (pastTitle) pastTitle.textContent = `Past jobs (${past.length})`;
+    }
+    ensurePoll(live.length > 0);
   };
 
   const paint = async (opts = {}) => {
@@ -2473,9 +2660,13 @@ async function paneCognize() {
       const byRecent = (a, b) =>
         String(b.updated_at || b.completed_at || b.created_at || "")
           .localeCompare(String(a.updated_at || a.completed_at || a.created_at || ""));
-      const active = allJobs
-        .filter((j) => ["pending", "running", "failed"].includes(String(j.status || "").toLowerCase()))
+      const live = allJobs
+        .filter((j) => ["pending", "running"].includes(String(j.status || "").toLowerCase()))
         .sort(byRecent);
+      const failed = allJobs
+        .filter((j) => String(j.status || "").toLowerCase() === "failed")
+        .sort(byRecent);
+      const active = [...live, ...failed];
       const past = allJobs
         .filter((j) => ["completed", "cancelled", "dead_letter"].includes(String(j.status || "").toLowerCase()))
         .sort(byRecent)
@@ -2536,6 +2727,16 @@ async function paneCognize() {
             </p>
           </section>
 
+          <section class="home-card cognize-live-pane">
+            <h2 class="home-card-title" id="cognize-live-title">Live run (${live.length})</h2>
+            <p class="home-card-sub muted">Stage progress · ETA · entities created in this job</p>
+            <div id="cognize-live">
+              ${live.length
+                ? live.map((j) => liveJobCard(j)).join("")
+                : empty("No live run", "Execute a batch to watch stage progress here")}
+            </div>
+          </section>
+
           <section class="home-card cognize-estimate">
             <h2 class="home-card-title">Estimate</h2>
             <p class="home-card-sub muted">${esc(plan.estimate_note || "Per-stage preview")}</p>
@@ -2586,16 +2787,18 @@ async function paneCognize() {
           </section>
 
           <section class="home-card cognize-jobs-active">
-            <h2 class="home-card-title">Active jobs (${active.length})</h2>
-            <div class="cognize-item-list">
-              ${active.length ? active.map(jobRow).join("") : empty("No active cognize jobs")}
+            <h2 class="home-card-title" id="cognize-jobs-active-title">Active jobs (${active.length})</h2>
+            <div class="cognize-item-list" id="cognize-jobs-active-list">
+              ${active.length
+                ? active.map((j) => jobRow(j)).join("")
+                : empty("No active cognize jobs")}
             </div>
           </section>
 
           <section class="home-card cognize-jobs-past">
-            <h2 class="home-card-title">Past jobs (${past.length})</h2>
-            <div class="cognize-item-list">
-              ${past.length ? past.map(jobRow).join("") : empty("No past cognize jobs yet")}
+            <h2 class="home-card-title" id="cognize-jobs-past-title">Past jobs (${past.length})</h2>
+            <div class="cognize-item-list" id="cognize-jobs-past-list">
+              ${past.length ? past.map((j) => jobRow(j)).join("") : empty("No past cognize jobs yet")}
             </div>
           </section>
 
@@ -2649,14 +2852,17 @@ async function paneCognize() {
           });
           const jobId = out.job?.id || "";
           toast(jobId ? `Enqueued ${jobId}` : "Cognize job enqueued");
-          if (msg) msg.textContent = jobId ? `Job ${jobId} queued` : "Queued";
+          if (msg) msg.textContent = jobId ? `Job ${jobId} queued — watching live` : "Queued";
           await paint({ limit: Number(fd.get("limit") || 50) });
+          ensurePoll(true);
         } catch (err) {
           toast(err.message, false);
           if (msg) msg.textContent = err.message;
           if (btn) btn.disabled = false;
         }
       });
+
+      ensurePoll(live.length > 0);
     } catch (err) {
       const detail = String(err.message || err);
       const hint = /not found/i.test(detail)
@@ -2829,6 +3035,10 @@ async function route() {
   if (_reviewAbort) {
     _reviewAbort.abort();
     _reviewAbort = null;
+  }
+  if (pane !== "cognize" && _cognizePoll) {
+    clearInterval(_cognizePoll);
+    _cognizePoll = null;
   }
   const views = {
     home: () => paneHome(),

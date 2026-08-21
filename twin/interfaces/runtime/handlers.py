@@ -149,6 +149,38 @@ def handle_cognize_batch(
     p = job.payload or {}
     until = p.get("until")
     until_stage = CognizeStage(until) if until else None
+
+    def on_progress(evt: dict[str, Any]) -> None:
+        """Persist mid-run progress on the job row + extend the worker lease."""
+        stage = str(evt.get("stage") or job.stage or "cognize")
+        job.stage = stage
+        progress = dict(evt)
+        progress["job_id"] = job.id
+        progress["started_at"] = job.started_at or ""
+        job.result = {**(job.result or {}), "progress": progress}
+        store.update_runtime_job(job)
+        # LLM stages can exceed the default 60s lease; refresh generously.
+        if job.worker_id and job.lease_token:
+            store.heartbeat_runtime_job(
+                job.id,
+                worker_id=job.worker_id,
+                lease_token=job.lease_token,
+                lease_seconds=300,
+            )
+
+    # Mark as starting before the first LLM call so the UI can poll immediately.
+    on_progress({
+        "phase": "starting",
+        "stage": "starting",
+        "label": "Starting",
+        "stage_index": 0,
+        "stage_total": 8,
+        "percent": 0,
+        "stages_done": [],
+        "counts": {},
+        "entities": {},
+    })
+
     report = run_cognize(
         store,
         cfg,
@@ -157,8 +189,36 @@ def handle_cognize_batch(
         dry_run=bool(p.get("dry_run")),
         limit=int(p.get("limit") or 50),
         vault_id=p.get("vault_id") or p.get("vault") or None,
+        on_progress=on_progress,
     )
-    return report.to_dict()
+    out = report.to_dict()
+    # Preserve the latest progress snapshot alongside the final report.
+    if isinstance(job.result, dict) and job.result.get("progress"):
+        out["progress"] = job.result["progress"]
+    else:
+        out["progress"] = {
+            "phase": "complete",
+            "stage": "done",
+            "label": "Done",
+            "stage_index": 7,
+            "stage_total": 8,
+            "percent": 100,
+            "counts": {
+                "situations": len(out.get("situation_ids") or []),
+                "reflections": len(out.get("reflection_ids") or []),
+                "interpretations": len(out.get("interpretation_ids") or []),
+                "relations": len(out.get("relation_ids") or []),
+                "revisions": len(out.get("revision_ids") or []),
+            },
+            "entities": {
+                "situation_ids": out.get("situation_ids") or [],
+                "reflection_ids": out.get("reflection_ids") or [],
+                "interpretation_ids": out.get("interpretation_ids") or [],
+                "relation_ids": out.get("relation_ids") or [],
+                "revision_ids": out.get("revision_ids") or [],
+            },
+        }
+    return out
 
 
 def handle_attention_evaluate(
