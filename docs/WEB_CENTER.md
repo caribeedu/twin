@@ -1,27 +1,27 @@
 # Web Command Center
 
-Operator web cockpit for Twin — Sense → Cognize → Inject — served by
+Operator web cockpit for Twin — Cognize → Review → Inject — served by
 `twin serve` at a single route (`/`).
 
 The TUI Command Center ([COMMAND_CENTER.md](COMMAND_CENTER.md)) supervises
 long-lived processes on one screen (**Health · Services · MCP rail**). This
 surface is **visibility and human gates**: browse every Cognize entity, review
-Interpretations, commit Narratives, inspect Sense I/O, and build Inject packs.
+Interpretations, commit Narratives, run Cognize batches, and build Inject packs.
 
 ## Shell
 
 No side rail. Home is a dashboard of linked sections; deep links stay in-shell
-(`#explore/narrative/<id>`, `#review`, `#sense`, `#ops`, `#sessions`, …).
+(`#explore/narrative/<id>`, `#review`, `#review/reflection/<id>`, `#cognize`, `#ops`, `#sessions`, …).
 A brand bar + **← Home** recovers navigation from any pane.
 
 | Home section | Role | Full view |
 |---|---|---|
 | Sessions | Open sessions by provider (mock until telemetry) | `#sessions` |
-| Jobs | Running / pending | `#sense` |
+| Jobs | Running / pending | `#cognize` |
 | Substrate | Entity counts | `#explore` |
-| To review | Open Reflections + competing Interpretations | `#review` |
+| To review | Open Reflections + competing Interpretations | `#review` (one-at-a-time deck) |
 | Search | Fuzzy match across entity types | `#explore` |
-| Inject | Inline context pack builder (no deep-link) | — |
+| Inject | Inline context pack builder (no deep-link) | `#inject` |
 | Health | Cognize gate + connectors | `#ops` |
 
 ## Former rail panes
@@ -30,11 +30,18 @@ A brand bar + **← Home** recovers navigation from any pane.
 |---|---|
 | Home | Dashboard above |
 | Explore | List + detail for all substrate entities |
-| Review | Open Reflections, competing Interpretations, Narrative commit |
-| Cognize | Halt / health (runs stay CLI / Web Ops) |
-| Sense | Percepts, connectors, jobs |
-| Inject | Context pack builder |
-| Ops | Health, runtime queue, Stance proposals |
+| Review | One-at-a-time deck: Open Reflections + competing Interpretations; lineage graph; commit Narrative in-card |
+| Cognize | Run batch, per-stage token estimate, pending items, active/past jobs, integrity |
+| Inject | Context pack builder (domain select) |
+| Ops | Doctor, runtime queue, integrity (no raw JSON) |
+
+## Cognize pane
+
+Home-style sections (not raw JSON): **Run** (execute / dry-run enqueue of
+`cognize_batch`), **Estimate** (heuristic tokens + USD by model), **Items
+to execute**, **Active jobs**, **Past jobs**, and **Integrity** stats.
+Endpoints: `GET /api/cognize/status`, `GET /api/cognize/plan`,
+`POST /api/cognize/run`.
 
 ## Entities (Explore)
 
@@ -53,7 +60,7 @@ lineage node stays in Explore and switches the entity-type pill when needed.
 | Reflection | Open question / tension |
 | Interpretation | Competing explanation → Review |
 | Situation | Working cluster |
-| Stance | Evaluative posture (≠ factual account); Ops preview→approve |
+| Stance | Evaluative posture (≠ factual account); Explore + API preview→approve |
 | Evidences | Anchored warrant |
 | Trace | Accessibility / retrieval ledger |
 | Percept | Observed Sense input, or **Derived** Cognize-synthesized percepts (episode/pattern arcs); PR meta is structured, not a card |
@@ -81,7 +88,7 @@ Empty connectors state guides to CLI/TUI setup without inventing wizards here.
 | candidate | orange rule | Interpretation |
 | posture | green rule | Stance |
 | warrant | blue rule | Evidence |
-| observation | Sense pane rows | Percept |
+| observation | Explore Percept rows | Percept |
 | cluster | gray rule | Situation |
 | edge / ledger | typed chips | Relation / Trace |
 

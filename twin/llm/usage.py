@@ -120,31 +120,51 @@ def record_usage(usage: LLMUsage) -> None:
 # -- pricing ------------------------------------------------------------------
 
 # USD per 1M tokens: (input, output). Keys are matched as the LONGEST substring
-# of the (lowercased) model name, so "gpt-4o-mini" beats "gpt-4o".
+# of the (lowercased) model name, so "gpt-4o-mini" beats "gpt-4o" and
+# "claude-opus-4-6" beats "claude-opus-4".
+# Refreshed 2026-08-20 from Anthropic + OpenAI public pricing pages.
 _BUILTIN_PRICING: dict[str, tuple[float, float]] = {
-    # OpenAI
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.00),
+    # OpenAI — current flagship family
+    "gpt-5.6-sol": (5.00, 30.00),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-luna": (0.20, 1.20),
+    "gpt-5.6-cyber": (12.50, 75.00),
+    "gpt-5.3-codex": (1.75, 14.00),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5": (1.25, 10.00),
     "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4.1-mini": (0.40, 1.60),
     "gpt-4.1": (2.00, 8.00),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
     "o4-mini": (1.10, 4.40),
     "o3-mini": (1.10, 4.40),
     "o3": (2.00, 8.00),
-    # Anthropic
+    # Anthropic — prefer longer versioned keys so Opus 4.x ≠ legacy Opus 4
+    "claude-fable-5": (10.00, 50.00),
+    "claude-mythos-5": (10.00, 50.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-opus-4-1": (15.00, 75.00),
+    "claude-opus-4": (15.00, 75.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
+    "claude-3-7-sonnet": (3.00, 15.00),
+    "claude-3-5-sonnet": (3.00, 15.00),
     "claude-3-5-haiku": (0.80, 4.00),
     "claude-3-haiku": (0.25, 1.25),
-    "claude-3-5-sonnet": (3.00, 15.00),
-    "claude-3-7-sonnet": (3.00, 15.00),
-    "claude-sonnet-4": (3.00, 15.00),
     "claude-3-opus": (15.00, 75.00),
-    "claude-opus-4": (15.00, 75.00),
     # Google
-    "gemini-1.5-flash": (0.075, 0.30),
+    "gemini-2.5-pro": (1.25, 10.00),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-1.5-pro": (1.25, 5.00),
-    "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-1.5-flash": (0.075, 0.30),
     # DeepSeek / Mistral (rough)
     "deepseek-chat": (0.27, 1.10),
     "mistral-small": (0.20, 0.60),

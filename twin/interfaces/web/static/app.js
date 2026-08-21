@@ -16,6 +16,21 @@ const ENTITY_TYPES = [
   { id: "relation", label: "Relations", role: "edge", list: "/api/relations", show: (id) => `/api/relations/${id}` },
 ];
 
+const DOMAIN_OPTIONS = [
+  "work", "technical", "personal_preferences", "assistant_preferences",
+  "personal", "relationship", "family", "health",
+  "finance", "social", "legal", "emotional", "general",
+];
+
+function domainSelectHtml(name = "domain", selected = "technical", { required = true } = {}) {
+  const opts = DOMAIN_OPTIONS.map((d) => {
+    const label = d.replace(/_/g, " ");
+    const sel = d === selected ? " selected" : "";
+    return `<option value="${esc(d)}"${sel}>${esc(label)}</option>`;
+  }).join("");
+  return `<select name="${esc(name)}"${required ? " required" : ""}>${opts}</select>`;
+}
+
 const CONNECTOR_LABELS = {
   github: "GitHub",
   slack: "Slack",
@@ -581,7 +596,7 @@ async function paneHome() {
         </section>
 
         <section class="home-card home-jobs home-card--compact">
-          ${sectionGo("#sense", "Jobs")}
+          ${sectionGo("#cognize", "Jobs")}
           <h2 class="home-card-title">Jobs</h2>
           <div class="jobs-pair">
             <div class="job-stat">
@@ -2150,9 +2165,16 @@ async function paneExplore(parts) {
   }
 }
 
-async function paneReview() {
-  setChrome("Review", "Interpretations & commit");
-  app.innerHTML = `<div class="split-panes"><section id="rev-list">Loading…</section><section id="rev-commit"></section></div>`;
+let _reviewAbort = null;
+
+async function paneReview(parts = []) {
+  _reviewAbort?.abort();
+  _reviewAbort = new AbortController();
+  const { signal } = _reviewAbort;
+
+  setChrome("Review", "Queue");
+  app.innerHTML = `<div class="review-deck"><div class="muted">Loading review queue…</div></div>`;
+
   try {
     const [openRefs, competing] = await Promise.all([
       api(`/api/reflections?vault=${encodeURIComponent(VAULT)}&status=open`),
@@ -2160,60 +2182,235 @@ async function paneReview() {
     ]);
     const refs = Array.isArray(openRefs) ? openRefs : [];
     const ints = Array.isArray(competing) ? competing : [];
-    $("#rev-list").innerHTML = `
-      <h3 class="entity-question">Open Reflections</h3>
-      ${refs.length ? refs.map((r) =>
-        `<a class="entity-row" href="#explore/reflection/${encodeURIComponent(r.id)}">
-          <strong>${esc(truncate(r.text || r.question || r.id))}</strong></a>`).join("") : empty("No open Reflections")}
-      <h3 class="entity-candidate">Competing Interpretations</h3>
-      ${ints.length ? ints.map((i) =>
-        `<a class="entity-row" href="#explore/interpretation/${encodeURIComponent(i.id)}">
-          <strong>${esc(truncate(i.explanation || i.id))}</strong>${badge(i.status)}</a>`).join("") : empty("No competing Interpretations")}`;
+    const queue = [
+      ...refs.map((row) => ({ kind: "reflection", id: row.id, seed: row })),
+      ...ints.map((row) => ({ kind: "interpretation", id: row.id, seed: row })),
+    ];
 
-    $("#rev-commit").innerHTML = `
-      <h3 class="entity-account">Commit Narrative</h3>
-      <form id="nar-commit-form" class="stack-form">
-        <label>Account<textarea name="account" rows="5" required></textarea></label>
-        <label>Evidence ids (comma-separated)<input name="evidence" required /></label>
-        <label>Interpretation ids<input name="interpretations" placeholder="optional" /></label>
-        <label>Actor<input name="actor" value="user" required /></label>
-        <label>Domain<input name="domain" value="technical" /></label>
-        <p id="nar-token" class="muted">Preview for a commit token first.</p>
-        <div class="cta-row">
-          <button type="button" class="btn" id="nar-preview">Preview token</button>
-          <button type="submit" class="btn primary">Commit</button>
-        </div>
-      </form>`;
+    if (!queue.length) {
+      setChrome("Review", "Nothing waiting");
+      app.innerHTML = `<div class="review-deck">${empty("Nothing to review", "Open Reflections and competing Interpretations land here.")}</div>`;
+      return;
+    }
 
-    let previewToken = "";
-    $("#nar-preview").addEventListener("click", async () => {
-      const fd = new FormData($("#nar-commit-form"));
-      try {
-        const body = commitBody(fd);
-        const prev = await api("/api/narratives/commit-preview", { method: "POST", body: JSON.stringify(body) });
-        previewToken = prev.preview_token || "";
-        $("#nar-token").textContent = previewToken ? `Token: ${previewToken}` : "No token";
-        toast("Preview ready");
-      } catch (err) {
-        toast(err.message, false);
-      }
-    });
-    $("#nar-commit-form").addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      if (!previewToken) {
-        toast("Preview a token before commit", false);
+    let index = 0;
+    let paintSeq = 0;
+    if (parts[0] && parts[1]) {
+      const kind = parts[0];
+      const id = decodeURIComponent(parts[1]);
+      const found = queue.findIndex((q) => q.kind === kind && q.id === id);
+      if (found >= 0) index = found;
+    } else if (parts[0] && /^\d+$/.test(parts[0])) {
+      index = Math.min(queue.length - 1, Math.max(0, Number(parts[0])));
+    }
+
+    const metaFor = (kind) => ENTITY_TYPES.find((e) => e.id === kind);
+
+    const syncHash = (i) => {
+      const item = queue[i];
+      if (!item) return;
+      const next = `#review/${item.kind}/${encodeURIComponent(item.id)}`;
+      if (location.hash !== next) history.replaceState(null, "", next);
+    };
+
+    const go = (i) => {
+      if (!queue.length || signal.aborted) return;
+      index = (i + queue.length) % queue.length;
+      syncHash(index);
+      paint().catch((e) => toast(e.message, false));
+    };
+
+    const paint = async () => {
+      if (signal.aborted) return;
+      const seq = ++paintSeq;
+      const item = queue[index];
+      if (!item) {
+        setChrome("Review", "Nothing waiting");
+        app.innerHTML = `<div class="review-deck">${empty("Nothing to review")}</div>`;
         return;
       }
-      const fd = new FormData(ev.target);
+      const meta = metaFor(item.kind);
+      const kindLabel = item.kind === "reflection" ? "Reflection" : "Interpretation";
+      setChrome("Review", `${index + 1} of ${queue.length} · ${kindLabel}`);
+
+      app.innerHTML = `
+        <div class="review-deck">
+          <header class="review-nav">
+            <button type="button" class="review-nav-btn" data-review-nav="-1" aria-label="Previous review" ${queue.length < 2 ? "disabled" : ""}>←</button>
+            <div class="review-nav-meta">
+              <span class="review-nav-count">${index + 1} / ${queue.length}</span>
+              <span class="review-nav-kind">${esc(kindLabel)}</span>
+            </div>
+            <button type="button" class="review-nav-btn" data-review-nav="1" aria-label="Next review" ${queue.length < 2 ? "disabled" : ""}>→</button>
+          </header>
+          <article class="review-card entity-${meta?.role || "question"}" aria-busy="true">
+            <div class="muted">Loading…</div>
+          </article>
+        </div>`;
+
+      const card = $(".review-card", app);
       try {
-        const body = { ...commitBody(fd), preview_token: previewToken };
-        const out = await api("/api/narratives/commit", { method: "POST", body: JSON.stringify(body) });
-        toast(`Committed ${out.narrative_id}`);
-        location.hash = `#explore/narrative/${out.narrative_id}`;
+        const { row, relations } = await fetchEntityBundle(meta, item.id);
+        if (signal.aborted || seq !== paintSeq) return;
+        const status = row.status || (item.kind === "reflection" ? "open" : "competing");
+        const statusLabel = pascalStatus(status);
+        const bodyText = expandBodyText(meta, row);
+        const evidenceIds = Array.isArray(row.evidence_ids) ? row.evidence_ids : [];
+        const situationIds = Array.isArray(row.situation_ids) ? row.situation_ids : [];
+        const domain = row.domain || "technical";
+
+        const actions = item.kind === "interpretation"
+          ? `
+            <button type="button" class="btn primary" data-review-action="commit">Commit Narrative</button>
+            <a class="btn" href="${esc(exploreHref(item.kind, item.id))}">Open in Explore</a>`
+          : `
+            <button type="button" class="btn primary" data-review-action="draft">Draft Narrative</button>
+            <a class="btn" href="${esc(exploreHref(item.kind, item.id))}">Open in Explore</a>`;
+
+        const accountSeed = item.kind === "interpretation"
+          ? (row.explanation || "")
+          : (row.text || row.question || "");
+        const interpIds = item.kind === "interpretation" ? item.id : "";
+
+        card.innerHTML = `
+          <header class="review-card-head">
+            <div class="review-card-tags">
+              <span class="review-kind">${esc(kindLabel)}</span>
+              ${statusLabel ? `<span class="${reviewStatusClass(status)}">${esc(statusLabel)}</span>` : ""}
+              <span class="muted review-card-id">${esc(row.id)}</span>
+            </div>
+            <h2 class="review-card-title">${titleHtml(row, item.kind)}</h2>
+            ${bodyText ? `<div class="review-card-body md-body">${renderMd(bodyText)}</div>` : ""}
+            <p class="review-card-meta muted">
+              Situations: ${situationIds.length} · Evidence: ${evidenceIds.length}
+              ${row.created_at ? ` · ${esc(formatWhen(row.created_at))}` : ""}
+              ${domain ? ` · ${esc(domain)}` : ""}
+            </p>
+          </header>
+          <div class="review-card-actions">${actions}</div>
+          <section class="review-commit" hidden>
+            <h3 class="review-commit-title">Commit Narrative</h3>
+            <form id="nar-commit-form" class="stack-form review-commit-form">
+              <label>Account<textarea name="account" rows="6" required>${esc(accountSeed)}</textarea></label>
+              <label>Evidence ids (comma-separated)<input name="evidence" value="${esc(evidenceIds.join(", "))}" ${evidenceIds.length ? "required" : ""} /></label>
+              <label>Interpretation ids<input name="interpretations" value="${esc(interpIds)}" placeholder="optional" /></label>
+              <label>Actor<input name="actor" value="user" required /></label>
+              <label>Domain<input name="domain" value="${esc(domain)}" /></label>
+              <p id="nar-token" class="muted">Preview locks the account + evidence set before commit (safety gate).</p>
+              <div class="cta-row">
+                <button type="button" class="btn" id="nar-preview">Preview</button>
+                <button type="submit" class="btn primary">Commit</button>
+                <button type="button" class="btn ghost" data-review-action="hide-commit">Cancel</button>
+              </div>
+            </form>
+          </section>
+          <div class="review-card-graph"><div class="muted">Loading lineage…</div></div>`;
+
+        card.removeAttribute("aria-busy");
+
+        const graphBox = $(".review-card-graph", card);
+        try {
+          graphBox.innerHTML = await renderLineageGraph(row.id, meta, relations, row);
+          if (signal.aborted || seq !== paintSeq) return;
+          bindGraphPan(graphBox);
+        } catch (err) {
+          graphBox.innerHTML = empty("Lineage unavailable", err.message);
+        }
+
+        let previewToken = "";
+        const commitPanel = $(".review-commit", card);
+        const showCommit = () => {
+          if (commitPanel) commitPanel.hidden = false;
+        };
+        const hideCommit = () => {
+          if (commitPanel) commitPanel.hidden = true;
+        };
+
+        card.addEventListener("click", (ev) => {
+          const action = ev.target.closest("[data-review-action]")?.dataset.reviewAction;
+          if (!action) return;
+          if (action === "commit" || action === "draft") showCommit();
+          if (action === "hide-commit") hideCommit();
+        }, { signal });
+
+        $("#nar-preview", card)?.addEventListener("click", async () => {
+          const form = $("#nar-commit-form", card);
+          if (!form) return;
+          const fd = new FormData(form);
+          try {
+            const body = commitBody(fd);
+            if (!body.evidence_ids.length) {
+              toast("Evidence ids required", false);
+              return;
+            }
+            const prev = await api("/api/narratives/commit-preview", {
+              method: "POST",
+              body: JSON.stringify(body),
+            });
+            previewToken = prev.preview_token || "";
+            const tokenEl = $("#nar-token", card);
+            if (tokenEl) {
+              tokenEl.textContent = previewToken ? `Token: ${previewToken}` : "No token";
+            }
+            toast("Preview ready");
+          } catch (err) {
+            toast(err.message, false);
+          }
+        }, { signal });
+
+        $("#nar-commit-form", card)?.addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          if (!previewToken) {
+            toast("Preview a token before commit", false);
+            return;
+          }
+          const fd = new FormData(ev.target);
+          try {
+            const body = { ...commitBody(fd), preview_token: previewToken };
+            const out = await api("/api/narratives/commit", {
+              method: "POST",
+              body: JSON.stringify(body),
+            });
+            toast(`Committed ${out.narrative_id}`);
+            _reviewAbort?.abort();
+            _reviewAbort = null;
+            location.hash = `#explore/narrative/${encodeURIComponent(out.narrative_id)}`;
+          } catch (err) {
+            toast(err.message, false);
+          }
+        }, { signal });
       } catch (err) {
-        toast(err.message, false);
+        if (signal.aborted) return;
+        card.innerHTML = empty("Could not load review item", err.message);
+        card.removeAttribute("aria-busy");
       }
-    });
+    };
+
+    app.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-review-nav]");
+      if (!btn || !app.contains(btn)) return;
+      const delta = Number(btn.dataset.reviewNav || 0);
+      if (!delta) return;
+      go(index + delta);
+    }, { signal });
+
+    window.addEventListener("keydown", (ev) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) {
+        return;
+      }
+      if (ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        go(index - 1);
+      } else if (ev.key === "ArrowRight") {
+        ev.preventDefault();
+        go(index + 1);
+      }
+    }, { signal });
+
+    syncHash(index);
+    await paint();
   } catch (err) {
     app.innerHTML = empty("Review failed", err.message);
   }
@@ -2234,64 +2431,268 @@ function commitBody(fd) {
 }
 
 async function paneCognize() {
-  setChrome("Cognize", "Pipeline status");
-  app.innerHTML = `<div class="stack">Loading…</div>`;
-  try {
-    const [sum, health] = await Promise.all([
-      api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`),
-      api("/api/health/cognition").catch((e) => ({ error: e.message })),
-    ]);
-    app.innerHTML = `
-      <section class="detail-card">
-        <p>Open Reflections: <strong>${sum.open_reflections}</strong></p>
-        <p>Competing Interpretations: <strong>${sum.competing_interpretations}</strong></p>
-        <p>Halt: <strong>${esc(sum.cognize_halt || "none")}</strong></p>
-        <p class="muted">Run cognition from the TUI Command Center or <code>twin cognize run</code>.</p>
-        <pre class="json-block">${esc(JSON.stringify(health, null, 2))}</pre>
-      </section>`;
-  } catch (err) {
-    app.innerHTML = empty("Cognize pane failed", err.message);
-  }
-}
+  setChrome("Cognize", "Run · estimate · jobs");
+  app.innerHTML = `<div class="cognize-dash"><div class="muted">Loading…</div></div>`;
 
-async function paneSense() {
-  setChrome("Sense", "Percepts · Connectors · Jobs");
-  app.innerHTML = `<div class="split-panes"><section id="sense-a">Loading…</section><section id="sense-b"></section></div>`;
-  try {
-    const [percepts, connectors, jobs] = await Promise.all([
-      api("/api/percepts?limit=50"),
-      api("/api/connectors").catch(() => []),
-      api("/api/runtime/jobs?limit=40").catch(() => []),
-    ]);
-    const plist = Array.isArray(percepts) ? percepts : [];
-    const clist = Array.isArray(connectors) ? connectors : (connectors.connectors || []);
-    const jlist = Array.isArray(jobs) ? jobs : [];
-    $("#sense-a").innerHTML = `
-      <h3 class="entity-observation">Recent Percepts</h3>
-      ${plist.length ? plist.map((p) =>
-        `<a class="entity-row" href="#explore/percept/${encodeURIComponent(p.id)}">
-          <strong>${esc(truncate(entityHeadline(p, "percept")))}</strong>
-          <span class="muted">${esc(p.id)}</span></a>`).join("") : empty("No percepts")}`;
-    $("#sense-b").innerHTML = `
-      <h3>Connectors</h3>
-      ${clist.length ? clist.map((c) =>
-        `<div class="entity-row"><strong>${esc(c.connector_type || c.id)}</strong>
-          ${badge(c.status)}${c.id ? `<span class="muted">${esc(c.id)}</span>` : ""}</div>`).join("") : empty("No connectors yet", "twin connector setup · or TUI Connectors")}
-      <h3>Jobs</h3>
-      ${jlist.length ? jlist.map((j) =>
-        `<div class="entity-row"><strong>${esc(j.kind || j.id)}</strong>${badge(j.status)}</div>`).join("") : empty("No jobs")}`;
-  } catch (err) {
-    app.innerHTML = empty("Sense pane failed", err.message);
-  }
+  const fmtTok = (n) => {
+    const v = Number(n) || 0;
+    return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : String(v);
+  };
+
+  const fmtUsd = (n, priced = true) => {
+    if (!priced) return "—";
+    const v = Number(n) || 0;
+    if (v === 0) return "$0";
+    if (v < 0.01) return `$${v.toFixed(4)}`;
+    return `$${v.toFixed(2)}`;
+  };
+
+  const jobRow = (j) => {
+    const when = formatWhen(j.updated_at || j.created_at || j.finished_at || "");
+    const dry = j.payload?.dry_run ? " · dry-run" : "";
+    return `<div class="entity-row cognize-job">
+      <div class="entity-row-main">
+        <strong>${esc(j.kind || "job")}</strong>
+        <span class="muted">${esc(j.id)}${esc(dry)}${when ? ` · ${esc(when)}` : ""}</span>
+      </div>
+      ${badge(j.status)}
+    </div>`;
+  };
+
+  const paint = async (opts = {}) => {
+    const limitVal = Number(opts.limit ?? $("#cognize-run-form input[name=limit]")?.value ?? 50) || 50;
+    try {
+      const [status, plan, jobsRaw, health] = await Promise.all([
+        api(`/api/cognize/status?vault=${encodeURIComponent(VAULT)}`),
+        api(`/api/cognize/plan?vault=${encodeURIComponent(VAULT)}&limit=${encodeURIComponent(limitVal)}`),
+        api(`/api/runtime/jobs?kind=cognize_batch&limit=80`).catch(() => []),
+        api("/api/health/cognition").catch((e) => ({ error: e.message })),
+      ]);
+
+      const allJobs = Array.isArray(jobsRaw) ? jobsRaw : [];
+      const byRecent = (a, b) =>
+        String(b.updated_at || b.completed_at || b.created_at || "")
+          .localeCompare(String(a.updated_at || a.completed_at || a.created_at || ""));
+      const active = allJobs
+        .filter((j) => ["pending", "running", "failed"].includes(String(j.status || "").toLowerCase()))
+        .sort(byRecent);
+      const past = allJobs
+        .filter((j) => ["completed", "cancelled", "dead_letter"].includes(String(j.status || "").toLowerCase()))
+        .sort(byRecent)
+        .slice(0, 20);
+
+      const gateOk = status.gate_ok !== false && !status.halt_reason;
+      const halt = status.halt_reason || status.detail || "";
+      const stages = plan.stages || [];
+      const totals = plan.totals || {};
+      const queue = plan.queue_totals || {};
+      const items = plan.items || [];
+      const stats = health?.stats || {};
+      const problems = health?.problems || [];
+      const priced = totals.priced !== false && (stages.some((s) => s.priced) || queue.priced);
+      const pendingTotal = plan.pending_total ?? status.pending_percepts ?? items.length;
+      const batchLimit = plan.batch_limit ?? limitVal;
+      const batchCount = plan.batch_count ?? items.length;
+      const runsToClear = plan.runs_to_clear ?? 0;
+      const formLimit = batchLimit;
+
+      app.innerHTML = `
+        <div class="cognize-dash">
+          <section class="home-card cognize-run">
+            <h2 class="home-card-title">Run</h2>
+            <p class="home-card-sub muted">
+              ${gateOk
+                ? `Gate open · ${esc(status.model || plan.model || "model")} · batch ${batchCount} of ${pendingTotal}${plan.queue_truncated ? "+" : ""} pending`
+                : `Halted · ${esc(halt || "LLM gate closed")}`}
+              · enqueue needs the runtime worker
+            </p>
+            <div class="cognize-metrics" role="group" aria-label="Queue metrics">
+              <div class="cognize-metric">
+                <span class="cognize-metric-n">${pendingTotal}${plan.queue_truncated ? "+" : ""}</span>
+                <span class="cognize-metric-l">Pending total</span>
+              </div>
+              <div class="cognize-metric">
+                <span class="cognize-metric-n">${status.open_reflections ?? 0}</span>
+                <span class="cognize-metric-l">Open Reflections</span>
+              </div>
+              <div class="cognize-metric">
+                <span class="cognize-metric-n">${status.competing_interpretations ?? 0}</span>
+                <span class="cognize-metric-l">Competing</span>
+              </div>
+            </div>
+            <form id="cognize-run-form" class="cognize-run-form">
+              <label class="cognize-check">
+                <input type="checkbox" name="dry_run" /> Dry-run (no writes)
+              </label>
+              <label>Batch limit<input type="number" name="limit" min="1" max="200" value="${esc(formLimit)}" /></label>
+              <div class="cta-row">
+                <button type="submit" class="btn primary" ${gateOk ? "" : "disabled"}>Execute</button>
+                <button type="button" class="btn" id="cognize-refresh">Refresh</button>
+              </div>
+            </form>
+            <p id="cognize-run-msg" class="muted cognize-run-msg">
+              One Execute run processes up to ${batchLimit} items through stages 0–7.
+              ${runsToClear > 1 ? `Clearing the queue needs ~${runsToClear} runs at this limit.` : ""}
+            </p>
+          </section>
+
+          <section class="home-card cognize-estimate">
+            <h2 class="home-card-title">Estimate</h2>
+            <p class="home-card-sub muted">${esc(plan.estimate_note || "Per-stage preview")}</p>
+            <div class="cognize-estimate-total">
+              <div class="cognize-estimate-pair">
+                <span class="stat-n">${fmtTok(totals.total_tokens_est)}</span>
+                <span class="stat-l">this batch · ${fmtTok(totals.input_tokens)} in · ${fmtTok(totals.output_tokens_est)} out</span>
+              </div>
+              <div class="cognize-estimate-pair">
+                <span class="stat-n">${fmtUsd(totals.cost_usd, priced)}</span>
+                <span class="stat-l">${priced ? "this batch USD" : "unpriced model"}</span>
+              </div>
+            </div>
+            <div class="cognize-estimate-queue">
+              <div class="cognize-estimate-pair">
+                <span class="stat-n">${fmtTok(queue.total_tokens_est ?? 0)}</span>
+                <span class="stat-l">full queue · ~${runsToClear || 0} run${runsToClear === 1 ? "" : "s"} · ${pendingTotal}${plan.queue_truncated ? "+" : ""} items</span>
+              </div>
+              <div class="cognize-estimate-pair">
+                <span class="stat-n">${fmtUsd(queue.cost_usd ?? 0, priced && queue.priced !== false)}</span>
+                <span class="stat-l">${priced ? "full queue USD" : "unpriced model"}</span>
+              </div>
+            </div>
+            <div class="cognize-stage-list">
+              ${stages.length ? stages.map((s) => `
+                <div class="cognize-stage-row">
+                  <span class="cognize-stage-name">${esc(s.label || s.stage)}</span>
+                  <span class="muted">${fmtTok(s.input_tokens)} in</span>
+                  <span class="muted">${fmtTok(s.output_tokens_est)} out</span>
+                  <span class="muted">${fmtUsd(s.cost_usd, s.priced)}</span>
+                  <strong>${fmtTok(s.total_tokens_est)}</strong>
+                </div>`).join("") : empty("No stages")}
+            </div>
+          </section>
+
+          <section class="home-card cognize-items">
+            <h2 class="home-card-title">Items in this batch (${batchCount} of ${pendingTotal}${plan.queue_truncated ? "+" : ""})</h2>
+            <p class="home-card-sub muted">Next Execute run · limit ${batchLimit} · not the full pending queue</p>
+            <div class="cognize-item-list">
+              ${items.length ? items.map((it) => `
+                <a class="entity-row" href="${esc(it.href || `#explore/percept/${it.id}`)}">
+                  <div class="entity-row-main">
+                    <strong>${esc(truncate(it.title || it.id, 90))}</strong>
+                    <span class="muted">${esc(it.id)}${it.source_sensor ? ` · ${esc(it.source_sensor)}` : ""}</span>
+                  </div>
+                </a>`).join("") : empty("Nothing queued", "No pending percepts for this vault")}
+            </div>
+          </section>
+
+          <section class="home-card cognize-jobs-active">
+            <h2 class="home-card-title">Active jobs (${active.length})</h2>
+            <div class="cognize-item-list">
+              ${active.length ? active.map(jobRow).join("") : empty("No active cognize jobs")}
+            </div>
+          </section>
+
+          <section class="home-card cognize-jobs-past">
+            <h2 class="home-card-title">Past jobs (${past.length})</h2>
+            <div class="cognize-item-list">
+              ${past.length ? past.map(jobRow).join("") : empty("No past cognize jobs yet")}
+            </div>
+          </section>
+
+          <section class="home-card cognize-health">
+            <h2 class="home-card-title">Integrity</h2>
+            <p class="home-card-sub muted">${health?.ok === false ? `${problems.length} problem(s)` : "No integrity problems reported"}</p>
+            <div class="cognize-kv">
+              ${Object.keys(stats).length
+                ? Object.entries(stats).map(([k, v]) => `
+                  <div class="cognize-kv-row"><span>${esc(k.replace(/_/g, " "))}</span><strong>${esc(v)}</strong></div>`).join("")
+                : health?.error
+                  ? `<p class="muted">${esc(health.error)}</p>`
+                  : `<p class="muted">No stats</p>`}
+            </div>
+            ${problems.length ? `
+              <ul class="cognize-problems">
+                ${problems.slice(0, 8).map((p) => `<li>${esc(p)}</li>`).join("")}
+              </ul>` : ""}
+          </section>
+        </div>`;
+
+      $("#cognize-refresh")?.addEventListener("click", () => {
+        const lim = Number($("#cognize-run-form input[name=limit]")?.value || 50);
+        paint({ limit: lim }).catch((e) => toast(e.message, false));
+      });
+
+      const limitInput = $("#cognize-run-form input[name=limit]");
+      let limitTimer = null;
+      limitInput?.addEventListener("change", () => {
+        clearTimeout(limitTimer);
+        limitTimer = setTimeout(() => {
+          paint({ limit: Number(limitInput.value || 50) }).catch((e) => toast(e.message, false));
+        }, 200);
+      });
+
+      $("#cognize-run-form")?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(ev.target);
+        const msg = $("#cognize-run-msg");
+        const btn = ev.target.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = true;
+        if (msg) msg.textContent = "Enqueueing…";
+        try {
+          const out = await api("/api/cognize/run", {
+            method: "POST",
+            body: JSON.stringify({
+              vault_id: VAULT,
+              limit: Number(fd.get("limit") || 50),
+              dry_run: fd.get("dry_run") === "on",
+            }),
+          });
+          const jobId = out.job?.id || "";
+          toast(jobId ? `Enqueued ${jobId}` : "Cognize job enqueued");
+          if (msg) msg.textContent = jobId ? `Job ${jobId} queued` : "Queued";
+          await paint({ limit: Number(fd.get("limit") || 50) });
+        } catch (err) {
+          toast(err.message, false);
+          if (msg) msg.textContent = err.message;
+          if (btn) btn.disabled = false;
+        }
+      });
+    } catch (err) {
+      const detail = String(err.message || err);
+      const hint = /not found/i.test(detail)
+        ? "New Cognize APIs need a restarted twin serve."
+        : "";
+      app.innerHTML = empty("Cognize pane failed", hint ? `${detail} — ${hint}` : detail);
+    }
+  };
+
+  await paint();
 }
 
 async function paneInject() {
   setChrome("Inject", "Context pack");
+  let domainDefault = "technical";
+  try {
+    const sum = await api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`);
+    const domains = sum.domains || [];
+    if (domains.length && !DOMAIN_OPTIONS.includes(domains[0].id)) {
+      /* keep technical default */
+    } else if (domains.some((d) => d.id === "technical")) {
+      domainDefault = "technical";
+    } else if (domains[0]?.id) {
+      domainDefault = domains[0].id;
+    }
+  } catch {
+    /* keep default */
+  }
+
   app.innerHTML = `
-    <section class="detail-card entity-warrant">
+    <section class="home-card inject-pane entity-warrant">
+      <h2 class="home-card-title">Build pack</h2>
+      <p class="home-card-sub muted">Retrieve Narratives and open Reflections for a query</p>
       <form id="pack-form" class="stack-form">
         <label>Query<input name="query" required placeholder="What was decided about…?" /></label>
-        <label>Domain<input name="domain" value="technical" /></label>
+        <label>Domain${domainSelectHtml("domain", domainDefault)}</label>
         <button class="btn primary" type="submit">Build pack</button>
       </form>
       <div id="pack-meta" class="muted"></div>
@@ -2314,6 +2715,7 @@ async function paneInject() {
       meta.textContent = `Narratives: ${(data.narratives || []).length} · Reflections: ${(data.open_reflections || []).length}`;
       out.hidden = false;
       out.textContent = data.context_pack || JSON.stringify(data, null, 2);
+      toast("Pack built");
     } catch (err) {
       toast(err.message, false);
     }
@@ -2321,82 +2723,100 @@ async function paneInject() {
 }
 
 async function paneOps() {
-  setChrome("Ops", "Health & Stance proposals");
-  app.innerHTML = `<div class="stack">Loading…</div>`;
+  setChrome("Ops", "Health");
+  app.innerHTML = `<div class="ops-dash"><div class="muted">Loading…</div></div>`;
   try {
-    const [health, runtime, proposals] = await Promise.all([
+    const [doctor, health, runtime, sum] = await Promise.all([
+      api("/api/doctor").catch((e) => ({ error: e.message, checks: [] })),
       api("/api/health/cognition").catch((e) => ({ error: e.message })),
       api("/api/runtime/health").catch((e) => ({ error: e.message })),
-      api("/api/stances/proposals").catch(() => []),
+      api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`).catch(() => ({})),
     ]);
-    const props = Array.isArray(proposals) ? proposals : [];
-    app.innerHTML = `
-      <section class="split-panes">
-        <div class="detail-card">
-          <h3>Cognition health</h3>
-          <pre class="json-block">${esc(JSON.stringify(health, null, 2))}</pre>
-          <h3>Runtime</h3>
-          <pre class="json-block">${esc(JSON.stringify(runtime, null, 2))}</pre>
-        </div>
-        <div class="detail-card entity-posture" id="stance-ops">
-          <h3>Pending Stance proposals</h3>
-          ${props.length ? props.map((p) => `
-            <div class="entity-row stance-prop" data-id="${esc(p.id)}">
-              <div class="entity-row-main">
-                <strong>${esc(truncate(p.statement || p.id))}</strong>
-                <span class="muted">${esc(p.id)}</span>
-              </div>
-              ${badge(p.status)}
-              <div class="cta-row">
-                <button type="button" class="btn stance-preview" data-id="${esc(p.id)}">Preview</button>
-                <button type="button" class="btn primary stance-approve" data-id="${esc(p.id)}" disabled>Approve</button>
-              </div>
-            </div>`).join("") : empty("No pending proposals", "Approve requires preview token")}
-          <p id="stance-token" class="muted">Preview a proposal to unlock Approve.</p>
-        </div>
-      </section>`;
+    const checks = Array.isArray(doctor.checks) ? doctor.checks : [];
+    const counts = doctor.counts || {
+      ok: checks.filter((c) => c.status === "ok").length,
+      warn: checks.filter((c) => c.status === "warn").length,
+      fail: checks.filter((c) => c.status === "fail").length,
+    };
+    const ordered = [
+      ...checks.filter((c) => c.status === "fail"),
+      ...checks.filter((c) => c.status === "warn"),
+      ...checks.filter((c) => c.status === "ok"),
+    ];
+    const mark = (status) => (status === "fail" ? "✗" : (status === "warn" ? "!" : "✓"));
+    const stats = health?.stats || {};
+    const problems = health?.problems || [];
+    const queue = runtime?.queue || {};
+    const queueRows = Object.entries(queue);
+    const halt = sum?.cognize_halt || "";
 
-    const tokens = {};
-    app.querySelectorAll(".stance-preview").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
-        try {
-          const prev = await api(`/api/stances/proposals/${encodeURIComponent(id)}/preview`, {
-            method: "POST",
-            body: JSON.stringify({}),
-          });
-          tokens[id] = prev.preview_token || prev.token || "";
-          const row = btn.closest(".stance-prop");
-          row?.querySelector(".stance-approve")?.removeAttribute("disabled");
-          $("#stance-token").textContent = tokens[id]
-            ? `Token for ${id}: ${tokens[id]}`
-            : "Preview returned no token";
-          toast("Stance preview ready");
-        } catch (err) {
-          toast(err.message, false);
-        }
-      });
-    });
-    app.querySelectorAll(".stance-approve").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
-        const token = tokens[id];
-        if (!token) {
-          toast("Preview first", false);
-          return;
-        }
-        try {
-          await api(`/api/stances/proposals/${encodeURIComponent(id)}/approve`, {
-            method: "POST",
-            body: JSON.stringify({ preview_token: token }),
-          });
-          toast(`Approved ${id}`);
-          paneOps();
-        } catch (err) {
-          toast(err.message, false);
-        }
-      });
-    });
+    app.innerHTML = `
+      <div class="ops-dash">
+        <section class="home-card ops-doctor">
+          <h2 class="home-card-title">Doctor</h2>
+          <p class="home-card-sub muted">${esc(doctor.llm || "—")} · ${esc(doctor.model || "—")} · embed ${esc(doctor.embedder || "—")}</p>
+          ${halt ? `<p class="doctor-halt">cognize halt · ${esc(halt)}</p>` : ""}
+          ${doctor.error ? `<p class="muted">${esc(doctor.error)}</p>` : `
+          <div class="doctor-score" aria-label="Doctor counts">
+            <span class="doctor-chip doctor-chip--ok">✓ ${counts.ok ?? 0}</span>
+            <span class="doctor-chip doctor-chip--warn">! ${counts.warn ?? 0}</span>
+            <span class="doctor-chip doctor-chip--fail">✗ ${counts.fail ?? 0}</span>
+          </div>
+          <ul class="doctor-issues doctor-issues--all ops-doctor-list">
+            ${ordered.length ? ordered.map((c) => {
+              const label = friendlyDoctorName(c.name);
+              const detail = friendlyDoctorDetail(c.name, c.detail);
+              return `<li>
+                <span class="doctor-mark doctor-mark--${esc(c.status)}">${mark(c.status)}</span>
+                <span class="doctor-issue-text">
+                  <strong>${esc(label)}</strong>
+                  ${detail ? ` <span class="muted">${esc(detail)}</span>` : ""}
+                </span>
+              </li>`;
+            }).join("") : `<li class="muted">No checks returned</li>`}
+          </ul>`}
+        </section>
+
+        <div class="ops-right">
+          <section class="home-card ops-runtime">
+            <h2 class="home-card-title">Runtime</h2>
+            <p class="home-card-sub muted">${runtime?.ok === false ? "Runtime reporting issues" : "Queue depth & dead letters"}</p>
+            ${runtime?.error ? `<p class="muted">${esc(runtime.error)}</p>` : `
+            <div class="cognize-metrics ops-runtime-metrics" role="group" aria-label="Runtime queue">
+              ${queueRows.length ? queueRows.map(([k, v]) => `
+                <div class="cognize-metric">
+                  <span class="cognize-metric-n">${esc(v)}</span>
+                  <span class="cognize-metric-l">${esc(String(k).replace(/_/g, " "))}</span>
+                </div>`).join("") : `
+                <div class="cognize-metric">
+                  <span class="cognize-metric-n">0</span>
+                  <span class="cognize-metric-l">queue</span>
+                </div>`}
+              <div class="cognize-metric">
+                <span class="cognize-metric-n">${esc(runtime?.dead_letters_open ?? 0)}</span>
+                <span class="cognize-metric-l">Dead letters</span>
+              </div>
+            </div>
+            <p class="muted ops-runtime-hint">Jobs live under Cognize · Active / Past</p>`}
+          </section>
+
+          <section class="home-card ops-integrity">
+            <h2 class="home-card-title">Integrity</h2>
+            <p class="home-card-sub muted">${health?.ok === false ? `${problems.length} problem(s)` : "No integrity problems reported"}</p>
+            ${health?.error ? `<p class="muted">${esc(health.error)}</p>` : `
+            <div class="cognize-kv">
+              ${Object.keys(stats).length
+                ? Object.entries(stats).map(([k, v]) => `
+                  <div class="cognize-kv-row"><span>${esc(k.replace(/_/g, " "))}</span><strong>${esc(v)}</strong></div>`).join("")
+                : `<p class="muted">No stats</p>`}
+            </div>
+            ${problems.length ? `
+              <ul class="cognize-problems">
+                ${problems.slice(0, 12).map((p) => `<li>${esc(p)}</li>`).join("")}
+              </ul>` : ""}`}
+          </section>
+        </div>
+      </div>`;
   } catch (err) {
     app.innerHTML = empty("Ops failed", err.message);
   }
@@ -2406,15 +2826,19 @@ async function route() {
   const { pane, parts } = parseHash();
   setActiveNav(pane);
   _searchCache = null;
+  if (_reviewAbort) {
+    _reviewAbort.abort();
+    _reviewAbort = null;
+  }
   const views = {
     home: () => paneHome(),
     sessions: () => paneSessions(),
     explore: () => paneExplore(parts),
-    review: () => paneReview(),
+    review: () => paneReview(parts),
     cognize: () => paneCognize(),
-    sense: () => paneSense(),
     inject: () => paneInject(),
     ops: () => paneOps(),
+    sense: () => { location.hash = "#cognize"; },
   };
   const fn = views[pane] || views.home;
   await fn();

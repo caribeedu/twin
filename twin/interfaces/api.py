@@ -82,6 +82,15 @@ class ConsolidationRequest(BaseModel):
     retry: bool = False
 
 
+class CognizeRunRequest(BaseModel):
+    vault_id: str = "default"
+    limit: int = Field(default=50, ge=1, le=200)
+    dry_run: bool = False
+    until: Optional[str] = None
+    percept_ids: list[str] = Field(default_factory=list)
+    priority: int = Field(default=100, ge=0, le=10_000)
+
+
 class RuntimeEnqueueRequest(BaseModel):
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -1004,6 +1013,57 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 "percepts": percepts,
             },
         }
+
+    @app.get("/api/cognize/status")
+    def api_cognize_status(vault: str = "default"):
+        from types import SimpleNamespace
+
+        from twin.interfaces.commands.cognize_cmd import cognize_status
+
+        return cognize_status(ws, SimpleNamespace(vault=vault))
+
+    @app.get("/api/cognize/plan")
+    def api_cognize_plan(vault: str = "default", limit: int = 50):
+        from twin.cognize.orchestrator import plan_cognize
+
+        return plan_cognize(
+            ws.store,
+            ws.cfg,
+            limit=max(1, min(limit, 200)),
+            vault_id=vault,
+        )
+
+    @app.post("/api/cognize/run")
+    def api_cognize_run(req: CognizeRunRequest):
+        from twin.interfaces.runtime.models import JobKind
+        from twin.interfaces.runtime.queue import RuntimeQueue
+
+        if req.until:
+            from twin.cognize.orchestrator import CognizeStage
+
+            try:
+                CognizeStage(req.until)
+            except ValueError as exc:
+                raise HTTPException(400, f"unknown until stage: {req.until}") from exc
+
+        payload: dict[str, Any] = {
+            "vault_id": req.vault_id,
+            "limit": req.limit,
+            "dry_run": req.dry_run,
+        }
+        if req.until:
+            payload["until"] = req.until
+        if req.percept_ids:
+            payload["percept_ids"] = list(req.percept_ids)
+
+        job = RuntimeQueue(ws.store).enqueue(
+            JobKind.cognize_batch,
+            payload=payload,
+            vault_id=req.vault_id,
+            priority=req.priority,
+            idempotency_key="",
+        )
+        return {"ok": True, "job": job.model_dump(mode="json")}
 
     @app.post("/api/narratives/commit")
     def api_narrative_commit(req: NarrativeCommitRequest):
