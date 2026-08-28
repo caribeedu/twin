@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional
 
 from twin.config import Config
 from twin.store.embeddings import Embedder, get_embedder_for_config
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.interfaces.runtime.queue import RuntimeQueue
 from twin.interfaces.runtime.scheduler import RuntimeScheduler
 from twin.interfaces.runtime.worker import RuntimeWorker, run_worker_pool
@@ -26,7 +26,7 @@ class TwinRuntime:
 
     def __init__(
         self,
-        store: MemoryStore,
+        store: TwinStore,
         cfg: Config,
         embedder: Optional[Embedder] = None,
         *,

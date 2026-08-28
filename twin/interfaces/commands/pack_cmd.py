@@ -19,7 +19,7 @@ def build_pack(ws, args) -> Any:
         surface="cli",
         client="local-cli",
         persona=persona,
-        purpose=getattr(args, "purpose", None) or "memory_retrieval",
+        purpose=getattr(args, "purpose", None) or "context_retrieval",
         audience=getattr(args, "audience", None) or "self",
         requested_domains=[args.domain] if getattr(args, "domain", None) else [],
     )

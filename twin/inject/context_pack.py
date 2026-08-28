@@ -32,7 +32,7 @@ from twin.privacy.firewall import Firewall
 from twin.cognize.stance_engine.profile import load_profile
 from twin.store.embeddings import Embedder
 from twin.store.search import SearchHit
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from ..privacy.models import AccessRequest
 from twin.inject.pack_format import PackMode, render_pack
 from twin.inject.pack_select import (
@@ -113,7 +113,7 @@ def _entry_from_view(
     return f"- [{tag}] {title}: {summary}"
 
 
-def _evidence_lines(store: MemoryStore, hits: list[SearchHit], top_n: int,
+def _evidence_lines(store: TwinStore, hits: list[SearchHit], top_n: int,
                     *, skip_ids: Optional[set[str]] = None) -> list[str]:
     skip_ids = skip_ids or set()
     top = sorted(
@@ -129,7 +129,7 @@ def _evidence_lines(store: MemoryStore, hits: list[SearchHit], top_n: int,
 
 
 def build_context_pack(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     query: str,

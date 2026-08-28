@@ -16,7 +16,7 @@ def _cli_access(store):
     bootstrap_policy_set(store)
     ensure_local_identity(store)
     return resolve_access(store, surface="cli", persona="individual",
-                          purpose="memory_retrieval", audience="self")
+                          purpose="context_retrieval", audience="self")
 
 
 def _populate(store, cfg, embedder):

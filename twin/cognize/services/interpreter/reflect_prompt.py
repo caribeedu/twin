@@ -200,11 +200,11 @@ def _render_brief(brief: "EpisodeBrief") -> str:
         lines.append(dossier.render())
     else:
         lines.append(
-            "RELATED context (vault memories + open-session artifacts — use as "
+            "RELATED context (vault claims + open-session artifacts — use as "
             "context; do not restate without new episode evidence):"
         )
-        if brief.related_memories:
-            for rm in brief.related_memories:
+        if brief.related_claims:
+            for rm in brief.related_claims:
                 lines.append(
                     f"  [{rm.get('status')}] {rm.get('id')} "
                     f"type={rm.get('type')} domain={rm.get('domain')}: "
@@ -237,7 +237,7 @@ def reflect_with_model(client, brief: "EpisodeBrief") -> list["TrajectoryClaim"]
         return []
 
     phase_keys = {p["phase_key"] for p in brief.phases}
-    related_ids = {rm.get("id") for rm in brief.related_memories if rm.get("id")}
+    related_ids = {rm.get("id") for rm in brief.related_claims if rm.get("id")}
     dossier = getattr(brief, "dossier", None)
     cross_refs = {
         b.ref for b in getattr(dossier, "cross_sense", [])

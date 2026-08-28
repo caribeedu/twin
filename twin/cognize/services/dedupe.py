@@ -15,7 +15,7 @@ from typing import Optional
 
 from twin.store.embeddings import Embedder
 from twin.store.models import INACTIVE_STATUSES
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 DUPLICATE_THRESHOLD = 0.92
 RELATED_THRESHOLD = 0.80
@@ -28,7 +28,7 @@ class DedupeVerdict:
     similarity: float = 0.0
 
 
-def check(store: MemoryStore, embedder: Embedder, mem_type: str, text: str) -> DedupeVerdict:
+def check(store: TwinStore, embedder: Embedder, mem_type: str, text: str) -> DedupeVerdict:
     vector = embedder.embed(text)
     best_id: Optional[str] = None
     best_sim = 0.0

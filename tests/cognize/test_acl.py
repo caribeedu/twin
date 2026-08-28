@@ -95,7 +95,7 @@ def test_pack_acl_hides_private_from_client_audience(store, cfg):
         audience="client",
         principal_id="ext",
         persona="individual",
-        purpose="memory_retrieval",
+        purpose="context_retrieval",
         tool_id="test",
         requested_domains=["technical"],
         metadata={"allowed_source_sensors": ["github"]},

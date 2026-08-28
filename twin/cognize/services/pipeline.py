@@ -39,7 +39,7 @@ from twin.store.models import (
     PerceptInterpretation, Relation,
 )
 from twin.store.provenance import ensure_artifact_from_percept
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.sense.sensory.percept import Percept
 from .dedupe import check as dedupe_check
 from .extractors import heuristic as heuristic_detector
@@ -103,7 +103,7 @@ def _backoff_next_attempt(attempts: int) -> str:
         .strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _record_state(store: MemoryStore, percept: Percept, *, status: str,
+def _record_state(store: TwinStore, percept: Percept, *, status: str,
                   interpreter: str = "", model: str = "", prompt_version: str = "",
                   schema_version: str = "", failure_class: str = "",
                   interpretation_attempted: bool = False, items: int = 0,
@@ -123,7 +123,7 @@ def _record_state(store: MemoryStore, percept: Percept, *, status: str,
     ))
 
 
-def _record_failure(store: MemoryStore, percept: Percept,
+def _record_failure(store: TwinStore, percept: Percept,
                     result: InterpretationResult) -> None:
     """Persist a deferral/error. A service outage (deferred/unavailable) is
     never terminal and never gated by backoff — it stays eligible until the
@@ -156,7 +156,7 @@ def _record_failure(store: MemoryStore, percept: Percept,
 # -- heuristic detection (never a memory) ---------------------------------------
 
 
-def _run_detection(store: MemoryStore, percept: Percept) -> list[DetectionSignal]:
+def _run_detection(store: TwinStore, percept: Percept) -> list[DetectionSignal]:
     signals: list[DetectionSignal] = []
     for hit in heuristic_detector.scan(percept.content or ""):
         signal = DetectionSignal(
@@ -189,8 +189,8 @@ def _prepare_item(item, percept: Percept, report: ExtractReport):
     """Turn a grounded InterpretedItem into an ExtractedClaim, refusing the
     silent semantic fallbacks the old code did. Returns (extracted, forced
     review reasons) or (None, []) when the item must be dropped."""
-    # invalid memory type is a schema error, never silently a 'fact'
-    if item.memory_type not in INTERPRETATION_TYPES:
+    # invalid claim type is a schema error, never silently a 'fact'
+    if item.claim_type not in INTERPRETATION_TYPES:
         report.invalid += 1
         return None, []
     forced: list[str] = []
@@ -263,7 +263,7 @@ def _needs_review(cfg: Config, mem: ExtractedClaim, percept: Percept) -> Optiona
 # -- main entry points ----------------------------------------------------------
 
 
-def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
+def extract_percept(store: TwinStore, cfg: Config, embedder: Embedder,
                     percept: Percept, *,
                     runtime: Optional[interp_service.InterpretationRuntime] = None,
                     ) -> ExtractReport:
@@ -465,7 +465,7 @@ def extract_percept(store: MemoryStore, cfg: Config, embedder: Embedder,
 
 
 def extract_pending(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,

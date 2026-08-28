@@ -1,7 +1,7 @@
 """Post-reflect condensation — collapse near-duplicate candidates into one.
 
 Keeps the highest-altitude survivor's title/summary and merges evidence via
-``merge_memories``. Runs after hippocampus_consolidate so meditate doesn't
+``merge_claims``. Runs after hippocampus_consolidate so meditate doesn't
 leave five paraphrases of the same launch-gate claim.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from twin.store.lifecycle import merge_memories
+from twin.store.lifecycle import merge_claims
 from twin.store.models import FindingType, INACTIVE_STATUSES, StoreClaim
 from .quality import altitude_rank, claim_altitude
 
@@ -160,7 +160,7 @@ def condense_near_duplicates(
                 title=survivor.title or "",
                 summary=survivor.summary or "",
             )
-            result = merge_memories(
+            result = merge_claims(
                 store,
                 ids,
                 title=survivor.title,

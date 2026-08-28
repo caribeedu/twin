@@ -16,7 +16,7 @@ from twin.clock import now_iso
 
 if TYPE_CHECKING:
     from twin.store.models import StoreClaim
-    from twin.store.store.base import MemoryStore
+    from twin.store.store.base import TwinStore
 
 
 def load_profile(path: Path | str) -> dict[str, Any]:
@@ -35,7 +35,7 @@ _PROMOTION_SECTIONS = {
 
 
 def promote_claim(path: Path | str, mem: "StoreClaim",
-                   store: Optional["MemoryStore"] = None) -> str:
+                   store: Optional["TwinStore"] = None) -> str:
     """Promote a memory into judgment.
 
     When a store is provided , creates a pending JudgmentProposal and
@@ -50,8 +50,8 @@ def promote_claim(path: Path | str, mem: "StoreClaim",
         )
 
     if store is not None and hasattr(store, "insert_judgment_proposal"):
-        from .proposals import propose_from_memory
-        proposal = propose_from_memory(store, mem.id)
+        from .proposals import propose_from_claim
+        proposal = propose_from_claim(store, mem.id)
         return f"proposal:{proposal.id}"
 
     # Legacy YAML append (bootstrap / no DB)

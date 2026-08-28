@@ -11,7 +11,7 @@ from typing import Any, Optional
 from twin import ids
 from twin.clock import now_iso
 from twin.store.models import ClaimOperation
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import (
     AppliedRevisionRef,
     JudgmentItem,
@@ -22,13 +22,13 @@ from .models import (
 from .revisions import clone_revision_as_new, commit_new_item, commit_new_revision, item_from_revision
 
 
-def active_items(store: MemoryStore) -> list[JudgmentItem]:
+def active_items(store: TwinStore) -> list[JudgmentItem]:
     if not hasattr(store, "list_judgment_items"):
         return []
     return store.list_judgment_items(status=JudgmentStatus.active.value)
 
 
-def active_revision_ids(store: MemoryStore) -> list[str]:
+def active_revision_ids(store: TwinStore) -> list[str]:
     ids_out: list[str] = []
     for item in active_items(store):
         if item.current_revision_id:
@@ -37,7 +37,7 @@ def active_revision_ids(store: MemoryStore) -> list[str]:
 
 
 def create_version(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     reason: str,
     revision_ids: Optional[list[str]] = None,
@@ -94,7 +94,7 @@ def create_version(
 
 
 def make_snapshot(
-    store: MemoryStore,
+    store: TwinStore,
     applied: list[AppliedRevisionRef],
     *,
     context: Optional[dict[str, Any]] = None,
@@ -125,7 +125,7 @@ def make_snapshot(
 
 
 def supersede_item(
-    store: MemoryStore,
+    store: TwinStore,
     old_id: str,
     new_item: JudgmentItem,
     *,
@@ -169,7 +169,7 @@ def supersede_item(
 
 
 def restore_version(
-    store: MemoryStore,
+    store: TwinStore,
     version_id: str,
     *,
     actor: str = "user",
@@ -220,7 +220,7 @@ def restore_version(
     )
 
 
-def _audit(store: MemoryStore, operation: str, output: str, after: dict[str, Any],
+def _audit(store: TwinStore, operation: str, output: str, after: dict[str, Any],
            *, actor: str, undoable: bool = False) -> None:
     if not hasattr(store, "insert_operation"):
         return

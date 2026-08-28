@@ -54,5 +54,5 @@ def local_access(store):
     ensure_local_identity(store)
     return resolve_access(
         store, surface="cli", client="local-cli",
-        persona="individual", purpose="memory_retrieval", audience="self",
+        persona="individual", purpose="context_retrieval", audience="self",
     )

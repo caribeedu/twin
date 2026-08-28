@@ -28,7 +28,7 @@ from twin.store.models import (
     ClaimStatus,
     SessionStatus,
 )
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.store.store.host_binding_mixin import is_unique_violation
 from twin.inject.context_pack import ContextPack, build_context_pack
 from .sessions import SessionStart, complete_session, observe_session, start_session
@@ -176,7 +176,7 @@ def _assert_frozen_scope(
 
 
 def bind_and_start(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -346,7 +346,7 @@ def bind_and_start(
 
 
 def resolve_active_binding(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     host_type: str,
     external_session_id: str,
@@ -359,7 +359,7 @@ def resolve_active_binding(
 
 
 def observe_host_event(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     host_type: str,
     external_session_id: str,
@@ -448,7 +448,7 @@ class DomainUpgradePack:
 
 
 def _refresh_placeholder_access(
-    store: MemoryStore, cfg: Config,
+    store: TwinStore, cfg: Config,
     binding: HostSessionBinding, resolved: str,
 ):
     """Re-resolve access for packing after a domain upgrade.
@@ -499,7 +499,7 @@ def _apply_upgraded_scope(target, *, domain: str, reading, access) -> None:
 
 
 def maybe_upgrade_domain(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -557,7 +557,7 @@ def maybe_upgrade_domain(
 
 
 def maybe_upgrade_domain_and_pack(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -592,7 +592,7 @@ def maybe_upgrade_domain_and_pack(
 
 
 def request_context_pack(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -605,7 +605,7 @@ def request_context_pack(
     task_profile: Optional[str] = None,
     max_tokens: int = 1200,
     persona: str = "individual",
-    purpose: str = "memory_retrieval",
+    purpose: str = "context_retrieval",
     audience: str = "self",
     client: str = "native",
     deadline_monotonic: Optional[float] = None,
@@ -711,7 +711,7 @@ def request_context_pack(
     )
 
 
-def _dialogue_text_for_domain(store: MemoryStore, session_id: str) -> str:
+def _dialogue_text_for_domain(store: TwinStore, session_id: str) -> str:
     """Fold user/assistant session artifacts into multi-message evidence."""
     session = store.get_session(session_id)
     if session is None:
@@ -731,7 +731,7 @@ def _dialogue_text_for_domain(store: MemoryStore, session_id: str) -> str:
 
 
 def maybe_enqueue_domain_resolve(
-    store: MemoryStore,
+    store: TwinStore,
     binding: HostSessionBinding,
     *,
     cwd: Optional[str] = None,
@@ -764,7 +764,7 @@ def maybe_enqueue_domain_resolve(
 
 
 def maybe_enqueue_session_complete(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     session_id: str,
     summary: str = "",
@@ -794,7 +794,7 @@ def maybe_enqueue_session_complete(
 
 
 def end_host_session(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -850,7 +850,7 @@ def end_host_session(
 
 
 def apply_background_domain_resolve(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -913,7 +913,7 @@ def apply_background_domain_resolve(
 
 
 def recommend_intervention(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     session_id: str,
     draft_text: str,

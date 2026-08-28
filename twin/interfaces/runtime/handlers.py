@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from twin.config import Config
 from twin.store.embeddings import Embedder
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.interfaces.runtime.models import ErrorClass, JobKind, RuntimeJob
 
 
@@ -17,11 +17,11 @@ class HandlerError(Exception):
         self.stage = stage
 
 
-Handler = Callable[[MemoryStore, Config, Embedder, RuntimeJob], dict[str, Any]]
+Handler = Callable[[TwinStore, Config, Embedder, RuntimeJob], dict[str, Any]]
 
 
 def handle_interpret_percept(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.cognize.services.pipeline import extract_percept
     from twin.cognize.services.interpreter import service as interp_service
@@ -56,7 +56,7 @@ def handle_interpret_percept(
 
 
 def handle_workspace_tick(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.cognize.services.workspace import workspace_tick
 
@@ -78,7 +78,7 @@ def handle_workspace_tick(
 
 
 def handle_consolidate_daily(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.cognize.services.consolidation_cycle import (
         ConsolidationInvariantError,
@@ -99,7 +99,7 @@ def handle_consolidate_daily(
 
 
 def handle_consolidate_weekly(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.cognize.services.consolidation_cycle import (
         ConsolidationInvariantError,
@@ -120,7 +120,7 @@ def handle_consolidate_weekly(
 
 
 def handle_reembed_memory(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     mid = (job.payload or {}).get("claim_id")
     if not mid:
@@ -134,7 +134,7 @@ def handle_reembed_memory(
 
 
 def handle_integrity_check(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.interfaces.sovereignty.integrity import run_integrity_checks
     report = run_integrity_checks(store)
@@ -142,7 +142,7 @@ def handle_integrity_check(
 
 
 def handle_cognize_batch(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.cognize.orchestrator import CognizeStage, run_cognize
 
@@ -222,7 +222,7 @@ def handle_cognize_batch(
 
 
 def handle_attention_evaluate(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     from twin.cognize.services.attention import evaluate_attention
 
@@ -241,7 +241,7 @@ def handle_attention_evaluate(
 
 
 def handle_connector_reconcile(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     """Run due connector syncs via the shared scheduler (recovery path)."""
     if not hasattr(store, "list_connector_instances"):
@@ -269,7 +269,7 @@ def handle_connector_reconcile(
 
 
 def handle_backfill_partition(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     """Advance one BackfillJob partition (historical; not continuous sync)."""
     if not hasattr(store, "get_backfill_job"):
@@ -337,7 +337,7 @@ def handle_backfill_partition(
 
 
 def handle_session_domain_resolve(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     """Background domain freeze from multi-message session evidence (LLM)."""
     from twin.cognize.services.host_session import apply_background_domain_resolve
@@ -368,7 +368,7 @@ def handle_session_domain_resolve(
 
 
 def handle_session_complete(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     """Background session consolidation + extract after native SessionEnd."""
     from twin.cognize.services.sessions import complete_session
@@ -431,7 +431,7 @@ HANDLERS: dict[JobKind, Handler] = {
 
 
 def dispatch(
-    store: MemoryStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
+    store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     kind = job.kind if isinstance(job.kind, JobKind) else JobKind(str(job.kind))
     handler = HANDLERS.get(kind)

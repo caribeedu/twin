@@ -103,7 +103,9 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
 
 
 def _from_config(raw: dict[str, Any]) -> SourcePolicy:
-    allow_raw = raw.get("allow_memory_types")
+    allow_raw = raw.get("allow_claim_types")
+    if allow_raw is None:
+        allow_raw = raw.get("allow_memory_types")  # deprecated alias
     return SourcePolicy(
         allow=frozenset(allow_raw) if allow_raw else None,
         require_review=frozenset(raw.get("require_review_for") or []),
@@ -141,16 +143,16 @@ def policy_for_percept(percept: Percept) -> Optional[SourcePolicy]:
     return default
 
 
-def evaluate(policy: Optional[SourcePolicy], memory_type: str) -> PolicyDecision:
+def evaluate(policy: Optional[SourcePolicy], claim_type: str) -> PolicyDecision:
     if policy is None:
         return PolicyDecision("allow")
-    if memory_type in policy.drop:
+    if claim_type in policy.drop:
         return PolicyDecision(
-            "drop", f"memory type '{memory_type}' not accepted from this source")
-    if memory_type in policy.require_review:
+            "drop", f"claim type '{claim_type}' not accepted from this source")
+    if claim_type in policy.require_review:
         return PolicyDecision(
-            "review", f"source policy requires review for '{memory_type}'")
-    if policy.allow is not None and memory_type not in policy.allow:
+            "review", f"source policy requires review for '{claim_type}'")
+    if policy.allow is not None and claim_type not in policy.allow:
         return PolicyDecision(
-            "drop", f"memory type '{memory_type}' outside the source allowlist")
+            "drop", f"claim type '{claim_type}' outside the source allowlist")
     return PolicyDecision("allow")

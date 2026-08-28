@@ -21,7 +21,7 @@ def test_open_reflections_acl_blocks_private_text(store, cfg):
         audience="client",
         principal_id="ext",
         persona="individual",
-        purpose="memory_retrieval",
+        purpose="context_retrieval",
         tool_id="test",
         requested_domains=["technical"],
         metadata={"vault_id": "default"},
@@ -50,7 +50,7 @@ def test_open_reflections_allowed_for_self(store, cfg):
         audience="self",
         principal_id="owner",
         persona="individual",
-        purpose="memory_retrieval",
+        purpose="context_retrieval",
         tool_id="test",
         requested_domains=["technical"],
     )

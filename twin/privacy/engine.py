@@ -11,7 +11,7 @@ from .. import ids
 from ..clock import now_iso
 from twin.privacy.firewall import Firewall
 from twin.store.models import StoreClaim
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .classify import classify_memory
 from .grants import (
     consume_grant,
@@ -21,7 +21,9 @@ from .grants import (
 )
 from .identity import (
     active_consent_covers,
+    normalize_purpose,
     principal_can_read,
+    purpose_allowed,
     resolve_execution_location,
     restricted_access,
     validate_vault_access,
@@ -67,6 +69,18 @@ def _wildcard_match(patterns: list[str], value: str) -> bool:
     return False
 
 
+def _purpose_match(patterns: list[str], purpose: str) -> bool:
+    """Like ``_wildcard_match`` but treats ``memory_retrieval`` ≡ ``context_retrieval``."""
+    if not patterns or "*" in patterns:
+        return True
+    if purpose_allowed(purpose, patterns):
+        return True
+    return _wildcard_match(
+        [normalize_purpose(p) for p in patterns],
+        normalize_purpose(purpose),
+    )
+
+
 def policy_matches(
     policy: PrivacyPolicy,
     request: AccessRequest,
@@ -97,7 +111,7 @@ def policy_matches(
     if res.third_party is False and classification.third_party:
         return False
     ctx = policy.context
-    if not _wildcard_match(ctx.purposes, request.purpose):
+    if not _purpose_match(ctx.purposes, request.purpose):
         return False
     if not _wildcard_match(ctx.audiences, request.audience):
         return False
@@ -134,7 +148,7 @@ def evaluate_resource(
     classification: ResourceClassification,
     *,
     execution_location: str,
-    store: Optional[MemoryStore] = None,
+    store: Optional[TwinStore] = None,
     consume_grants: bool = False,
     legacy_firewall: Optional[Firewall] = None,
     memory: Optional[StoreClaim] = None,
@@ -315,7 +329,7 @@ def evaluate_resource(
 
 
 def evaluate_access(
-    store: MemoryStore,
+    store: TwinStore,
     request: AccessRequest,
     memories: list[StoreClaim],
     *,
@@ -513,7 +527,7 @@ def evaluate_access(
 
 
 def evaluate_judgment_items(
-    store: MemoryStore,
+    store: TwinStore,
     request: AccessRequest,
     items: list[Any],
     *,
@@ -556,7 +570,7 @@ def evaluate_judgment_items(
     )
 
 
-def explain_decision(store: MemoryStore, decision_id: str) -> dict[str, Any]:
+def explain_decision(store: TwinStore, decision_id: str) -> dict[str, Any]:
     d = store.get_privacy_decision(decision_id)
     if d is None:
         raise ValueError(f"decision {decision_id} not found")
@@ -593,7 +607,7 @@ def validate_output(
     access: AccessRequest,
     decision: Optional[PrivacyDecision] = None,
     forbidden_substrings: Optional[list[str]] = None,
-    store: Optional[MemoryStore] = None,
+    store: Optional[TwinStore] = None,
 ) -> dict[str, Any]:
     """Scan generated/exported text before release to an external consumer."""
     findings = leakage_scan(output, forbidden_substrings=forbidden_substrings)

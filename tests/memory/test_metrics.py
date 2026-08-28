@@ -60,13 +60,13 @@ def test_session_and_product_metrics(store, cfg, embedder):
     assert product["context_relevance_rate"] == 0.75
     assert product["fully_relevant_rate"] == 0.5
     assert product["at_least_partially_relevant_rate"] == 1.0
-    assert product["false_memory_rate"] == 0.0
+    assert product["false_claim_rate"] == 0.0
     # 1 of the 2 sessions with feedback needed re-explanation
     assert product["re_explanation_rate"] == 0.5
     assert product["privacy_overblocks"] == 1
 
 
-def test_memory_usage_rate_counts_session_memory_pairs(store, cfg, embedder):
+def test_claim_usage_rate_counts_session_memory_pairs(store, cfg, embedder):
     """A memory supplied in two sessions counts twice in the denominator
     and once per session where it was marked useful — pairs on both sides."""
     from twin import ids
@@ -89,7 +89,7 @@ def test_memory_usage_rate_counts_session_memory_pairs(store, cfg, embedder):
     # duplicate verdict in the same session must not double-count the pair
     record_feedback(store, s1.id, "partially_useful", claim_id=mem.id)
 
-    usage = compute_metrics(store)["product"]["memory_usage_rate"]
+    usage = compute_metrics(store)["product"]["claim_usage_rate"]
     assert usage == round(1 / (len(s1.supplied_claim_ids)
                                + len(s2.supplied_claim_ids)), 3)
 
@@ -100,7 +100,7 @@ def test_product_metrics_empty(store):
     assert metrics["product"]["context_relevance_rate"] is None
     assert metrics["product"]["fully_relevant_rate"] is None
     assert metrics["product"]["re_explanation_rate"] is None
-    assert metrics["product"]["memory_usage_rate"] is None
+    assert metrics["product"]["claim_usage_rate"] is None
 
 
 def test_metrics_after_extraction_and_review(store, cfg, embedder):

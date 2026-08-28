@@ -21,7 +21,7 @@ from ..config import SENSITIVITY_ORDER, UNCLASSIFIED_DOMAIN
 from twin.store.models import StoreClaim
 
 if TYPE_CHECKING:
-    from twin.store.store.base import MemoryStore
+    from twin.store.store.base import TwinStore
 
 SENSITIVE_DOMAINS = {"relationship", "family", "health", "finance", "emotional", "legal"}
 
@@ -56,7 +56,7 @@ class Rule:
 
 
 class Firewall:
-    def __init__(self, policies_path: Path | str, store: Optional["MemoryStore"] = None):
+    def __init__(self, policies_path: Path | str, store: Optional["TwinStore"] = None):
         self.store = store
         data = yaml.safe_load(Path(policies_path).read_text(encoding="utf-8")) or {}
         self.default_action: str = data.get("default_action", "allow")

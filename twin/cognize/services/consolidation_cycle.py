@@ -26,7 +26,7 @@ from twin.config import Config
 from twin.sense.connectors.errors import sanitize_error
 from twin.store.automation import apply_safe_automations
 from twin.store.embeddings import Embedder
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.store.store.workspace_ops_mixin import ConsolidationRunRecord
 from .quality import analyze_candidates
 
@@ -39,7 +39,7 @@ MAX_JUDGMENT_DRAFTS_PER_WINDOW = 20
 MAX_CONSOLIDATION_TOKENS = 50_000
 
 
-def _narrative_committed_ids(store: MemoryStore) -> set[str]:
+def _narrative_committed_ids(store: TwinStore) -> set[str]:
     if not hasattr(store, "list_narratives"):
         return set()
     return {
@@ -120,7 +120,7 @@ def logical_window(
 
 
 def refresh_temporal_beliefs_and_goals(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     dry_run: bool = False,
     belief_max_age_days: int = 90,
@@ -193,7 +193,7 @@ def refresh_temporal_beliefs_and_goals(
 
 
 def _existing_window_proposals(
-    store: MemoryStore, *, window_key: str, detector: str,
+    store: TwinStore, *, window_key: str, detector: str,
 ) -> list[str]:
     if not hasattr(store, "list_judgment_proposals"):
         return []
@@ -205,7 +205,7 @@ def _existing_window_proposals(
     return ids_out
 
 
-def _confirmed_snapshot(store: MemoryStore) -> tuple[set[str], set[str]]:
+def _confirmed_snapshot(store: TwinStore) -> tuple[set[str], set[str]]:
     mems = {
         m.id for m in store.list_claims(status="confirmed", limit=10_000)
     }
@@ -219,7 +219,7 @@ def _confirmed_snapshot(store: MemoryStore) -> tuple[set[str], set[str]]:
 
 
 def inventory_closed_sessions(
-    store: MemoryStore, *, limit: int = 200,
+    store: TwinStore, *, limit: int = 200,
 ) -> list[dict[str, Any]]:
     """Summarize completed/abandoned sessions for the cycle report (no confirm)."""
     out: list[dict[str, Any]] = []
@@ -247,7 +247,7 @@ def inventory_closed_sessions(
 
 
 def inventory_open_tasks(
-    store: MemoryStore, *, limit: int = 200,
+    store: TwinStore, *, limit: int = 200,
 ) -> list[dict[str, Any]]:
     tasks = store.list_claims(type_="task", status="candidate", limit=limit)
     tasks += store.list_claims(type_="task", status="confirmed", limit=limit)
@@ -265,7 +265,7 @@ def inventory_open_tasks(
 
 
 def prepare_review_backlog(
-    store: MemoryStore, *, limit: int = 100, dry_run: bool = False,
+    store: TwinStore, *, limit: int = 100, dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """List candidates awaiting review; optionally stamp formation_state."""
     from twin.store.formation import FormationState, as_candidate
@@ -303,7 +303,7 @@ def prepare_review_backlog(
     return prepared
 
 
-def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[str, Any]:
+def candidate_formation_stats(store: TwinStore, *, limit: int = 500) -> dict[str, Any]:
     from twin.store.formation import derive_formation_state
 
     counts: dict[str, int] = {}
@@ -320,7 +320,7 @@ def candidate_formation_stats(store: MemoryStore, *, limit: int = 500) -> dict[s
 
 
 def reflect_recent_episodes(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -385,7 +385,7 @@ def reflect_recent_episodes(
 
 
 def run_pattern_reflect_pass(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -446,7 +446,7 @@ def run_pattern_reflect_pass(
 
 
 def build_cognitive_change_report(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     kind: str,
     temporal_updates: list[dict[str, Any]],
@@ -481,7 +481,7 @@ def build_cognitive_change_report(
 
 
 def run_episode_cortex_pass(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,
@@ -527,7 +527,7 @@ def run_episode_cortex_pass(
 
 
 def run_consolidation_cycle(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,

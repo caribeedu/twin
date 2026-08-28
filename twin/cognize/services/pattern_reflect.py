@@ -23,7 +23,7 @@ from twin.config import Config
 from twin.store.embeddings import Embedder
 from twin.store.formation import propose_or_corroborate
 from twin.store.models import CanonicalClaim, ExtractorVersion, StoreClaim, ClaimType
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.sense.sensory.percept import Percept
 from .analysis_dossier import AnalysisDossier, compile_window_dossier
 
@@ -83,7 +83,7 @@ def _window_key(vault_id: str, project_id: Optional[str], window) -> str:
 
 
 def _ensure_pattern_percept(
-    store: MemoryStore, dossier: AnalysisDossier, claim: Any, wkey: str,
+    store: TwinStore, dossier: AnalysisDossier, claim: Any, wkey: str,
 ) -> str:
     basis = claim.canonical_claim or {"t": claim.title}
     digest = hashlib.sha256(
@@ -118,7 +118,7 @@ def _ensure_pattern_percept(
 
 
 def pattern_reflect(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,

@@ -49,7 +49,7 @@ def interpret(percept: Percept, masked_text: str, cfg: Config) -> Interpretation
         seen.add(key)
         title = sentence if len(sentence) <= 90 else sentence[:87] + "..."
         items.append(InterpretedItem(
-            memory_type="fact",                 # the null category — no analysis
+            claim_type="fact",                 # the null category — no analysis
             cognitive_act=CognitiveAct.statement,
             title=title, summary=sentence,
             domain=percept.privacy_hints.get(

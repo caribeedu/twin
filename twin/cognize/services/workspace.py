@@ -28,7 +28,7 @@ from twin.config import UNCLASSIFIED_DOMAIN, Config
 from twin.sense.connectors.errors import sanitize_error
 from twin.privacy.firewall import Firewall
 from twin.store.embeddings import Embedder
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 from twin.sense.sensory.percept import Percept
 from .observer import observe, read_context
@@ -117,7 +117,7 @@ def _blocked_concurrent(record: WorkspaceTickRecord) -> WorkspaceTickResult:
 
 
 def _lookup_existing_tick(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     session_id: str,
     sequence: Optional[int],
@@ -145,7 +145,7 @@ def _lookup_existing_tick(
 
 
 def _fail_tick(
-    store: MemoryStore,
+    store: TwinStore,
     tick: WorkspaceTickRecord,
     *,
     stage: str,
@@ -168,7 +168,7 @@ def _fail_tick(
 
 
 def workspace_tick(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     current_text: str,

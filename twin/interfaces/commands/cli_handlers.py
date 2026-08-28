@@ -379,7 +379,7 @@ def cmd_review_batch(args) -> None:
 
 def _narrative_lifecycle(args) -> None:
     from twin.interfaces import ux
-    from twin.store.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
+    from twin.store.lifecycle import archive_claim, merge_claims, split_memory, undo_operation
 
     from twin.store.provenance import claim_provenance
 
@@ -399,7 +399,7 @@ def _narrative_lifecycle(args) -> None:
             "b": {"id": b.id, "title": b.title, "summary": b.summary},
         }, pretty)
     elif args.narrative_command == "merge":
-        result = merge_memories(ws.store, args.ids, embedder=ws.embedder)
+        result = merge_claims(ws.store, args.ids, embedder=ws.embedder)
         merged = result.extras.get("merged_id")
 
         def pretty():
@@ -428,7 +428,7 @@ def _narrative_lifecycle(args) -> None:
 
         _emit(args, prov, pretty)
     elif args.narrative_command == "archive":
-        result = archive_memory(ws.store, args.claim_id)
+        result = archive_claim(ws.store, args.claim_id)
 
         def pretty():
             ux.print_rule("narrative archive")

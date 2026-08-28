@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 
-def run_integrity_checks(store: MemoryStore) -> dict[str, Any]:
+def run_integrity_checks(store: TwinStore) -> dict[str, Any]:
     problems: list[str] = []
     stats: dict[str, int] = {}
 

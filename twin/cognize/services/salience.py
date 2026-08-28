@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from twin.store.models import INACTIVE_STATUSES
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 
 @dataclass
@@ -28,7 +28,7 @@ def _clamp(x: float) -> float:
 
 
 def score_memories(
-    store: MemoryStore,
+    store: TwinStore,
     claim_ids: list[str],
     *,
     query_text: str = "",

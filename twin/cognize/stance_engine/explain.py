@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 
 def explain_judgment_snapshot(
-    store: MemoryStore, snapshot_id: str,
+    store: TwinStore, snapshot_id: str,
 ) -> dict[str, Any]:
     """Link a JudgmentSnapshot to applied revisions and influenced memories."""
     if not hasattr(store, "get_judgment_snapshot"):

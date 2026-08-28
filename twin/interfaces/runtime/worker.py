@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 from twin.clock import now_iso
 from twin.config import Config
 from twin.store.embeddings import Embedder
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.interfaces.runtime.handlers import HandlerError, dispatch
 from twin.interfaces.runtime.models import ErrorClass, RuntimeJob
 from twin.interfaces.runtime.queue import RuntimeQueue
@@ -43,7 +43,7 @@ class RuntimeWorker:
 
     def __init__(
         self,
-        store: MemoryStore,
+        store: TwinStore,
         cfg: Config,
         embedder: Embedder,
         *,
@@ -153,7 +153,7 @@ class RuntimeWorker:
 
 
 def run_worker_pool(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,

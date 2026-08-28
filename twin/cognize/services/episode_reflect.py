@@ -30,7 +30,7 @@ from twin.store.embeddings import Embedder
 from twin.store.formation import propose_or_corroborate
 from twin.store.models import CanonicalClaim, ExtractorVersion, StoreClaim, ClaimType
 from twin.store.search import search
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.sense.sensory.percept import Percept
 from .correlation.models import EpisodeLinkStatus
 from .correlation.text import rich_excerpt
@@ -54,12 +54,21 @@ class EpisodeBrief:
     edges: list[dict[str, Any]] = field(default_factory=list)
     quotes_by_ref: dict[str, str] = field(default_factory=dict)
     percept_by_ref: dict[str, str] = field(default_factory=dict)
-    related_memories: list[dict[str, Any]] = field(default_factory=list)
+    related_claims: list[dict[str, Any]] = field(default_factory=list)
     # Rich cross-sense context compiled by the Analysis Context Compiler.
     # Optional so a compile failure degrades to the structural brief.
     dossier: Optional[Any] = None
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
+
+    @property
+    def related_memories(self) -> list[dict[str, Any]]:
+        """Deprecated alias of ``related_claims``."""
+        return self.related_claims
+
+    @related_memories.setter
+    def related_memories(self, value: list[dict[str, Any]]) -> None:
+        self.related_claims = list(value) if value is not None else []
 
 
 @dataclass
@@ -113,7 +122,7 @@ def set_reflect_override(fn: Optional[ReflectorFn]) -> None:
 # -- brief construction ---------------------------------------------------
 
 
-def build_episode_brief(store: MemoryStore, episode_id: str) -> Optional[EpisodeBrief]:
+def build_episode_brief(store: TwinStore, episode_id: str) -> Optional[EpisodeBrief]:
     ep = store.get_work_episode(episode_id)
     if ep is None:
         return None
@@ -207,7 +216,7 @@ _SESSION_ARTIFACT_KINDS = frozenset({
 
 
 def gather_session_artifacts(
-    store: MemoryStore,
+    store: TwinStore,
     brief: EpisodeBrief,
     *,
     limit: int = 8,
@@ -270,8 +279,8 @@ def gather_session_artifacts(
     return out
 
 
-def gather_related_memories(
-    store: MemoryStore,
+def gather_related_claims(
+    store: TwinStore,
     embedder: Embedder,
     brief: EpisodeBrief,
     *,
@@ -319,6 +328,10 @@ def gather_related_memories(
     # Session intent first — the model should see live dogfood notes before
     # older vault neighbors that often dominate lexical search.
     return session_hits + mem_hits
+
+
+# Deprecated alias — prefer gather_related_claims.
+gather_related_memories = gather_related_claims
 
 
 # -- reflectors -----------------------------------------------------------
@@ -377,7 +390,7 @@ def _has_arc(brief: EpisodeBrief) -> bool:
 
 
 def reflect_episode(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     episode_id: str,
@@ -424,9 +437,9 @@ def reflect_episode(
         dossier = None
     if dossier is not None:
         brief.dossier = dossier
-        brief.related_memories = list(dossier.related_memories)
+        brief.related_claims = list(dossier.related_claims)
     else:
-        brief.related_memories = gather_related_memories(
+        brief.related_claims = gather_related_claims(
             store, embedder, brief, session_id=session_id,
         )
 
@@ -561,7 +574,7 @@ def _claim_key(brief: EpisodeBrief, claim: TrajectoryClaim) -> str:
 
 
 def _ensure_derived_percept(
-    store: MemoryStore, brief: EpisodeBrief, claim: TrajectoryClaim,
+    store: TwinStore, brief: EpisodeBrief, claim: TrajectoryClaim,
 ) -> str:
     """Create (or reuse) the Derived percept that grounds a trajectory claim.
 
@@ -598,7 +611,7 @@ def _ensure_derived_percept(
 
 
 def _attach_extra_evidence(
-    store: MemoryStore, claim_id: str, claim: TrajectoryClaim, primary_pid: str,
+    store: TwinStore, claim_id: str, claim: TrajectoryClaim, primary_pid: str,
     *, episode_id: str,
 ) -> None:
     from twin.store.provenance import attach_corroborating_evidence
@@ -626,7 +639,7 @@ def _attach_extra_evidence(
 
 
 def _attach_cross_sense_evidence(
-    store: MemoryStore, claim_id: str, claim: TrajectoryClaim, brief: EpisodeBrief,
+    store: TwinStore, claim_id: str, claim: TrajectoryClaim, brief: EpisodeBrief,
 ) -> None:
     """Attach model-cited cross-sense neighbors as independent evidence.
 

@@ -1,16 +1,17 @@
 """Store — persistence, search, embeddings.
 
 Product nouns remain Narrative / Stance / Evidence. This package is the
-storage facade (``MemoryStore`` contract + backends under ``twin.store.store``).
+storage facade (``TwinStore`` contract + backends under ``twin.store.store``).
+``MemoryStore`` remains a deprecated alias.
 """
 
 from .models import (
     ClaimStatus, ClaimType, Entity, Evidence, Relation, Sensitivity,
     StoreClaim,
 )
-from .store import MemoryStore, create_store
+from .store import MemoryStore, TwinStore, create_store
 
 __all__ = [
     "Entity", "Evidence", "StoreClaim", "ClaimStatus", "ClaimType",
-    "Relation", "Sensitivity", "MemoryStore", "create_store",
+    "Relation", "Sensitivity", "TwinStore", "MemoryStore", "create_store",
 ]

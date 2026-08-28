@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import DeletionMode, DeletionRequest, DeletionStatus
 
 PREVIEW_UI_CAP = 50
@@ -49,7 +49,7 @@ def _evidence_touches_selector(ev: Any, selector: dict[str, Any]) -> bool:
     return False
 
 
-def _match_memories(store: MemoryStore, selector: dict[str, Any]) -> list[Any]:
+def _match_memories(store: TwinStore, selector: dict[str, Any]) -> list[Any]:
     artifact_id = selector.get("artifact_id")
     source_account = selector.get("source_account")
     domain = selector.get("domain")
@@ -85,7 +85,7 @@ def _match_memories(store: MemoryStore, selector: dict[str, Any]) -> list[Any]:
 
 
 def _plan_memory_actions(
-    store: MemoryStore,
+    store: TwinStore,
     mem: Any,
     selector: dict[str, Any],
     *,
@@ -136,7 +136,7 @@ def _plan_memory_actions(
 
 
 def _build_manifest(
-    store: MemoryStore,
+    store: TwinStore,
     matched: list[Any],
     selector: dict[str, Any],
     *,
@@ -207,7 +207,7 @@ def _build_manifest(
 
 
 def preview_deletion(
-    store: MemoryStore,
+    store: TwinStore,
     selector: dict[str, Any],
     *,
     mode: DeletionMode = DeletionMode.delete,
@@ -268,7 +268,7 @@ def preview_deletion(
 
 
 def execute_deletion(
-    store: MemoryStore,
+    store: TwinStore,
     deletion_id: str,
     *,
     confirm: bool = False,
@@ -458,7 +458,7 @@ def execute_deletion(
 
 
 def retry_deletion_residuals(
-    store: MemoryStore,
+    store: TwinStore,
     deletion_id: str,
     *,
     confirm: bool = False,

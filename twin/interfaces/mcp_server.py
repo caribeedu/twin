@@ -181,7 +181,7 @@ def create_server(home: Optional[str] = None):
         task_profile: str = "general",
         project: Optional[str] = None,
         persona: str = "individual",
-        purpose: str = "memory_retrieval",
+        purpose: str = "context_retrieval",
         audience: str = "self",
         mode: str = "compact",
         session_id: Optional[str] = None,
@@ -741,8 +741,8 @@ def create_server(home: Optional[str] = None):
         """Archive a claim (removed from default retrieval). Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from twin.store.lifecycle import archive_memory
-        result = archive_memory(ws.store, claim_id)
+        from twin.store.lifecycle import archive_claim
+        result = archive_claim(ws.store, claim_id)
         return json.dumps({"action": result.action, "operation_id": result.operation_id})
 
     @mcp.tool()
@@ -760,7 +760,7 @@ def create_server(home: Optional[str] = None):
         """
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply", "preview": claim_ids})
-        from twin.store.lifecycle import merge_memories
+        from twin.store.lifecycle import merge_claims
         kwargs: dict = {
             "title": title, "summary": summary, "embedder": ws.embedder,
             "confirm_cross_scope_merge": confirm_cross_scope_merge,
@@ -770,7 +770,7 @@ def create_server(home: Optional[str] = None):
         if output_project_id is not None:
             kwargs["output_project_id"] = output_project_id
         try:
-            result = merge_memories(ws.store, claim_ids, **kwargs)
+            result = merge_claims(ws.store, claim_ids, **kwargs)
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
         return json.dumps({"merged_id": result.extras.get("merged_id"),
@@ -879,7 +879,7 @@ def create_server(home: Optional[str] = None):
     def privacy_evaluate(
         claim_ids: Optional[list[str]] = None,
         persona: str = "individual",
-        purpose: str = "memory_retrieval",
+        purpose: str = "context_retrieval",
         audience: str = "self",
     ) -> str:
         """Evaluate privacy policies for memories under the MCP process identity

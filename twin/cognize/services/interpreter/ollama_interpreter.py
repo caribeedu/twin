@@ -43,7 +43,7 @@ For every item you catalogue, decide the COGNITIVE ACT that produced it:
   owner — attribute it, never adopt it as the user's own knowledge;
 - statement: a plain factual assertion by the author.
 
-Then classify memory_type. Choose by what the item IS, not by the artifact it
+Then classify claim_type. Choose by what the item IS, not by the artifact it
 came from. Use these definitions and discriminators:
 - decision: a settled choice the parties made ("we chose Postgres over Mongo").
 - task: an assigned or self-committed FUTURE obligation with an owner — someone
@@ -258,11 +258,14 @@ def _coerce_item(raw: dict) -> Optional[InterpretedItem]:
         return None
     data = dict(raw)
 
-    mem_type = str(data.get("memory_type") or "fact").strip().lower().replace(" ", "_")
+    mem_type = str(
+        data.get("claim_type") or data.get("memory_type") or "fact"
+    ).strip().lower().replace(" ", "_")
     mem_type = _TYPE_ALIASES.get(mem_type.replace("_", " "), _TYPE_ALIASES.get(mem_type, mem_type))
     if mem_type not in INTERPRETATION_TYPES:
         mem_type = "fact"
-    data["memory_type"] = mem_type
+    data["claim_type"] = mem_type
+    data.pop("memory_type", None)
 
     act_raw = str(data.get("cognitive_act") or "statement").strip().lower().replace(" ", "_")
     act = _ACT_ALIASES.get(act_raw.replace("_", "-"), _ACT_ALIASES.get(act_raw))

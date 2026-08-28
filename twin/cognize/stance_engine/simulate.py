@@ -10,13 +10,13 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .application import applicable_pack, record_trace
 from .models import AppliedJudgmentEffect, JudgmentContext
 
 
 def evaluate(
-    store: MemoryStore,
+    store: TwinStore,
     query: str,
     *,
     domain: str = "technical",
@@ -136,7 +136,7 @@ def evaluate(
     }
 
 
-def simulate(store: MemoryStore, query: str, **kwargs: Any) -> dict[str, Any]:
+def simulate(store: TwinStore, query: str, **kwargs: Any) -> dict[str, Any]:
     """Persisting simulation for user-facing recommendations."""
     kwargs = dict(kwargs)
     kwargs["persist"] = True
@@ -144,7 +144,7 @@ def simulate(store: MemoryStore, query: str, **kwargs: Any) -> dict[str, Any]:
 
 
 def counterfactual(
-    store: MemoryStore,
+    store: TwinStore,
     query: str,
     judgment_id: str,
     **kwargs: Any,

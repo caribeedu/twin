@@ -492,7 +492,7 @@ def test_vault_persona_enforced(store, embedder):
     # individual must not read vault_work
     req = AccessRequest(
         principal_id="principal_local_cli",
-        persona="individual", purpose="memory_retrieval",
+        persona="individual", purpose="context_retrieval",
         audience="self", tool_id="local-cli",
     )
     result = evaluate_access(store, req, [mem], persist=True)
@@ -715,7 +715,7 @@ def test_unregistered_principal_denied_for_vault_general(store, embedder):
     )
     req = AccessRequest(
         principal_id="ghost",
-        persona="individual", purpose="memory_retrieval",
+        persona="individual", purpose="context_retrieval",
         audience="self", tool_id="local-cli",
     )
     rd = evaluate_access(store, req, [mem], persist=True)["decision"].resource_decisions[0]
@@ -836,7 +836,7 @@ def test_project_scope_requires_matching_project_id(store, embedder):
         store,
         AccessRequest(
             principal_id="p_proj", persona="individual",
-            purpose="memory_retrieval", audience="self", tool_id="local-cli",
+            purpose="context_retrieval", audience="self", tool_id="local-cli",
             project_id=None,
         ),
         [mem], persist=True,
@@ -847,7 +847,7 @@ def test_project_scope_requires_matching_project_id(store, embedder):
         store,
         AccessRequest(
             principal_id="p_proj", persona="individual",
-            purpose="memory_retrieval", audience="self", tool_id="local-cli",
+            purpose="context_retrieval", audience="self", tool_id="local-cli",
             project_id="twin",
         ),
         [mem], persist=True,

@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import (
     AccessRequest,
     ClientBinding,
@@ -31,6 +31,27 @@ from .models import (
     Vault,
 )
 from .yaml_io import resolve_tool
+
+# Deprecated product purpose → canonical name (old clients / stored allowlists).
+PURPOSE_ALIASES: dict[str, str] = {
+    "memory_retrieval": "context_retrieval",
+}
+DEFAULT_PURPOSE = "context_retrieval"
+
+
+def normalize_purpose(purpose: str) -> str:
+    """Map deprecated purpose strings onto the canonical product name."""
+    return PURPOSE_ALIASES.get(purpose, purpose)
+
+
+def purpose_allowed(purpose: str, allowed: list[str] | tuple[str, ...] | set[str]) -> bool:
+    """True when ``purpose`` (or its alias) is covered by ``allowed`` (or ``*``)."""
+    if not allowed:
+        return True
+    if "*" in allowed:
+        return True
+    wanted = normalize_purpose(purpose)
+    return any(normalize_purpose(p) == wanted for p in allowed)
 
 
 LOCAL_SURFACES = frozenset({"cli", "local-cli", "twin-cli"})
@@ -126,7 +147,7 @@ def restricted_access(
 def resolve_execution_location(
     tool_id: str,
     *,
-    store: Optional[MemoryStore] = None,
+    store: Optional[TwinStore] = None,
     claimed: Optional[str] = None,
 ) -> str:
     """Client claims are never authority. Unknown tool → unknown (not local)."""
@@ -165,7 +186,7 @@ def intersect_capabilities(
 
 
 def register_client_binding(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     client_id: str,
     tool_id: str,
@@ -195,7 +216,7 @@ def register_client_binding(
         credential_hash=hash_credential(credential) if credential else None,
         capabilities=list(capabilities or []),
         allowed_personas=list(allowed_personas or ["individual"]),
-        allowed_purposes=list(allowed_purposes or ["memory_retrieval", "task_execution", "*"]),
+        allowed_purposes=list(allowed_purposes or ["context_retrieval", "task_execution", "*"]),
         allowed_audiences=list(allowed_audiences or ["self"]),
         allowed_vaults=list(allowed_vaults or ["vault_general"]),
         created_at=now_iso(),
@@ -206,7 +227,7 @@ def register_client_binding(
 
 
 def resolve_access(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     surface: str,
     client: Optional[str] = None,
@@ -322,7 +343,7 @@ def resolve_access(
 
 
 def _find_binding(
-    store: MemoryStore,
+    store: TwinStore,
     client_key: Optional[str],
     api_token: Optional[str],
     *,
@@ -357,7 +378,7 @@ def _find_binding(
 
 def _apply_allowlists(
     *,
-    store: MemoryStore,
+    store: TwinStore,
     principal: Principal,
     tool_id: str,
     persona: Optional[str],
@@ -376,7 +397,7 @@ def _apply_allowlists(
         binding.allowed_personas if binding else None,
     )
     allowed_purposes = intersect_allowlists(
-        principal.allowed_purposes or ["memory_retrieval", "task_execution"],
+        principal.allowed_purposes or ["context_retrieval", "task_execution"],
         binding.allowed_purposes if binding else None,
     )
     allowed_audiences = intersect_allowlists(
@@ -403,7 +424,7 @@ def _apply_allowlists(
         requested_persona = "individual"
     else:
         requested_persona = allowed_personas[0]
-    requested_purpose = purpose or "memory_retrieval"
+    requested_purpose = normalize_purpose(purpose or DEFAULT_PURPOSE)
     requested_audience = audience or "self"
 
     if allowed_personas and requested_persona not in allowed_personas and "*" not in allowed_personas:
@@ -411,11 +432,7 @@ def _apply_allowlists(
             project_id=project_id, session_id=session_id,
             requested_domains=requested_domains, claims=claims,
         )
-    if (
-        allowed_purposes
-        and requested_purpose not in allowed_purposes
-        and "*" not in allowed_purposes
-    ):
+    if allowed_purposes and not purpose_allowed(requested_purpose, allowed_purposes):
         return restricted_access(
             project_id=project_id, session_id=session_id,
             requested_domains=requested_domains, claims=claims,
@@ -479,7 +496,7 @@ def _apply_allowlists(
 
 
 def _authenticated_local(
-    surface: str, api_token: Optional[str], store: MemoryStore,
+    surface: str, api_token: Optional[str], store: TwinStore,
 ) -> bool:
     if surface in LOCAL_SURFACES:
         return True
@@ -570,7 +587,7 @@ def principal_has_capability(
 
 
 def validate_vault_access(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     vault_id: str,
     persona: str,
@@ -598,7 +615,7 @@ def validate_vault_access(
 
 
 def active_consent_covers(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     subject_ids: list[str],
     purpose: str,
@@ -615,7 +632,7 @@ def active_consent_covers(
     for c in store.list_consents(status=ConsentStatus.active.value):
         if c.subject_id not in subject_ids and c.subject_id != "*":
             continue
-        if c.purposes and purpose not in c.purposes and "*" not in c.purposes:
+        if c.purposes and not purpose_allowed(purpose, c.purposes):
             continue
         if c.allowed_tools:
             tools = set(c.allowed_tools)
@@ -639,7 +656,7 @@ def active_consent_covers(
     return False
 
 
-def ensure_local_identity(store: MemoryStore) -> Principal:
+def ensure_local_identity(store: TwinStore) -> Principal:
     """Admin/bootstrap helper — create local CLI principal + vaults if missing."""
     for vid, personas in DEFAULT_VAULT_PERSONAS.items():
         if hasattr(store, "get_vault") and store.get_vault(vid) is None:
@@ -679,7 +696,7 @@ def ensure_local_identity(store: MemoryStore) -> Principal:
             "individual", "developer", "employee", "assistant_user",
             "tech_lead", "personal_project_builder", "private_individual", "global",
         ],
-        allowed_purposes=["*", "memory_retrieval", "task_execution", "financial_planning",
+        allowed_purposes=["*", "context_retrieval", "task_execution", "financial_planning",
                           "personal_planning", "debugging"],
         allowed_audiences=["self", "local"],
         allowed_vaults=list(DEFAULT_VAULT_PERSONAS.keys()),

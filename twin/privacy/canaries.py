@@ -7,12 +7,12 @@ from typing import Optional
 
 from .. import ids
 from ..clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import LeakageCanary
 
 
 def place_canary(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     vault_id: str = "vault_general",
     placed_in: Optional[list[str]] = None,
@@ -30,13 +30,13 @@ def place_canary(
     return canary
 
 
-def active_canary_tokens(store: MemoryStore) -> list[str]:
+def active_canary_tokens(store: TwinStore) -> list[str]:
     if not hasattr(store, "list_leakage_canaries"):
         return []
     return [c.token for c in store.list_leakage_canaries(active=True)]
 
 
-def scan_for_canaries(store: MemoryStore, text: str) -> list[str]:
+def scan_for_canaries(store: TwinStore, text: str) -> list[str]:
     """Return canary tokens found in text (leakage)."""
     found = []
     for token in active_canary_tokens(store):

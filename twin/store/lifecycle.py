@@ -13,7 +13,7 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from .models import Evidence, StoreClaim, ClaimStatus, Relation
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 
 @dataclass
@@ -30,7 +30,7 @@ def _snapshot(mem: StoreClaim) -> dict[str, Any]:
     return mem.model_dump(mode="json")
 
 
-def _restore_memory_fields(store: MemoryStore, claim_id: str, snap: dict[str, Any]) -> None:
+def _restore_memory_fields(store: TwinStore, claim_id: str, snap: dict[str, Any]) -> None:
     store.update_claim(
         claim_id,
         title=snap.get("title"),
@@ -60,7 +60,7 @@ def _restore_memory_fields(store: MemoryStore, claim_id: str, snap: dict[str, An
     )
 
 
-def _capture_embedding(store: MemoryStore, claim_id: str) -> Optional[dict[str, Any]]:
+def _capture_embedding(store: TwinStore, claim_id: str) -> Optional[dict[str, Any]]:
     if not hasattr(store, "get_embedding_blob"):
         return None
     got = store.get_embedding_blob(claim_id)  # type: ignore[attr-defined]
@@ -70,7 +70,7 @@ def _capture_embedding(store: MemoryStore, claim_id: str) -> Optional[dict[str, 
     return {"ref_id": claim_id, "model": model, "blob": blob.hex()}
 
 
-def _restore_embedding(store: MemoryStore, payload: Optional[dict[str, Any]]) -> None:
+def _restore_embedding(store: TwinStore, payload: Optional[dict[str, Any]]) -> None:
     if not payload or not hasattr(store, "restore_embedding_blob"):
         return
     store.restore_embedding_blob(  # type: ignore[attr-defined]
@@ -78,7 +78,7 @@ def _restore_embedding(store: MemoryStore, payload: Optional[dict[str, Any]]) ->
     )
 
 
-def _record_op(store: MemoryStore, operation: str, inputs: list[str],
+def _record_op(store: TwinStore, operation: str, inputs: list[str],
                output: Optional[str], before: dict, after: dict,
                actor: str = "user") -> Optional[str]:
     if not hasattr(store, "insert_operation"):
@@ -99,7 +99,7 @@ def _record_op(store: MemoryStore, operation: str, inputs: list[str],
     return op.id
 
 
-def supersede(store: MemoryStore, new_id: str, old_id: str,
+def supersede(store: TwinStore, new_id: str, old_id: str,
               actor: str = "user") -> LifecycleResult:
     new_mem = store.get_claim(new_id)
     old_mem = store.get_claim(old_id)
@@ -140,7 +140,7 @@ def supersede(store: MemoryStore, new_id: str, old_id: str,
     return LifecycleResult("supersede", new_id, old_id, relation_id, op_id)
 
 
-def contradict(store: MemoryStore, claim_id: str, contradicted_id: str,
+def contradict(store: TwinStore, claim_id: str, contradicted_id: str,
                actor: str = "user") -> LifecycleResult:
     mem = store.get_claim(claim_id)
     other = store.get_claim(contradicted_id)
@@ -272,8 +272,8 @@ def _resolve_merge_semantics(
     }
 
 
-def merge_memories(
-    store: MemoryStore,
+def merge_claims(
+    store: TwinStore,
     claim_ids: list[str],
     *,
     title: Optional[str] = None,
@@ -429,15 +429,15 @@ def merge_memories(
     )
 
 
-def split_memory(
-    store: MemoryStore,
+def split_claim(
+    store: TwinStore,
     claim_id: str,
     parts: list[dict[str, Any]],
     *,
     actor: str = "user",
     embedder=None,
 ) -> LifecycleResult:
-    """Split a compound memory. Each part may declare ``evidence_ids`` it owns.
+    """Split a compound claim. Each part may declare ``evidence_ids`` it owns.
 
     Without an evidence map, children stay candidates with
     ``evidence_mapping_required`` and only contextual (non-supporting) copies.
@@ -561,7 +561,7 @@ def split_memory(
     )
 
 
-def archive_memory(store: MemoryStore, claim_id: str, *,
+def archive_claim(store: TwinStore, claim_id: str, *,
                    reason: str = "archived", actor: str = "user") -> LifecycleResult:
     mem = store.get_claim(claim_id)
     if mem is None:
@@ -587,7 +587,7 @@ def archive_memory(store: MemoryStore, claim_id: str, *,
     return LifecycleResult("archive", claim_id, claim_id, "", op_id)
 
 
-def undo_operation(store: MemoryStore, operation_id: str) -> dict[str, Any]:
+def undo_operation(store: TwinStore, operation_id: str) -> dict[str, Any]:
     """Fully reverse a recorded structural operation inside one transaction."""
     if not hasattr(store, "get_operation"):
         raise ValueError("store does not support operations")
@@ -653,3 +653,9 @@ def undo_operation(store: MemoryStore, operation_id: str) -> dict[str, Any]:
             store.mark_operation_undone(operation_id)  # type: ignore[attr-defined]
 
     return {"undone": operation_id, "operation": op.operation}
+
+
+# Deprecated aliases — prefer merge_claims / archive_claim / split_claim.
+merge_memories = merge_claims
+archive_memory = archive_claim
+split_memory = split_claim

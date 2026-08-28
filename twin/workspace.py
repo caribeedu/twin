@@ -10,7 +10,7 @@ from .config import Config, load_config
 from .privacy.firewall import Firewall
 from .store.crypto import build_codec
 from .store.embeddings import Embedder, get_embedder_for_config
-from .store.store import MemoryStore, create_store
+from .store.store import TwinStore, create_store
 
 
 class Workspace:
@@ -18,7 +18,7 @@ class Workspace:
         self.cfg: Config = load_config(home)
         self.cfg.ensure_home()
         codec = build_codec(self.cfg.encryption_key, self.cfg.home)
-        self.store: MemoryStore = create_store(self.cfg.resolved_db_url, codec=codec)
+        self.store: TwinStore = create_store(self.cfg.resolved_db_url, codec=codec)
         self.embedder: Embedder = get_embedder_for_config(self.cfg)
         # Record LLM token/cost usage to the home ledger (idempotent per home).
         try:

@@ -21,7 +21,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from twin.config import ALL_DOMAINS
 from ..schema import CLAIM_TYPES, SENSITIVITIES, ExtractedClaim, ExtractedRelation
@@ -65,7 +65,7 @@ INTERPRETATION_TYPES = CLAIM_TYPES + ["rejected_alternative"]
 class InterpretedItem(BaseModel):
     """One catalogued unit of meaning, grounded in the source."""
 
-    memory_type: str
+    claim_type: str
     cognitive_act: CognitiveAct = CognitiveAct.statement
     title: str
     summary: str
@@ -90,32 +90,48 @@ class InterpretedItem(BaseModel):
     # A short note when the item is genuinely ambiguous (competing readings).
     ambiguity: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_memory_type_alias(cls, data: Any) -> Any:
+        """Prefer ``claim_type``; still accept LLM/legacy JSON ``memory_type``."""
+        if isinstance(data, dict):
+            data = dict(data)
+            if data.get("claim_type") in (None, "") and data.get("memory_type") not in (None, ""):
+                data["claim_type"] = data["memory_type"]
+            data.pop("memory_type", None)
+        return data
+
+    @property
+    def memory_type(self) -> str:
+        """Deprecated alias of ``claim_type`` (transitional reads)."""
+        return self.claim_type
+
     def resolved_type(self) -> tuple[str, bool]:
-        """(memory_type, is_rejected_alternative) after normalization.
+        """(claim_type, is_rejected_alternative) after normalization.
 
         Invalid types raise — callers must validate before conversion.
         """
-        if self.memory_type == "rejected_alternative":
+        if self.claim_type == "rejected_alternative":
             return "decision", True
-        if self.memory_type not in CLAIM_TYPES:
+        if self.claim_type not in CLAIM_TYPES:
             raise ValueError(
-                f"invalid memory_type {self.memory_type!r}; "
+                f"invalid claim_type {self.claim_type!r}; "
                 f"allowed={list(INTERPRETATION_TYPES)}"
             )
-        return self.memory_type, False
+        return self.claim_type, False
 
     def to_extracted(self) -> ExtractedClaim:
         """Bridge to the persistence-facing schema, preserving the cognitive
         act, attribution and unresolved references in the payload so nothing
         the interpreter established is lost on the way to storage.
 
-        Requires a validated item: invalid ``memory_type`` / ``domain`` raise
+        Requires a validated item: invalid ``claim_type`` / ``domain`` raise
         instead of silently becoming ``fact`` / ``technical``. Governance may
         remap an unrecognized domain to ``unknown`` *before* calling this.
         """
-        if self.memory_type not in INTERPRETATION_TYPES:
+        if self.claim_type not in INTERPRETATION_TYPES:
             raise ValueError(
-                f"invalid memory_type {self.memory_type!r}; "
+                f"invalid claim_type {self.claim_type!r}; "
                 f"allowed={list(INTERPRETATION_TYPES)}"
             )
         if self.domain not in ALL_DOMAINS and self.domain != "unknown":
@@ -203,7 +219,7 @@ INTERPRETATION_JSON_SCHEMA: dict = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "memory_type": {"type": "string", "enum": INTERPRETATION_TYPES},
+                    "claim_type": {"type": "string", "enum": INTERPRETATION_TYPES},
                     "cognitive_act": {
                         "type": "string",
                         "enum": [a.value for a in CognitiveAct],
@@ -247,7 +263,7 @@ INTERPRETATION_JSON_SCHEMA: dict = {
                     "ambiguity": {"type": ["string", "null"]},
                 },
                 "required": [
-                    "memory_type", "cognitive_act", "title", "summary",
+                    "claim_type", "cognitive_act", "title", "summary",
                     "domain", "sensitivity", "confidence", "entities",
                     "evidence_span",
                 ],

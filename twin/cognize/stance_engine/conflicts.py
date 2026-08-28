@@ -12,7 +12,7 @@ from typing import Optional
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import ConflictStatus, ConflictType, JudgmentConflict
 from .versions import active_items
 
@@ -27,7 +27,7 @@ _OPPOSING = [
 ANALYZER = "conflict-v1"
 
 
-def detect_judgment_conflicts(store: MemoryStore) -> list[JudgmentConflict]:
+def detect_judgment_conflicts(store: TwinStore) -> list[JudgmentConflict]:
     items = active_items(store)
     found: list[JudgmentConflict] = []
     for i, a in enumerate(items):
@@ -67,7 +67,7 @@ def detect_judgment_conflicts(store: MemoryStore) -> list[JudgmentConflict]:
 
 
 def detect_behavior_conflicts(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     domain: str = "technical",
     min_exceptions: int = 3,
@@ -122,7 +122,7 @@ def detect_behavior_conflicts(
 
 
 def resolve_conflict(
-    store: MemoryStore,
+    store: TwinStore,
     conflict_id: str,
     *,
     resolution: str,

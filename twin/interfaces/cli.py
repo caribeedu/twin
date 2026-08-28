@@ -7,15 +7,15 @@
  twin search "query" [--domain d] hybrid search
  twin pack "task" [--domain d] build a safe context pack (confirmed only;
  --include-candidates to loosen)
- twin observe "current text" memory observer suggestion
- twin workspace tick "text" parallel memory tick (recall + optional interpret)
+ twin observe "current text" Inject Observer suggestion
+ twin workspace tick "text" workspace tick (recall + optional interpret)
  twin consolidate daily|weekly scheduled consolidation cycle
  twin runtime start|status|enqueue|job|retry|cancel durable cognitive runtime
  (live processing panel on start; session_domain_resolve / session_complete)
  twin promote <claim_id> propose promoting into Stance
- twin supersede <new_id> <old_id> new memory replaces the old one
- twin contradict <id_a> <id_b> flag two memories as contradictory
- twin stats memory + product quality metrics
+ twin supersede <new_id> <old_id> newer claim supersedes older
+ twin contradict <id_a> <id_b> flag two claims as contradictory
+ twin stats claim + product quality metrics
  twin reindex regenerate embeddings with the current embedder
  twin session start "task" open a cognitive session (context pack + tracking)
  twin session observe <id> ... record artifacts produced during the work
@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> None:
     _add_json_flag(p)
     p.set_defaults(func=cmd_delete_source)
 
-    p = sub.add_parser("undo", help="undo a recorded memory operation")
+    p = sub.add_parser("undo", help="undo a recorded claim operation")
     p.add_argument("operation_id")
     _add_json_flag(p)
     p.set_defaults(func=cmd_undo)
@@ -220,17 +220,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--domain", default="technical")
     p.add_argument("--max-tokens", type=int, default=1200)
     p.add_argument("--include-candidates", action="store_true",
-                   help="also pack unreviewed candidate memories (off by default)")
+                   help="also pack unreviewed candidate claims (off by default)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_pack)
 
-    p = sub.add_parser("observe", help="memory observer suggestion")
+    p = sub.add_parser("observe", help="Inject Observer suggestion")
     p.add_argument("text")
     p.add_argument("--domain", default=None)
     _add_json_flag(p)
     p.set_defaults(func=cmd_observe)
 
-    p = sub.add_parser("workspace", help="parallel memory workspace ")
+    p = sub.add_parser("workspace", help="Cognize workspace ticks")
     wss = p.add_subparsers(dest="workspace_command", required=True)
     wt = wss.add_parser("tick", help="one observation/recall tick")
     wt.add_argument("text")
@@ -322,7 +322,7 @@ def main(argv: list[str] | None = None) -> None:
     _add_json_flag(preidx)
     preidx.set_defaults(func=cmd_reindex)
 
-    p = sub.add_parser("promote", help="propose promoting a memory into judgment")
+    p = sub.add_parser("promote", help="propose promoting a claim into Stance")
     p.add_argument("claim_id")
     _add_json_flag(p)
     p.set_defaults(func=cmd_promote)
@@ -331,10 +331,11 @@ def main(argv: list[str] | None = None) -> None:
     ps = p.add_subparsers(dest="privacy_command", required=True)
     psim = ps.add_parser("simulate")
     psim.add_argument("--persona", default="individual")
-    psim.add_argument("--purpose", default="memory_retrieval")
+    psim.add_argument("--purpose", default="context_retrieval")
     psim.add_argument("--audience", default="self")
     psim.add_argument("--tool", default="local-cli")
-    psim.add_argument("--memory", action="append", default=[])
+    psim.add_argument("--memory", action="append", default=[],
+                     help="claim id (deprecated flag name; use claim ids)")
     psim.set_defaults(func=cmd_privacy)
     pex = ps.add_parser("explain"); pex.add_argument("decision_id"); pex.set_defaults(func=cmd_privacy)
     ppol = ps.add_parser("bootstrap"); ppol.set_defaults(func=cmd_privacy)
@@ -494,19 +495,19 @@ def main(argv: list[str] | None = None) -> None:
     # every connector command is human-pretty by default with --json for scripts
     _add_json_flag_tree(p)
 
-    p = sub.add_parser("supersede", help="mark a memory as superseding another")
+    p = sub.add_parser("supersede", help="mark a claim as superseding another")
     p.add_argument("new_id")
     p.add_argument("old_id")
     _add_json_flag(p)
     p.set_defaults(func=cmd_supersede)
 
-    p = sub.add_parser("contradict", help="flag two memories as contradictory")
+    p = sub.add_parser("contradict", help="flag two claims as contradictory")
     p.add_argument("id_a")
     p.add_argument("id_b")
     _add_json_flag(p)
     p.set_defaults(func=cmd_contradict)
 
-    pstats = sub.add_parser("stats", help="memory quality metrics")
+    pstats = sub.add_parser("stats", help="claim quality metrics")
     _add_json_flag(pstats)
     pstats.set_defaults(func=cmd_stats)
 
@@ -549,7 +550,7 @@ def main(argv: list[str] | None = None) -> None:
                                         "incorrect", "missing_context",
                                         "privacy_overblock", "privacy_underblock"])
     ps.add_argument("--memory", default=None,
-                    help="a memory this session supplied or created")
+                    help="a claim this session supplied or created")
     ps.add_argument("--note", default=None)
     ps.add_argument("--scope", default=None, choices=["session", "pack", "claim"])
     ps.set_defaults(func=cmd_session_feedback)

@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Optional
 
 from ..crypto import ContentCodec
-from .base import MemoryStore
+from .base import MemoryStore, TwinStore
 
 
-def create_store(url: str, codec: Optional[ContentCodec] = None) -> MemoryStore:
+def create_store(url: str, codec: Optional[ContentCodec] = None) -> TwinStore:
     if url.startswith(("postgres://", "postgresql://")):
         from .postgres import PostgresStore
 
@@ -24,4 +24,4 @@ def create_store(url: str, codec: Optional[ContentCodec] = None) -> MemoryStore:
     raise ValueError(f"Unsupported TWIN_DB_URL: {url!r}")
 
 
-__all__ = ["MemoryStore", "create_store"]
+__all__ = ["TwinStore", "MemoryStore", "create_store"]

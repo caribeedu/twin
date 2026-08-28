@@ -133,6 +133,14 @@ same person over time rather than repeatedly starting from zero. See
 | **Situation Model** (as sole label) | **Situation** (+ Narrative as the durable account) |
 | Understanding as a stored row / table | Understanding as **emergent** (above) |
 | Package names `twin.memory` / `twin.judgment` / `twin.cognition` as product architecture | Target packages in [ARCHITECTURE — Code packages](ARCHITECTURE.md#code-packages-target-layout) |
+| Purpose `memory_retrieval` | `context_retrieval` (alias still accepted) |
+| Store facade `MemoryStore` | `TwinStore` (alias still exported) |
+| Lifecycle `merge_memories` / `archive_memory` | `merge_claims` / `archive_claim` (aliases kept) |
+| REST `/api/memories` | `/api/claims` (memories remains dual-read) |
+| Interpreter JSON `memory_type` | `claim_type` (`memory_type` still accepted) |
+| Connector config `allow_memory_types` | `allow_claim_types` (alias kept) |
+| Metrics `memory_usage_rate` / `false_memory_rate` | `claim_usage_rate` / `false_claim_rate` |
+| `gather_related_memories` / `related_memories` | `gather_related_claims` / `related_claims` |
 
 Academic citations may still say “memory” (paper titles). Everyday speech
 (“Twin remembers”) is fine in conversation; commands, schema, and product

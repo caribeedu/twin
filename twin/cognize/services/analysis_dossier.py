@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from twin.store.embeddings import Embedder
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from . import sense_lenses
 from .correlation.partition import vault_for_record
 from .correlation.projects import resolve_project_for_record
@@ -97,11 +97,20 @@ class AnalysisDossier:
     primary: list[DossierBlob] = field(default_factory=list)
     cross_sense: list[DossierBlob] = field(default_factory=list)
     neighbors: list[dict[str, Any]] = field(default_factory=list)
-    related_memories: list[dict[str, Any]] = field(default_factory=list)
+    related_claims: list[dict[str, Any]] = field(default_factory=list)
     lenses: list[dict[str, Any]] = field(default_factory=list)
     user_stance: list[dict[str, Any]] = field(default_factory=list)
     gaps: list[str] = field(default_factory=list)
     budget: DossierBudget = field(default_factory=DossierBudget)
+
+    @property
+    def related_memories(self) -> list[dict[str, Any]]:
+        """Deprecated alias of ``related_claims``."""
+        return self.related_claims
+
+    @related_memories.setter
+    def related_memories(self, value: list[dict[str, Any]]) -> None:
+        self.related_claims = list(value) if value is not None else []
 
     def senses(self) -> list[str]:
         out: list[str] = []
@@ -154,11 +163,11 @@ class AnalysisDossier:
             lines.append("")
 
         lines.append(
-            "RELATED CONTEXT (vault memories confirmed/candidate/rejected + "
+            "RELATED CONTEXT (vault claims confirmed/candidate/rejected + "
             "open-session artifacts):"
         )
-        if self.related_memories:
-            for rm in self.related_memories:
+        if self.related_claims:
+            for rm in self.related_claims:
                 lines.append(
                     f"  [{rm.get('status')}] {rm.get('id')} "
                     f"type={rm.get('type')} domain={rm.get('domain')}: "
@@ -223,7 +232,7 @@ def _lexical_overlap(a: set[str], b: set[str]) -> float:
 
 
 def _iter_vault_records(
-    store: MemoryStore, vault_id: str,
+    store: TwinStore, vault_id: str,
 ) -> Iterable[Any]:
     """Live connector records in one vault, bounded, newest connectors first."""
     if not hasattr(store, "list_connector_instances"):
@@ -244,7 +253,7 @@ def _iter_vault_records(
     return out
 
 
-def _member_record_ids(store: MemoryStore, episode_id: str) -> tuple[list[Any], set[str]]:
+def _member_record_ids(store: TwinStore, episode_id: str) -> tuple[list[Any], set[str]]:
     """Active connector records that are members of an episode."""
     from .correlation.models import EpisodeLinkStatus
 
@@ -351,7 +360,7 @@ def _fill_budget(
 
 
 def _score_cross_candidate(
-    store: MemoryStore,
+    store: TwinStore,
     rec: Any,
     *,
     focus_tokens: set[str],
@@ -436,7 +445,7 @@ def _diversify_cross_sense(
 
 
 def _gather_cross_sense(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     vault_id: str,
     focus_text: str,
@@ -480,7 +489,7 @@ def _gather_cross_sense(
 
 
 def _related_from_retrieve(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     *,
     query: str,
@@ -523,7 +532,7 @@ def _related_from_retrieve(
 
 
 def _gather_neighbors(
-    store: MemoryStore, *, vault_id: str, project_id: Optional[str],
+    store: TwinStore, *, vault_id: str, project_id: Optional[str],
     exclude_episode_id: Optional[str], limit: int,
 ) -> list[dict[str, Any]]:
     if not project_id or not hasattr(store, "list_work_episodes"):
@@ -549,7 +558,7 @@ def _gather_neighbors(
 
 
 def _gather_user_stance(
-    store: MemoryStore, *, project_id: Optional[str], limit: int,
+    store: TwinStore, *, project_id: Optional[str], limit: int,
 ) -> list[dict[str, Any]]:
     stance_types = ("preference", "procedure", "constraint")
     out: list[dict[str, Any]] = []
@@ -605,7 +614,7 @@ def _compiler_gaps(
 
 
 def compile_episode_dossier(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     episode_id: str,
     *,
@@ -641,7 +650,7 @@ def compile_episode_dossier(
 
 
 def compile_window_dossier(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     *,
     vault_id: str,
@@ -691,7 +700,7 @@ def compile_window_dossier(
 
 
 def _compile(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     *,
     focus: DossierFocus,
@@ -765,7 +774,7 @@ def _compile(
         primary=primary_blobs,
         cross_sense=cross_blobs,
         neighbors=neighbors,
-        related_memories=related,
+        related_claims=related,
         lenses=lenses,
         user_stance=stance,
         gaps=gaps,
@@ -774,7 +783,7 @@ def _compile(
 
 
 def _session_artifacts(
-    store: MemoryStore, project_id: Optional[str], session_id: Optional[str],
+    store: TwinStore, project_id: Optional[str], session_id: Optional[str],
 ) -> list[dict[str, Any]]:
     """Reuse the reflect session-artifact gatherer with a lightweight brief."""
     from .episode_reflect import EpisodeBrief, gather_session_artifacts

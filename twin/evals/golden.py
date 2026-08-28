@@ -19,13 +19,13 @@ from twin.store.embeddings import Embedder
 from twin.store.formation import confirm_candidate, explain_memory, propose_or_corroborate
 from twin.store.models import StoreClaim, ClaimStatus, ClaimType
 from twin.store.search import search
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.privacy.quarantine import detect_injection
 from twin.sense.sensory.percept import Percept
 
 
 def run_golden_work_loop(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
 ) -> dict[str, Any]:

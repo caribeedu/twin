@@ -37,7 +37,7 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 | Command | What it does |
 |---|---|
 | `twin search <query>` | Hybrid search (optional `--domain`). |
-| `twin pack <query> --domain <domain>` | Build a safe context pack (candidates off unless flagged). |
+| `twin pack <query> --domain <domain>` | Build a safe context pack (candidates off unless flagged). Default purpose `context_retrieval` (alias `memory_retrieval` still accepted). |
 | `twin inject pack <query> --domain <domain>` | Inject pack (EpistemicState + Narratives + open Reflections). |
 | `twin observe <text>` | Memory observer suggestion for current text. |
 

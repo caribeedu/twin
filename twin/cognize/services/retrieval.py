@@ -29,7 +29,7 @@ from twin.privacy.firewall import Firewall
 from twin.store.embeddings import Embedder
 from twin.store.models import INACTIVE_STATUSES, StoreClaim, ClaimStatus
 from twin.store.search import BlockedHit, SearchHit, SearchResult, search
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 logger = logging.getLogger("twin.cognize.services.retrieval")
 
@@ -63,7 +63,7 @@ class _Expansion:
     via_entity: str
 
 
-def _graph_expand(store: MemoryStore, hits: list[SearchHit],
+def _graph_expand(store: TwinStore, hits: list[SearchHit],
                   limit: int) -> list[_Expansion]:
     """Pull in memories sharing entities with the current top hits — context
     the lexical/vector stage missed but the graph knows is adjacent.
@@ -95,7 +95,7 @@ def _graph_expand(store: MemoryStore, hits: list[SearchHit],
     return expanded
 
 
-def _avg_source_trust(store: MemoryStore, mem: StoreClaim) -> float:
+def _avg_source_trust(store: TwinStore, mem: StoreClaim) -> float:
     trusts = []
     for pid in mem.percept_ids[:5]:
         percept = store.get_percept(pid)
@@ -105,7 +105,7 @@ def _avg_source_trust(store: MemoryStore, mem: StoreClaim) -> float:
 
 
 def retrieve(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     query: str,
     target_domain: str = "technical",

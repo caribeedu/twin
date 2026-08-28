@@ -20,7 +20,8 @@ Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
 | Domain | Typical prefixes | Role |
 |---|---|---|
 | Ingest & extract | `/api/ingest`, `/api/extract`, `/api/percepts`, `/api/artifacts` | Artifact → percept → extraction |
-| Memories & review | `/api/memories`, `/api/review` | Dual-read / legacy review helpers |
+| Claims & review | `/api/claims`, `/api/review` | Preferred dual-read claim surface |
+| Memories & review (deprecated) | `/api/memories`, `/api/review` | Alias of `/api/claims` — keep for old clients |
 | Narratives & reflections | `/api/narratives`, `/api/narratives/{id}`, `/api/narratives/commit`, `/api/narratives/commit-preview`, `/api/reflections`, `/api/reflections/{id}` | List, EpistemicState, human commit with preview fingerprint |
 | Cognize entities | `/api/situations`, `/api/interpretations`, `/api/relations`, `/api/evidence`, `/api/traces`, `/api/stances`, `/api/percepts/{id}` | Web Command Center list+show ([WEB_CENTER.md](WEB_CENTER.md)) |
 | Center summary | `/api/center/summary`, `/api/cognize/status\|plan\|run`, `/api/runtime/jobs` | Overview; Cognize plan/estimate/enqueue; job list |
@@ -47,8 +48,9 @@ Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
 | GET/POST | `/api/stances/proposals…` | List; preview; approve with token |
 
 Review resolve actions (merge, contradict, supersede, dismiss, …) go
-through memory/finding endpoints on the workbench — see OpenAPI and the
-UI under `twin serve` ([WEB_CENTER.md](WEB_CENTER.md)).
+through claim/finding endpoints (`/api/claims/…`; `/api/memories/…` remains
+a deprecated dual-read) on the workbench — see OpenAPI and the UI under
+`twin serve` ([WEB_CENTER.md](WEB_CENTER.md)).
 
 ---
 

@@ -41,7 +41,7 @@ from twin.store.models import (
     Project,
     SessionStatus,
 )
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.sense.sensory.percept import Percept
 from twin.inject.context_pack import ContextPack, PackDeadlineExceeded, build_context_pack
 from .observer import DOMAIN_MODE_EXPLICIT, ObserverReading, resolve_context_domain
@@ -99,7 +99,7 @@ class SessionStart:
 
 
 def start_session(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     query: str,
@@ -273,7 +273,7 @@ def start_session(
     )
 
 
-def observe_session(store: MemoryStore, session_id: str,
+def observe_session(store: TwinStore, session_id: str,
                     artifact: dict[str, Any]) -> CognitiveSession:
     """Record an artifact produced or changed during the session — a file,
     commit, PR, document or free-form note ({kind, ref?, note?, percept_id?}).
@@ -292,7 +292,7 @@ def observe_session(store: MemoryStore, session_id: str,
 
 
 def complete_session(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     session_id: str,
@@ -362,7 +362,7 @@ def complete_session(
                         summary_origin, user_confirmed)
 
 
-def _consolidate(store: MemoryStore, cfg: Config, embedder: Embedder,
+def _consolidate(store: TwinStore, cfg: Config, embedder: Embedder,
                  session: CognitiveSession, lines: list[str],
                  summary_origin: str, user_confirmed: bool) -> CognitiveSession:
     session.consolidation_status = ConsolidationStatus.pending
@@ -426,7 +426,7 @@ def _consolidate(store: MemoryStore, cfg: Config, embedder: Embedder,
     return session
 
 
-def record_feedback(store: MemoryStore, session_id: str, verdict: str,
+def record_feedback(store: TwinStore, session_id: str, verdict: str,
                     claim_id: Optional[str] = None, note: str = "",
                     scope: Optional[str] = None) -> CognitiveSession:
     """Explicit usefulness feedback — the raw material of product metrics.
@@ -465,7 +465,7 @@ def record_feedback(store: MemoryStore, session_id: str, verdict: str,
     return store.get_session(session_id)
 
 
-def ensure_project(store: MemoryStore, name: str, repos: Optional[list[str]] = None,
+def ensure_project(store: TwinStore, name: str, repos: Optional[list[str]] = None,
                    aliases: Optional[list[str]] = None) -> Project:
     """Create the project or merge new repos/aliases into the existing one —
     calling it again with more signals enriches the project instead of
@@ -491,7 +491,7 @@ def ensure_project(store: MemoryStore, name: str, repos: Optional[list[str]] = N
     return project
 
 
-def stale_sessions(store: MemoryStore,
+def stale_sessions(store: TwinStore,
                    max_idle_hours: float = DEFAULT_STALE_HOURS) -> list[CognitiveSession]:
     """Active sessions with no activity for longer than ``max_idle_hours``."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_idle_hours)).isoformat()
@@ -501,7 +501,7 @@ def stale_sessions(store: MemoryStore,
     ]
 
 
-def abandon_stale_sessions(store: MemoryStore,
+def abandon_stale_sessions(store: TwinStore,
                            max_idle_hours: float = DEFAULT_STALE_HOURS) -> list[str]:
     """Mark stale active sessions as abandoned. Returns the ids affected."""
     abandoned: list[str] = []

@@ -24,7 +24,7 @@ from twin.store.models import (
     ReviewFinding,
     SuggestedAction,
 )
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 ANALYZER_VERSION = "quality-v3"
 
@@ -67,7 +67,7 @@ def _thresholds(embedder: Embedder) -> dict[str, float]:
 
 
 def discover_neighbors(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     mem: StoreClaim,
     *,
@@ -285,7 +285,7 @@ def review_priority(
     return round(min(1.0, base), 4)
 
 
-def select_canonical_survivor(memories: list[StoreClaim], store: MemoryStore) -> StoreClaim:
+def select_canonical_survivor(memories: list[StoreClaim], store: TwinStore) -> StoreClaim:
     """Pick one survivor from an exact-duplicate group."""
     def sort_key(m: StoreClaim) -> tuple:
         evidence = store.get_evidence(m.id)
@@ -307,7 +307,7 @@ def select_canonical_survivor(memories: list[StoreClaim], store: MemoryStore) ->
 
 
 def build_duplicate_groups(
-    store: MemoryStore,
+    store: TwinStore,
     candidates: list[StoreClaim],
 ) -> list[DuplicateGroup]:
     """Union-find exact-duplicate clusters from quality flags / findings."""
@@ -375,7 +375,7 @@ def build_duplicate_groups(
 
 
 def analyze_claim(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     claim_id: str,
     *,
@@ -589,7 +589,7 @@ def analyze_claim(
 
 
 def analyze_candidates(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     *,
     limit: int = 200,
@@ -601,7 +601,7 @@ def analyze_candidates(
 
 
 def review_queue(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     project_id: Optional[str] = None,
     domain: Optional[str] = None,

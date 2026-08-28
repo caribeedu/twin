@@ -17,7 +17,7 @@ from twin.clock import now_iso
 from twin.config import Config
 from twin.store.embeddings import Embedder
 from twin.store.models import CognitiveSession, SessionStatus
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.cognize.services.sessions import complete_session
 
 
@@ -68,7 +68,7 @@ class SessionClosure(BaseModel):
     created_at: str = Field(default_factory=now_iso)
 
 
-def pause_session(store: MemoryStore, session_id: str) -> CognitiveSession:
+def pause_session(store: TwinStore, session_id: str) -> CognitiveSession:
     if not store.transition_session(
         session_id, SessionStatus.active.value, SessionStatus.paused.value,
     ):
@@ -76,7 +76,7 @@ def pause_session(store: MemoryStore, session_id: str) -> CognitiveSession:
     return store.get_session(session_id)
 
 
-def resume_session(store: MemoryStore, session_id: str) -> CognitiveSession:
+def resume_session(store: TwinStore, session_id: str) -> CognitiveSession:
     if not store.transition_session(
         session_id, SessionStatus.paused.value, SessionStatus.active.value,
     ):
@@ -84,7 +84,7 @@ def resume_session(store: MemoryStore, session_id: str) -> CognitiveSession:
     return store.get_session(session_id)
 
 
-def reopen_session(store: MemoryStore, session_id: str) -> CognitiveSession:
+def reopen_session(store: TwinStore, session_id: str) -> CognitiveSession:
     """Controlled reopen of completed/abandoned → active (clears ended_at)."""
     session = store.get_session(session_id)
     if session is None:
@@ -101,7 +101,7 @@ def reopen_session(store: MemoryStore, session_id: str) -> CognitiveSession:
     return store.get_session(session_id)
 
 
-def archive_session(store: MemoryStore, session_id: str) -> CognitiveSession:
+def archive_session(store: TwinStore, session_id: str) -> CognitiveSession:
     session = store.get_session(session_id)
     if session is None:
         raise ValueError(f"session {session_id} not found")
@@ -114,7 +114,7 @@ def archive_session(store: MemoryStore, session_id: str) -> CognitiveSession:
 
 
 def append_session_delta(
-    store: MemoryStore,
+    store: TwinStore,
     session_id: str,
     *,
     text: str = "",
@@ -173,7 +173,7 @@ def append_session_delta(
 
 
 def checkpoint_session(
-    store: MemoryStore,
+    store: TwinStore,
     session_id: str,
     *,
     summary: str = "",
@@ -212,7 +212,7 @@ def checkpoint_session(
 
 
 def close_session_structured(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     session_id: str,
@@ -273,5 +273,5 @@ def close_session_structured(
     return session, sc
 
 
-def get_session_closure(store: MemoryStore, session_id: str) -> Optional[SessionClosure]:
+def get_session_closure(store: TwinStore, session_id: str) -> Optional[SessionClosure]:
     return store.get_session_closure(session_id)

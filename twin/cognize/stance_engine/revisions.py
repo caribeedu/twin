@@ -6,7 +6,7 @@ from typing import Optional
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import JudgmentItem, JudgmentRevision, JudgmentStatus
 from .persistence import item_payload
 
@@ -20,7 +20,7 @@ def item_from_revision(rev: JudgmentRevision) -> JudgmentItem:
 
 
 def create_revision(
-    store: MemoryStore,
+    store: TwinStore,
     item: JudgmentItem,
     *,
     actor: str = "user",
@@ -45,7 +45,7 @@ def create_revision(
 
 
 def commit_new_item(
-    store: MemoryStore,
+    store: TwinStore,
     item: JudgmentItem,
     *,
     actor: str = "user",
@@ -60,7 +60,7 @@ def commit_new_item(
 
 
 def commit_new_revision(
-    store: MemoryStore,
+    store: TwinStore,
     item: JudgmentItem,
     *,
     actor: str = "user",
@@ -86,7 +86,7 @@ def commit_new_revision(
 
 
 def clone_revision_as_new(
-    store: MemoryStore,
+    store: TwinStore,
     source: JudgmentRevision,
     *,
     actor: str = "user",

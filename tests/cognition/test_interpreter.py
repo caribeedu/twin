@@ -412,7 +412,7 @@ def test_to_extracted_rejects_invalid_type_and_domain():
         memory_type="not_a_type", cognitive_act=CognitiveAct.statement,
         title="x", summary="y", domain="technical", evidence_span="y",
     )
-    with pytest.raises(ValueError, match="invalid memory_type"):
+    with pytest.raises(ValueError, match="invalid claim_type"):
         bad_type.to_extracted()
 
     bad_domain = InterpretedItem(

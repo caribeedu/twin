@@ -17,7 +17,7 @@ from twin import ids
 from twin.clock import now_iso
 from twin.config import Config
 from twin.store.embeddings import Embedder
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 
 class AttentionKind(str, Enum):
@@ -71,7 +71,7 @@ def text_content_hash(text: str) -> str:
 
 
 def working_memory_text(
-    store: MemoryStore,
+    store: TwinStore,
     session_id: str,
     *,
     window: int = 12,
@@ -130,7 +130,7 @@ def _parse_iso(value: str) -> Optional[datetime]:
     return dt
 
 
-def _in_cooldown(store: MemoryStore, session_id: str, policy: AttentionPolicy) -> bool:
+def _in_cooldown(store: TwinStore, session_id: str, policy: AttentionPolicy) -> bool:
     if not hasattr(store, "list_attention_emissions"):
         return False
     recent = [
@@ -145,7 +145,7 @@ def _in_cooldown(store: MemoryStore, session_id: str, policy: AttentionPolicy) -
     return datetime.now(timezone.utc) - latest < timedelta(seconds=policy.cooldown_seconds)
 
 
-def _window_count(store: MemoryStore, session_id: str, policy: AttentionPolicy) -> int:
+def _window_count(store: TwinStore, session_id: str, policy: AttentionPolicy) -> int:
     if not hasattr(store, "list_attention_emissions"):
         return 0
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=policy.window_seconds)
@@ -159,7 +159,7 @@ def _window_count(store: MemoryStore, session_id: str, policy: AttentionPolicy) 
     return n
 
 
-def _already_emitted(store: MemoryStore, session_id: str, claim_id: str, kind: str) -> bool:
+def _already_emitted(store: TwinStore, session_id: str, claim_id: str, kind: str) -> bool:
     if not claim_id or not hasattr(store, "list_attention_emissions"):
         return False
     for e in store.list_attention_emissions(session_id, status="open", limit=50):
@@ -171,7 +171,7 @@ def _already_emitted(store: MemoryStore, session_id: str, claim_id: str, kind: s
 
 
 def evaluate_attention(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     session_id: str,
@@ -351,7 +351,7 @@ def evaluate_attention(
 
 
 def feedback_attention(
-    store: MemoryStore,
+    store: TwinStore,
     emission_id: str,
     *,
     verdict: str,
@@ -377,7 +377,7 @@ def feedback_attention(
     return em
 
 
-def maybe_enqueue_attention_job(store: MemoryStore, session_id: str, *, text: str = "") -> str:
+def maybe_enqueue_attention_job(store: TwinStore, session_id: str, *, text: str = "") -> str:
     """Enqueue durable attention_evaluate job if runtime store is available."""
     if not hasattr(store, "insert_runtime_job"):
         return ""

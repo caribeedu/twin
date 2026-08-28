@@ -1,9 +1,12 @@
-"""MemoryStore — the storage contract every backend implements.
+"""TwinStore — the storage contract every backend implements.
 
 Backends: ``PostgresStore`` (primary; PostgreSQL + pgvector, scales beyond a
 single file and supports server-side vector search) and ``SqliteStore``
 (zero-config for dev/tests). Everything above this interface — cognition,
 judgment, interfaces — is backend-agnostic.
+
+``MemoryStore`` remains a deprecated alias of ``TwinStore`` for transitional
+imports.
 """
 
 from __future__ import annotations
@@ -19,10 +22,10 @@ from ..models import (
     PerceptInterpretation, Project, Relation,
 )
 
-__all__ = ["MemoryStore", "now_iso"]
+__all__ = ["TwinStore", "MemoryStore", "now_iso"]
 
 
-class MemoryStore(ABC):
+class TwinStore(ABC):
     # -- percepts ---------------------------------------------------------
 
     @abstractmethod
@@ -309,3 +312,7 @@ class MemoryStore(ABC):
     @staticmethod
     def sanitize_fts_terms(query: str) -> list[str]:
         return [t for t in "".join(c if c.isalnum() else " " for c in query).split() if len(t) > 1]
+
+
+# Deprecated alias — prefer TwinStore.
+MemoryStore = TwinStore

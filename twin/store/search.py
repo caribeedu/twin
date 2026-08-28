@@ -10,7 +10,7 @@ from ..clock import now_iso
 from twin.privacy.firewall import Firewall
 from .embeddings import Embedder
 from .models import INACTIVE_STATUSES, StoreClaim, ClaimStatus
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 FTS_WEIGHT = 0.55
 VECTOR_WEIGHT = 0.35
@@ -47,7 +47,7 @@ def _entity_boost(query: str, claim: StoreClaim) -> float:
 
 
 def search(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     query: str,
     target_domain: str = "technical",

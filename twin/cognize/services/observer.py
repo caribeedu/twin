@@ -26,7 +26,7 @@ from twin.config import UNCLASSIFIED_DOMAIN, Config
 from twin.privacy.firewall import Firewall
 from twin.store.embeddings import Embedder
 from twin.store.search import search
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 
 logger = logging.getLogger("twin.cognize.services.observer")
 
@@ -38,7 +38,7 @@ DOMAIN_MODE_EXPLICIT = "explicit"    # caller supplied a real domain
 DOMAIN_MODE_FROZEN = "frozen"        # already frozen on the binding/session
 
 
-def infer_project_from_cwd(store: MemoryStore, cwd: Optional[str]) -> Optional[str]:
+def infer_project_from_cwd(store: TwinStore, cwd: Optional[str]) -> Optional[str]:
     """Deterministic project id from a working-directory signal.
 
     Matches the cwd basename against project name / alias / repo — no LLM,
@@ -66,7 +66,7 @@ class ObserverSuggestion:
 
 
 def observe(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     current_text: str,
@@ -163,7 +163,7 @@ class ObserverReading:
         return self.domain == UNCLASSIFIED_DOMAIN
 
 
-def _deep_read(store: MemoryStore, cfg: Config, text: str,
+def _deep_read(store: TwinStore, cfg: Config, text: str,
                seed: ObserverReading, client=None) -> ObserverReading:
     from twin.llm import get_chat_client
     from twin.llm.usage import usage_context
@@ -216,7 +216,7 @@ def _deep_read(store: MemoryStore, cfg: Config, text: str,
     )
 
 
-def read_context(store: MemoryStore, cfg: Config, text: str,
+def read_context(store: TwinStore, cfg: Config, text: str,
                  cwd: Optional[str] = None, client=None) -> ObserverReading:
     """Classify session context with the configured local LLM only.
 
@@ -268,7 +268,7 @@ DOMAIN_VOTE_MIN_MARGIN = 0.05
 
 
 def infer_domain_from_search(
-    store: MemoryStore,
+    store: TwinStore,
     embedder: Embedder,
     text: str,
     *,
@@ -348,7 +348,7 @@ def infer_domain_from_search(
 
 
 def resolve_context_domain(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     text: str,

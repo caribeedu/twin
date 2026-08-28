@@ -11,7 +11,7 @@ from twin import ids
 from twin.clock import now_iso
 from twin.store.models import StoreClaim, ClaimStatus
 from twin.store.provenance import count_independent_sources, claim_source_keys
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import (
     ACTIONS_REQUIRING_TARGET,
     DURABLE_KINDS,
@@ -38,8 +38,8 @@ _SIMPLICITY_RE = re.compile(
 )
 
 
-def propose_from_memory(
-    store: MemoryStore,
+def propose_from_claim(
+    store: TwinStore,
     claim_id: str,
     *,
     kind: Optional[str] = None,
@@ -47,9 +47,9 @@ def propose_from_memory(
 ) -> JudgmentProposal:
     mem = store.get_claim(claim_id)
     if mem is None:
-        raise ValueError(f"memory {claim_id} not found")
+        raise ValueError(f"claim {claim_id} not found")
     if mem.status != ClaimStatus.confirmed and mem.status.value != "confirmed":
-        raise ValueError("only confirmed memories can seed judgment proposals")
+        raise ValueError("only confirmed claims can seed Stance proposals")
 
     twin_influenced = bool(
         (mem.payload or {}).get("judgment_influenced")
@@ -67,7 +67,7 @@ def propose_from_memory(
     item = {
         "kind": mapped_kind,
         "statement": statement or mem.summary,
-        "description": f"Promoted from memory {mem.id}: {mem.title}",
+        "description": f"Promoted from claim {mem.id}: {mem.title}",
         "domain": mem.domain,
         "strength": 0.55 if mapped_kind == "preference" else 0.7,
         "confidence": 0.9 if not twin_influenced else 0.55,
@@ -75,10 +75,11 @@ def propose_from_memory(
         "scope": {"domains": [mem.domain], "projects": [mem.project_id] if mem.project_id else []},
         "provenance": {
             "claim_ids": [mem.id],
-            "source": "promoted_memory",
+            "source": "promoted_claim",
             "twin_influenced": twin_influenced,
             "independence_weight": 0.4 if twin_influenced else 1.0,
             "independent_sources": independent,
+            "claim_count": 1,
             "memory_count": 1,
         },
     }
@@ -86,21 +87,21 @@ def propose_from_memory(
         id=ids.judgment_proposal_id(),
         action=ProposalAction.create,
         proposed_item=item,
-        reason=f"Manual promotion of confirmed memory {mem.id}",
+        reason=f"Manual promotion of confirmed claim {mem.id}",
         supporting_claim_ids=[mem.id],
         support_count=independent,
         confidence=float(item["confidence"]),
         scope={"domain": mem.domain, "projects": [mem.project_id] if mem.project_id else []},
         status=ProposalStatus.pending,
         created_at=now_iso(),
-        metadata={"independent_sources": independent, "memory_count": 1},
+        metadata={"independent_sources": independent, "claim_count": 1, "memory_count": 1},
     )
     store.insert_judgment_proposal(proposal)
     return proposal
 
 
 def propose_from_pattern(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     domain: str = "technical",
     min_evidence: int = 3,
@@ -194,7 +195,7 @@ def propose_from_pattern(
 
 
 def _episode_confirmed_memories(
-    store: MemoryStore, episode_id: str, *, limit: int = 2000,
+    store: TwinStore, episode_id: str, *, limit: int = 2000,
 ) -> list[StoreClaim]:
     """Confirmed memories tied to an episode (typically from ``episode_reflect``)."""
     out: list[StoreClaim] = []
@@ -205,7 +206,7 @@ def _episode_confirmed_memories(
 
 
 def propose_from_episode(
-    store: MemoryStore,
+    store: TwinStore,
     episode_id: str,
     *,
     domain: Optional[str] = None,
@@ -289,7 +290,7 @@ def propose_from_episode(
 
 
 def propose_from_narrative(
-    store: MemoryStore,
+    store: TwinStore,
     narrative_id: str,
     *,
     domain: Optional[str] = None,
@@ -349,7 +350,7 @@ def propose_from_narrative(
 
 
 def propose_from_episode_patterns(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     domain: str = "technical",
     min_evidence: int = 2,
@@ -425,7 +426,7 @@ def propose_from_episode_patterns(
     return [proposal]
 
 
-def _memory_fingerprint(store: MemoryStore, claim_id: str) -> dict[str, Any]:
+def _memory_fingerprint(store: TwinStore, claim_id: str) -> dict[str, Any]:
     m = store.get_claim(claim_id)
     if m is None:
         return {"id": claim_id, "missing": True}
@@ -457,7 +458,7 @@ def merge_proposed_item(proposal: JudgmentProposal, edits: Optional[dict[str, An
 
 
 def compute_proposal_preview_token(
-    store: MemoryStore,
+    store: TwinStore,
     proposal: JudgmentProposal,
     *,
     edits: Optional[dict[str, Any]] = None,
@@ -516,7 +517,7 @@ def compute_proposal_preview_token(
 
 
 def preview_proposal(
-    store: MemoryStore,
+    store: TwinStore,
     proposal_id: str,
     *,
     edits: Optional[dict[str, Any]] = None,
@@ -663,7 +664,7 @@ def _require_constitutional_confirm(
 
 
 def approve_proposal(
-    store: MemoryStore,
+    store: TwinStore,
     proposal_id: str,
     *,
     preview_token: str,
@@ -713,7 +714,7 @@ def approve_proposal(
 
 
 def _dispatch_action(
-    store: MemoryStore,
+    store: TwinStore,
     proposal: JudgmentProposal,
     action: ProposalAction,
     final: dict[str, Any],
@@ -798,7 +799,7 @@ def _dispatch_action(
     }
 
 
-def reject_proposal(store: MemoryStore, proposal_id: str, *, reason: str = "") -> JudgmentProposal:
+def reject_proposal(store: TwinStore, proposal_id: str, *, reason: str = "") -> JudgmentProposal:
     proposal = store.get_judgment_proposal(proposal_id)
     if proposal is None:
         raise ValueError(f"proposal {proposal_id} not found")
@@ -810,7 +811,7 @@ def reject_proposal(store: MemoryStore, proposal_id: str, *, reason: str = "") -
     return store.get_judgment_proposal(proposal_id)  # type: ignore[return-value]
 
 
-def defer_proposal(store: MemoryStore, proposal_id: str) -> JudgmentProposal:
+def defer_proposal(store: TwinStore, proposal_id: str) -> JudgmentProposal:
     store.update_judgment_proposal(proposal_id, status=ProposalStatus.deferred.value)
     return store.get_judgment_proposal(proposal_id)  # type: ignore[return-value]
 
@@ -821,3 +822,7 @@ def rank_proposals(proposals: list[JudgmentProposal]) -> list[JudgmentProposal]:
         key=lambda p: (p.confidence, p.support_count, -p.contradiction_count),
         reverse=True,
     )
+
+
+# Deprecated alias — prefer propose_from_claim.
+propose_from_memory = propose_from_claim

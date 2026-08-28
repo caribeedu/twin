@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 from twin.clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.interfaces.sovereignty.export import write_export_bundle
 from twin.interfaces.sovereignty.manifest import BackupManifest, verify_manifest_files
 
 
 def create_backup(
-    store: MemoryStore,
+    store: TwinStore,
     dest_dir: Path | str,
     *,
     copy_sqlite_db: Optional[Path] = None,

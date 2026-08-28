@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 
-def compute_metrics(store: MemoryStore) -> dict[str, Any]:
+def compute_metrics(store: TwinStore) -> dict[str, Any]:
     memories = store.list_claims(limit=1_000_000)
     percepts = store.list_percepts()
     unprocessed = store.unprocessed_percepts()
@@ -130,8 +130,8 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
         #   fully_relevant_rate.
         # - re_explanation_rate: sessions with any feedback; a session counts
         #   once no matter how many missing_context verdicts it received.
-        # - memory_usage_rate: (session, memory) pairs — supplied pairs below,
-        #   pairs with a useful/partially_useful memory-scoped verdict above.
+        # - claim_usage_rate: (session, claim) pairs — supplied pairs below,
+        #   pairs with a useful/partially_useful claim-scoped verdict above.
         "product": {
             "feedback_by_verdict": by_verdict,
             "context_relevance_rate": round(
@@ -145,7 +145,7 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
                 (by_verdict.get("useful", 0)
                  + by_verdict.get("partially_useful", 0)) / relevance_rated, 3
             ) if relevance_rated else None,
-            "false_memory_rate": round(
+            "false_claim_rate": round(
                 by_verdict.get("incorrect", 0) / relevance_rated, 3
             ) if relevance_rated else None,
             "re_explanation_rate": round(
@@ -155,7 +155,7 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
             ) if sessions_with_feedback else None,
             "privacy_overblocks": by_verdict.get("privacy_overblock", 0),
             "privacy_underblocks": by_verdict.get("privacy_underblock", 0),
-            "memory_usage_rate": round(
+            "claim_usage_rate": round(
                 used_pairs / supplied_pairs, 3
             ) if supplied_pairs else None,
         },
@@ -163,7 +163,7 @@ def compute_metrics(store: MemoryStore) -> dict[str, Any]:
     }
 
 
-def _connector_block(store: MemoryStore) -> dict[str, Any]:
+def _connector_block(store: TwinStore) -> dict[str, Any]:
     """ — connector counters nested under the same metrics payload."""
     try:
         from twin.sense.connectors.metrics import compute_connector_metrics

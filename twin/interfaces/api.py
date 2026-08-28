@@ -110,7 +110,7 @@ class PackRequest(BaseModel):
     project: Optional[str] = None  # project name, alias or id
     client: Optional[str] = None  # registered tool client; omit → restricted
     persona: str = "individual"
-    purpose: str = "memory_retrieval"
+    purpose: str = "context_retrieval"
     audience: str = "self"
     api_token: Optional[str] = None
     mode: Literal["compact", "explainable", "references_only"] = "compact"
@@ -351,6 +351,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "percept not found")
         return p.model_dump(mode="json")
 
+    @app.get("/api/claims")
     @app.get("/api/memories")
     def api_memories(
         status: Optional[str] = None,
@@ -365,6 +366,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         )
         return [_claim_dict(m, ws.store) for m in memories]
 
+    @app.get("/api/claims/{claim_id}")
     @app.get("/api/memories/{claim_id}")
     def api_memory(claim_id: str):
         mem = ws.store.get_claim(claim_id)
@@ -373,11 +375,12 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         evidence = [e.model_dump() for e in ws.store.get_evidence(claim_id)]
         return {**_claim_dict(mem, ws.store), "evidence": evidence}
 
+    @app.post("/api/claims/{claim_id}/review")
     @app.post("/api/memories/{claim_id}/review")
     def api_review(claim_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
         from ..clock import now_iso
-        from twin.store.lifecycle import archive_memory
+        from twin.store.lifecycle import archive_claim
         mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
@@ -395,7 +398,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             ws.store.update_claim(claim_id, needs_review=True, review_reason="deferred")
         elif action == "archive":
             try:
-                archive_memory(ws.store, claim_id)
+                archive_claim(ws.store, claim_id)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         elif action != "update":
@@ -1229,6 +1232,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ws.store.update_project(project)
         return ws.store.get_project(project.id).model_dump()
 
+    @app.post("/api/claims/{claim_id}/promote")
     @app.post("/api/memories/{claim_id}/promote")
     def api_promote(claim_id: str):
         from twin.cognize.stance_engine.profile import promote_claim
@@ -1243,6 +1247,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ws.store.update_claim(claim_id, payload={**mem.payload, "promoted_to_judgment": True})
         return {"claim_id": claim_id, "promoted_to": section}
 
+    @app.post("/api/claims/{claim_id}/supersede/{old_id}")
     @app.post("/api/memories/{claim_id}/supersede/{old_id}")
     def api_supersede(claim_id: str, old_id: str):
         from twin.store.lifecycle import supersede
@@ -1253,6 +1258,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, str(exc))
         return result.__dict__
 
+    @app.post("/api/claims/{claim_id}/contradict/{other_id}")
     @app.post("/api/memories/{claim_id}/contradict/{other_id}")
     def api_contradict(claim_id: str, other_id: str):
         from twin.store.lifecycle import contradict
@@ -1664,6 +1670,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             force=req.force, preview_token=req.preview_token,
         )
 
+    @app.get("/api/claims/{claim_id}/neighbors")
     @app.get("/api/memories/{claim_id}/neighbors")
     def api_neighbors(claim_id: str):
         from twin.cognize.services.quality import discover_neighbors
@@ -1676,6 +1683,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             for n, sim, reason in neighbors
         ]
 
+    @app.get("/api/claims/{claim_id}/quality")
     @app.get("/api/memories/{claim_id}/quality")
     def api_quality(claim_id: str, refresh: bool = False):
         from twin.cognize.services.quality import analyze_claim
@@ -1711,6 +1719,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         data["from_store"] = False
         return data
 
+    @app.get("/api/claims/{claim_id}/findings")
     @app.get("/api/memories/{claim_id}/findings")
     def api_findings(claim_id: str, unresolved_only: bool = True):
         mem = ws.store.get_claim(claim_id)
@@ -1723,6 +1732,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             for f in ws.store.get_findings(claim_id, unresolved_only=unresolved_only)
         ]
 
+    @app.post("/api/claims/{claim_id}/findings/{finding_id}/dismiss")
     @app.post("/api/memories/{claim_id}/findings/{finding_id}/dismiss")
     def api_dismiss_finding(claim_id: str, finding_id: str):
         closed = _close_finding(
@@ -1732,13 +1742,14 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "finding not found")
         return closed
 
+    @app.post("/api/claims/{claim_id}/resolve")
     @app.post("/api/memories/{claim_id}/resolve")
     def api_resolve(claim_id: str, req: ResolveRequest):
         from ..clock import now_iso
         from twin.store.lifecycle import (
-            archive_memory,
+            archive_claim,
             contradict,
-            merge_memories,
+            merge_claims,
             split_memory,
             supersede,
         )
@@ -1764,7 +1775,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             elif action == "merge":
                 if not related_id:
                     raise ValueError("related_claim_id required for merge")
-                merged = merge_memories(
+                merged = merge_claims(
                     ws.store, [claim_id, related_id],
                     title=req.title, summary=req.summary,
                     embedder=ws.embedder,
@@ -1822,7 +1833,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 })
                 remove_ids = [claim_id]
             elif action == "archive":
-                out = archive_memory(ws.store, claim_id)
+                out = archive_claim(ws.store, claim_id)
                 op_id = out.operation_id
                 result["operation_id"] = op_id
                 remove_ids = [claim_id]
@@ -1869,6 +1880,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             if ws.store.get_claim(claim_id) else None
         return result
 
+    @app.get("/api/claims/{claim_id}/provenance")
     @app.get("/api/memories/{claim_id}/provenance")
     def api_provenance(claim_id: str):
         from twin.store.provenance import claim_provenance
@@ -1877,9 +1889,10 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @app.post("/api/claims/merge")
     @app.post("/api/memories/merge")
     def api_merge(req: MergeRequest):
-        from twin.store.lifecycle import merge_memories
+        from twin.store.lifecycle import merge_claims
         from twin.store.models import CanonicalClaim
         merge_kwargs: dict[str, Any] = {
             "title": req.title,
@@ -1899,12 +1912,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 CanonicalClaim(**claim) if isinstance(claim, dict) else claim
             )
         try:
-            result = merge_memories(ws.store, req.claim_ids, **merge_kwargs)
+            result = merge_claims(ws.store, req.claim_ids, **merge_kwargs)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "merged_id": result.extras.get("merged_id"),
                 "operation_id": result.operation_id, **result.extras}
 
+    @app.post("/api/claims/{claim_id}/split")
     @app.post("/api/memories/{claim_id}/split")
     def api_split(claim_id: str, req: SplitRequest):
         from twin.store.lifecycle import split_memory
@@ -1915,15 +1929,17 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return {"action": result.action, "children": result.extras.get("children"),
                 "operation_id": result.operation_id}
 
+    @app.post("/api/claims/{claim_id}/archive")
     @app.post("/api/memories/{claim_id}/archive")
     def api_archive(claim_id: str):
-        from twin.store.lifecycle import archive_memory
+        from twin.store.lifecycle import archive_claim
         try:
-            result = archive_memory(ws.store, claim_id)
+            result = archive_claim(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         return {"action": result.action, "operation_id": result.operation_id}
 
+    @app.post("/api/claims/{claim_id}/request-evidence")
     @app.post("/api/memories/{claim_id}/request-evidence")
     def api_request_evidence(claim_id: str):
         mem = ws.store.get_claim(claim_id)
@@ -2488,7 +2504,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def ui_review(claim_id: str, action: str = Form(...), domain: str = Form(None),
                   sensitivity: str = Form(None), neighbor_id: str = Form(None)):
         from ..clock import now_iso
-        from twin.store.lifecycle import archive_memory, contradict, merge_memories, supersede
+        from twin.store.lifecycle import archive_claim, contradict, merge_claims, supersede
         mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
@@ -2505,14 +2521,14 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         elif action == "defer":
             ws.store.update_claim(claim_id, needs_review=True, review_reason="deferred")
         elif action == "archive":
-            archive_memory(ws.store, claim_id)
+            archive_claim(ws.store, claim_id)
         elif action == "supersede_hint" and neighbor_id:
             supersede(ws.store, claim_id, neighbor_id)
             ws.store.set_status(claim_id, ClaimStatus.confirmed)
         elif action == "contradict_hint" and neighbor_id:
             contradict(ws.store, claim_id, neighbor_id)
         elif action == "merge_hint" and neighbor_id:
-            merge_memories(ws.store, [claim_id, neighbor_id], embedder=ws.embedder)
+            merge_claims(ws.store, [claim_id, neighbor_id], embedder=ws.embedder)
         elif action != "update":
             raise HTTPException(400, "unknown action")
         return RedirectResponse("/#review", status_code=303)

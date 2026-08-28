@@ -43,7 +43,7 @@ from twin.cognize.services.host_session import (
 from ...config import Config
 from twin.store.embeddings import Embedder
 from twin.store.models import HostSessionBinding, InterventionRecommendation
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .events import ALLOWED_HOST_EVENT_KINDS, PACK_EMIT_KINDS, HostEvent
 
 logger = logging.getLogger("twin.interfaces.native")
@@ -116,7 +116,7 @@ class NativeEventResult:
 class NativeHostService:
     """Thin host façade — pack/session logic stays in cognition."""
 
-    def __init__(self, store: MemoryStore, cfg: Config, embedder: Embedder):
+    def __init__(self, store: TwinStore, cfg: Config, embedder: Embedder):
         self.store = store
         self.cfg = cfg
         self.embedder = embedder
@@ -613,7 +613,7 @@ class NativeHostService:
 
 
 def handle_normalized_event(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     event: HostEvent,
@@ -622,7 +622,7 @@ def handle_normalized_event(
 
 
 def proactive_pack(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,

@@ -11,10 +11,10 @@ from typing import Any, Optional
 
 from ..clock import now_iso
 from .calibration import DEFAULT_CALIBRATION
-from .lifecycle import archive_memory
+from .lifecycle import archive_claim
 from .models import ClaimStatus, Sensitivity
 from .provenance import attach_corroborating_evidence
-from .store.base import MemoryStore
+from .store.base import TwinStore
 from twin.cognize.services.quality import build_duplicate_groups
 
 _SENS_ORDER = ["public", "internal", "private", "restricted"]
@@ -37,7 +37,7 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
 
 
 def apply_safe_automations(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     calibration: Optional[dict[str, Any]] = None,
     dry_run: bool = False,
@@ -120,7 +120,7 @@ def apply_safe_automations(
                 "age_days": age_days,
             })
             if not dry_run:
-                archive_memory(store, mem.id, reason="expired_task", actor="automation")
+                archive_claim(store, mem.id, reason="expired_task", actor="automation")
 
     return {
         "dry_run": dry_run,
@@ -171,7 +171,7 @@ def compute_preview_token(action: str, memories: list) -> str:
 
 
 def batch_preview(
-    store: MemoryStore,
+    store: TwinStore,
     claim_ids: list[str],
     action: str,
 ) -> dict[str, Any]:
@@ -213,7 +213,7 @@ def batch_preview(
 
 
 def batch_apply(
-    store: MemoryStore,
+    store: TwinStore,
     claim_ids: list[str],
     action: str,
     *,
@@ -256,7 +256,7 @@ def batch_apply(
             store.update_claim(mid, reviewed_at=now_iso())
             applied.append(mid)
         elif action == "archive":
-            archive_memory(store, mid, actor=actor)
+            archive_claim(store, mid, actor=actor)
             applied.append(mid)
         elif action == "defer":
             store.update_claim(mid, needs_review=True, review_reason="deferred")

@@ -9,7 +9,7 @@ import yaml
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import (
     JudgmentItem,
     JudgmentKind,
@@ -105,7 +105,7 @@ def preview_yaml_import(path: Path | str) -> list[dict[str, Any]]:
 
 
 def apply_yaml_import(
-    store: MemoryStore,
+    store: TwinStore,
     path: Path | str,
     *,
     classifications: Optional[list[dict[str, Any]]] = None,
@@ -159,7 +159,7 @@ def apply_yaml_import(
     }
 
 
-def export_judgment_yaml(store: MemoryStore) -> str:
+def export_judgment_yaml(store: TwinStore) -> str:
     """Human-readable projection of active judgment items."""
     items = store.list_judgment_items(status=JudgmentStatus.active.value)
     out: dict[str, Any] = {

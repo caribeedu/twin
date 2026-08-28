@@ -17,7 +17,7 @@ from ..models import (
     ClaimOperation, PerceptInterpretation, Project, Relation, ReviewBatch,
     ReviewFinding,
 )
-from .base import MemoryStore, now_iso
+from .base import TwinStore, now_iso
 from .connector_mixin import ConnectorStoreMixin
 from .correlation_mixin import CORRELATION_SCHEMA, CorrelationStoreMixin
 from .cognize_mixin import COGNIZE_SCHEMA, CognizeStoreMixin
@@ -693,7 +693,7 @@ class SqliteStore(
     PrivacyStoreMixin, JudgmentStoreMixin, CorrelationStoreMixin,
     CognizeStoreMixin,
     HostBindingStoreMixin, WorkspaceOpsStoreMixin, ConnectorStoreMixin,
-    RuntimeStoreMixin, SessionOpsStoreMixin, AttentionOpsStoreMixin, MemoryStore,
+    RuntimeStoreMixin, SessionOpsStoreMixin, AttentionOpsStoreMixin, TwinStore,
 ):
     def __init__(self, path: str | Path, codec: ContentCodec | None = None):
         self.codec = codec or NullCodec()

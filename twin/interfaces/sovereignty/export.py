@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from twin.clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from twin.interfaces.sovereignty.manifest import (
     BackupManifest,
     FileEntry,
@@ -63,7 +63,7 @@ def _write_section(path: Path, rows: Iterable[Any]) -> FileEntry:
     )
 
 
-def collect_export(store: MemoryStore) -> dict[str, list[Any]]:
+def collect_export(store: TwinStore) -> dict[str, list[Any]]:
     data: dict[str, list[Any]] = {s: [] for s in SECTIONS}
     if hasattr(store, "list_percepts"):
         data["percepts"] = list(store.list_percepts())
@@ -150,7 +150,7 @@ def collect_export(store: MemoryStore) -> dict[str, list[Any]]:
 
 
 def write_export_bundle(
-    store: MemoryStore,
+    store: TwinStore,
     dest: Path,
     *,
     kind: str = "export",

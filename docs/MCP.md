@@ -137,7 +137,7 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `privacy_evaluate` | `claim_ids?`, `persona="individual"`, `purpose="memory_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
+| `privacy_evaluate` | `claim_ids?`, `persona="individual"`, `purpose="context_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
 | `privacy_explain` | `decision_id` | Explain a prior privacy decision. |
 | `privacy_validate_output` | `text` | Check model output for policy violations. |
 

@@ -8,10 +8,10 @@ from .. import ids
 from ..clock import now_iso
 from twin.sense.sensory.percept import Percept
 from .models import Artifact, Evidence, StoreClaim
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 
-def ensure_artifact_from_percept(store: MemoryStore, percept: Percept) -> Optional[str]:
+def ensure_artifact_from_percept(store: TwinStore, percept: Percept) -> Optional[str]:
     """Create or reuse an Artifact from a percept's content_refs / metadata."""
     if not hasattr(store, "insert_artifact"):
         return None
@@ -60,7 +60,7 @@ def ensure_artifact_from_percept(store: MemoryStore, percept: Percept) -> Option
     return art.id
 
 
-def claim_provenance(store: MemoryStore, claim_id: str) -> dict[str, Any]:
+def claim_provenance(store: TwinStore, claim_id: str) -> dict[str, Any]:
     """Navigable lineage for 'why does twin believe this?'."""
     mem = store.get_claim(claim_id)
     if mem is None:
@@ -186,7 +186,7 @@ def _source_ref_label(sensor: str, ext_type: str, ext_id: str, sm: dict[str, Any
     return " · ".join(bits)
 
 
-def claim_source_summary(store: MemoryStore, claim_id: str) -> dict[str, Any]:
+def claim_source_summary(store: TwinStore, claim_id: str) -> dict[str, Any]:
     """Compact 'where did this come from?' for UI cards and list endpoints.
 
     Returns sensors (slack/github/…), concrete artifact refs, and a short
@@ -282,7 +282,7 @@ def claim_source_summary(store: MemoryStore, claim_id: str) -> dict[str, Any]:
     }
 
 
-def claim_source_keys(store: MemoryStore, memory: Any) -> set[str]:
+def claim_source_keys(store: TwinStore, memory: Any) -> set[str]:
     """Distinct *independent sources* backing one memory.
 
     The unit of independence is the evidence ``independence_group`` (e.g.
@@ -315,7 +315,7 @@ def claim_source_keys(store: MemoryStore, memory: Any) -> set[str]:
     return {f"mem:{mem.id}"}
 
 
-def count_independent_sources(store: MemoryStore, memories: Any) -> int:
+def count_independent_sources(store: TwinStore, memories: Any) -> int:
     """Number of distinct independent sources across a set of memories/ids.
 
     This is the honest "support" behind a claim: N memories that all trace back
@@ -332,7 +332,7 @@ def count_independent_sources(store: MemoryStore, memories: Any) -> int:
 
 
 def attach_corroborating_evidence(
-    store: MemoryStore,
+    store: TwinStore,
     claim_id: str,
     percept_id: str,
     quote: str,

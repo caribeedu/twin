@@ -7,11 +7,11 @@ from typing import Any, Optional
 from .. import ids
 from ..clock import now_iso
 from .models import ReviewBatch
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 
 def create_batch(
-    store: MemoryStore,
+    store: TwinStore,
     name: str,
     *,
     query: Optional[dict[str, Any]] = None,
@@ -57,13 +57,13 @@ def create_batch(
     return batch
 
 
-def get_batch(store: MemoryStore, batch_id: str) -> Optional[ReviewBatch]:
+def get_batch(store: TwinStore, batch_id: str) -> Optional[ReviewBatch]:
     if not hasattr(store, "get_review_batch"):
         return None
     return store.get_review_batch(batch_id)  # type: ignore[attr-defined]
 
 
-def mark_reviewed(store: MemoryStore, batch_id: str, claim_id: str) -> Optional[ReviewBatch]:
+def mark_reviewed(store: TwinStore, batch_id: str, claim_id: str) -> Optional[ReviewBatch]:
     batch = get_batch(store, batch_id)
     if batch is None:
         return None

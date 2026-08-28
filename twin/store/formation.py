@@ -23,7 +23,7 @@ from .models import (
     ClaimStatus,
     ClaimType,
 )
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 
 class FormationState(str, Enum):
@@ -159,7 +159,7 @@ def derive_formation_state(mem: StoreClaim) -> FormationState:
     return FormationState.candidate
 
 
-def as_candidate(store: MemoryStore, mem: StoreClaim) -> ClaimCandidate:
+def as_candidate(store: TwinStore, mem: StoreClaim) -> ClaimCandidate:
     evidence = store.get_evidence(mem.id) if hasattr(store, "get_evidence") else []
     payload = mem.payload or {}
     identity = payload.get("formation_identity") or formation_identity(
@@ -207,7 +207,7 @@ def _explain(
 
 
 def _record_op(
-    store: MemoryStore,
+    store: TwinStore,
     operation: str,
     claim_id: str,
     before: dict,
@@ -287,7 +287,7 @@ def apply_formation_policy(
 
 
 def find_by_formation_identity(
-    store: MemoryStore, identity: str,
+    store: TwinStore, identity: str,
 ) -> Optional[StoreClaim]:
     mid = claim_id_for_identity(identity)
     mem = store.get_claim(mid)
@@ -304,7 +304,7 @@ def find_by_formation_identity(
 
 
 def propose_or_corroborate(
-    store: MemoryStore,
+    store: TwinStore,
     mem: StoreClaim,
     *,
     percept_id: str,
@@ -402,7 +402,7 @@ def propose_or_corroborate(
 
 
 def confirm_candidate(
-    store: MemoryStore,
+    store: TwinStore,
     claim_id: str,
     *,
     actor: str = "user",
@@ -445,7 +445,7 @@ def confirm_candidate(
 
 
 def reject_candidate(
-    store: MemoryStore,
+    store: TwinStore,
     claim_id: str,
     *,
     reason: str,
@@ -483,7 +483,7 @@ def reject_candidate(
 
 
 def restore_candidate(
-    store: MemoryStore,
+    store: TwinStore,
     claim_id: str,
     *,
     actor: str = "user",
@@ -520,7 +520,7 @@ def restore_candidate(
 
 
 def edit_candidate(
-    store: MemoryStore,
+    store: TwinStore,
     claim_id: str,
     *,
     title: Optional[str] = None,
@@ -556,7 +556,7 @@ def edit_candidate(
     return as_candidate(store, after)
 
 
-def mark_conflicting(store: MemoryStore, claim_id: str, *, reason: str = "") -> ClaimCandidate:
+def mark_conflicting(store: TwinStore, claim_id: str, *, reason: str = "") -> ClaimCandidate:
     mem = store.get_claim(claim_id)
     if mem is None:
         raise ValueError(f"memory {claim_id} not found")
@@ -578,7 +578,7 @@ def mark_conflicting(store: MemoryStore, claim_id: str, *, reason: str = "") -> 
 
 
 def list_candidates(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     state: Optional[str] = None,
     limit: int = 100,
@@ -598,7 +598,7 @@ def list_candidates(
     return out
 
 
-def explain_memory(store: MemoryStore, claim_id: str) -> dict[str, Any]:
+def explain_memory(store: TwinStore, claim_id: str) -> dict[str, Any]:
     mem = store.get_claim(claim_id)
     if mem is None:
         raise ValueError(f"memory {claim_id} not found")

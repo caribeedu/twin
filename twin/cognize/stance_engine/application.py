@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from twin import ids
 from twin.clock import now_iso
-from twin.store.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import (
     KIND_PRECEDENCE,
     AppliedJudgmentEffect,
@@ -64,7 +64,7 @@ def scope_matches(item: JudgmentItem, ctx: JudgmentContext) -> bool:
 
 
 def select_applicable(
-    store: MemoryStore,
+    store: TwinStore,
     ctx: JudgmentContext,
     *,
     as_of: Optional[str] = None,
@@ -152,7 +152,7 @@ def _exception_matches(exc, ctx: JudgmentContext) -> bool:
 
 
 def applicable_pack(
-    store: MemoryStore,
+    store: TwinStore,
     ctx: Optional[JudgmentContext] = None,
     *,
     domain: str = "technical",
@@ -277,7 +277,7 @@ def render_applicable(pack: dict[str, Any]) -> str:
 
 
 def record_trace(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     query: str,
     snapshot_id: str,

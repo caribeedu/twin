@@ -10,11 +10,11 @@ from typing import Any, Optional
 
 from ..clock import now_iso
 from .models import ClaimStatus
-from .store.base import MemoryStore
+from .store.base import TwinStore
 
 
 def delete_artifact(
-    store: MemoryStore,
+    store: TwinStore,
     artifact_id: str,
     *,
     dry_run: bool = False,
@@ -147,7 +147,7 @@ def delete_artifact(
 
 
 def delete_by_source_system(
-    store: MemoryStore,
+    store: TwinStore,
     source_system: str,
     *,
     dry_run: bool = True,
@@ -167,7 +167,7 @@ def delete_by_source_system(
     }
 
 
-def mark_stale(store: MemoryStore, claim_id: str, reason: str = "stale") -> None:
+def mark_stale(store: TwinStore, claim_id: str, reason: str = "stale") -> None:
     store.update_claim(
         claim_id,
         status=ClaimStatus.stale.value,
@@ -177,7 +177,7 @@ def mark_stale(store: MemoryStore, claim_id: str, reason: str = "stale") -> None
 
 
 def apply_retention_policies(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     dry_run: bool = True,
     archive_completed_tasks: bool = True,
@@ -205,7 +205,7 @@ def apply_retention_policies(
                 pass
     if dry_run:
         return {"dry_run": True, "actions": actions, "count": len(actions)}
-    from .lifecycle import archive_memory
+    from .lifecycle import archive_claim
     for a in actions:
-        archive_memory(store, a["id"], reason=a["reason"], actor="retention")
+        archive_claim(store, a["id"], reason=a["reason"], actor="retention")
     return {"dry_run": False, "actions": actions, "count": len(actions)}
