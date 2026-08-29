@@ -104,8 +104,6 @@ DEFAULT_SOURCE_POLICIES: dict[str, SourcePolicy] = {
 
 def _from_config(raw: dict[str, Any]) -> SourcePolicy:
     allow_raw = raw.get("allow_claim_types")
-    if allow_raw is None:
-        allow_raw = raw.get("allow_memory_types")  # deprecated alias
     return SourcePolicy(
         allow=frozenset(allow_raw) if allow_raw else None,
         require_review=frozenset(raw.get("require_review_for") or []),

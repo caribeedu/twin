@@ -212,7 +212,7 @@ def test_search_domain_affinity_boosts_same_domain(store, embedder):
 
 def test_inactive_statuses_excluded_from_search(store, embedder):
     from twin import ids
-    from twin.store.lifecycle import archive_memory
+    from twin.store.lifecycle import archive_claim
     from twin.store.models import StoreClaim
 
     live = StoreClaim(
@@ -231,7 +231,7 @@ def test_inactive_statuses_excluded_from_search(store, embedder):
                           embedder.embed(f"{live.title}\n{live.summary}"))
     store.store_embedding(dead.id, "claim", embedder.name,
                           embedder.embed(f"{dead.title}\n{dead.summary}"))
-    archive_memory(store, dead.id)
+    archive_claim(store, dead.id)
     result = search(store, embedder, "local-first", include_candidates=False)
     ids_hit = {h.claim.id for h in result.hits}
     assert dead.id not in ids_hit

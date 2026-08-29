@@ -781,8 +781,8 @@ def create_server(home: Optional[str] = None):
         """Split a compound claim. parts are titles/summaries. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply", "parts": parts})
-        from twin.store.lifecycle import split_memory
-        result = split_memory(
+        from twin.store.lifecycle import split_claim
+        result = split_claim(
             ws.store, claim_id,
             [{"title": p, "summary": p} for p in parts],
             embedder=ws.embedder,

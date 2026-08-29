@@ -32,26 +32,21 @@ from .models import (
 )
 from .yaml_io import resolve_tool
 
-# Deprecated product purpose → canonical name (old clients / stored allowlists).
-PURPOSE_ALIASES: dict[str, str] = {
-    "memory_retrieval": "context_retrieval",
-}
+# Default purpose for packs / retrieval.
 DEFAULT_PURPOSE = "context_retrieval"
 
 
 def normalize_purpose(purpose: str) -> str:
-    """Map deprecated purpose strings onto the canonical product name."""
-    return PURPOSE_ALIASES.get(purpose, purpose)
+    return purpose
 
 
 def purpose_allowed(purpose: str, allowed: list[str] | tuple[str, ...] | set[str]) -> bool:
-    """True when ``purpose`` (or its alias) is covered by ``allowed`` (or ``*``)."""
+    """True when ``purpose`` is covered by ``allowed`` (or ``*``)."""
     if not allowed:
         return True
     if "*" in allowed:
         return True
-    wanted = normalize_purpose(purpose)
-    return any(normalize_purpose(p) == wanted for p in allowed)
+    return purpose in allowed
 
 
 LOCAL_SURFACES = frozenset({"cli", "local-cli", "twin-cli"})

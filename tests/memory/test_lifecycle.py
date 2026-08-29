@@ -5,8 +5,8 @@ import pytest
 from twin import ids
 from twin.store.lifecycle import (
     contradict,
-    merge_memories,
-    split_memory,
+    merge_claims,
+    split_claim,
     supersede,
     undo_operation,
 )
@@ -150,7 +150,7 @@ def test_merge_preserves_evidence_and_undo(store, embedder):
                                    quote="Twin uses FastAPI"))
     store.insert_evidence(Evidence(id=ids.evidence_id(), claim_id=b.id, percept_id=p.id,
                                    quote="API is built with FastAPI"))
-    result = merge_memories(store, [a.id, b.id], title="Twin HTTP API uses FastAPI",
+    result = merge_claims(store, [a.id, b.id], title="Twin HTTP API uses FastAPI",
                             embedder=embedder)
     merged_id = result.extras["merged_id"]
     merged = store.get_claim(merged_id)
@@ -166,7 +166,7 @@ def test_merge_preserves_evidence_and_undo(store, embedder):
 def test_undo_restores_embeddings_and_graph(store, embedder):
     a = _mem(store, embedder, title="FastAPI", summary="Twin uses FastAPI.")
     b = _mem(store, embedder, title="API FastAPI", summary="The Twin API uses FastAPI.")
-    result = merge_memories(
+    result = merge_claims(
         store, [a.id, b.id],
         title="Twin HTTP API uses FastAPI",
         summary="Twin HTTP API uses FastAPI.",
@@ -192,7 +192,7 @@ def test_split_creates_children(store, embedder):
         summary="Twin uses PostgreSQL in production, SQLite in development, and FastAPI for its API.",
         status="candidate", needs_review=True,
     )
-    result = split_memory(store, mem.id, [
+    result = split_claim(store, mem.id, [
         {"title": "Postgres prod", "summary": "Twin production storage uses PostgreSQL."},
         {"title": "SQLite dev", "summary": "Twin development storage can use SQLite."},
         {"title": "FastAPI", "summary": "Twin HTTP API uses FastAPI."},
@@ -217,7 +217,7 @@ def test_split_evidence_mapping(store, embedder):
                   quote="PostgreSQL is the primary production backend.")
     store.insert_evidence(ev)
 
-    result = split_memory(store, mem.id, [
+    result = split_claim(store, mem.id, [
         {"title": "Postgres prod", "summary": "Twin production storage uses PostgreSQL.",
          "evidence_ids": [ev.id]},
         {"title": "SQLite local", "summary": "Twin development storage can use SQLite.",
@@ -238,7 +238,7 @@ def test_merge_blocks_cross_domain(store, embedder):
     b = _mem(store, embedder, domain="relationship", type="decision",
              title="rel", summary="relationship decision", entities=["Partner"])
     with pytest.raises(ValueError, match="life domains|mixed domains"):
-        merge_memories(store, [a.id, b.id], confirm_cross_scope_merge=True, embedder=embedder)
+        merge_claims(store, [a.id, b.id], confirm_cross_scope_merge=True, embedder=embedder)
 
 
 def test_merge_cross_type_requires_output_semantics(store, embedder):
@@ -247,12 +247,12 @@ def test_merge_cross_type_requires_output_semantics(store, embedder):
     b = _mem(store, embedder, type="belief", title="ship belief",
              summary="I believe shipping the release is right.")
     with pytest.raises(ValueError, match="mixed types"):
-        merge_memories(store, [a.id, b.id], embedder=embedder)
+        merge_claims(store, [a.id, b.id], embedder=embedder)
     with pytest.raises(ValueError, match="output_type"):
-        merge_memories(
+        merge_claims(
             store, [a.id, b.id], confirm_cross_scope_merge=True, embedder=embedder,
         )
-    result = merge_memories(
+    result = merge_claims(
         store, [a.id, b.id],
         confirm_cross_scope_merge=True,
         output_type="decision",
@@ -288,7 +288,7 @@ def test_merge_rolls_back_on_mid_failure(store, embedder):
     store.insert_relation = boom  # type: ignore[method-assign]
     before_ids = {m.id for m in store.list_claims(limit=100)}
     with pytest.raises(RuntimeError):
-        merge_memories(store, [a.id, b.id], embedder=embedder)
+        merge_claims(store, [a.id, b.id], embedder=embedder)
     store.insert_relation = real_insert  # type: ignore[method-assign]
 
     after = store.list_claims(limit=100)
@@ -315,7 +315,7 @@ def test_merge_transaction_rollback_on_fault(store, embedder):
     store.update_claim = boom  # type: ignore[method-assign]
     try:
         with pytest.raises(RuntimeError, match="injected"):
-            merge_memories(store, [a_id, b_id], embedder=embedder)
+            merge_claims(store, [a_id, b_id], embedder=embedder)
     finally:
         store.update_claim = real_update  # type: ignore[method-assign]
 

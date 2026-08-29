@@ -319,7 +319,7 @@ def test_gmail_source_policy_requires_review(store, cfg, embedder):
     store.insert_percept(percept)
     set_interpreter_override(lambda p, text, c: InterpretationResult(
         items=[InterpretedItem(
-            memory_type="decision", cognitive_act=CognitiveAct.decision,
+            claim_type="decision", cognitive_act=CognitiveAct.decision,
             title="Postpone the Friday release", summary=content,
             domain="work", confidence=0.9, evidence_span=content)],
         status=InterpretationStatus.interpreted, interpreter="authored",

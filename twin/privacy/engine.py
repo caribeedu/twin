@@ -21,7 +21,6 @@ from .grants import (
 )
 from .identity import (
     active_consent_covers,
-    normalize_purpose,
     principal_can_read,
     purpose_allowed,
     resolve_execution_location,
@@ -70,15 +69,11 @@ def _wildcard_match(patterns: list[str], value: str) -> bool:
 
 
 def _purpose_match(patterns: list[str], purpose: str) -> bool:
-    """Like ``_wildcard_match`` but treats ``memory_retrieval`` ≡ ``context_retrieval``."""
     if not patterns or "*" in patterns:
         return True
     if purpose_allowed(purpose, patterns):
         return True
-    return _wildcard_match(
-        [normalize_purpose(p) for p in patterns],
-        normalize_purpose(purpose),
-    )
+    return _wildcard_match(patterns, purpose)
 
 
 def policy_matches(

@@ -241,7 +241,7 @@ def preview_deletion(
         "exports": 0,
         "backups": 0,
         "matched_claim_ids_sample": mem_ids[:PREVIEW_UI_CAP],
-        "matched_memory_count": len(mem_ids),
+        "matched_claim_count": len(mem_ids),
         "memories_to_delete": len(manifest["memories_delete"]),
         "memories_to_recalculate": len(manifest["memories_recalculate"]),
         "mode": mode.value,

@@ -352,7 +352,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return p.model_dump(mode="json")
 
     @app.get("/api/claims")
-    @app.get("/api/memories")
     def api_memories(
         status: Optional[str] = None,
         domain: Optional[str] = None,
@@ -367,7 +366,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return [_claim_dict(m, ws.store) for m in memories]
 
     @app.get("/api/claims/{claim_id}")
-    @app.get("/api/memories/{claim_id}")
     def api_memory(claim_id: str):
         mem = ws.store.get_claim(claim_id)
         if mem is None:
@@ -376,7 +374,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return {**_claim_dict(mem, ws.store), "evidence": evidence}
 
     @app.post("/api/claims/{claim_id}/review")
-    @app.post("/api/memories/{claim_id}/review")
     def api_review(claim_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
         from ..clock import now_iso
@@ -1233,7 +1230,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return ws.store.get_project(project.id).model_dump()
 
     @app.post("/api/claims/{claim_id}/promote")
-    @app.post("/api/memories/{claim_id}/promote")
     def api_promote(claim_id: str):
         from twin.cognize.stance_engine.profile import promote_claim
 
@@ -1248,7 +1244,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return {"claim_id": claim_id, "promoted_to": section}
 
     @app.post("/api/claims/{claim_id}/supersede/{old_id}")
-    @app.post("/api/memories/{claim_id}/supersede/{old_id}")
     def api_supersede(claim_id: str, old_id: str):
         from twin.store.lifecycle import supersede
 
@@ -1259,7 +1254,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return result.__dict__
 
     @app.post("/api/claims/{claim_id}/contradict/{other_id}")
-    @app.post("/api/memories/{claim_id}/contradict/{other_id}")
     def api_contradict(claim_id: str, other_id: str):
         from twin.store.lifecycle import contradict
 
@@ -1671,7 +1665,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         )
 
     @app.get("/api/claims/{claim_id}/neighbors")
-    @app.get("/api/memories/{claim_id}/neighbors")
     def api_neighbors(claim_id: str):
         from twin.cognize.services.quality import discover_neighbors
         mem = ws.store.get_claim(claim_id)
@@ -1684,7 +1677,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ]
 
     @app.get("/api/claims/{claim_id}/quality")
-    @app.get("/api/memories/{claim_id}/quality")
     def api_quality(claim_id: str, refresh: bool = False):
         from twin.cognize.services.quality import analyze_claim
         mem = ws.store.get_claim(claim_id)
@@ -1720,7 +1712,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return data
 
     @app.get("/api/claims/{claim_id}/findings")
-    @app.get("/api/memories/{claim_id}/findings")
     def api_findings(claim_id: str, unresolved_only: bool = True):
         mem = ws.store.get_claim(claim_id)
         if mem is None:
@@ -1733,7 +1724,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ]
 
     @app.post("/api/claims/{claim_id}/findings/{finding_id}/dismiss")
-    @app.post("/api/memories/{claim_id}/findings/{finding_id}/dismiss")
     def api_dismiss_finding(claim_id: str, finding_id: str):
         closed = _close_finding(
             ws.store, claim_id, finding_id, status=FindingStatus.dismissed,
@@ -1743,14 +1733,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return closed
 
     @app.post("/api/claims/{claim_id}/resolve")
-    @app.post("/api/memories/{claim_id}/resolve")
     def api_resolve(claim_id: str, req: ResolveRequest):
         from ..clock import now_iso
         from twin.store.lifecycle import (
             archive_claim,
             contradict,
             merge_claims,
-            split_memory,
+            split_claim,
             supersede,
         )
 
@@ -1825,7 +1814,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 parts = req.parts or []
                 if len(parts) < 2:
                     raise ValueError("split requires at least two parts")
-                out = split_memory(ws.store, claim_id, parts, embedder=ws.embedder)
+                out = split_claim(ws.store, claim_id, parts, embedder=ws.embedder)
                 op_id = out.operation_id
                 result.update({
                     "children": out.extras.get("children"),
@@ -1881,7 +1870,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return result
 
     @app.get("/api/claims/{claim_id}/provenance")
-    @app.get("/api/memories/{claim_id}/provenance")
     def api_provenance(claim_id: str):
         from twin.store.provenance import claim_provenance
         try:
@@ -1890,7 +1878,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, str(exc)) from exc
 
     @app.post("/api/claims/merge")
-    @app.post("/api/memories/merge")
     def api_merge(req: MergeRequest):
         from twin.store.lifecycle import merge_claims
         from twin.store.models import CanonicalClaim
@@ -1919,18 +1906,16 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 "operation_id": result.operation_id, **result.extras}
 
     @app.post("/api/claims/{claim_id}/split")
-    @app.post("/api/memories/{claim_id}/split")
     def api_split(claim_id: str, req: SplitRequest):
-        from twin.store.lifecycle import split_memory
+        from twin.store.lifecycle import split_claim
         try:
-            result = split_memory(ws.store, claim_id, req.parts, embedder=ws.embedder)
+            result = split_claim(ws.store, claim_id, req.parts, embedder=ws.embedder)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "children": result.extras.get("children"),
                 "operation_id": result.operation_id}
 
     @app.post("/api/claims/{claim_id}/archive")
-    @app.post("/api/memories/{claim_id}/archive")
     def api_archive(claim_id: str):
         from twin.store.lifecycle import archive_claim
         try:
@@ -1940,7 +1925,6 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return {"action": result.action, "operation_id": result.operation_id}
 
     @app.post("/api/claims/{claim_id}/request-evidence")
-    @app.post("/api/memories/{claim_id}/request-evidence")
     def api_request_evidence(claim_id: str):
         mem = ws.store.get_claim(claim_id)
         if mem is None:

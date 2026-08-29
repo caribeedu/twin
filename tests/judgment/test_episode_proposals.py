@@ -72,7 +72,7 @@ def test_propose_from_episode_support_counts_independent_sources(store):
     proposal = propose_from_episode(store, ep)
     assert proposal is not None
     assert proposal.support_count == 1
-    assert proposal.metadata.get("memory_count") == 2
+    assert proposal.metadata.get("claim_count") == 2
     assert proposal.metadata.get("independent_sources") == 1
 
 

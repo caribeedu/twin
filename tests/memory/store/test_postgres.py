@@ -174,7 +174,7 @@ def test_firewall_log_on_postgres(pg_store, cfg):
 def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
     """Same fault-injection as SQLite — Postgres must roll back structural merge."""
     from twin import ids
-    from twin.store.lifecycle import merge_memories
+    from twin.store.lifecycle import merge_claims
     from twin.store.models import StoreClaim, ClaimStatus
 
     def _mem(**kw):
@@ -209,7 +209,7 @@ def test_merge_transaction_rollback_on_postgres(pg_store, embedder):
     pg_store.update_claim = boom  # type: ignore[method-assign]
     try:
         with pytest.raises(RuntimeError, match="injected"):
-            merge_memories(pg_store, [a_id, b_id], embedder=embedder)
+            merge_claims(pg_store, [a_id, b_id], embedder=embedder)
     finally:
         pg_store.update_claim = real_update  # type: ignore[method-assign]
 
@@ -460,7 +460,7 @@ def test_interpretation_state_and_deferral_on_postgres(pg_store, cfg, embedder):
 
         set_interpreter_override(lambda percept, text, c: InterpretationResult(
             items=[InterpretedItem(
-                memory_type="decision", cognitive_act=CognitiveAct.decision,
+                claim_type="decision", cognitive_act=CognitiveAct.decision,
                 title="Use PostgreSQL advisory locks",
                 summary="The team decided to use PostgreSQL advisory locks.",
                 domain="technical", confidence=0.9,

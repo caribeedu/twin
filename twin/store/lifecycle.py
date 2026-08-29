@@ -420,7 +420,7 @@ def merge_claims(
             "created_relation_ids": created_relations + redirected,
             "deleted_embedding_refs": list(before["embeddings"].keys()),
         }
-        op_id = _record_op(store, "merge_memories", claim_ids, new.id, before, after, actor=actor)
+        op_id = _record_op(store, "merge_claims", claim_ids, new.id, before, after, actor=actor)
 
     return LifecycleResult(
         "merge", new.id, claim_ids[0],
@@ -551,7 +551,7 @@ def split_claim(
             "created_relation_ids": created_relations,
             "deleted_embedding_refs": list(before["embeddings"].keys()),
         }
-        op_id = _record_op(store, "split_memory", [claim_id], child_ids[0],
+        op_id = _record_op(store, "split_claim", [claim_id], child_ids[0],
                            before, after, actor=actor)
 
     return LifecycleResult(
@@ -653,9 +653,3 @@ def undo_operation(store: TwinStore, operation_id: str) -> dict[str, Any]:
             store.mark_operation_undone(operation_id)  # type: ignore[attr-defined]
 
     return {"undone": operation_id, "operation": op.operation}
-
-
-# Deprecated aliases — prefer merge_claims / archive_claim / split_claim.
-merge_memories = merge_claims
-archive_memory = archive_claim
-split_memory = split_claim

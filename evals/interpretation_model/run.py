@@ -48,7 +48,7 @@ def _score_case(case: dict, cfg: Config) -> dict:
         1 for it in result.items
         if not evidence_span_is_grounded(it.evidence_span, percept.content))
     acts = {it.title.lower(): it.cognitive_act.value for it in result.items}
-    types = {it.title.lower(): it.memory_type for it in result.items}
+    types = {it.title.lower(): it.claim_type for it in result.items}
 
     act_hits = type_hits = attrib_hits = total = 0
     for want in case.get("expected_items", []):

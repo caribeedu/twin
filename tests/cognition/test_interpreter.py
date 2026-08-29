@@ -78,7 +78,7 @@ def test_deferred_percept_is_interpreted_on_retry(store, interpreting_cfg, embed
 
     # model comes back: same percept is now understood, no duplicate churn
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="Use PostgreSQL", summary="Team chose PostgreSQL.",
                         domain="technical", confidence=0.9,
                         evidence_span="We decided to use PostgreSQL for the queue."),
@@ -124,7 +124,7 @@ def test_interpreter_error_is_retryable_but_bounded(store, interpreting_cfg, emb
 
 def test_proposal_is_not_a_decision(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.proposal,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.proposal,
                         title="Adopt Redis", summary="Someone proposed adopting Redis.",
                         domain="technical", confidence=0.95, attributed_to="Bruno",
                         evidence_span="I propose we adopt Redis"),
@@ -140,7 +140,7 @@ def test_proposal_is_not_a_decision(store, interpreting_cfg, embedder):
 
 def test_third_party_claim_is_attributed_and_reviewed(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.third_party_claim,
+        InterpretedItem(claim_type="fact", cognitive_act=CognitiveAct.third_party_claim,
                         title="Vendor rate limit", summary="Vendor says limit is 5000/h.",
                         domain="technical", confidence=0.95, attributed_to="Priya",
                         speaker_is_owner=False,
@@ -158,7 +158,7 @@ def test_third_party_claim_is_attributed_and_reviewed(store, interpreting_cfg, e
 
 def test_settled_decision_not_held_by_act(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="Use PostgreSQL advisory locks",
                         summary="The team decided to use PostgreSQL advisory locks.",
                         domain="technical", confidence=0.9, attributed_to="Marina",
@@ -181,11 +181,11 @@ def test_settled_decision_not_held_by_act(store, interpreting_cfg, embedder):
 
 def test_ungrounded_items_are_dropped(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="constraint", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="constraint", cognitive_act=CognitiveAct.statement,
                         title="Tabs everywhere", summary="Indentation is tabs.",
                         domain="technical", confidence=0.85,
                         evidence_span="standardized on tabs for indentation"),
-        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="fact", cognitive_act=CognitiveAct.statement,
                         title="Unsupported guess", summary="They deploy on Fridays.",
                         domain="technical", confidence=0.4, evidence_span="   "),
     ]))
@@ -201,7 +201,7 @@ def test_ungrounded_items_are_dropped(store, interpreting_cfg, embedder):
 def test_interpretation_metadata_recorded_on_memory_and_state(store, interpreting_cfg,
                                                               embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="fact", cognitive_act=CognitiveAct.statement,
                         title="Prod on PG16", summary="Production runs on Postgres 16.",
                         domain="technical", confidence=0.88,
                         evidence_span="production runs on Postgres 16"),
@@ -246,11 +246,11 @@ def test_quarantine_precedes_interpretation(store, interpreting_cfg, embedder):
 def test_source_policy_still_applies_over_interpreter(store, interpreting_cfg, embedder):
     # a github-typed percept may not propose preferences (source policy §70)
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="preference", cognitive_act=CognitiveAct.opinion,
+        InterpretedItem(claim_type="preference", cognitive_act=CognitiveAct.opinion,
                         title="Prefers tabs", summary="Author prefers tabs.",
                         domain="technical", confidence=0.9,
                         evidence_span="I prefer tabs over spaces"),
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="Adopt CI gate", summary="Team adopted a CI gate.",
                         domain="technical", confidence=0.9,
                         evidence_span="we adopted a required CI gate"),
@@ -271,11 +271,11 @@ def test_source_policy_still_applies_over_interpreter(store, interpreting_cfg, e
 def test_nonempty_but_invented_evidence_span_is_dropped(store, interpreting_cfg,
                                                         embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="constraint", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="constraint", cognitive_act=CognitiveAct.statement,
                         title="Tabs", summary="Indentation is tabs.",
                         domain="technical", confidence=0.85,
                         evidence_span="The team standardized on tabs."),
-        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="fact", cognitive_act=CognitiveAct.statement,
                         title="Invented", summary="They run on Kubernetes.",
                         domain="technical", confidence=0.9,
                         evidence_span="The team runs everything on Kubernetes."),
@@ -292,7 +292,7 @@ def test_nonempty_but_invented_evidence_span_is_dropped(store, interpreting_cfg,
 def test_paraphrase_is_not_accepted_as_verbatim_evidence(store, interpreting_cfg,
                                                          embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="PG", summary="PostgreSQL was chosen.",
                         domain="technical", confidence=0.9,
                         evidence_span="PostgreSQL was selected by the team."),
@@ -316,7 +316,7 @@ def test_evidence_grounding_uses_masked_source(store, interpreting_cfg, embedder
     # the interpreter only ever saw `masked`; quote a slice of it
     span = masked.split("confirm ")[-1].rstrip(".")
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="PG", summary=span, domain="technical",
                         confidence=0.9, evidence_span=span),
     ]))
@@ -346,7 +346,7 @@ def test_model_outage_does_not_permanently_abandon_percept(store, interpreting_c
     assert p.id in [x.id for x in store.percepts_pending_interpretation(max_attempts=6)]
 
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="PG", summary="Use PostgreSQL.", domain="technical",
                         confidence=0.9, evidence_span="We decided to use PostgreSQL."),
     ]))
@@ -373,10 +373,10 @@ def test_poison_input_has_bounded_retries(store, interpreting_cfg, embedder):
 # -- Adjustment 6: no silent invalid type/domain fallback ------------------------
 
 
-def test_invalid_memory_type_is_dropped_not_coerced_to_fact(store, interpreting_cfg,
+def test_invalid_claim_type_is_dropped_not_coerced_to_fact(store, interpreting_cfg,
                                                             embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="wizardry", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="wizardry", cognitive_act=CognitiveAct.statement,
                         title="Bogus", summary="Some bogus type.", domain="technical",
                         confidence=0.9, evidence_span="Some bogus type."),
     ]))
@@ -391,7 +391,7 @@ def test_invalid_domain_goes_to_review_as_unknown_not_technical(store,
                                                                 interpreting_cfg,
                                                                 embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="fact", cognitive_act=CognitiveAct.statement,
+        InterpretedItem(claim_type="fact", cognitive_act=CognitiveAct.statement,
                         title="Fact", summary="A grounded fact.", domain="wonderland",
                         confidence=0.95, evidence_span="A grounded fact."),
     ]))
@@ -409,14 +409,14 @@ def test_to_extracted_rejects_invalid_type_and_domain():
     from twin.cognize.services.interpreter.schema import CognitiveAct, InterpretedItem
 
     bad_type = InterpretedItem(
-        memory_type="not_a_type", cognitive_act=CognitiveAct.statement,
+        claim_type="not_a_type", cognitive_act=CognitiveAct.statement,
         title="x", summary="y", domain="technical", evidence_span="y",
     )
     with pytest.raises(ValueError, match="invalid claim_type"):
         bad_type.to_extracted()
 
     bad_domain = InterpretedItem(
-        memory_type="fact", cognitive_act=CognitiveAct.statement,
+        claim_type="fact", cognitive_act=CognitiveAct.statement,
         title="x", summary="y", domain="wonderland", evidence_span="y",
     )
     with pytest.raises(ValueError, match="invalid domain"):
@@ -427,11 +427,11 @@ def test_grounded_count_includes_policy_dropped_items(store, interpreting_cfg,
                                                       embedder):
     """grounded = passed evidence check, even if later dropped by policy."""
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="preference", cognitive_act=CognitiveAct.opinion,
+        InterpretedItem(claim_type="preference", cognitive_act=CognitiveAct.opinion,
                         title="Prefers tabs", summary="Author prefers tabs.",
                         domain="technical", confidence=0.9,
                         evidence_span="I prefer tabs over spaces"),
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="Adopt CI gate", summary="Team adopted a CI gate.",
                         domain="technical", confidence=0.9,
                         evidence_span="we adopted a required CI gate"),
@@ -454,7 +454,7 @@ def test_grounded_count_includes_policy_dropped_items(store, interpreting_cfg,
 
 def test_invented_speaker_is_flagged_unresolved(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="PG", summary="Use PostgreSQL.", domain="technical",
                         confidence=0.9, attributed_to="Nonexistent Person",
                         evidence_span="We decided to use PostgreSQL."),
@@ -483,7 +483,7 @@ def test_coerce_item_tolerates_messy_llm_fields():
     items, dropped = _items_from_payload({
         "items": [
             {
-                "memory_type": "Rejected Alternative",
+                "claim_type": "Rejected Alternative",
                 "cognitive_act": "suggestion",
                 "title": "Kafka",
                 "summary": "Rejected Kafka for now",
@@ -495,10 +495,10 @@ def test_coerce_item_tolerates_messy_llm_fields():
                 "relations": [{"subject": "Atlas", "predicate": "rejects", "object": "Kafka"}],
                 "extra_junk": True,
             },
-            {"memory_type": "fact"},  # unusable — no title/summary
+            {"claim_type": "fact"},  # unusable — no title/summary
             {
                 # Wrong field name — must not be silently aliased.
-                "memory_type": "preference",
+                "claim_type": "preference",
                 "cognitive_act": "statement",
                 "description": "The user likes bananas.",
                 "domain": "personal_preferences",
@@ -510,7 +510,7 @@ def test_coerce_item_tolerates_messy_llm_fields():
     })
     assert dropped == 2
     assert len(items) == 1
-    assert items[0].memory_type == "rejected_alternative"
+    assert items[0].claim_type == "rejected_alternative"
     assert items[0].cognitive_act.value == "proposal"
     assert items[0].domain == "technical"
     assert items[0].confidence == 0.85
@@ -519,7 +519,7 @@ def test_coerce_item_tolerates_messy_llm_fields():
 
 def test_known_speaker_attribution_resolves(store, interpreting_cfg, embedder):
     set_interpreter_override(_override([
-        InterpretedItem(memory_type="decision", cognitive_act=CognitiveAct.decision,
+        InterpretedItem(claim_type="decision", cognitive_act=CognitiveAct.decision,
                         title="PG", summary="Use PostgreSQL.", domain="technical",
                         confidence=0.9, attributed_to="Marina",
                         evidence_span="we decided to use PostgreSQL"),

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ..crypto import ContentCodec
-from .base import MemoryStore, TwinStore
+from .base import TwinStore
 
 
 def create_store(url: str, codec: Optional[ContentCodec] = None) -> TwinStore:
@@ -24,4 +24,4 @@ def create_store(url: str, codec: Optional[ContentCodec] = None) -> TwinStore:
     raise ValueError(f"Unsupported TWIN_DB_URL: {url!r}")
 
 
-__all__ = ["TwinStore", "MemoryStore", "create_store"]
+__all__ = ["TwinStore", "create_store"]

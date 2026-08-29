@@ -1126,7 +1126,7 @@ def _authored_policy_interp(percept, text, _cfg):
     )
     items = [
         InterpretedItem(
-            memory_type=mtype, cognitive_act=CognitiveAct(act),
+            claim_type=mtype, cognitive_act=CognitiveAct(act),
             title=phrase[:80], summary=phrase, domain="technical",
             confidence=0.9, evidence_span=phrase)
         for phrase, (mtype, act) in _POLICY_AUTHORED.items() if phrase in text

@@ -29,7 +29,7 @@ from twin.cognize.stance_engine.models import (
 from twin.cognize.stance_engine.proposals import (
     approve_proposal,
     preview_proposal,
-    propose_from_memory,
+    propose_from_claim,
     propose_from_pattern,
     reject_proposal,
 )
@@ -124,7 +124,7 @@ def test_preview_edits_change_token(store, cfg, embedder):
         store, embedder, type="preference",
         title="short", summary="Prefere respostas curtas.",
     )
-    prop = propose_from_memory(store, mem.id)
+    prop = propose_from_claim(store, mem.id)
     p1 = preview_proposal(store, prop.id)
     p2 = preview_proposal(store, prop.id, edits={"kind": "principle", "strength": 0.9})
     assert p1["preview_token"] != p2["preview_token"]
@@ -143,7 +143,7 @@ def test_supporting_memory_change_invalidates_token(store, cfg, embedder):
         store, embedder, type="preference",
         title="x", summary="Prefere ferramentas locais.",
     )
-    prop = propose_from_memory(store, mem.id)
+    prop = propose_from_claim(store, mem.id)
     token = preview_proposal(store, prop.id)["preview_token"]
     store.update_claim(mem.id, summary="Prefere ferramentas locais — edited after preview.")
     with pytest.raises(ValueError, match="preview_token"):
@@ -358,7 +358,7 @@ def test_stability_change_changes_preview_token(store, cfg):
 
 def test_approve_rollback_on_fault(store, cfg, embedder):
     mem = _mem(store, embedder, type="preference", title="t", summary="Prefere X.")
-    prop = propose_from_memory(store, mem.id)
+    prop = propose_from_claim(store, mem.id)
     token = preview_proposal(store, prop.id)["preview_token"]
     real = store.insert_judgment_version
     calls = {"n": 0}

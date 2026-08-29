@@ -311,7 +311,7 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
 
             def _authored(percept, text, _c):
                 items = [InterpretedItem(
-                    memory_type="decision", cognitive_act=CognitiveAct.decision,
+                    claim_type="decision", cognitive_act=CognitiveAct.decision,
                     title=t, summary=p, domain="technical", confidence=0.9,
                     evidence_span=p) for p, t in authored.items() if p in text]
                 return InterpretationResult(

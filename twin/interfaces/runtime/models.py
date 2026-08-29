@@ -22,7 +22,7 @@ class JobKind(str, Enum):
     attention_evaluate = "attention_evaluate"
     consolidate_daily = "consolidate_daily"
     consolidate_weekly = "consolidate_weekly"
-    reembed_memory = "reembed_memory"
+    reembed_claim = "reembed_claim"
     integrity_check = "integrity_check"
     cognize_batch = "cognize_batch"
     connector_reconcile = "connector_reconcile"

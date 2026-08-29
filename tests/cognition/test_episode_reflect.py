@@ -347,7 +347,7 @@ def test_reflect_allows_divergent_pr_commit_pair(store, cfg, embedder):
     assert any("workspace ticks" in q for q in brief.quotes_by_ref.values())
 
     def _fake(brief_in, _cfg):
-        assert brief_in.related_memories is not None
+        assert brief_in.related_claims is not None
         return [TrajectoryClaim(
             type="constraint",
             domain="technical",
@@ -371,7 +371,7 @@ def test_reflect_allows_divergent_pr_commit_pair(store, cfg, embedder):
 def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
     """Consolidate retrieves confirmed/candidate/rejected neighbors."""
     from twin import ids
-    from twin.cognize.services.episode_reflect import gather_related_memories
+    from twin.cognize.services.episode_reflect import gather_related_claims
     from twin.store.models import StoreClaim
 
     acc, inst = _acct(store, account_id="acct_rel")
@@ -398,7 +398,7 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
 
     brief = build_episode_brief(store, ep.id)
     assert brief is not None
-    related = gather_related_memories(store, embedder, brief, limit=10)
+    related = gather_related_claims(store, embedder, brief, limit=10)
     ids_hit = {r["id"] for r in related}
     assert confirmed.id in ids_hit
     assert rejected.id in ids_hit
@@ -408,7 +408,7 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
     seen: dict = {}
 
     def _fake(brief_in, _cfg):
-        seen["related"] = list(brief_in.related_memories)
+        seen["related"] = list(brief_in.related_claims)
         return [TrajectoryClaim(
             type="preference",
             domain="technical",
@@ -427,7 +427,7 @@ def test_reflect_gathers_related_including_rejected(store, cfg, embedder):
 
 def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
     """Open-session observe notes surface before vault neighbors."""
-    from twin.cognize.services.episode_reflect import gather_related_memories
+    from twin.cognize.services.episode_reflect import gather_related_claims
     from twin.cognize.services.sessions import observe_session, start_session
 
     acc, inst = _acct(store, account_id="acct_sesart")
@@ -446,7 +446,7 @@ def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
 
     brief = build_episode_brief(store, ep.id)
     assert brief is not None
-    related = gather_related_memories(
+    related = gather_related_claims(
         store, embedder, brief, limit=12, session_id=started.session.id,
     )
     arts = [r for r in related if r["status"] == "session_artifact"]
@@ -457,7 +457,7 @@ def test_reflect_gathers_open_session_artifacts(store, cfg, embedder):
     seen: dict = {}
 
     def _fake(brief_in, _cfg):
-        seen["related"] = list(brief_in.related_memories)
+        seen["related"] = list(brief_in.related_claims)
         return [TrajectoryClaim(
             type="preference",
             domain="technical",

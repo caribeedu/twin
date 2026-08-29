@@ -80,7 +80,6 @@ def propose_from_claim(
             "independence_weight": 0.4 if twin_influenced else 1.0,
             "independent_sources": independent,
             "claim_count": 1,
-            "memory_count": 1,
         },
     }
     proposal = JudgmentProposal(
@@ -94,7 +93,7 @@ def propose_from_claim(
         scope={"domain": mem.domain, "projects": [mem.project_id] if mem.project_id else []},
         status=ProposalStatus.pending,
         created_at=now_iso(),
-        metadata={"independent_sources": independent, "claim_count": 1, "memory_count": 1},
+        metadata={"independent_sources": independent, "claim_count": 1},
     )
     store.insert_judgment_proposal(proposal)
     return proposal
@@ -163,7 +162,7 @@ def propose_from_pattern(
             "twin_influenced": False,
             "independence_weight": 1.0,
             "independent_sources": independent_sources,
-            "memory_count": len(supporting),
+            "claim_count": len(supporting),
         },
     }
     proposal = JudgmentProposal(
@@ -187,7 +186,7 @@ def propose_from_pattern(
         metadata={
             "detector": "simplicity_cluster_demo",
             "independent_sources": independent_sources,
-            "memory_count": len(supporting),
+            "claim_count": len(supporting),
         },
     )
     store.insert_judgment_proposal(proposal)
@@ -260,7 +259,7 @@ def propose_from_episode(
             "twin_influenced": twin_influenced,
             "independence_weight": 0.4 if twin_influenced else 1.0,
             "independent_sources": independent,
-            "memory_count": len(claim_ids),
+            "claim_count": len(claim_ids),
         },
     }
     proposal = JudgmentProposal(
@@ -282,7 +281,7 @@ def propose_from_episode(
             "detector": "episode_pattern",
             "episode_id": episode_id,
             "independent_sources": independent,
-            "memory_count": len(claim_ids),
+            "claim_count": len(claim_ids),
         },
     )
     store.insert_judgment_proposal(proposal)
@@ -399,7 +398,7 @@ def propose_from_episode_patterns(
             "twin_influenced": False,
             "independence_weight": 1.0,
             "independent_sources": independent,
-            "memory_count": len(supporting),
+            "claim_count": len(supporting),
         },
     }
     proposal = JudgmentProposal(
@@ -419,7 +418,7 @@ def propose_from_episode_patterns(
         metadata={
             "detector": "episode_pattern",
             "independent_sources": independent,
-            "memory_count": len(supporting),
+            "claim_count": len(supporting),
         },
     )
     store.insert_judgment_proposal(proposal)
@@ -496,7 +495,7 @@ def compute_proposal_preview_token(
         "contradicting": contradicting,
         "support_count": proposal.support_count,
         "independent_sources": independent_sources,
-        "memory_count": len(proposal.supporting_claim_ids),
+        "claim_count": len(proposal.supporting_claim_ids),
         "confidence": proposal.confidence,
         "scope": proposal.scope,
         "status": proposal.status.value if hasattr(proposal.status, "value") else proposal.status,
@@ -822,7 +821,3 @@ def rank_proposals(proposals: list[JudgmentProposal]) -> list[JudgmentProposal]:
         key=lambda p: (p.confidence, p.support_count, -p.contradiction_count),
         reverse=True,
     )
-
-
-# Deprecated alias — prefer propose_from_claim.
-propose_from_memory = propose_from_claim

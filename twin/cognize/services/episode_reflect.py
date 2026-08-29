@@ -61,15 +61,6 @@ class EpisodeBrief:
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
 
-    @property
-    def related_memories(self) -> list[dict[str, Any]]:
-        """Deprecated alias of ``related_claims``."""
-        return self.related_claims
-
-    @related_memories.setter
-    def related_memories(self, value: list[dict[str, Any]]) -> None:
-        self.related_claims = list(value) if value is not None else []
-
 
 @dataclass
 class TrajectoryClaim:
@@ -328,10 +319,6 @@ def gather_related_claims(
     # Session intent first — the model should see live dogfood notes before
     # older vault neighbors that often dominate lexical search.
     return session_hits + mem_hits
-
-
-# Deprecated alias — prefer gather_related_claims.
-gather_related_memories = gather_related_claims
 
 
 # -- reflectors -----------------------------------------------------------

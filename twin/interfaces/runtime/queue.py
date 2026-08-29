@@ -33,7 +33,8 @@ class RuntimeQueue:
         max_attempts: int = 8,
         not_before: str = "",
     ) -> RuntimeJob:
-        kind = JobKind(kind) if not isinstance(kind, JobKind) else kind
+        if not isinstance(kind, JobKind):
+            kind = JobKind(kind)
         if idempotency_key:
             existing = self.store.get_runtime_job_by_idempotency_key(idempotency_key)
             if existing is not None:

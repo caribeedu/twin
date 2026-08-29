@@ -379,7 +379,7 @@ def cmd_review_batch(args) -> None:
 
 def _narrative_lifecycle(args) -> None:
     from twin.interfaces import ux
-    from twin.store.lifecycle import archive_claim, merge_claims, split_memory, undo_operation
+    from twin.store.lifecycle import archive_claim, merge_claims, split_claim, undo_operation
 
     from twin.store.provenance import claim_provenance
 
@@ -410,7 +410,7 @@ def _narrative_lifecycle(args) -> None:
         _emit(args, {"merged_id": merged, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "split":
         parts = [{"title": p, "summary": p} for p in args.parts]
-        result = split_memory(ws.store, args.claim_id, parts, embedder=ws.embedder)
+        result = split_claim(ws.store, args.claim_id, parts, embedder=ws.embedder)
         children = result.extras.get("children")
 
         def pretty():
@@ -1053,8 +1053,8 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     signed = preview.get("signed_payload") or {}
     metadata = proposal.get("metadata") or {}
     mem_count = (
-        signed.get("memory_count")
-        if signed.get("memory_count") is not None
+        signed.get("claim_count")
+        if signed.get("claim_count") is not None
         else len(proposal.get("supporting_claim_ids") or [])
     )
     independent = (
@@ -1127,7 +1127,7 @@ def _stance_ops(args) -> None:
     from twin.cognize.stance_engine.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
     from twin.cognize.stance_engine.proposals import (
         approve_proposal, defer_proposal, preview_proposal, propose_from_episode,
-        propose_from_memory, propose_from_pattern, reject_proposal,
+        propose_from_claim, propose_from_pattern, reject_proposal,
     )
     from twin.cognize.stance_engine.simulate import counterfactual, simulate
     from twin.cognize.stance_engine.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
@@ -1247,8 +1247,8 @@ def _stance_ops(args) -> None:
 
         _emit(args, {"proposals": rows, "count": len(rows)}, pretty)
     elif cmd == "propose":
-        if args.from_memory:
-            p = propose_from_memory(ws.store, args.from_memory)
+        if args.from_claim:
+            p = propose_from_claim(ws.store, args.from_claim)
         else:
             props = propose_from_pattern(ws.store, domain=args.domain or "technical")
             if not props:
@@ -1408,7 +1408,7 @@ def cmd_privacy(args) -> None:
     elif cmd == "simulate":
         bootstrap_policy_set(ws.store)
         memories = []
-        for mid in args.memory or []:
+        for mid in args.claim or []:
             m = ws.store.get_claim(mid)
             if m:
                 memories.append(m)
@@ -2463,7 +2463,7 @@ def cmd_session_feedback(args) -> None:
 
     ws = Workspace(args.home)
     ses = record_feedback(ws.store, args.session_id, args.verdict,
-                          claim_id=args.memory, note=args.note or "",
+                          claim_id=args.claim, note=args.note or "",
                           scope=args.scope)
     print(f"session {ses.id}: feedback '{args.verdict}' recorded")
 

@@ -95,10 +95,6 @@ class ClaimCandidate(BaseModel):
     explanation: str = ""
 
 
-# Deprecated alias — prefer ClaimCandidate in new code.
-MemoryCandidate = ClaimCandidate
-
-
 def _norm(text: str) -> str:
     t = (text or "").strip().lower()
     t = re.sub(r"\s+", " ", t)

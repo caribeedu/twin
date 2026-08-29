@@ -21,7 +21,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from twin.config import ALL_DOMAINS
 from ..schema import CLAIM_TYPES, SENSITIVITIES, ExtractedClaim, ExtractedRelation
@@ -89,22 +89,6 @@ class InterpretedItem(BaseModel):
     unresolved_references: list[str] = Field(default_factory=list)
     # A short note when the item is genuinely ambiguous (competing readings).
     ambiguity: Optional[str] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _accept_memory_type_alias(cls, data: Any) -> Any:
-        """Prefer ``claim_type``; still accept LLM/legacy JSON ``memory_type``."""
-        if isinstance(data, dict):
-            data = dict(data)
-            if data.get("claim_type") in (None, "") and data.get("memory_type") not in (None, ""):
-                data["claim_type"] = data["memory_type"]
-            data.pop("memory_type", None)
-        return data
-
-    @property
-    def memory_type(self) -> str:
-        """Deprecated alias of ``claim_type`` (transitional reads)."""
-        return self.claim_type
 
     def resolved_type(self) -> tuple[str, bool]:
         """(claim_type, is_rejected_alternative) after normalization.

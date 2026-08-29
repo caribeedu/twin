@@ -164,7 +164,7 @@ def test_workspace_tick_interpret_creates_candidates_only(store, cfg, embedder):
     def scripted(percept, text, cfg):
         return InterpretationResult(
             items=[InterpretedItem(
-                memory_type="decision",
+                claim_type="decision",
                 title="Use FastAPI",
                 summary=span,
                 domain="technical",
@@ -204,7 +204,7 @@ def test_repeated_workspace_tick_is_idempotent(store, cfg, embedder):
         calls["n"] += 1
         return InterpretationResult(
             items=[InterpretedItem(
-                memory_type="fact",
+                claim_type="fact",
                 title="Note",
                 summary=span,
                 domain="technical",
@@ -424,7 +424,7 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
     def scripted(percept, text, cfg):
         return InterpretationResult(
             items=[InterpretedItem(
-                memory_type="decision",
+                claim_type="decision",
                 title="Use FastAPI",
                 summary=span,
                 domain="technical",

@@ -395,7 +395,7 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
     def _authored_decisions(percept, text, _cfg):
         items = [
             InterpretedItem(
-                memory_type="decision", cognitive_act=CognitiveAct.decision,
+                claim_type="decision", cognitive_act=CognitiveAct.decision,
                 title=title, summary=phrase, domain="technical", confidence=0.9,
                 evidence_span=phrase)
             for phrase, title in _AUTHORED.items() if phrase in text
@@ -439,7 +439,7 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
     def _authored_preference(percept, text, _cfg):
         items = ([InterpretedItem(
-            memory_type="preference", cognitive_act=CognitiveAct.opinion,
+            claim_type="preference", cognitive_act=CognitiveAct.opinion,
             title="Prefers tabs over spaces", summary=phrase, domain="technical",
             confidence=0.9, evidence_span=phrase)] if phrase in text else [])
         return InterpretationResult(
@@ -466,7 +466,7 @@ def test_rejected_alternative_becomes_decision_with_payload():
     )
 
     item = InterpretedItem(
-        memory_type="rejected_alternative", cognitive_act=CognitiveAct.decision,
+        claim_type="rejected_alternative", cognitive_act=CognitiveAct.decision,
         title="MongoDB rejected", summary="Decided against MongoDB (licensing).",
         domain="technical", confidence=0.9,
         evidence_span="We also decided against MongoDB because of licensing.")
@@ -900,7 +900,7 @@ def test_ingestion_policy_override_cannot_widen_github_allowlist():
     widen = merge_policies(
         default,
         _from_config({
-            "allow_memory_types": ["belief", "preference"],
+            "allow_claim_types": ["belief", "preference"],
             "drop": [],
             "require_review_for": [],
         }),
@@ -910,7 +910,7 @@ def test_ingestion_policy_override_cannot_widen_github_allowlist():
     assert evaluate(widen, "decision").action == "drop"
 
     narrow = merge_policies(
-        default, _from_config({"allow_memory_types": ["decision"]}),
+        default, _from_config({"allow_claim_types": ["decision"]}),
     )
     assert evaluate(narrow, "decision").action == "allow"
     assert evaluate(narrow, "fact").action == "drop"

@@ -10,7 +10,7 @@
   },
   "interpreter_output": [
     {
-      "memory_type": "decision",
+      "claim_type": "decision",
       "cognitive_act": "decision",
       "title": "Use PostgreSQL advisory locks for the queue",
       "summary": "The team decided to use PostgreSQL advisory locks for the queue.",
@@ -21,7 +21,7 @@
       "evidence_span": "we decided to use PostgreSQL advisory locks for the queue"
     },
     {
-      "memory_type": "decision",
+      "claim_type": "decision",
       "cognitive_act": "proposal",
       "title": "Add a Redis cache later",
       "summary": "Bruno proposed adding a Redis cache later.",

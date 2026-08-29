@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None) -> None:
     re = rs.add_parser("enqueue", help="enqueue a job")
     re.add_argument("kind", choices=[
         "interpret_percept", "workspace_tick", "attention_evaluate",
-        "consolidate_daily", "consolidate_weekly", "reembed_memory",
+        "consolidate_daily", "consolidate_weekly", "reembed_claim",
         "integrity_check", "connector_reconcile", "backfill_partition",
         "session_domain_resolve", "session_complete",
     ])
@@ -334,7 +334,7 @@ def main(argv: list[str] | None = None) -> None:
     psim.add_argument("--purpose", default="context_retrieval")
     psim.add_argument("--audience", default="self")
     psim.add_argument("--tool", default="local-cli")
-    psim.add_argument("--memory", action="append", default=[],
+    psim.add_argument("--claim", action="append", default=[],
                      help="claim id (deprecated flag name; use claim ids)")
     psim.set_defaults(func=cmd_privacy)
     pex = ps.add_parser("explain"); pex.add_argument("decision_id"); pex.set_defaults(func=cmd_privacy)
@@ -549,7 +549,7 @@ def main(argv: list[str] | None = None) -> None:
     ps.add_argument("verdict", choices=["useful", "partially_useful", "irrelevant",
                                         "incorrect", "missing_context",
                                         "privacy_overblock", "privacy_underblock"])
-    ps.add_argument("--memory", default=None,
+    ps.add_argument("--claim", default=None,
                     help="a claim this session supplied or created")
     ps.add_argument("--note", default=None)
     ps.add_argument("--scope", default=None, choices=["session", "pack", "claim"])
@@ -882,7 +882,7 @@ def main(argv: list[str] | None = None) -> None:
     js.add_parser("export").set_defaults(func=cmd_stance)
     pprop = js.add_parser("proposals"); pprop.add_argument("--status"); pprop.set_defaults(func=cmd_stance)
     ppr = js.add_parser("propose")
-    ppr.add_argument("--from-memory"); ppr.add_argument("--domain", default="technical")
+    ppr.add_argument("--from-claim"); ppr.add_argument("--domain", default="technical")
     ppr.set_defaults(func=cmd_stance)
     ppe = js.add_parser(
         "propose-episode",

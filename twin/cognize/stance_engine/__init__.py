@@ -12,7 +12,6 @@ from .proposals import (
     defer_proposal,
     preview_proposal,
     propose_from_claim,
-    propose_from_memory,
     propose_from_pattern,
     reject_proposal,
 )
@@ -23,7 +22,7 @@ __all__ = [
     "Firewall", "Verdict", "detect", "mask",
     "load_profile", "render_profile", "promote_claim",
     "preview_yaml_import", "apply_yaml_import", "export_judgment_yaml",
-    "propose_from_claim", "propose_from_memory", "propose_from_pattern",
+    "propose_from_claim", "propose_from_pattern",
     "preview_proposal", "approve_proposal", "reject_proposal", "defer_proposal",
     "applicable_pack", "render_applicable",
     "simulate", "evaluate", "counterfactual",

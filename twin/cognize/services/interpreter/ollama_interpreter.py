@@ -258,14 +258,11 @@ def _coerce_item(raw: dict) -> Optional[InterpretedItem]:
         return None
     data = dict(raw)
 
-    mem_type = str(
-        data.get("claim_type") or data.get("memory_type") or "fact"
-    ).strip().lower().replace(" ", "_")
+    mem_type = str(data.get("claim_type") or "fact").strip().lower().replace(" ", "_")
     mem_type = _TYPE_ALIASES.get(mem_type.replace("_", " "), _TYPE_ALIASES.get(mem_type, mem_type))
     if mem_type not in INTERPRETATION_TYPES:
         mem_type = "fact"
     data["claim_type"] = mem_type
-    data.pop("memory_type", None)
 
     act_raw = str(data.get("cognitive_act") or "statement").strip().lower().replace(" ", "_")
     act = _ACT_ALIASES.get(act_raw.replace("_", "-"), _ACT_ALIASES.get(act_raw))

@@ -440,7 +440,7 @@ def test_deletion_full_manifest_not_capped(store, embedder):
         m = _mem(store, embedder, domain="technical", title=f"m{i}", summary=f"s{i}")
         ids_list.append(m.id)
     req = preview_deletion(store, {"claim_ids": ids_list})
-    assert req.preview["matched_memory_count"] == 60
+    assert req.preview["matched_claim_count"] == 60
     assert len(req.preview["matched_claim_ids_sample"]) == 50
     assert len(req.manifest["memories_delete"]) == 60
     out = execute_deletion(store, req.id, confirm=True, preview_token=req.preview_token)

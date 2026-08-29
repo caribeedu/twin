@@ -103,15 +103,6 @@ class AnalysisDossier:
     gaps: list[str] = field(default_factory=list)
     budget: DossierBudget = field(default_factory=DossierBudget)
 
-    @property
-    def related_memories(self) -> list[dict[str, Any]]:
-        """Deprecated alias of ``related_claims``."""
-        return self.related_claims
-
-    @related_memories.setter
-    def related_memories(self, value: list[dict[str, Any]]) -> None:
-        self.related_claims = list(value) if value is not None else []
-
     def senses(self) -> list[str]:
         out: list[str] = []
         for b in list(self.primary) + list(self.cross_sense):

@@ -48,7 +48,7 @@ _CORPUS: list[tuple[str, str, str, str]] = [
 def corpus_interpreter(percept, masked_text, cfg) -> InterpretationResult:
     items = [
         InterpretedItem(
-            memory_type=mtype, cognitive_act=CognitiveAct(act),
+            claim_type=mtype, cognitive_act=CognitiveAct(act),
             title=span[:80], summary=span, domain=domain, confidence=0.9,
             evidence_span=span)
         for span, mtype, act, domain in _CORPUS if span in (masked_text or "")

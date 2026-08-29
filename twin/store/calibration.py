@@ -136,7 +136,7 @@ def load_calibration(path: Optional[Path] = None) -> dict[str, Any]:
 
 def calibrated_confidence(
     source: str,
-    memory_type: str,
+    claim_type: str,
     raw_confidence: float,
     *,
     source_trust: Optional[float] = None,
@@ -153,7 +153,7 @@ def calibrated_confidence(
     cal = calibration or DEFAULT_CALIBRATION
     src = cal.get("sources", {}).get(source) or cal.get("sources", {}).get("document", {})
     trust = float(source_trust if source_trust is not None else src.get("base_trust", 0.7))
-    mod = float(src.get("type_modifiers", {}).get(memory_type, 1.0))
+    mod = float(src.get("type_modifiers", {}).get(claim_type, 1.0))
     # Soft type curve: modifier 1.0 → full trust; 0.35 → ~0.71× trust
     adjusted_trust = trust * (0.55 + 0.45 * mod)
     score = raw_confidence * adjusted_trust * evidence_directness

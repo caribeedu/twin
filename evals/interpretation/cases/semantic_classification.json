@@ -10,7 +10,7 @@
   },
   "interpreter_output": [
     {
-      "memory_type": "task",
+      "claim_type": "task",
       "cognitive_act": "decision",
       "title": "Ship the billing service on Friday",
       "summary": "The billing service will ship on Friday.",
@@ -20,7 +20,7 @@
       "evidence_span": "we will ship the billing service on Friday"
     },
     {
-      "memory_type": "rejected_alternative",
+      "claim_type": "rejected_alternative",
       "cognitive_act": "decision",
       "title": "MongoDB rejected due to licensing",
       "summary": "The team decided against MongoDB because of licensing.",
@@ -29,7 +29,7 @@
       "evidence_span": "We decided against MongoDB because of licensing"
     },
     {
-      "memory_type": "fact",
+      "claim_type": "fact",
       "cognitive_act": "statement",
       "title": "Production runs on Postgres 16",
       "summary": "Production runs on Postgres 16.",

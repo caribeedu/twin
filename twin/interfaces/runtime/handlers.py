@@ -119,7 +119,7 @@ def handle_consolidate_weekly(
     return result.to_dict()
 
 
-def handle_reembed_memory(
+def handle_reembed_claim(
     store: TwinStore, cfg: Config, embedder: Embedder, job: RuntimeJob,
 ) -> dict[str, Any]:
     mid = (job.payload or {}).get("claim_id")
@@ -127,7 +127,7 @@ def handle_reembed_memory(
         raise HandlerError("missing claim_id", error_class=ErrorClass.permanent, stage="validate")
     mem = store.get_claim(mid)
     if mem is None:
-        raise HandlerError(f"memory {mid} not found", error_class=ErrorClass.permanent, stage="validate")
+        raise HandlerError(f"claim {mid} not found", error_class=ErrorClass.permanent, stage="validate")
     vector = embedder.embed(f"{mem.title}\n{mem.summary}")
     store.store_embedding(mem.id, "claim", embedder.name, vector)
     return {"claim_id": mid, "embedder": embedder.name}
@@ -420,7 +420,7 @@ HANDLERS: dict[JobKind, Handler] = {
     JobKind.attention_evaluate: handle_attention_evaluate,
     JobKind.consolidate_daily: handle_consolidate_daily,
     JobKind.consolidate_weekly: handle_consolidate_weekly,
-    JobKind.reembed_memory: handle_reembed_memory,
+    JobKind.reembed_claim: handle_reembed_claim,
     JobKind.integrity_check: handle_integrity_check,
     JobKind.cognize_batch: handle_cognize_batch,
     JobKind.connector_reconcile: handle_connector_reconcile,
