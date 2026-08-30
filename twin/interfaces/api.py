@@ -1014,6 +1014,134 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             },
         }
 
+    def _center_access():
+        from twin.privacy.identity import ensure_local_identity, resolve_access
+        ensure_local_identity(ws.store)
+        return resolve_access(
+            ws.store, surface="cli", purpose="context_retrieval", audience="self",
+        )
+
+    def _center_connector_row(inst) -> dict[str, Any]:
+        from twin.sense.connectors import connector_health
+        acc = ws.store.get_source_account(inst.account_id) if hasattr(ws.store, "get_source_account") else None
+        health = {}
+        try:
+            health = connector_health(ws.store, inst.id) or {}
+        except Exception as exc:
+            health = {"health": "unknown", "detail": str(exc)}
+        return {
+            "connector_id": inst.id,
+            "connector_type": inst.connector_type,
+            "status": inst.status.value if hasattr(inst.status, "value") else str(inst.status),
+            "account_id": inst.account_id,
+            "has_credential": bool(getattr(inst, "credential_ref", None)),
+            "source_owner": (
+                acc.source_owner.value if acc and hasattr(acc.source_owner, "value")
+                else (getattr(acc, "source_owner", None) if acc else None)
+            ),
+            "vault_id": getattr(acc, "vault_id", None) if acc else None,
+            "configuration": getattr(inst, "configuration", None) or {},
+            "health": health,
+        }
+
+    @app.get("/api/center/connectors")
+    def api_center_connectors():
+        from twin.sense.connectors import CAP_READ, authorize_connector, visible_connectors
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_READ)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        return [_center_connector_row(i) for i in visible_connectors(ws.store, access)]
+
+    @app.get("/api/center/connectors/{connector_id}")
+    def api_center_connector(connector_id: str):
+        from twin.sense.connectors import CAP_READ, authorize_connector
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_READ, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        inst = ws.store.get_connector_instance(connector_id)
+        if inst is None:
+            raise HTTPException(404, "connector not found")
+        return _center_connector_row(inst)
+
+    @app.post("/api/center/connectors/{connector_id}/sync")
+    def api_center_connector_sync(connector_id: str, stream: Optional[str] = None):
+        from twin.sense.connectors import (
+            CAP_SYNC, authorize_connector, build_credential_store, sync_connector,
+        )
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_SYNC, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            result = sync_connector(
+                ws.store, build_credential_store(ws.cfg.home), connector_id,
+                streams=[stream] if stream else None,
+                emit_percepts=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {
+            "connector_id": connector_id,
+            "health": result.health.value if hasattr(result.health, "value") else str(result.health),
+            "percepts": result.percepts,
+            "streams": [
+                {
+                    "stream": s.stream, "committed": s.committed, "skipped": s.skipped,
+                    "raw": s.raw, "normalized": s.normalized, "deduplicated": s.deduplicated,
+                    "quarantined": s.quarantined, "percepts": s.percepts, "failed": s.failed,
+                }
+                for s in (result.streams or [])
+            ],
+        }
+
+    @app.post("/api/center/connectors/{connector_id}/validate")
+    def api_center_connector_validate(connector_id: str):
+        from twin.sense.connectors import (
+            CAP_READ, authorize_connector, build_credential_store, validate_connector,
+        )
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_READ, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            health = validate_connector(
+                ws.store, build_credential_store(ws.cfg.home), connector_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {
+            "status": health.status.value if hasattr(health.status, "value") else str(health.status),
+            "detail": getattr(health, "detail", "") or "",
+        }
+
+    @app.post("/api/center/connectors/{connector_id}/pause")
+    def api_center_connector_pause(connector_id: str):
+        from twin.sense.connectors import CAP_OPERATE, authorize_connector, pause_connector
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_OPERATE, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            pause_connector(ws.store, connector_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"status": "paused"}
+
+    @app.post("/api/center/connectors/{connector_id}/resume")
+    def api_center_connector_resume(connector_id: str):
+        from twin.sense.connectors import CAP_OPERATE, authorize_connector, resume_connector
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_OPERATE, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            resume_connector(ws.store, connector_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"status": "active"}
+
     @app.get("/api/cognize/status")
     def api_cognize_status(vault: str = "default"):
         from types import SimpleNamespace

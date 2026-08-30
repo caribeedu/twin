@@ -23,7 +23,7 @@ Surface map: [INTERFACES.md](INTERFACES.md). Equivalent CLI:
 | Claims & review | `/api/claims`, `/api/review` | Preferred dual-read claim surface |
 | Narratives & reflections | `/api/narratives`, `/api/narratives/{id}`, `/api/narratives/commit`, `/api/narratives/commit-preview`, `/api/reflections`, `/api/reflections/{id}` | List, EpistemicState, human commit with preview fingerprint |
 | Cognize entities | `/api/situations`, `/api/interpretations`, `/api/relations`, `/api/evidence`, `/api/traces`, `/api/stances`, `/api/percepts/{id}` | Web Command Center list+show ([WEB_CENTER.md](WEB_CENTER.md)) |
-| Center summary | `/api/center/summary`, `/api/cognize/status\|plan\|run`, `/api/runtime/jobs` | Overview; Cognize plan/estimate/enqueue; job list |
+| Center summary | `/api/center/summary`, `/api/center/connectors`, `/api/cognize/status\|plan\|run`, `/api/runtime/jobs` | Overview; Connectors list/sync; Cognize plan/estimate/enqueue; job list |
 | Search & packs | `/api/search`, `/api/context_pack`, `/api/observer` | Hybrid retrieval and firewall-filtered packs |
 | Sessions & runtime | `/api/sessions`, `/api/attention`, `/api/runtime`, `/api/health` | Cognitive sessions, attention, worker health |
 | Connectors | `/api/connectors`, `/api/webhooks` | Connector ops and inbound webhooks |

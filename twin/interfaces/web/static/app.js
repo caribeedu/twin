@@ -97,6 +97,20 @@ function setChrome(eyebrow, title, { home = false } = {}) {
   if (t) t.textContent = title;
 }
 
+function paneLoading(message = "Loading…") {
+  return `<div class="pane-loading" role="status" aria-live="polite">
+    <span class="pane-loading-spinner" aria-hidden="true"></span>
+    <span class="pane-loading-text">${esc(message)}</span>
+  </div>`;
+}
+
+function inlineLoading(message = "Loading…") {
+  return `<div class="pane-loading pane-loading--inline" role="status" aria-live="polite">
+    <span class="pane-loading-spinner" aria-hidden="true"></span>
+    <span class="pane-loading-text">${esc(message)}</span>
+  </div>`;
+}
+
 function setExploreChrome(meta, query = "") {
   const q = String(query || "").trim();
   setChrome("Explore", q ? `Search in ${meta.label}` : meta.label);
@@ -556,7 +570,7 @@ function reviewCard(item) {
 
 async function paneHome() {
   setChrome("Home", "General");
-  app.innerHTML = `<div class="home-dash loading">Loading…</div>`;
+  app.innerHTML = paneLoading();
   try {
     const sum = await api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`);
     const counts = sum.counts || {};
@@ -637,7 +651,7 @@ async function paneHome() {
             ${sectionGo("#ops", "Health")}
             <h2 class="home-card-title">Health</h2>
             <div id="home-health-body" class="home-health-body">
-              <div class="muted">Loading doctor…</div>
+              ${inlineLoading("Loading doctor…")}
             </div>
           </section>
 
@@ -913,7 +927,7 @@ function wireHomeSearch() {
       return;
     }
     box.hidden = false;
-    box.innerHTML = `<div class="muted">Searching…</div>`;
+    box.innerHTML = inlineLoading("Searching…");
     try {
       const corpus = await loadSearchCorpus();
       const hits = corpus
@@ -1959,7 +1973,7 @@ async function paneExplore(parts) {
     <div class="explore-search">
       <input id="explore-search-q" type="search" placeholder="Search" autocomplete="off" aria-label="Search ${esc(meta.label)}" />
     </div>
-    <div class="entity-list entity-${meta.role}">Loading…</div>
+    <div class="entity-list entity-${meta.role}">${paneLoading()}</div>
   </div>`;
 
   const box = $(".entity-list", app);
@@ -2089,7 +2103,7 @@ async function paneExplore(parts) {
       item.classList.add("is-open");
       btn.setAttribute("aria-expanded", "true");
       panel.hidden = false;
-      panel.innerHTML = `<div class="expand-loading muted">Loading…</div>`;
+      panel.innerHTML = inlineLoading();
       if (pushHash) {
         const next = `#explore/${meta.id}/${encodeURIComponent(rid)}`;
         if (location.hash !== next) history.replaceState(null, "", next);
@@ -2175,7 +2189,7 @@ async function paneReview(parts = []) {
   const { signal } = _reviewAbort;
 
   setChrome("Review", "Queue");
-  app.innerHTML = `<div class="review-deck"><div class="muted">Loading review queue…</div></div>`;
+  app.innerHTML = paneLoading("Loading review queue…");
 
   try {
     const [openRefs, competing] = await Promise.all([
@@ -2240,7 +2254,7 @@ async function paneReview(parts = []) {
           <div class="review-stage">
             <button type="button" class="review-nav-btn" data-review-nav="-1" aria-label="Previous review" ${queue.length < 2 ? "disabled" : ""}>←</button>
             <article class="review-card entity-${meta?.role || "question"}" aria-busy="true">
-              <div class="muted">Loading…</div>
+              ${inlineLoading()}
             </article>
             <button type="button" class="review-nav-btn" data-review-nav="1" aria-label="Next review" ${queue.length < 2 ? "disabled" : ""}>→</button>
           </div>
@@ -2303,7 +2317,7 @@ async function paneReview(parts = []) {
               </div>
             </form>
           </section>
-          <div class="review-card-graph"><div class="muted">Loading lineage…</div></div>`;
+          <div class="review-card-graph">${inlineLoading("Loading lineage…")}</div>`;
 
         card.removeAttribute("aria-busy");
 
@@ -2431,7 +2445,7 @@ function commitBody(fd) {
 
 async function paneCognize() {
   setChrome("Cognize", "Run · estimate · jobs");
-  app.innerHTML = `<div class="cognize-dash"><div class="muted">Loading…</div></div>`;
+  app.innerHTML = paneLoading();
 
   if (_cognizePoll) {
     clearInterval(_cognizePoll);
@@ -2872,8 +2886,178 @@ async function paneCognize() {
   await paint();
 }
 
+function connectorTypeLabel(type) {
+  return CONNECTOR_LABELS[type] || String(type || "Connector").replace(/_/g, " ");
+}
+
+function healthTone(h) {
+  const s = String(h || "").toLowerCase();
+  if (["healthy", "ok", "active"].includes(s)) return "ok";
+  if (["degraded", "warn", "paused", "unknown"].includes(s)) return "warn";
+  if (["failed", "unauthorized", "error", "revoked"].includes(s)) return "err";
+  return "";
+}
+
+function connectorTargets(c) {
+  const cfg = c.configuration || {};
+  const type = String(c.connector_type || "");
+  if (type === "github" || type === "git") {
+    return { label: "Repositories", items: [...(cfg.repositories || [])] };
+  }
+  if (type === "slack") {
+    const meta = cfg.channel_metadata || {};
+    const items = (cfg.channels || []).map((id) => {
+      const name = meta[id]?.name;
+      return name ? `#${name}` : id;
+    });
+    return { label: "Channels", items };
+  }
+  if (type === "gmail" || type === "mail" || type === "outlook") {
+    const labels = cfg.labels || cfg.folders || [];
+    if (labels.length) return { label: "Labels", items: [...labels] };
+    const boxes = cfg.mailboxes || cfg.accounts || [];
+    if (boxes.length) return { label: "Mailboxes", items: [...boxes] };
+    return { label: "Targets", items: [] };
+  }
+  if (type === "calendar") {
+    return { label: "Calendars", items: [...(cfg.calendars || cfg.calendar_ids || [])] };
+  }
+  if (type === "folder" || type === "document") {
+    const roots = (cfg.roots || []).map((r) => (
+      typeof r === "string" ? r : (r.path || r.root || r.name || "")
+    )).filter(Boolean);
+    return { label: "Folders", items: roots };
+  }
+  if (type === "fireflies" || type === "meeting") {
+    const items = [];
+    if (cfg.account_email) items.push(cfg.account_email);
+    if (cfg.workspace) items.push(cfg.workspace);
+    return { label: "Account", items };
+  }
+  return { label: "Targets", items: [] };
+}
+
+function renderConnectorTargets(c) {
+  const { label, items } = connectorTargets(c);
+  if (!items.length) {
+    return `<div class="conn-targets">
+      <span class="conn-targets-label">${esc(label)}</span>
+      <p class="muted conn-targets-empty">Nothing configured</p>
+    </div>`;
+  }
+  const shown = items.slice(0, 12);
+  const more = items.length - shown.length;
+  return `<div class="conn-targets">
+    <span class="conn-targets-label">${esc(label)} (${items.length})</span>
+    <ul class="conn-targets-list">
+      ${shown.map((t) => `<li>${esc(t)}</li>`).join("")}
+      ${more > 0 ? `<li class="muted">+${more} more</li>` : ""}
+    </ul>
+  </div>`;
+}
+
+async function paneConnectors() {
+  setChrome("Connectors", "Instances");
+  app.innerHTML = paneLoading();
+
+  const paint = async () => {
+    try {
+      const rows = await api("/api/center/connectors");
+      const list = Array.isArray(rows) ? rows : [];
+
+      const card = (c) => {
+        const health = c.health || {};
+        const healthStatus = health.health || health.status || "unknown";
+        const instStatus = c.status || "unknown";
+        const paused = instStatus === "paused" || health.paused;
+        const lastOk = formatWhen(health.last_success_at || "");
+        const lastFail = formatWhen(health.last_failure_at || "");
+        const next = formatWhen(health.next_run_at || "");
+        const dead = health.dead_letters ?? 0;
+        const typeLabel = connectorTypeLabel(c.connector_type);
+        return `
+          <article class="home-card conn-card" data-id="${esc(c.connector_id)}">
+            <div class="conn-card-head">
+              <div>
+                <h2 class="home-card-title">${esc(typeLabel)}</h2>
+                <p class="home-card-sub muted">${esc(c.connector_id)}${c.vault_id ? ` · ${esc(c.vault_id)}` : ""}</p>
+              </div>
+              <div class="conn-badges">
+                <span class="conn-badge conn-badge--${esc(healthTone(instStatus) || "warn")}">${esc(instStatus)}</span>
+                <span class="conn-badge conn-badge--${esc(healthTone(healthStatus) || "warn")}">${esc(healthStatus)}</span>
+                <span class="conn-badge">${c.has_credential ? "credential" : "no credential"}</span>
+              </div>
+            </div>
+            ${renderConnectorTargets(c)}
+            <div class="conn-metrics" role="group" aria-label="Connector health">
+              <div class="conn-metric"><span class="conn-metric-l">Last success</span><strong>${esc(lastOk || "—")}</strong></div>
+              <div class="conn-metric"><span class="conn-metric-l">Last failure</span><strong>${esc(lastFail || "—")}</strong></div>
+              <div class="conn-metric"><span class="conn-metric-l">Next run</span><strong>${esc(next || "—")}</strong></div>
+              <div class="conn-metric"><span class="conn-metric-l">Dead letters</span><strong>${esc(dead)}</strong></div>
+            </div>
+            <div class="cta-row conn-actions">
+              <button type="button" class="btn primary" data-conn-act="sync" data-id="${esc(c.connector_id)}">Sync</button>
+              <button type="button" class="btn" data-conn-act="validate" data-id="${esc(c.connector_id)}">Validate</button>
+              ${paused
+                ? `<button type="button" class="btn" data-conn-act="resume" data-id="${esc(c.connector_id)}">Resume</button>`
+                : `<button type="button" class="btn" data-conn-act="pause" data-id="${esc(c.connector_id)}">Pause</button>`}
+            </div>
+          </article>`;
+      };
+
+      app.innerHTML = `
+        <div class="conn-dash">
+          <div class="conn-toolbar">
+            <button type="button" class="btn" id="conn-refresh">Refresh</button>
+          </div>
+          <div class="conn-list" id="conn-list">
+            ${list.length
+              ? list.map(card).join("")
+              : empty("No connectors yet", "twin connector setup <type> --source-owner …")}
+          </div>
+        </div>`;
+
+      $("#conn-refresh")?.addEventListener("click", () => {
+        paint().catch((e) => toast(e.message, false));
+      });
+
+      app.querySelectorAll("[data-conn-act]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          const act = btn.dataset.connAct;
+          btn.disabled = true;
+          try {
+            if (act === "sync") {
+              const out = await api(`/api/center/connectors/${encodeURIComponent(id)}/sync`, { method: "POST" });
+              toast(`Synced · ${out.percepts ?? 0} percepts`);
+            } else if (act === "validate") {
+              const out = await api(`/api/center/connectors/${encodeURIComponent(id)}/validate`, { method: "POST" });
+              toast(`${out.status}${out.detail ? ` · ${out.detail}` : ""}`);
+            } else if (act === "pause") {
+              await api(`/api/center/connectors/${encodeURIComponent(id)}/pause`, { method: "POST" });
+              toast("Paused");
+            } else if (act === "resume") {
+              await api(`/api/center/connectors/${encodeURIComponent(id)}/resume`, { method: "POST" });
+              toast("Resumed");
+            }
+            await paint();
+          } catch (err) {
+            toast(err.message, false);
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (err) {
+      app.innerHTML = empty("Connectors failed", err.message);
+    }
+  };
+
+  await paint();
+}
+
 async function paneInject() {
   setChrome("Inject", "Context pack");
+  app.innerHTML = paneLoading();
   let domainDefault = "technical";
   try {
     const sum = await api(`/api/center/summary?vault=${encodeURIComponent(VAULT)}`);
@@ -2927,7 +3111,7 @@ async function paneInject() {
 
 async function paneOps() {
   setChrome("Ops", "Health");
-  app.innerHTML = `<div class="ops-dash"><div class="muted">Loading…</div></div>`;
+  app.innerHTML = paneLoading();
   try {
     const [doctor, health, runtime, sum] = await Promise.all([
       api("/api/doctor").catch((e) => ({ error: e.message, checks: [] })),
@@ -3043,6 +3227,7 @@ async function route() {
     explore: () => paneExplore(parts),
     review: () => paneReview(parts),
     cognize: () => paneCognize(),
+    connectors: () => paneConnectors(),
     inject: () => paneInject(),
     ops: () => paneOps(),
     sense: () => { location.hash = "#cognize"; },

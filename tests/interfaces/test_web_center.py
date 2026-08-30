@@ -30,11 +30,21 @@ def test_center_shell_has_no_memories_nav(tmp_path, monkeypatch):
     assert "Command Center" in html
     assert 'data-nav="explore"' in html
     assert 'data-nav="cognize"' in html
+    assert 'data-nav="connectors"' in html
     assert 'data-nav="inject"' in html
     assert 'data-nav="ops"' in html
     assert 'data-nav="sense"' not in html
     assert "Memories" not in html
     assert 'data-nav="memories"' not in html
+
+
+def test_center_connectors_list(tmp_path, monkeypatch):
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    client = TestClient(create_app(str(tmp_path / "home")))
+    r = client.get("/api/center/connectors")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
 
 
 def test_entity_list_show_endpoints(tmp_path, monkeypatch):
