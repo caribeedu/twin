@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from twin.cognize.commit import commit_narrative
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.embeddings import HashEmbedder
+from twin.inject.context_pack import build_context_pack
+from twin.store.embeddings import HashEmbedder
 from twin.privacy.models import AccessRequest
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def test_eval_acl_intersection_private_slack_plus_public_pr(store, cfg):
@@ -39,7 +39,7 @@ def test_eval_acl_intersection_private_slack_plus_public_pr(store, cfg):
         audience="client",
         principal_id="no_slack",
         persona="individual",
-        purpose="memory_retrieval",
+        purpose="context_retrieval",
         tool_id="test",
         requested_domains=["technical"],
         metadata={"allowed_source_sensors": ["github"], "vault_id": "default"},
@@ -58,7 +58,7 @@ def test_eval_acl_intersection_private_slack_plus_public_pr(store, cfg):
         audience="self",
         principal_id="owner",
         persona="individual",
-        purpose="memory_retrieval",
+        purpose="context_retrieval",
         tool_id="test",
         requested_domains=["technical"],
         metadata={

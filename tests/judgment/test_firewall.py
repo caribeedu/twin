@@ -1,17 +1,17 @@
 from twin import ids
 from twin.clock import now_iso
-from twin.judgment.firewall import Firewall
-from twin.memory.models import MemoryItem
+from twin.privacy.firewall import Firewall
+from twin.store.models import StoreClaim
 
 
-def _mem(**kw) -> MemoryItem:
+def _mem(**kw) -> StoreClaim:
     base = dict(
-        id=ids.memory_id(), type="fact", title="t", summary="s",
+        id=ids.claim_id(), type="fact", title="t", summary="s",
         domain="technical", sensitivity="internal", confidence=0.9,
         status="confirmed", created_at=now_iso(), updated_at=now_iso(),
     )
     base.update(kw)
-    return MemoryItem(**base)
+    return StoreClaim(**base)
 
 
 def test_technical_memory_allowed_in_technical_context(cfg):

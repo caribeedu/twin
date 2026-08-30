@@ -1,32 +1,186 @@
-"""Textual Command Center application."""
+"""Textual Command Center application — Twin brand TUI."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static
+from textual.widgets import Button, Header, Label, Static
 
 from twin.interfaces.center import (
     CenterState,
-    fuzzy_palette,
-    home_snapshot,
+    DEFAULT_SERVE_PORT,
+    pids_listening_on,
+    read_log_tail,
+    runtime_is_up,
+    serve_is_up,
+    start_all_supervised,
     start_runtime,
     start_serve,
+    stop_all_supervised,
     stop_runtime,
     stop_serve,
 )
 from twin.interfaces.center import actions
 from twin.workspace import Workspace
 
+# Twin brand (aligned with twin/interfaces/web/static/app.css)
+_TWIN_CSS = """
+$twin-purple: #4f3d9e;
+$twin-deep: #252526;
+$twin-soft: #7b6bc4;
+$twin-mist: #e8e8e8;
+$twin-ink: #1e1e1e;
+$twin-panel: #252526;
+$twin-line: #3c3c3c;
+$twin-muted: #9a94b0;
+$twin-ok: #2f9d6a;
+$twin-warn: #c9842a;
+$twin-err: #c44b5a;
+
+Screen {
+    background: $twin-ink;
+    color: $twin-mist;
+}
+Header {
+    background: #181818;
+    color: $twin-mist;
+    text-style: bold;
+    dock: top;
+    height: 1;
+}
+Button {
+    background: $twin-panel;
+    color: $twin-mist;
+    border: tall $twin-line;
+    margin-right: 1;
+    margin-bottom: 0;
+}
+Button:hover {
+    background: $twin-purple;
+    color: $twin-mist;
+}
+Button.-primary {
+    background: $twin-purple;
+    color: $twin-mist;
+    border: tall $twin-soft;
+    text-style: bold;
+}
+Button.-error {
+    background: $twin-err;
+    color: $twin-mist;
+    border: tall $twin-err;
+}
+
+#shell {
+    height: 1fr;
+    width: 100%;
+}
+#main-col {
+    width: 1fr;
+    height: 1fr;
+    padding: 1 2;
+}
+#mcp-rail {
+    width: 36;
+    height: 1fr;
+    padding: 1 1 1 0;
+    background: #1a1a1a;
+}
+.page-title {
+    color: $twin-soft;
+    text-style: bold;
+    margin-bottom: 0;
+}
+.page-sub {
+    color: $twin-muted;
+    margin-bottom: 1;
+}
+.section-title {
+    color: $twin-soft;
+    text-style: bold;
+    margin-bottom: 0;
+    margin-top: 0;
+}
+.panel {
+    background: $twin-panel;
+    border: tall $twin-line;
+    padding: 1 2;
+    margin-bottom: 1;
+    height: auto;
+}
+#services-box {
+    background: $twin-panel;
+    border: tall $twin-line;
+    padding: 1 2;
+    margin-bottom: 1;
+    height: auto;
+}
+#services-box .toolbar {
+    margin-top: 1;
+    width: 100%;
+    height: auto;
+}
+#services-box Button {
+    width: 1fr;
+    margin-right: 1;
+}
+#mcp-rail .panel {
+    height: 1fr;
+    margin-bottom: 0;
+}
+.hint {
+    color: $twin-muted;
+    margin-top: 1;
+    text-align: center;
+}
+.toolbar {
+    height: auto;
+    margin-bottom: 0;
+}
+.body {
+    height: 1fr;
+}
+
+#exit-dialog {
+    background: $twin-panel;
+    border: tall $twin-soft;
+    padding: 1 2;
+    width: 64;
+    height: auto;
+    color: $twin-mist;
+}
+#exit-dialog Label {
+    color: $twin-soft;
+    text-style: bold;
+    margin-bottom: 1;
+}
+"""
+
+
+def _alive(proc) -> bool:
+    return bool(proc and proc.poll() is None)
+
+
+def _status_markup(running: bool, running_label: str = "running", stopped: str = "stopped") -> str:
+    if running:
+        return f"[bold #2f9d6a]{running_label}[/]"
+    return f"[#9a94b0]{stopped}[/]"
+
 
 class ExitPrompt(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Label("Stop supervised services?"),
+            Label("Leave Command Center"),
+            Static(
+                "Stop supervised [bold #7b6bc4]web[/] + [bold #7b6bc4]runtime[/] "
+                "children, or leave them running?",
+                classes="page-sub",
+            ),
             Horizontal(
                 Button("Yes — stop", id="stop", variant="error"),
                 Button("Leave running", id="leave", variant="primary"),
@@ -39,446 +193,201 @@ class ExitPrompt(ModalScreen[str]):
         self.dismiss(event.button.id or "cancel")
 
 
-class HomeScreen(Screen):
+class LogViewer(ModalScreen[None]):
+    BINDINGS = [Binding("escape", "app.pop_screen", "Close", show=False)]
+
+    def __init__(self, title: str, path: Optional[Path], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._title = title
+        self._path = path
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with Vertical(classes="page", id="main-col"):
+            yield Label(self._title, classes="page-title")
+            yield Static(
+                str(self._path) if self._path else "(no log path)",
+                classes="page-sub",
+            )
+            with VerticalScroll(classes="body"):
+                yield Static(read_log_tail(self._path), id="log-body", classes="panel")
+
+
+class MainScreen(Screen):
+    """Single operator surface: Health + Services + MCP rail."""
+
     BINDINGS = [
-        Binding("s", "goto_services", "Services"),
-        Binding("c", "goto_connectors", "Connectors"),
-        Binding("j", "goto_jobs", "Jobs"),
-        Binding("g", "goto_cognize", "Cognize"),
-        Binding("r", "goto_review", "Review"),
-        Binding("n", "goto_narratives", "Narratives"),
-        Binding("t", "goto_stance", "Stance"),
-        Binding("m", "goto_mcp", "MCP"),
-        Binding("slash", "palette", "Palette"),
-        Binding("q", "quit_center", "Quit"),
+        Binding("q", "quit_center", "Quit", show=False),
     ]
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield VerticalScroll(Static(id="home-body"))
-        yield Footer()
+        with Horizontal(id="shell"):
+            with Vertical(id="main-col"):
+                yield Label("Command Center", classes="page-title")
+                yield Static(
+                    "Manage your instance",
+                    classes="page-sub",
+                )
+                yield Label("Health", classes="section-title")
+                yield Static(id="health-body", classes="panel")
+                yield Label("Services", classes="section-title")
+                with Vertical(id="services-box"):
+                    yield Static(id="services-status")
+                    with Horizontal(classes="toolbar"):
+                        yield Button("Start both", id="start-both", variant="primary")
+                        yield Button("Stop both", id="stop-both", variant="error")
+                        yield Button("Start web", id="start-serve")
+                        yield Button("Stop web", id="stop-serve")
+                    with Horizontal(classes="toolbar"):
+                        yield Button("Start runtime", id="start-runtime")
+                        yield Button("Stop runtime", id="stop-runtime")
+                        yield Button("Web logs", id="log-serve")
+                        yield Button("Runtime logs", id="log-runtime")
+            with Vertical(id="mcp-rail"):
+                yield Label("MCP", classes="page-title")
+                yield Static("Host tools · install status", classes="page-sub")
+                yield Static(id="mcp-body", classes="panel")
+                yield Static("[#9a94b0]q[/] to quit", classes="hint")
 
     def on_mount(self) -> None:
-        self.refresh_home()
+        self._ensure_log_paths()
+        self.refresh_all()
 
-    def refresh_home(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        snap = home_snapshot(app.ws)
-        doc = actions.doctor_summary(app.ws)
-        serve = "running" if app.state.serve.proc and app.state.serve.proc.poll() is None else "stopped"
-        runtime = "running" if app.state.runtime.proc and app.state.runtime.proc.poll() is None else "stopped"
-        warns = "\n".join(
-            f"  · {w.get('name')}: {w.get('detail')}" for w in (doc.get("warnings") or [])[:5]
-        ) or "  (none)"
-        body = (
-            f"[b]Twin Command Center[/b]\n\n"
-            f"home: {snap['home']}\n"
-            f"doctor: {doc.get('checks_ok')}/{doc.get('checks_total')} ok · "
-            f"llm={doc.get('llm')} extractor={doc.get('extractor')}\n"
-            f"warnings:\n{warns}\n"
-            f"review backlog: {snap['review_backlog']}\n"
-            f"open reflections: {snap['open_reflections']}\n"
-            f"connectors: {snap['connectors']}\n"
-            f"jobs pending: {snap['jobs_pending']}\n"
-            f"cognize halt: {snap['cognize_halt'] or '(none)'}\n"
-            f"serve: {serve} {app.state.serve.url}\n"
-            f"runtime: {runtime}\n\n"
-            f"Keys: s services · c connectors · j jobs · g cognize · "
-            f"r review · n narratives · t stance · m mcp · / palette · q quit"
-        )
-        self.query_one("#home-body", Static).update(body)
-
-    def action_goto_services(self) -> None:
-        self.app.push_screen(ServicesScreen())
-
-    def action_goto_connectors(self) -> None:
-        self.app.push_screen(ConnectorsScreen())
-
-    def action_goto_jobs(self) -> None:
-        self.app.push_screen(JobsScreen())
-
-    def action_goto_cognize(self) -> None:
-        self.app.push_screen(CognizeScreen())
-
-    def action_goto_review(self) -> None:
-        self.app.push_screen(ReviewScreen())
-
-    def action_goto_narratives(self) -> None:
-        self.app.push_screen(NarrativesScreen())
-
-    def action_goto_stance(self) -> None:
-        self.app.push_screen(StanceScreen())
-
-    def action_goto_mcp(self) -> None:
-        self.app.push_screen(McpScreen())
-
-    def action_palette(self) -> None:
-        self.app.push_screen(PaletteScreen())
+    def on_screen_resume(self) -> None:
+        self.refresh_all()
 
     def action_quit_center(self) -> None:
         self.app.action_quit_center()
 
-
-class ServicesScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back"), Binding("q", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Vertical(
-            Label("Services — supervised serve / runtime"),
-            Horizontal(
-                Button("Start serve", id="start-serve"),
-                Button("Stop serve", id="stop-serve"),
-                Button("Start runtime", id="start-runtime"),
-                Button("Stop runtime", id="stop-runtime"),
-            ),
-            Static(id="services-status"),
-        )
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
+    def _ensure_log_paths(self) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
-        serve_alive = app.state.serve.proc and app.state.serve.proc.poll() is None
-        rt_alive = app.state.runtime.proc and app.state.runtime.proc.poll() is None
-        self.query_one("#services-status", Static).update(
-            f"serve: {'RUNNING ' + app.state.serve.url if serve_alive else 'stopped'}\n"
-            f"runtime: {'RUNNING (attached)' if rt_alive else 'stopped'}\n"
-            f"logs: {app.state.serve.log_path or '-'} · {app.state.runtime.log_path or '-'}"
+        logs = app.state.home / "logs"
+        if app.state.serve.log_path is None:
+            app.state.serve.log_path = logs / "center-serve.log"
+        if app.state.runtime.log_path is None:
+            app.state.runtime.log_path = logs / "center-runtime.log"
+
+    def refresh_all(self) -> None:
+        self._refresh_health()
+        self._refresh_services()
+        self._refresh_mcp()
+
+    def _refresh_health(self) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        doc = actions.doctor_summary(app.ws)
+        ok = int(doc.get("checks_ok") or 0)
+        total = int(doc.get("checks_total") or 0)
+        doctor_cls = "ok" if ok == total and total else ("warn" if ok else "err")
+        tone = {
+            "ok": "#2f9d6a",
+            "warn": "#c9842a",
+            "err": "#c44b5a",
+        }.get(doctor_cls, "#9a94b0")
+        warns = doc.get("warnings") or []
+        warn_lines = "\n".join(
+            f"  [#c9842a]![/] {w.get('name')}: {w.get('detail')}" for w in warns[:12]
+        ) or "  [#2f9d6a]✓[/] no warnings"
+        self.query_one("#health-body", Static).update(
+            f"[bold #7b6bc4]doctor[/]  [{tone}]{ok}/{total} ok[/]\n"
+            f"  llm        {doc.get('llm') or '—'}\n"
+            f"  extractor  {doc.get('extractor') or '—'}\n"
+            f"  embedder   {doc.get('embedder') or '—'}\n"
+            f"[#9a94b0]  {doc.get('home') or ''}[/]\n\n"
+            f"[bold #7b6bc4]checks[/]\n{warn_lines}"
         )
+
+    def _refresh_services(self) -> None:
+        app: TwinCenterApp = self.app  # type: ignore[assignment]
+        port = DEFAULT_SERVE_PORT
+        listeners = pids_listening_on(port)
+        serve_child = _alive(app.state.serve.proc)
+        serve_alive = serve_is_up(app.state, port)
+        rt_alive = runtime_is_up(app.state)
+        rt_label = (
+            "attached" if _alive(app.state.runtime.proc)
+            else "running" if rt_alive
+            else "stopped"
+        )
+        mode = (
+            "both running" if serve_alive and rt_alive
+            else "partial" if serve_alive or rt_alive
+            else "stopped"
+        )
+        mode_color = "#2f9d6a" if mode == "both running" else (
+            "#c9842a" if mode == "partial" else "#9a94b0"
+        )
+        if serve_alive and not app.state.serve.url:
+            app.state.serve.url = f"http://127.0.0.1:{port}"
+        web_label = (app.state.serve.url or "running") if serve_alive else "running"
+        pids: list[int] = []
+        if serve_child and app.state.serve.proc is not None:
+            pids.append(int(app.state.serve.proc.pid))
+        for pid in listeners:
+            if pid not in pids:
+                pids.append(pid)
+        pid_line = (
+            f"\n  [#9a94b0]pid[/]      {', '.join(map(str, pids))}"
+            if pids else "\n  [#9a94b0]pid[/]      —"
+        )
+        self.query_one("#services-status", Static).update(
+            f"[bold #7b6bc4]status[/]  [{mode_color}]{mode}[/]\n"
+            f"  runtime   {_status_markup(rt_alive, running_label=rt_label)}\n"
+            f"  web       {_status_markup(serve_alive, running_label=web_label)}"
+            f"{pid_line}"
+        )
+
+    def _refresh_mcp(self) -> None:
+        rows = actions.mcp_client_status()
+        lines = ["[bold #7b6bc4]providers[/]"]
+        for row in rows:
+            if row["installed"]:
+                mark = "[bold #2f9d6a]installed[/]"
+            else:
+                mark = "[#9a94b0]not installed[/]"
+            lines.append(f"  {row['label']}")
+            lines.append(f"  {mark}  [#9a94b0]{row['path']}[/]")
+        self.query_one("#mcp-body", Static).update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         app: TwinCenterApp = self.app  # type: ignore[assignment]
         bid = event.button.id
-        if bid == "start-serve":
-            self.notify(f"serve at {start_serve(app.state)}")
+        if bid == "start-both":
+            out = start_all_supervised(app.state)
+            self.notify(f"web {out['serve']} · runtime {out['runtime']}")
+        elif bid == "stop-both":
+            stop_all_supervised(app.state)
+            self.notify("stopped web + runtime")
+        elif bid == "start-serve":
+            url = start_serve(app.state)
+            alive = _alive(app.state.serve.proc) or bool(pids_listening_on(DEFAULT_SERVE_PORT))
+            self.notify(
+                f"web at {url}" if alive else "web failed — check Web logs",
+                severity="information" if alive else "error",
+            )
         elif bid == "stop-serve":
             stop_serve(app.state)
+            self.notify("web stopped · port freed")
         elif bid == "start-runtime":
             self.notify(f"runtime {start_runtime(app.state)}")
         elif bid == "stop-runtime":
             stop_runtime(app.state)
-        self._refresh()
-
-
-class ConnectorsScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Vertical(
-            Label("Connectors (Sense I/O) — pause / resume / test"),
-            Input(placeholder="connector id", id="connector-id"),
-            Horizontal(
-                Button("Refresh", id="cx-refresh"),
-                Button("Test", id="cx-test"),
-                Button("Pause", id="cx-pause"),
-                Button("Resume", id="cx-resume"),
-            ),
-            Static(id="connectors-body"),
-        )
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        rows = actions.connector_rows(app.ws)
-        lines = [
-            f"{r['id']} · {r['type']} · status={r['status']} · health={r['health']}"
-            for r in rows
-        ]
-        body = "\n".join(lines) if lines else "(none registered)"
-        body += "\n\nRevoke remains CLI-confirmed: twin connector revoke <id>"
-        self.query_one("#connectors-body", Static).update(body)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        cid = self.query_one("#connector-id", Input).value.strip()
-        try:
-            if event.button.id == "cx-refresh":
-                self._refresh()
-                return
-            if not cid:
-                self.notify("enter connector id", severity="warning")
-                return
-            if event.button.id == "cx-test":
-                out = actions.connector_test(app.ws, cid)
-                self.notify(f"test {out.get('health', {}).get('status', 'ok')}")
-            elif event.button.id == "cx-pause":
-                actions.connector_pause(app.ws, cid)
-                self.notify(f"paused {cid}")
-            elif event.button.id == "cx-resume":
-                actions.connector_resume(app.ws, cid)
-                self.notify(f"resumed {cid}")
-        except Exception as exc:
-            self.notify(str(exc), severity="error")
-        self._refresh()
-
-
-class JobsScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Vertical(
-            Label("Jobs — runtime queue (kind · state · progress · log_ref)"),
-            Horizontal(
-                Button("Enqueue cognize_batch", id="enq-cognize"),
-                Button("Enqueue consolidate_daily", id="enq-consol"),
-                Button("Enqueue backfill_partition", id="enq-backfill"),
-                Button("Refresh", id="refresh"),
-            ),
-            Static(id="jobs-body"),
-        )
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        snap = actions.jobs_snapshot(app.ws)
-        lines = [f"depth: {snap.get('depth')}"]
-        for j in snap.get("jobs") or []:
-            lines.append(
-                f"{j.get('id', '')[:12]} · {j.get('kind')} · {j.get('state')} · "
-                f"progress={j.get('progress')} · log={j.get('log_ref') or '-'}"
-            )
-        if snap.get("backfills"):
-            lines.append("\nBackfills:")
-            for bf in snap["backfills"]:
-                lines.append(f"  {bf.get('id')} · {bf.get('state')} · {bf.get('progress')}")
-        self.query_one("#jobs-body", Static).update("\n".join(lines) or "(no jobs)")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        kind_map = {
-            "enq-cognize": "cognize_batch",
-            "enq-consol": "consolidate_daily",
-            "enq-backfill": "backfill_partition",
-        }
-        bid = event.button.id or ""
-        if bid == "refresh":
-            self._refresh()
+        elif bid == "log-serve":
+            self._ensure_log_paths()
+            self.app.push_screen(LogViewer("Web logs", app.state.serve.log_path))
             return
-        kind = kind_map.get(bid)
-        if not kind:
+        elif bid == "log-runtime":
+            self._ensure_log_paths()
+            self.app.push_screen(LogViewer("Runtime logs", app.state.runtime.log_path))
             return
-        try:
-            out = actions.enqueue_job(app.ws, kind)
-            self.notify(f"enqueued {out['kind']} {out['job_id'][:12]}")
-        except Exception as exc:
-            self.notify(str(exc), severity="error")
-        self._refresh()
-
-
-class CognizeScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Vertical(
-            Horizontal(
-                Button("Refresh", id="cog-refresh"),
-                Button("Run cognize", id="cog-run"),
-            ),
-            VerticalScroll(Static(id="cognize-body")),
-        )
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        st = actions.cognize_status(app.ws)
-        refs = "\n".join(
-            f"- {r['id'][:10]} {r['text']}" for r in st.get("reflection_previews") or []
-        ) or "(none)"
-        body = (
-            "Cognize\n\n"
-            f"halted: {st['halted']}\n"
-            f"halt_reason: {st['halt_reason'] or '(none)'}\n"
-            f"detail: {st['detail']}\n"
-            f"open reflections: {st['open_reflections']}\n"
-            f"{refs}\n"
-            f"last run: {str(st.get('last_run') or '')[:240]}"
-        )
-        self.query_one("#cognize-body", Static).update(body)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        if event.button.id == "cog-refresh":
-            self._refresh()
-            return
-        if event.button.id == "cog-run":
-            try:
-                out = actions.cognize_run(app.ws)
-                self.notify(f"cognize status={out.get('status') or out.get('ok')}")
-            except Exception as exc:
-                self.notify(str(exc), severity="error")
-            self._refresh()
-
-
-class ReviewScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield VerticalScroll(Static(id="review-body"))
-        yield Footer()
-
-    def on_mount(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        snap = actions.review_snapshot(app.ws)
-        url = app.state.serve.url or "http://127.0.0.1:8765"
-        refs = "\n".join(
-            f"- {r['id'][:10]} {r['text']}" for r in snap.get("open_reflections") or []
-        ) or "(none)"
-        fade = "\n".join(
-            f"- {r.get('narrative_id', '')[:10]} → {r.get('recommended')} ({r.get('reason')})"
-            for r in snap.get("accessibility") or []
-        ) or "(none)"
-        body = (
-            "Review\n\n"
-            f"candidate backlog: {snap['backlog']}\n"
-            f"workbench: {url}/#review\n\n"
-            "Open Reflections:\n"
-            f"{refs}\n\n"
-            "Accessibility (Fade/Remarkable):\n"
-            f"{fade}"
-        )
-        self.query_one("#review-body", Static).update(body)
-
-
-class NarrativesScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield VerticalScroll(Static(id="narratives-body"))
-        yield Footer()
-
-    def on_mount(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        lines = []
-        for n in actions.narrative_list(app.ws):
-            lines.append(
-                f"{n['id'][:12]} [{n['status']}/{n['epistemic']}] "
-                f"grain={n['grain'] or '-'} {(n['account'] or '')[:70]}"
-            )
-        self.query_one("#narratives-body", Static).update(
-            "Narratives\n\n" + ("\n".join(lines) if lines else "(none)")
-        )
-
-
-class StanceScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Vertical(
-            Input(placeholder="proposal id to approve", id="proposal-id"),
-            Horizontal(
-                Button("Refresh", id="st-refresh"),
-                Button("Approve proposal", id="st-approve"),
-            ),
-            VerticalScroll(Static(id="stance-body")),
-        )
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        ov = actions.stance_overview(app.ws)
-        lines = [
-            f"{s['id'][:12]} [{s['status']}] {(s['statement'] or '')[:70]}"
-            for s in ov.get("stances") or []
-        ]
-        pending = [
-            f"proposal {p['id'][:12]} nar={p.get('narrative_id') or '-'} {(p.get('reason') or '')[:50]}"
-            for p in ov.get("proposals") or []
-        ]
-        body = (
-            "Stance\n\n"
-            + ("\n".join(lines) if lines else "(no active stances)")
-            + "\n\nPending proposals:\n"
-            + ("\n".join(pending) if pending else "(none)")
-        )
-        self.query_one("#stance-body", Static).update(body)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        app: TwinCenterApp = self.app  # type: ignore[assignment]
-        if event.button.id == "st-refresh":
-            self._refresh()
-            return
-        if event.button.id == "st-approve":
-            pid = self.query_one("#proposal-id", Input).value.strip()
-            if not pid:
-                self.notify("enter proposal id", severity="warning")
-                return
-            try:
-                actions.approve_stance_proposal(app.ws, pid)
-                self.notify(f"approved {pid}")
-            except Exception as exc:
-                self.notify(str(exc), severity="error")
-            self._refresh()
-
-
-class McpScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield VerticalScroll(Static(id="mcp-body"))
-        yield Footer()
-
-    def on_mount(self) -> None:
-        body = (
-            "MCP\n\n"
-            "Process identity: TWIN_MCP_CLIENT + TWIN_MCP_CLIENT_TOKEN\n"
-            "Setup: twin setup mcp <client>\n"
-            "Pack: inject_context_pack\n"
-            "Narratives: narrative_list / narrative_show\n"
-            "Stance: stance_list / stance_proposals\n"
-        )
-        self.query_one("#mcp-body", Static).update(body)
-
-
-class PaletteScreen(Screen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Input(placeholder="fuzzy verbs…", id="palette-input")
-        yield ListView(id="palette-list")
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._fill("")
-
-    def _fill(self, query: str) -> None:
-        lv = self.query_one("#palette-list", ListView)
-        lv.clear()
-        for item in fuzzy_palette(query):
-            lv.append(ListItem(Label(item)))
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        self._fill(event.value)
+        self.refresh_all()
 
 
 class TwinCenterApp(App[None]):
-    TITLE = "Twin Command Center"
-    CSS = """
-    #exit-dialog { padding: 1 2; border: solid $accent; width: 60; height: auto; }
-    Screen { background: $surface; }
-    """
+    TITLE = "twin"
+    SUB_TITLE = "Command Center"
+    CSS = _TWIN_CSS
+    ENABLE_COMMAND_PALETTE = False
 
     def __init__(self, ws: Workspace, state: CenterState, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -486,7 +395,7 @@ class TwinCenterApp(App[None]):
         self.state = state
 
     def on_mount(self) -> None:
-        self.push_screen(HomeScreen())
+        self.push_screen(MainScreen())
 
     def action_quit_center(self) -> None:
         def done(choice: Optional[str]) -> None:

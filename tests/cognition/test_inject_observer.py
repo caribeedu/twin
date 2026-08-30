@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from twin.cognition.inject_observer import (
+from twin.inject.inject_observer import (
     NoOpInjectObserver,
     get_inject_observer,
     inject_observer_enabled,
 )
 from twin.cognize.commit import commit_narrative
-from twin.judgment.proposals import propose_from_narrative
-from twin.judgment.models import ProposalStatus
+from twin.cognize.stance_engine.proposals import propose_from_narrative
+from twin.cognize.stance_engine.models import ProposalStatus
 
 
 def test_inject_observer_default_noop(monkeypatch, store):

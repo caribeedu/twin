@@ -64,6 +64,8 @@ detail, not a fourth architecture wall.
 | **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals |
 | **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit; docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only |
 | **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): purpose-shaped UI for every Cognize entity (§2.2); Explore + Review + Sense + Inject panes; retire Memory-as-product web UI |
+| **v2.5** | Package walls | Reorganize code to `sense` / `cognize` / `inject` / `store` / `llm` / `privacy` / `interfaces`; fold `cognition` into `cognize`; split `memory` + `judgment` by pipeline function; retarget MCP tool names |
+| **v2.6** | Dual-read schema rename | Retire `MemoryItem` / `memory_id` dual-read names → store claim vocabulary; migrate DB; MCP `claim_*` only |
 
 Non-goals for v2 (deferred to later majors or explicit follow-ons):
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     CredentialBackendUnavailable,
     add_connector_instance,
     build_credential_store,
@@ -22,7 +22,7 @@ from twin.connectors import (
     sync_connector,
     validate_account_vault,
 )
-from twin.connectors.fake import _MALICIOUS
+from twin.sense.connectors.fake import _MALICIOUS
 
 PRINCIPAL = "principal_test_owner"
 
@@ -192,7 +192,7 @@ def test_checkpoint_cas_failure_aborts_batch(store, creds, monkeypatch):
 
 
 def test_checkpoint_cas_rejects_stale_version(store, creds):
-    from twin.connectors.models import ConnectorCheckpoint
+    from twin.sense.connectors.models import ConnectorCheckpoint
 
     _acc, inst = _make(store, creds)
     sync_connector(store, creds, inst.id)          # version 1
@@ -565,9 +565,9 @@ def test_malicious_content_quarantined_never_extracted(store, creds, cfg, embedd
     assert store.list_quarantine(status="quarantined")
 
     # extraction has nothing to chew on → no memories
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    assert store.list_memories() == []
+    assert store.list_claims() == []
 
 
 # -- ownership / vaults ----------------------------------------------------------
@@ -585,7 +585,7 @@ def test_employer_account_rejected_for_personal_vault(store, creds):
 
 
 def test_ownership_enum_rejects_typos():
-    from twin.connectors.models import SourceAccount
+    from twin.sense.connectors.models import SourceAccount
 
     with pytest.raises(Exception):
         SourceAccount(connector_type="fake", owner_principal_id=PRINCIPAL,
@@ -746,7 +746,7 @@ def test_invalid_ciphertext_is_treated_as_corruption(creds):
 def test_both_files_corrupted_fails_closed(creds):
     """Existing-but-unreadable credential files must raise — silently
     reinitializing an empty map would erase every secret on the next put."""
-    from twin.connectors import CredentialStoreCorrupted
+    from twin.sense.connectors import CredentialStoreCorrupted
 
     creds.put("cred_a", "secret-a")
     creds.put("cred_b", "secret-b")
@@ -769,7 +769,7 @@ def test_empty_map_only_when_no_files_existed(tmp_path):
 
 def _mp_put_many(home: str, prefix: str) -> None:
     """Top-level so multiprocessing can pickle it."""
-    from twin.connectors import build_credential_store
+    from twin.sense.connectors import build_credential_store
 
     cred_store = build_credential_store(Path(home))
     for i in range(8):
@@ -826,8 +826,8 @@ def test_windows_lock_contention_respects_timeout(tmp_path, monkeypatch):
     deadline raises CredentialLockTimeout — never an infinite spin."""
     import types
 
-    from twin.connectors import CredentialLockTimeout
-    from twin.connectors import credentials as cred_mod
+    from twin.sense.connectors import CredentialLockTimeout
+    from twin.sense.connectors import credentials as cred_mod
 
     attempts = []
 
@@ -861,7 +861,7 @@ def test_windows_lock_permanent_error_never_loops(tmp_path, monkeypatch):
     import errno as errno_mod
     import types
 
-    from twin.connectors import CredentialBackendUnavailable
+    from twin.sense.connectors import CredentialBackendUnavailable
 
     attempts = []
 
@@ -881,7 +881,7 @@ def test_windows_lock_permanent_error_never_loops(tmp_path, monkeypatch):
 
 
 def test_no_locking_backend_fails_closed(tmp_path, monkeypatch):
-    from twin.connectors import CredentialBackendUnavailable
+    from twin.sense.connectors import CredentialBackendUnavailable
 
     no_lock = build_credential_store(tmp_path / "nolock-home")
     monkeypatch.setitem(sys.modules, "fcntl", None)
@@ -955,9 +955,9 @@ def test_external_provider_without_secret_awaits_auth(store, creds):
     """Only generated_local_token adapters may receive a generated secret;
     an external provider without a credential is awaiting_auth — never
     active with a random token."""
-    from twin.connectors.protocol import AdapterManifest, ConnectorHealth
-    from twin.connectors.models import HealthStatus
-    from twin.connectors.registry import register_adapter
+    from twin.sense.connectors.protocol import AdapterManifest, ConnectorHealth
+    from twin.sense.connectors.models import HealthStatus
+    from twin.sense.connectors.registry import register_adapter
 
     @register_adapter
     class _ExternalProvider:
@@ -1050,14 +1050,14 @@ def test_persisted_errors_are_sanitized(store, creds):
 def test_no_confirmed_memory_or_judgment_written(store, creds):
     _acc, inst = _make(store, creds, source_owner="employer", org_key="acme")
     sync_connector(store, creds, inst.id)
-    assert store.list_memories(status="confirmed") == []
-    assert store.list_memories() == []
+    assert store.list_claims(status="confirmed") == []
+    assert store.list_claims() == []
     if hasattr(store, "list_judgment_items"):
         assert store.list_judgment_items() == []
 
 
 def test_manifest_and_adapter_registration():
-    from twin.connectors import get_manifest, list_adapters
+    from twin.sense.connectors import get_manifest, list_adapters
     assert "fake" in list_adapters()
     manifest = get_manifest("fake")
     assert manifest.connector_type == "fake"
@@ -1072,7 +1072,7 @@ def test_manifest_and_adapter_registration():
 def test_adapter_plan_streams_drives_dynamic_streams(store, creds, monkeypatch):
     """An adapter may derive its streams from configuration (one per repo);
     each dynamic stream gets its own checkpoint."""
-    from twin.connectors.fake import FakeConnector
+    from twin.sense.connectors.fake import FakeConnector
 
     _acc, inst = _make(store, creds)
     monkeypatch.setattr(
@@ -1089,14 +1089,14 @@ def test_adapter_plan_streams_drives_dynamic_streams(store, creds, monkeypatch):
 def test_rate_limit_retry_after_drives_backoff(store, creds):
     """A provider-instructed retry_after overrides the exponential guess —
     the scheduler waits what the provider asked, not 60s."""
-    from twin.connectors.fake import FakeConnector
+    from twin.sense.connectors.fake import FakeConnector
 
     _acc, inst = _make(store, creds, configuration={"fail_mode": "rate_limit"})
     original = FakeConnector.fetch_batch
 
     def rate_limited(self, plan, cursor):
-        from twin.connectors.protocol import ConnectorError
-        from twin.connectors.models import FailureClass
+        from twin.sense.connectors.protocol import ConnectorError
+        from twin.sense.connectors.models import FailureClass
         raise ConnectorError("rate limited", failure_class=FailureClass.rate_limit,
                              retryable=True, retry_after=900)
 
@@ -1121,12 +1121,12 @@ _POLICY_AUTHORED = {
 
 
 def _authored_policy_interp(percept, text, _cfg):
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
     items = [
         InterpretedItem(
-            memory_type=mtype, cognitive_act=CognitiveAct(act),
+            claim_type=mtype, cognitive_act=CognitiveAct(act),
             title=phrase[:80], summary=phrase, domain="technical",
             confidence=0.9, evidence_span=phrase)
         for phrase, (mtype, act) in _POLICY_AUTHORED.items() if phrase in text
@@ -1142,9 +1142,9 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
     """A connector-fed percept only proposes memory types its source policy
     allows: preferences/beliefs are dropped, review-required types come in
     flagged, and local (non-connector) percepts are unaffected."""
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.pipeline import extract_percept
-    from twin.sensory.percept import Percept
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.pipeline import extract_percept
+    from twin.sense.sensory.percept import Percept
 
     set_interpreter_override(_authored_policy_interp)
     content = (
@@ -1158,7 +1158,7 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
     ).seal()
     store.insert_percept(connector_percept)
     report = extract_percept(store, cfg, embedder, connector_percept)
-    types = {store.get_memory(m).type.value for m in report.inserted}
+    types = {store.get_claim(m).type.value for m in report.inserted}
     assert "preference" not in types          # dropped by policy
     assert report.policy_dropped >= 1
     assert "decision" in types                # allowed type flows normally
@@ -1171,7 +1171,7 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
                     source_trust=0.9).seal()
     store.insert_percept(local)
     local_report = extract_percept(store, cfg, embedder, local)
-    local_types = {store.get_memory(m).type.value for m in local_report.inserted}
+    local_types = {store.get_claim(m).type.value for m in local_report.inserted}
     assert "preference" in local_types
     assert local_report.policy_dropped == 0
 
@@ -1179,9 +1179,9 @@ def test_source_policy_gates_connector_candidates(store, cfg, embedder):
 def test_source_policy_instance_override(store, cfg, embedder):
     """ingestion_policy on the percept metadata (from instance config)
     narrows the connector-type default — never widens it."""
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.pipeline import extract_percept
-    from twin.sensory.percept import Percept
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.pipeline import extract_percept
+    from twin.sense.sensory.percept import Percept
 
     set_interpreter_override(_authored_policy_interp)
     percept = Percept(
@@ -1201,7 +1201,7 @@ def test_source_policy_instance_override(store, cfg, embedder):
 
 
 def test_scheduler_rejects_invalid_config(tmp_path):
-    from twin.connectors.scheduler import ScheduleConfigError, load_schedule
+    from twin.sense.connectors.scheduler import ScheduleConfigError, load_schedule
 
     (tmp_path / "connectors.yaml").write_text("intervals: [not, a, mapping]")
     with pytest.raises(ScheduleConfigError):
@@ -1216,7 +1216,7 @@ def test_scheduler_rejects_invalid_config(tmp_path):
 def test_scheduler_isolates_failing_connector(store, creds, tmp_path, monkeypatch):
     """One broken connector never blocks the others; its failure lands on
     its own sync state with backoff."""
-    from twin.connectors import scheduler as sched
+    from twin.sense.connectors import scheduler as sched
 
     _acc1, healthy = _make(store, creds)
     _acc2, broken = _make(store, creds)

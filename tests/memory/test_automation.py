@@ -1,26 +1,26 @@
-"""Safe quality automation and batch apply (twin.memory.automation)."""
+"""Safe quality automation and batch apply (twin.store.automation)."""
 
 from twin import ids
-from twin.cognition.quality import (
-    analyze_memory,
+from twin.cognize.services.quality import (
+    analyze_claim,
     build_duplicate_groups,
     select_canonical_survivor,
 )
-from twin.memory.automation import apply_safe_automations, batch_apply, batch_preview
-from twin.memory.models import MemoryItem, MemoryStatus
+from twin.store.automation import apply_safe_automations, batch_apply, batch_preview
+from twin.store.models import StoreClaim, ClaimStatus
 
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="fact", title="t", summary="s",
+        id=ids.claim_id(), type="fact", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         entities=["Twin"], project_id="proj_twin",
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -54,7 +54,7 @@ def test_preview_token_detects_state_change(store, embedder):
     missing = batch_apply(store, [m.id], "confirm")
     assert missing["error"] == "preview_token_required"
 
-    store.update_memory(m.id, summary="changed after preview")
+    store.update_claim(m.id, summary="changed after preview")
     stale = batch_apply(store, [m.id], "confirm", preview_token=token)
     assert stale["applied"] == 0
     assert stale["error"] == "preview_token_mismatch"
@@ -62,7 +62,7 @@ def test_preview_token_detects_state_change(store, embedder):
     fresh = batch_preview(store, [m.id], "confirm")
     ok = batch_apply(store, [m.id], "confirm", preview_token=fresh["preview_token"])
     assert ok["applied"] == 1
-    assert store.get_memory(m.id).status == MemoryStatus.confirmed
+    assert store.get_claim(m.id).status == ClaimStatus.confirmed
 
 
 def test_exact_duplicate_keeps_one_survivor(store, embedder):
@@ -75,25 +75,25 @@ def test_exact_duplicate_keeps_one_survivor(store, embedder):
     c = _mem(store, embedder, title="Same", summary="Same claim text.",
              status="confirmed", confidence=0.8,
              quality_flags=["exact_duplicate"])
-    analyze_memory(store, embedder, a.id)
-    analyze_memory(store, embedder, b.id)
-    analyze_memory(store, embedder, c.id)
+    analyze_claim(store, embedder, a.id)
+    analyze_claim(store, embedder, b.id)
+    analyze_claim(store, embedder, c.id)
     for m in (a, b, c):
-        store.update_memory(m.id, quality_flags=["exact_duplicate"])
+        store.update_claim(m.id, quality_flags=["exact_duplicate"])
 
     groups = build_duplicate_groups(store, [
-        store.get_memory(a.id), store.get_memory(b.id), store.get_memory(c.id),
+        store.get_claim(a.id), store.get_claim(b.id), store.get_claim(c.id),
     ])
     assert groups
     survivor = select_canonical_survivor(
-        [store.get_memory(x) for x in groups[0].memory_ids], store,
+        [store.get_claim(x) for x in groups[0].claim_ids], store,
     )
     assert survivor.id == c.id
 
     apply_safe_automations(store, dry_run=False)
     rejected = sum(
         1 for mid in (a.id, b.id, c.id)
-        if store.get_memory(mid).status == MemoryStatus.rejected
+        if store.get_claim(mid).status == ClaimStatus.rejected
     )
     assert rejected == 2
-    assert store.get_memory(c.id).status != MemoryStatus.rejected
+    assert store.get_claim(c.id).status != ClaimStatus.rejected

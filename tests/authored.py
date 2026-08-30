@@ -13,8 +13,8 @@ only need "some grounded memory" can rely on the default ``echo`` mode.
 
 from __future__ import annotations
 
-from twin.cognition.interpreter import echo
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services.interpreter import echo
+from twin.cognize.services.interpreter.schema import (
     CognitiveAct,
     InterpretationResult,
     InterpretationStatus,
@@ -48,7 +48,7 @@ _CORPUS: list[tuple[str, str, str, str]] = [
 def corpus_interpreter(percept, masked_text, cfg) -> InterpretationResult:
     items = [
         InterpretedItem(
-            memory_type=mtype, cognitive_act=CognitiveAct(act),
+            claim_type=mtype, cognitive_act=CognitiveAct(act),
             title=span[:80], summary=span, domain=domain, confidence=0.9,
             evidence_span=span)
         for span, mtype, act, domain in _CORPUS if span in (masked_text or "")

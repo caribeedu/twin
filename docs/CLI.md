@@ -24,7 +24,7 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 |---|---|
 | `twin ingest <paths…>` | Run sensors over files/dirs (docs, transcripts, exports). |
 | `twin cognize run` | Form / revise understanding from pending percepts (**LLM-or-halt**; never commits Narrative). |
-| `twin interpret status\|deferred\|signals` | Cognitive interpretation diagnostics (deferred queue, heuristic signals). |
+| `twin interpret status\|deferred\|signals` | Cognitive interpretation diagnostics (deferred queue, detection signals). |
 | `twin review` | Interactive priority review queue. |
 | `twin review --analyze` | Run quality analyzer on candidates first. |
 | `twin review --priority high` | Filter queue by priority. |
@@ -37,7 +37,7 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 | Command | What it does |
 |---|---|
 | `twin search <query>` | Hybrid search (optional `--domain`). |
-| `twin pack <query> --domain <domain>` | Build a safe context pack (candidates off unless flagged). |
+| `twin pack <query> --domain <domain>` | Build a safe context pack (candidates off unless flagged). Default purpose `context_retrieval`. |
 | `twin inject pack <query> --domain <domain>` | Inject pack (EpistemicState + Narratives + open Reflections). |
 | `twin observe <text>` | Memory observer suggestion for current text. |
 
@@ -69,10 +69,10 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 
 | Command | What it does |
 |---|---|
-| `twin promote <mem_id>` | Open a Stance proposal from a memory (does **not** auto-write). |
+| `twin promote <claim_id>` | Open a Stance proposal from a claim (does **not** auto-write). |
 | `twin stance import\|export\|list\|show\|history\|versions` | Bootstrap and inspect Stance store. |
 | `twin stance proposals\|propose\|preview\|approve\|reject\|defer` | Proposal lifecycle (approve needs preview token). |
-| `twin stance propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory memories (`provenance.source=episode_pattern`; human approval only). |
+| `twin stance propose-episode <episode_id>` | Seed a proposal from an episode's **confirmed** trajectory claims (`provenance.source=episode_pattern`; human approval only). |
 | `twin stance simulate <query> --domain …` | Simulate applicable Stance. |
 | `twin stance conflicts [--refresh]` | List / refresh conflicts. |
 | `twin stance explain <trace_id>` | Explain a Stance application trace. |
@@ -99,7 +99,7 @@ Correlation proposes revisable structure over connector evidence — never Narra
 | `twin episode phases <id>` | List the `goal → decision → execution → outcome` arc phases (built by the `amygdala`/`cortex` stages). |
 | `twin episode edges <id>` | List proposed causal/narrative edges (`motivated\|superseded\|resolved\|continues\|contradicts`) from the `cortex` stage. |
 | `twin episode confirm-edge\|reject-edge <edge_id>` | Human decision on an edge (survives cortex rebuilds). |
-| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **MemoryCandidates** ("intended X → chose Y") from the arc; candidates only, `review_reason=episode_reflect`. Defers if the model is unavailable. Complements `twin cognize run`. |
+| `twin episode reflect <id> [--dry-run]` | The `hippocampus_consolidate` stage: synthesize trajectory **review candidates** ("intended X → chose Y") from the arc; StoreClaims with `needs_review`, `review_reason=episode_reflect`. Defers if the model is unavailable. Complements `twin cognize run`. |
 
 ## Native
 
@@ -260,7 +260,7 @@ On an interactive TTY (with `rich` installed), `start` refreshes a panel of queu
 | `workspace_tick` | Parallel-memory tick |
 | `attention_evaluate` | Session attention evaluation |
 | `consolidate_daily` / `consolidate_weekly` | Consolidation cycle |
-| `reembed_memory` | Re-embed one memory |
+| `reembed_claim` | Re-embed one claim |
 | `integrity_check` | Store integrity checks |
 | `connector_reconcile` | Run due connector syncs |
 | `backfill_partition` | Advance one month of a connector historical backfill (`payload.backfill_job_id`) — scheduled while a backfill is in progress; not continuous sync |

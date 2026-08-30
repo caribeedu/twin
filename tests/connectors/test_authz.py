@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
@@ -293,7 +293,7 @@ def test_api_github_webhook_authenticates_by_hmac_only(tmp_path, monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    from twin.connectors.github.webhook import set_webhook_secret
+    from twin.sense.connectors.github.webhook import set_webhook_secret
     from twin.interfaces.api import create_app
     from twin.workspace import Workspace
 

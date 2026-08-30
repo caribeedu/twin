@@ -21,9 +21,11 @@ Implementation inventory: [v2-tracker.md](v2-tracker.md).
 3. Do not store an incrementable confidence float on Narrative / Reflection.
 4. Cognize must not expand ACL / sensitivity beyond contributing Evidence.
 
-Modules: `twin/cognize/orchestrator.py` (stages 0–7), `twin/cognize/commit.py`
+Modules today: `twin/cognize/orchestrator.py` (stages 0–7), `twin/cognize/commit.py`
 (stage 9), `twin/cognize/stages_late.py` (stages 10–12), store mixin
-`twin/memory/store/cognize_mixin.py`.
+`twin/memory/store/cognize_mixin.py`. Target layout folds `twin/cognition/`
+into `twin/cognize/` (+ `inject` / `llm` packages) and moves persistence to
+`store` — see [ARCHITECTURE — Code packages](ARCHITECTURE.md#code-packages-target-layout).
 
 ---
 
@@ -64,7 +66,7 @@ Overrides for CI: `set_cognize_stage_override` (0–7) and
 | **EvidenceAnchor** | Span warranting claim | `percept_id`, `quote`, `target_kind` |
 | **Trace** | Append-only use event | `pack_serve`, `fade_recommend`, `tombstone`, … |
 | **NarrativeRevisionDecision** | Stage 6 output | `outcome`, `surprise`, `explanatory_delta` |
-| **Stance** | Alias over Judgment | pending until human approve |
+| **Stance** | Evaluative posture (public name; store may still say Judgment) | pending until human approve |
 
 ---
 
@@ -92,16 +94,16 @@ Workbench: `#narratives` panel.
 
 ---
 
-## Migration ADR — MemoryItem → Narrative / Interpretation
+## Migration ADR — StoreClaim (ex-MemoryItem) → Narrative / Interpretation
 
 **Rule (dual-read):** confirmed memories map to provisional **Narratives**;
 candidates (and any `needs_review` rows) map to competing **Interpretations**.
 
 | Prior row | Cognize | Notes |
 |---|---|---|
-| `MemoryStatus.confirmed` | `Narrative` + `EpistemicState` | `migrated_from_memory=true` |
-| `MemoryStatus.candidate` | `Interpretation` (`competing`) | Never auto-commit |
+| `ClaimStatus.confirmed` | `Narrative` + `EpistemicState` | `migrated_from_memory=true` |
+| `ClaimStatus.candidate` | `Interpretation` (`competing`) | Never auto-commit |
 | `needs_review=true` | `Interpretation` only | Even if status looks confirmed |
 | Judgment items | Stance | Store tables unchanged |
 
-CLI: `twin narrative backfill` (`--apply` idempotent on `metadata.memory_id`).
+CLI: `twin narrative backfill` (`--apply` idempotent on `metadata.claim_id`).

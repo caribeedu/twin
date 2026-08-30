@@ -9,8 +9,8 @@ from twin.cognize.models import (
     RelationType,
     derive_confidence,
 )
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.embeddings import HashEmbedder
+from twin.inject.context_pack import build_context_pack
+from twin.store.embeddings import HashEmbedder
 
 
 def test_eval_independence_collapse_correlated_echoes(store, cfg):

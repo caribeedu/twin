@@ -1,8 +1,8 @@
 import pytest
 
 from twin.config import Config
-from twin.memory.embeddings import get_embedder
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.store.sqlite import SqliteStore
 
 
 @pytest.fixture()
@@ -19,7 +19,7 @@ def cfg(tmp_path):
 def _reset_interpreter_override():
     """Guarantee no scripted interpreter override leaks between tests — a test
     that authors an interpretation (set_interpreter_override) is isolated."""
-    from twin.cognition import (
+    from twin.cognize.services import (
         clear_stage_overrides,
         set_interpreter_override,
         set_reflect_override,
@@ -54,5 +54,5 @@ def local_access(store):
     ensure_local_identity(store)
     return resolve_access(
         store, surface="cli", client="local-cli",
-        persona="individual", purpose="memory_retrieval", audience="self",
+        persona="individual", purpose="context_retrieval", audience="self",
     )

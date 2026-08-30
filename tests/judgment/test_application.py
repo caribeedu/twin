@@ -4,16 +4,16 @@ import pytest
 
 from twin import ids
 from twin.clock import now_iso
-from twin.cognition.context_pack import build_context_pack
+from twin.inject.context_pack import build_context_pack
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
-from twin.judgment.application import applicable_pack
-from twin.judgment.conflicts import (
+from twin.cognize.stance_engine.application import applicable_pack
+from twin.cognize.stance_engine.conflicts import (
     detect_behavior_conflicts,
     detect_judgment_conflicts,
     resolve_conflict,
 )
-from twin.judgment.models import (
+from twin.cognize.stance_engine.models import (
     ExceptionEffect,
     JudgmentException,
     JudgmentItem,
@@ -26,18 +26,18 @@ from twin.judgment.models import (
     ProposalAction,
     ProposalStatus,
 )
-from twin.judgment.proposals import (
+from twin.cognize.stance_engine.proposals import (
     approve_proposal,
     preview_proposal,
-    propose_from_memory,
+    propose_from_claim,
     propose_from_pattern,
     reject_proposal,
 )
-from twin.judgment.revisions import commit_new_item
-from twin.judgment.simulate import counterfactual, evaluate, simulate
-from twin.judgment.versions import active_items, create_version, restore_version
-from twin.judgment.yaml_io import apply_yaml_import, preview_yaml_import
-from twin.memory.models import MemoryItem
+from twin.cognize.stance_engine.revisions import commit_new_item
+from twin.cognize.stance_engine.simulate import counterfactual, evaluate, simulate
+from twin.cognize.stance_engine.versions import active_items, create_version, restore_version
+from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
+from twin.store.models import StoreClaim
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
 
@@ -46,21 +46,21 @@ def _cli_access(store):
     bootstrap_policy_set(store)
     ensure_local_identity(store)
     return resolve_access(store, surface="cli", persona="individual",
-                          purpose="memory_retrieval", audience="self")
+                          purpose="context_retrieval", audience="self")
 
 
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="decision", title="t", summary="s",
+        id=ids.claim_id(), type="decision", title="t", summary="s",
         domain="technical", confidence=0.9, status="confirmed",
         entities=["Twin"],
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -124,7 +124,7 @@ def test_preview_edits_change_token(store, cfg, embedder):
         store, embedder, type="preference",
         title="short", summary="Prefere respostas curtas.",
     )
-    prop = propose_from_memory(store, mem.id)
+    prop = propose_from_claim(store, mem.id)
     p1 = preview_proposal(store, prop.id)
     p2 = preview_proposal(store, prop.id, edits={"kind": "principle", "strength": 0.9})
     assert p1["preview_token"] != p2["preview_token"]
@@ -143,9 +143,9 @@ def test_supporting_memory_change_invalidates_token(store, cfg, embedder):
         store, embedder, type="preference",
         title="x", summary="Prefere ferramentas locais.",
     )
-    prop = propose_from_memory(store, mem.id)
+    prop = propose_from_claim(store, mem.id)
     token = preview_proposal(store, prop.id)["preview_token"]
-    store.update_memory(mem.id, summary="Prefere ferramentas locais — edited after preview.")
+    store.update_claim(mem.id, summary="Prefere ferramentas locais — edited after preview.")
     with pytest.raises(ValueError, match="preview_token"):
         approve_proposal(store, prop.id, preview_token=token)
 
@@ -217,7 +217,7 @@ def _make_rich_item(**kw) -> JudgmentItem:
         status=JudgmentStatus.active,
         created_at=now, updated_at=now, approved_at=now, approved_by="user",
         provenance=JudgmentProvenance(
-            source="explicit_user_statement", memory_ids=["mem_1"],
+            source="explicit_user_statement", claim_ids=["mem_1"],
         ),
         exceptions=[JudgmentException(
             id=ids.judgment_exception_id(),
@@ -358,7 +358,7 @@ def test_stability_change_changes_preview_token(store, cfg):
 
 def test_approve_rollback_on_fault(store, cfg, embedder):
     mem = _mem(store, embedder, type="preference", title="t", summary="Prefere X.")
-    prop = propose_from_memory(store, mem.id)
+    prop = propose_from_claim(store, mem.id)
     token = preview_proposal(store, prop.id)["preview_token"]
     real = store.insert_judgment_version
     calls = {"n": 0}
@@ -555,10 +555,10 @@ def test_constitutional_requires_extra_confirm(store, cfg):
 
 
 def test_promote_creates_proposal(store, cfg, embedder):
-    from twin.judgment.profile import promote_memory
+    from twin.cognize.stance_engine.profile import promote_claim
     mem = _mem(store, embedder, type="preference", title="ADRs",
                summary="Prefere ADRs no repo.")
-    section = promote_memory(cfg.judgment_path, mem, store=store)
+    section = promote_claim(cfg.judgment_path, mem, store=store)
     assert section.startswith("proposal:")
 
 

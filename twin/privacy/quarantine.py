@@ -8,7 +8,7 @@ from typing import Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import QuarantineRecord, QuarantineStatus
 
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -36,7 +36,7 @@ def detect_injection(text: str) -> list[str]:
 
 
 def quarantine_content(
-    store: MemoryStore,
+    store: TwinStore,
     text: str,
     *,
     artifact_id: Optional[str] = None,
@@ -66,7 +66,7 @@ def quarantine_content(
     return rec
 
 
-def is_quarantined(store: MemoryStore, *, artifact_id: Optional[str] = None,
+def is_quarantined(store: TwinStore, *, artifact_id: Optional[str] = None,
                    percept_id: Optional[str] = None,
                    content_fingerprint: Optional[str] = None) -> bool:
     if not hasattr(store, "list_quarantine"):
@@ -82,7 +82,7 @@ def is_quarantined(store: MemoryStore, *, artifact_id: Optional[str] = None,
 
 
 def release_quarantine(
-    store: MemoryStore,
+    store: TwinStore,
     quarantine_id: str,
     *,
     actor: str,
@@ -131,7 +131,7 @@ def release_quarantine(
 
 
 def reject_quarantine(
-    store: MemoryStore,
+    store: TwinStore,
     quarantine_id: str,
     *,
     actor: str = "user",

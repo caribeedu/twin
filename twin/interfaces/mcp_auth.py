@@ -62,7 +62,7 @@ def resolve_mcp_access(
     store,
     *,
     persona: str = "individual",
-    purpose: str = "memory_retrieval",
+    purpose: str = "context_retrieval",
     audience: str = "self",
     project_id: Optional[str] = None,
     session_id: Optional[str] = None,
@@ -130,7 +130,7 @@ def ensure_mcp_client_binding(
             capabilities=list(DEFAULT_MCP_CAPABILITIES),
             allowed_personas=list(DEFAULT_MCP_PERSONAS),
             allowed_vaults=list(DEFAULT_MCP_VAULTS),
-            allowed_purposes=["*", "memory_retrieval", "task_execution", "debugging"],
+            allowed_purposes=["*", "context_retrieval", "task_execution", "debugging"],
             allowed_audiences=["self", "local"],
         ))
 
@@ -146,7 +146,7 @@ def ensure_mcp_client_binding(
             capabilities=list(DEFAULT_MCP_CAPABILITIES),
             allowed_personas=list(DEFAULT_MCP_PERSONAS),
             allowed_vaults=list(DEFAULT_MCP_VAULTS),
-            allowed_purposes=["*", "memory_retrieval", "task_execution", "debugging"],
+            allowed_purposes=["*", "context_retrieval", "task_execution", "debugging"],
             allowed_audiences=["self", "local"],
         )
 

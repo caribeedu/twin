@@ -45,14 +45,14 @@ def test_persona_restricts_domains_never_amplifies(store):
     # employee persona + finance request → empty intersect → restricted
     access = resolve_access(
         store, surface="cli", client="local-cli",
-        persona="employee", purpose="memory_retrieval", audience="self",
+        persona="employee", purpose="context_retrieval", audience="self",
         requested_domains=["finance"],
     )
     assert access.principal_id == "unknown" or access.is_restricted_mode
 
     ok = resolve_access(
         store, surface="cli", client="local-cli",
-        persona="developer", purpose="memory_retrieval", audience="self",
+        persona="developer", purpose="context_retrieval", audience="self",
         requested_domains=["technical"],
     )
     assert ok.principal_id == "principal_local_cli"
@@ -67,7 +67,7 @@ def test_private_individual_caps_restrict(store):
     ensure_local_identity(store)
     access = resolve_access(
         store, surface="cli", client="local-cli",
-        persona="private_individual", purpose="memory_retrieval", audience="self",
+        persona="private_individual", purpose="context_retrieval", audience="self",
         requested_domains=["personal_preferences"],
     )
     caps = set(access.metadata.get("resolved_capabilities") or [])
@@ -78,8 +78,8 @@ def test_private_individual_caps_restrict(store):
 def test_explain_judgment_snapshot(store):
     from twin import ids
     from twin.clock import now_iso
-    from twin.judgment.explain import explain_judgment_snapshot
-    from twin.judgment.models import AppliedRevisionRef, JudgmentSnapshot
+    from twin.cognize.stance_engine.explain import explain_judgment_snapshot
+    from twin.cognize.stance_engine.models import AppliedRevisionRef, JudgmentSnapshot
 
     ensure_local_identity(store)
     snap = JudgmentSnapshot(

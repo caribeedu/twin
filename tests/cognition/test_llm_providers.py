@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from twin.cognition.llm import (
+from twin.llm import (
     AnthropicChatClient,
     GeminiChatClient,
     OpenAICompatChatClient,
@@ -16,7 +16,7 @@ from twin.cognition.llm import (
 )
 from twin.config import Config, load_config
 from twin.interfaces.setup_wizard import run_setup_wizard
-from twin.memory.embeddings import (
+from twin.store.embeddings import (
     GeminiEmbedder,
     OpenAICompatEmbedder,
     get_embedder_for_config,

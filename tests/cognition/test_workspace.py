@@ -1,36 +1,36 @@
-"""Workspace evaluation tick (twin.cognition.workspace)."""
+"""Workspace evaluation tick (twin.cognize.services.workspace)."""
 
 from dataclasses import dataclass, field
 
 import pytest
 
 from twin import ids
-from twin.cognition import set_interpreter_override
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services import set_interpreter_override
+from twin.cognize.services.interpreter.schema import (
     CognitiveAct,
     InterpretationResult,
     InterpretationStatus,
     InterpretedItem,
 )
-from twin.cognition.observer import ObserverReading, ObserverSuggestion
-from twin.cognition.salience import SalienceScores
-from twin.cognition.workspace import workspace_tick
-from twin.memory.models import MemoryItem, MemoryStatus
+from twin.cognize.services.observer import ObserverReading, ObserverSuggestion
+from twin.cognize.services.salience import SalienceScores
+from twin.cognize.services.workspace import workspace_tick
+from twin.store.models import StoreClaim, ClaimStatus
 
 
 def _mem(store, embedder, **kw):
     base = dict(
-        id=ids.memory_id(), type="decision",
+        id=ids.claim_id(), type="decision",
         title="Postgres primary",
         summary="Use Postgres as the primary database for Twin.",
         domain="technical", confidence=0.92, status="confirmed",
         entities=["Postgres", "Twin"],
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
@@ -43,7 +43,7 @@ def test_workspace_tick_stages_and_silent_default(store, cfg, embedder):
     assert result.stages[-1] == "done"
     assert result.silent is True
     assert result.suggestions == []
-    assert result.candidate_memory_ids == []
+    assert result.candidate_claim_ids == []
     assert result.tick_id
 
 
@@ -55,14 +55,14 @@ def test_workspace_tick_suggests_high_confidence_memory(store, cfg, embedder):
         target_domain="technical",
         interpret=False,
     )
-    ids_out = {s["memory_id"] for s in result.suggestions}
+    ids_out = {s["claim_id"] for s in result.suggestions}
     assert result.silent is False
     assert mem.id in ids_out
-    hit = next(s for s in result.suggestions if s["memory_id"] == mem.id)
+    hit = next(s for s in result.suggestions if s["claim_id"] == mem.id)
     assert hit["stage"] == "suggestion"
     assert hit["confidence"] >= 0.55
     assert hit["score"] >= 0.25
-    assert result.candidate_memory_ids == []
+    assert result.candidate_claim_ids == []
 
 
 def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
@@ -87,7 +87,7 @@ def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
         return ObserverSuggestion(
             suggested_context=[
                 {
-                    "memory_id": "mem_a",
+                    "claim_id": "mem_a",
                     "summary": "high conf low score",
                     "why_relevant": "x",
                     "confidence": 0.95,
@@ -95,7 +95,7 @@ def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
                     "allowed": True,
                 },
                 {
-                    "memory_id": "mem_b",
+                    "claim_id": "mem_b",
                     "summary": "ok conf high score",
                     "why_relevant": "y",
                     "confidence": 0.70,
@@ -107,10 +107,10 @@ def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
             inferred_domain="technical",
         )
 
-    monkeypatch.setattr("twin.cognition.workspace.read_context", lambda *_a, **_k: _Reading())
-    monkeypatch.setattr("twin.cognition.workspace.observe", fake_observe)
+    monkeypatch.setattr("twin.cognize.services.workspace.read_context", lambda *_a, **_k: _Reading())
+    monkeypatch.setattr("twin.cognize.services.workspace.observe", fake_observe)
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores(
             by_memory={"mem_a": 0.9, "mem_b": 0.4},
             novelty={"mem_a": 0.99, "mem_b": 0.1},
@@ -119,24 +119,24 @@ def test_workspace_recall_uses_retrieval_score_not_memory_confidence(
     )
 
     result = workspace_tick(store, cfg, embedder, "anything", target_domain="technical")
-    assert [s["memory_id"] for s in result.suggestions] == ["mem_b"]
+    assert [s["claim_id"] for s in result.suggestions] == ["mem_b"]
     assert result.suggestions[0]["score"] == 0.90
     assert result.suggestions[0]["confidence"] == 0.70
 
 
 def test_observe_score_reaches_recall_item(store, cfg, embedder, monkeypatch):
     monkeypatch.setattr(
-        "twin.cognition.workspace.read_context",
+        "twin.cognize.services.workspace.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="technical", task_profile="coding",
             confidences={"domain": 1.0, "task_profile": 1.0, "project": 0.0},
         ),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.observe",
+        "twin.cognize.services.workspace.observe",
         lambda *_a, **_k: ObserverSuggestion(
             suggested_context=[{
-                "memory_id": "mem_x",
+                "claim_id": "mem_x",
                 "summary": "s",
                 "why_relevant": "w",
                 "confidence": 0.8,
@@ -148,7 +148,7 @@ def test_observe_score_reaches_recall_item(store, cfg, embedder, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores(
             by_memory={"mem_x": 0.5}, novelty={"mem_x": 0.2}, contradiction_ids=[],
         ),
@@ -164,7 +164,7 @@ def test_workspace_tick_interpret_creates_candidates_only(store, cfg, embedder):
     def scripted(percept, text, cfg):
         return InterpretationResult(
             items=[InterpretedItem(
-                memory_type="decision",
+                claim_type="decision",
                 title="Use FastAPI",
                 summary=span,
                 domain="technical",
@@ -188,11 +188,11 @@ def test_workspace_tick_interpret_creates_candidates_only(store, cfg, embedder):
     )
     assert "parallel_interpretation" in result.stages
     assert result.parallel_interpretation.get("percept_id")
-    assert result.candidate_memory_ids
-    for mid in result.candidate_memory_ids:
-        mem = store.get_memory(mid)
+    assert result.candidate_claim_ids
+    for mid in result.candidate_claim_ids:
+        mem = store.get_claim(mid)
         assert mem is not None
-        assert mem.status == MemoryStatus.candidate
+        assert mem.status == ClaimStatus.candidate
 
 
 def test_repeated_workspace_tick_is_idempotent(store, cfg, embedder):
@@ -204,7 +204,7 @@ def test_repeated_workspace_tick_is_idempotent(store, cfg, embedder):
         calls["n"] += 1
         return InterpretationResult(
             items=[InterpretedItem(
-                memory_type="fact",
+                claim_type="fact",
                 title="Note",
                 summary=span,
                 domain="technical",
@@ -268,7 +268,7 @@ def test_snapshot_interpret_does_not_create_percept(store, cfg, embedder):
 
 def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monkeypatch):
     monkeypatch.setattr(
-        "twin.cognition.workspace.read_context",
+        "twin.cognize.services.workspace.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="unclassified",
             confidences={"domain": 0.0, "task_profile": 0.0, "project": 0.0},
@@ -276,11 +276,11 @@ def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monk
         ),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.observe",
+        "twin.cognize.services.workspace.observe",
         lambda *_a, **_k: ObserverSuggestion(inferred_domain="unclassified"),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores({}, {}, []),
     )
     result = workspace_tick(
@@ -292,8 +292,8 @@ def test_unclassified_domain_not_coerced_to_technical(store, cfg, embedder, monk
 
 
 def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
-    from twin.cognition.workspace import text_content_hash
-    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+    from twin.cognize.services.workspace import text_content_hash
+    from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     cfg.extractor = "auto"
     calls = {"n": 0}
@@ -336,7 +336,7 @@ def test_running_workspace_tick_is_not_executed_twice(store, cfg, embedder):
 
 def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedder, monkeypatch):
     monkeypatch.setattr(
-        "twin.cognition.workspace.read_context",
+        "twin.cognize.services.workspace.read_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom observe path")),
     )
     with pytest.raises(RuntimeError):
@@ -371,14 +371,14 @@ def test_workspace_tick_error_persists_and_blocks_until_retry(store, cfg, embedd
 
 def test_second_retry_claim_is_blocked_concurrent(store, cfg, embedder):
     """After one atomic reclaim, a second retry must not execute."""
-    from twin.memory.store.workspace_ops_mixin import WorkspaceTickRecord
+    from twin.store.store.workspace_ops_mixin import WorkspaceTickRecord
 
     text = "retry race"
     tick = WorkspaceTickRecord(
         session_id="ses_retry_race",
         sequence=1,
         content_hash=__import__(
-            "twin.cognition.workspace", fromlist=["text_content_hash"]
+            "twin.cognize.services.workspace", fromlist=["text_content_hash"]
         ).text_content_hash(text),
         input_mode="delta",
         interpret=True,
@@ -403,13 +403,13 @@ def test_second_retry_claim_is_blocked_concurrent(store, cfg, embedder):
 
 
 def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, embedder, monkeypatch):
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct,
         InterpretationResult,
         InterpretationStatus,
         InterpretedItem,
     )
-    from twin.cognition.pipeline import extract_percept as real_extract
+    from twin.cognize.services.pipeline import extract_percept as real_extract
 
     cfg.extractor = "auto"
     span = "We decided to use FastAPI for the Twin HTTP API."
@@ -424,7 +424,7 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
     def scripted(percept, text, cfg):
         return InterpretationResult(
             items=[InterpretedItem(
-                memory_type="decision",
+                claim_type="decision",
                 title="Use FastAPI",
                 summary=span,
                 domain="technical",
@@ -438,7 +438,7 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
         )
 
     set_interpreter_override(scripted)
-    monkeypatch.setattr("twin.cognition.workspace.extract_percept", flaky_extract)
+    monkeypatch.setattr("twin.cognize.services.workspace.extract_percept", flaky_extract)
 
     with pytest.raises(RuntimeError):
         workspace_tick(
@@ -472,7 +472,7 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
     assert ok.status == "completed"
     assert ok.error == ""
     assert ok.parallel_interpretation.get("reused_percept") is True
-    assert ok.candidate_memory_ids
+    assert ok.candidate_claim_ids
     after = [
         p for p in store.list_percepts()
         if (p.metadata or {}).get("tick_id") == row.id
@@ -485,8 +485,8 @@ def test_retry_after_interpreter_failure_reuses_existing_percept(store, cfg, emb
 
 
 def test_workspace_retry_can_complete_after_transient_failure(store, cfg, embedder, monkeypatch):
-    from twin.cognition.observer import ObserverReading, ObserverSuggestion
-    from twin.cognition.salience import SalienceScores
+    from twin.cognize.services.observer import ObserverReading, ObserverSuggestion
+    from twin.cognize.services.salience import SalienceScores
 
     blows = {"n": 0}
 
@@ -499,13 +499,13 @@ def test_workspace_retry_can_complete_after_transient_failure(store, cfg, embedd
             confidences={"domain": 1.0, "task_profile": 1.0, "project": 0.0},
         )
 
-    monkeypatch.setattr("twin.cognition.workspace.read_context", flaky_read)
+    monkeypatch.setattr("twin.cognize.services.workspace.read_context", flaky_read)
     monkeypatch.setattr(
-        "twin.cognition.workspace.observe",
+        "twin.cognize.services.workspace.observe",
         lambda *_a, **_k: ObserverSuggestion(inferred_domain="technical"),
     )
     monkeypatch.setattr(
-        "twin.cognition.workspace.score_memories",
+        "twin.cognize.services.workspace.score_memories",
         lambda *_a, **_k: SalienceScores({}, {}, []),
     )
 

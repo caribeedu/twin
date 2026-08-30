@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     backfill_preview,
     build_credential_store,
@@ -13,7 +13,7 @@ from twin.connectors import (
     run_backfill_partition,
     sync_connector,
 )
-from twin.connectors.mail.streams import format_backfill_stream
+from twin.sense.connectors.mail.streams import format_backfill_stream
 
 from tests.connectors.gmail.gmail_mock import FakeGmailAPI
 
@@ -29,7 +29,7 @@ def creds(tmp_path):
 @pytest.fixture()
 def gmail(monkeypatch):
     api = FakeGmailAPI()
-    from twin.connectors.gmail import client as gclient
+    from twin.sense.connectors.gmail import client as gclient
     real_build = gclient._build_http
 
     def fake_build(base_url, token):
@@ -274,13 +274,13 @@ def test_backfill_claim_rejects_second_worker(store, creds, gmail):
     })
     job = create_backfill_job(store, creds, inst.id)
     # Manually claim as worker A with fresh CAS
-    from twin.connectors.mail.backfill import apply_partition_claim
+    from twin.sense.connectors.mail.backfill import apply_partition_claim
     expected = job.version
     job.progress = apply_partition_claim(
         job.progress, "2020-01", worker_id="worker_a", claim_token=1,
     )
     job.status = job.status  # noqa — keep planned→running via claim helper path
-    from twin.connectors.models import BackfillJobStatus
+    from twin.sense.connectors.models import BackfillJobStatus
     job.status = BackfillJobStatus.running
     assert store.cas_backfill_job(job, expected)
 
@@ -303,12 +303,12 @@ def test_backfill_preview_lists_partitions(store, creds, gmail):
 
 
 def test_gmail_source_policy_requires_review(store, cfg, embedder):
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
-    from twin.cognition.pipeline import extract_percept
-    from twin.sensory.percept import Percept
+    from twin.cognize.services.pipeline import extract_percept
+    from twin.sense.sensory.percept import Percept
 
     content = "We decided to postpone the Friday release."
     percept = Percept(
@@ -319,20 +319,20 @@ def test_gmail_source_policy_requires_review(store, cfg, embedder):
     store.insert_percept(percept)
     set_interpreter_override(lambda p, text, c: InterpretationResult(
         items=[InterpretedItem(
-            memory_type="decision", cognitive_act=CognitiveAct.decision,
+            claim_type="decision", cognitive_act=CognitiveAct.decision,
             title="Postpone the Friday release", summary=content,
             domain="work", confidence=0.9, evidence_span=content)],
         status=InterpretationStatus.interpreted, interpreter="authored",
         model="authored", prompt_version="test", schema_version="1"))
     report = extract_percept(store, cfg, embedder, percept)
     assert report.inserted
-    mem = store.get_memory(report.inserted[0])
+    mem = store.get_claim(report.inserted[0])
     assert mem.needs_review
     assert mem.type.value == "decision"
 
 
 def test_list_labels_helper(store, creds, gmail):
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.registry import build_adapter
     _acc, inst = _mk(store, creds)
     account = store.get_source_account(inst.account_id)
     adapter = build_adapter(inst, account, TOKEN)
@@ -431,8 +431,8 @@ def test_thread_message_tombstone_resolves_external_type(store, creds, gmail):
 
 
 def test_stale_backfill_worker_cannot_publish(store, creds, gmail):
-    from twin.connectors.models import SyncExecutionContext
-    from twin.connectors.mail.streams import format_backfill_stream
+    from twin.sense.connectors.models import SyncExecutionContext
+    from twin.sense.connectors.mail.streams import format_backfill_stream
 
     for i in range(60):
         gmail.add_message(

@@ -1,7 +1,7 @@
 # MCP
 
 This document explains the universal tool surface — packs, search,
-sessions, review, judgment and connector ops over stdio.
+sessions, review, Stance and connector ops over stdio.
 
 > **MCP everywhere.** Use it when the host has no native surface, and
 > alongside [native](NATIVE.md) for mid-conversation tools.
@@ -44,23 +44,11 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 1. Prefer `inject_context_pack` or `session_start` at the beginning of a technical task.
 2. Always pass a truthful `target_domain`.
 3. Treat `blocked` as authoritative — do not ask the model to “ignore” the firewall.
-4. Do not treat `candidate` memories as established fact.
-5. Cite memory ids / evidence when using specific claims.
-6. Mutating tools require `confirm=true` (and stronger flags for constitutional judgment changes).
+4. Prefer `narrative_*` / `stance_*` tools for durable substrate; use `claim_*` for store claim rows.
+5. Cite Narrative / Evidence ids when using specific claims.
+6. Mutating tools require `confirm=true` (and stronger flags for constitutional Stance changes).
 
-## Retrieve
-
-| Tool | Arguments | What it does |
-|---|---|---|
-| `memory_search` | `query`, `domain="technical"`, `type?`, `limit=10` | Hybrid search (vector + FTS + graph boosts) filtered by domain. |
-| `memory_get` | `memory_id` | Single memory with evidence links. |
-| `memory_related` | `entity` | Graph neighborhood around an entity name/id. |
-| `memory_project_context` | `project_name` | Memories scoped to a project. |
-| `memory_recent_decisions` | `project_name?`, `limit=10` | Recent `decision` memories. |
-| `memory_user_preferences` | `context=""` | Stable preference memories for the given context string. |
-| `memory_judgment_profile` | — | Active judgment items (DB) plus YAML bootstrap view. |
-
-## Context packs
+## Prefer (v2 substrate)
 
 | Tool | Arguments | What it does |
 |---|---|---|
@@ -68,7 +56,34 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `narrative_show` | `narrative_id` | One Narrative + EpistemicState |
 | `stance_list` | — | Active Stances |
 | `stance_proposals` | `status=pending` | Pending Stance drafts (human approve) |
-| `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable stance. |
+| `stance_applicable` | `domain`, `task_profile`, … | Stance items applicable to this context |
+| `stance_simulate` | `query`, `domain`, … | Simulate Stance influence without writing |
+| `stance_profile` | — | Active Stance items + YAML bootstrap |
+| `stance_proposal_preview` / `_approve` / `_reject` | … | Human-gated Stance mutations |
+| `stance_conflicts` / `stance_version` | … | Conflicts and version metadata |
+| `inject_context_pack` | `query`, `target_domain="technical"`, … | EpistemicState, open reflections, derived confidence/independence, applicable Stance |
+
+## Retrieve (store claims)
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `claim_search` | `query`, `domain="technical"`, `type?`, `limit=10` | Hybrid search (vector + FTS + graph boosts) filtered by domain. |
+| `claim_get` | `claim_id` | Single store claim with evidence links. |
+| `claim_related` | `entity` | Graph neighborhood around an entity name/id. |
+| `claim_project_context` | `project_name` | Claims scoped to a project. |
+| `claim_recent_decisions` | `project_name?`, `limit=10` | Recent `decision` claims. |
+| `claim_user_preferences` | `context=""` | Stable preference claims for the given context string. |
+| `claim_quality` | `claim_id` | Quality analysis (duplicates, conflicts, review priority). |
+| `claim_neighbors` | `claim_id` | Semantically/entity-related neighbor claims. |
+| `claim_provenance` | `claim_id` | Lineage: claim → evidence → percept → artifact. |
+| `claim_confirm` / `claim_reject` / `claim_archive` | `claim_id`, `confirm=false` | Curation mutations (require `confirm=true`). |
+| `claim_merge` / `claim_split` | … | Merge/split claims (require `confirm=true`). |
+
+## Context packs
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `inject_context_pack` | `query`, `target_domain="technical"`, … | Same as Prefer table — primary Inject tool. |
 
 ## Sessions
 
@@ -80,8 +95,8 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 | `get_active_session` | `session_id` | Session snapshot. |
 | `get_attention` | `session_id`, `evaluate=false` | Attention / focus hints for the session. |
 | `session_complete` | `session_id`, `summary=""`, `abandoned=false`, `summary_origin="assistant"`, `user_confirmed=false` | Closes the session; may enqueue extraction candidates. |
-| `session_feedback` | `session_id`, `verdict`, `memory_id?`, `note=""`, `scope?` | Feedback on session usefulness / a memory in context. |
-| `provide_feedback` | `emission_id=""`, `session_id=""`, `verdict="useful"`, `memory_id?`, `note=""` | Feedback on a specific emission (pack/suggestion). |
+| `session_feedback` | `session_id`, `verdict`, `claim_id?`, `note=""`, `scope?` | Feedback on session usefulness / a claim in context. |
+| `provide_feedback` | `emission_id=""`, `session_id=""`, `verdict="useful"`, `claim_id?`, `note=""` | Feedback on a specific emission (pack/suggestion). |
 
 ## Review & curation (mutating — need `confirm`)
 
@@ -89,39 +104,40 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 |---|---|---|
 | `review_queue` | `limit=20`, `conflicts_only=false` | Priority-ordered candidates waiting for human review. |
 | `review_batch_get` | `batch_id` | Load a review batch. |
-| `review_suggest_action` | `memory_id` | Suggest confirm/reject/merge/… **without** mutating. |
-| `memory_confirm` | `memory_id`, `confirm=false` | Promote candidate to confirmed. |
-| `memory_reject` | `memory_id`, `confirm=false` | Reject a candidate. |
-| `memory_archive` | `memory_id`, `confirm=false` | Archive a memory. |
-| `memory_merge` | `memory_ids`, `confirm=false`, titles/summaries/scope flags… | Merge memories into one (cross-scope needs extra confirm). |
-| `memory_split` | `memory_id`, `parts`, `confirm=false` | Split one memory into parts. |
+| `review_suggest_action` | `claim_id` | Suggest confirm/reject/merge/… **without** mutating. |
+| `claim_confirm` | `claim_id`, `confirm=false` | Confirm a candidate claim. |
+| `claim_reject` | `claim_id`, `confirm=false` | Reject a candidate claim. |
+| `claim_archive` | `claim_id`, `confirm=false` | Archive a claim. |
+| `claim_merge` | `claim_ids`, `confirm=false`, titles/summaries/scope flags… | Merge claims. |
+| `claim_split` | `claim_id`, `parts`, `confirm=false` | Split a claim. |
 
 ## Quality & provenance
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `memory_quality` | `memory_id` | Quality findings + review priority. |
-| `memory_neighbors` | `memory_id` | Nearby memories for side-by-side review. |
-| `memory_provenance` | `memory_id` | Chain memory, evidence, percept, artifact. |
+| `claim_quality` | `claim_id` | Quality findings + review priority. |
+| `claim_neighbors` | `claim_id` | Nearby claims for side-by-side review. |
+| `claim_provenance` | `claim_id` | Chain claim, evidence, percept, artifact. |
 
-## Judgment governance
+## Stance governance
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `judgment_applicable` | `domain="technical"`, `task_profile="general"`, `project?`, `query=""` | Judgment items applicable to this context. |
-| `judgment_simulate` | `query`, `domain="technical"`, `task_profile="architecture"`, `project?` | Simulate which judgment would fire without writing. |
-| `judgment_proposals` | `status="pending"` | List judgment change proposals. |
-| `judgment_proposal_preview` | `proposal_id` | Preview + token required for approve. |
-| `judgment_proposal_approve` | `proposal_id`, `preview_token`, `confirm=false`, `confirm_constitutional=false` | Human-gated approve. |
-| `judgment_proposal_reject` | `proposal_id`, `confirm=false`, `reason=""` | Reject a proposal. |
-| `judgment_conflicts` | `status="open"` | Open judgment conflicts. |
-| `judgment_version` | — | Current judgment store version metadata. |
+| `stance_applicable` | `domain="technical"`, `task_profile="general"`, `project?`, `query=""` | Stance items applicable to this context. |
+| `stance_simulate` | `query`, `domain="technical"`, `task_profile="architecture"`, `project?` | Simulate which Stance would fire without writing. |
+| `stance_proposals` | `status="pending"` | List Stance change proposals. |
+| `stance_proposal_preview` | `proposal_id` | Preview + token required for approve. |
+| `stance_proposal_approve` | `proposal_id`, `preview_token`, `confirm=false`, `confirm_constitutional=false` | Human-gated approve. |
+| `stance_proposal_reject` | `proposal_id`, `confirm=false`, `reason=""` | Reject a proposal. |
+| `stance_conflicts` | `status="open"` | Open Stance conflicts. |
+| `stance_version` | — | Current Stance store version metadata. |
+| `stance_profile` | — | Active Stance items + YAML bootstrap. |
 
 ## Privacy
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `privacy_evaluate` | `memory_ids?`, `persona="individual"`, `purpose="memory_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
+| `privacy_evaluate` | `claim_ids?`, `persona="individual"`, `purpose="context_retrieval"`, `audience="self"` | Evaluate whether content may be disclosed (MCP process identity). |
 | `privacy_explain` | `decision_id` | Explain a prior privacy decision. |
 | `privacy_validate_output` | `text` | Check model output for policy violations. |
 
@@ -150,24 +166,22 @@ Manual entry (absolute `command` path if the GUI cannot see your `PATH`):
 
 ### Claude Code
 
+`twin setup mcp claude-code` writes/merges into the **user** MCP config:
+
+- `~/.claude.json` → top-level `mcpServers.twin`
+- or `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set
+
 ```bash
-claude mcp add twin -- twin mcp
-# project scope (shareable via .mcp.json):
-claude mcp add --scope project twin -- twin mcp
+twin setup mcp claude-code
+# equivalent CLI:
+claude mcp add --scope user twin -- twin mcp
 ```
 
-Or directly in the project's `.mcp.json`:
+Project-scoped `.mcp.json` (shareable via git) remains optional and is **not**
+what Twin's doctor / Command Center treat as the install target:
 
-```json
-{
-  "mcpServers": {
-    "twin": {
-      "command": "twin",
-      "args": ["mcp"],
-      "env": { "TWIN_DB_URL": "postgresql://twin:twin@localhost:5432/twin" }
-    }
-  }
-}
+```bash
+claude mcp add --scope project twin -- twin mcp
 ```
 
 ### Claude Desktop
@@ -250,7 +264,7 @@ Any MCP stdio-compatible client works with:
 4. **Report usefulness with `session_feedback`** (`useful`,
    `partially_useful`, `irrelevant`, `incorrect`, `missing_context`,
    `privacy_overblock`, `privacy_underblock`), with `scope` = `session`,
-   `pack` or `memory`. A `memory_id` must be one this session supplied or
+   `pack` or `memory`. A `claim_id` must be one this session supplied or
    created. This feeds twin's product metrics — especially "did the user
    have to re-explain something twin should already have known?".
 
@@ -271,7 +285,7 @@ Any MCP stdio-compatible client works with:
 4. Use `memory_search`/`memory_get` to dig deeper, `memory_related` and
    `memory_project_context` to navigate the graph, `memory_recent_decisions`
    before proposing architecture changes.
-5. Cite the `memory_id` when using specific content — every memory has
+5. Cite the `claim_id` when using specific content — every memory has
    traceable verbatim evidence.
 
 #### Troubleshooting

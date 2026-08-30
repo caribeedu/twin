@@ -12,7 +12,7 @@ from typing import Any, Callable, Optional
 
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.gate import require_chat_llm
-from twin.judgment.proposals import propose_from_narrative
+from twin.cognize.stance_engine.proposals import propose_from_narrative
 
 _LATE_OVERRIDES: dict[str, Callable[..., Any]] = {}
 
@@ -33,7 +33,7 @@ def _gate(cfg: Any):
 
     reachable = None
     try:
-        from twin.cognition.llm import llm_available
+        from twin.llm import llm_available
 
         reachable = llm_available(cfg)
     except Exception:
@@ -60,7 +60,7 @@ def draft_stance_after_commit(
         gate = _gate(cfg)
         if not gate.halted:
             try:
-                from twin.cognition.llm import get_chat_client
+                from twin.llm import get_chat_client
 
                 llm = get_chat_client(cfg)
                 nar = store.get_narrative(narrative_id)
@@ -72,6 +72,14 @@ def draft_stance_after_commit(
                             "Return JSON {statement, rationale}."
                         ),
                         user=f"Narrative account:\n{nar.account}",
+                        schema={
+                            "type": "object",
+                            "properties": {
+                                "statement": {"type": "string"},
+                                "rationale": {"type": "string"},
+                            },
+                            "additionalProperties": True,
+                        },
                     )
                     stmt = str(data.get("statement") or nar.account)[:500]
                     return propose_from_narrative(
@@ -110,7 +118,7 @@ def run_consolidation_judgment(
     drafts: list[dict[str, Any]] = []
     budget = max_tokens
     try:
-        from twin.cognition.llm import get_chat_client
+        from twin.llm import get_chat_client
 
         llm = get_chat_client(cfg)
         if llm is None:
@@ -134,6 +142,15 @@ def run_consolidation_judgment(
                     "Return JSON {action: promote|keep_episodic|skip, statement?, rationale}."
                 ),
                 user=f"Account:\n{nar.account}\nDomain:{nar.domain}",
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "statement": {"type": "string"},
+                        "rationale": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
             )
             used = max(200, len(nar.account or "") // 4)
             budget -= used
@@ -181,7 +198,7 @@ def run_fade_judgment(
             "recommendations": recs,
         }
     try:
-        from twin.cognition.llm import get_chat_client
+        from twin.llm import get_chat_client
 
         llm = get_chat_client(cfg)
         if llm is None:
@@ -203,6 +220,14 @@ def run_fade_judgment(
                     f"account={nar.account}\ntrace_hits={rec.get('trace_hits')}\n"
                     f"stance_linked={rec.get('stance_linked')}"
                 ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "recommended": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
             )
             label = str(data.get("recommended") or rec["recommended"])
             reason = str(data.get("reason") or rec["reason"])

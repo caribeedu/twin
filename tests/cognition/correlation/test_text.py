@@ -1,6 +1,6 @@
 """Excerpt + divergence helpers for episode briefs."""
 
-from twin.cognition.correlation.text import (
+from twin.cognize.services.correlation.text import (
     normalize_for_compare,
     rich_excerpt,
     texts_diverge,

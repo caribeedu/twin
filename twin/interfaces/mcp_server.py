@@ -27,20 +27,20 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from ..cognition.context_pack import build_context_pack
-from ..cognition.sessions import (
+from twin.inject.context_pack import build_context_pack
+from twin.cognize.services.sessions import (
     complete_session,
     observe_session,
     record_feedback,
     start_session,
 )
-from ..judgment.profile import load_profile
-from ..memory.search import search
+from twin.cognize.stance_engine.profile import load_profile
+from twin.store.search import search
 from ..workspace import Workspace
 from .mcp_auth import MCP_CLIENT_ENV, mcp_process_identity, resolve_mcp_access
 
 
-def _memory_to_dict(mem) -> dict[str, Any]:
+def _claim_to_dict(mem) -> dict[str, Any]:
     return {
         "id": mem.id, "type": mem.type.value, "title": mem.title,
         "summary": mem.summary, "domain": mem.domain, "persona": mem.persona,
@@ -72,13 +72,13 @@ def create_server(home: Optional[str] = None):
         return client or "mcp"
 
     @mcp.tool()
-    def memory_search(
+    def claim_search(
         query: str,
         domain: str = "technical",
         type: Optional[str] = None,
         limit: int = 10,
     ) -> str:
-        """Hybrid search (text + semantic + graph) over the user's memories.
+        """Hybrid search (text + semantic + graph) over store claims.
         `domain` is the domain of YOUR current task (work, technical,
         personal_preferences, assistant_preferences) and controls privacy
         filtering. Optional `type` filters by memory type (decision, task,
@@ -87,34 +87,34 @@ def create_server(home: Optional[str] = None):
                         firewall=ws.firewall, type_=type, limit=limit)
         return json.dumps({
             "hits": [
-                {**_memory_to_dict(h.memory), "score": h.score, "why": h.why}
+                {**_claim_to_dict(h.claim), "score": h.score, "why": h.why}
                 for h in result.hits
             ],
-            "blocked": [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
+            "blocked": [{"claim_id": b.claim_id, "reason": b.rule} for b in result.blocked],
         }, ensure_ascii=False)
 
     @mcp.tool()
-    def memory_get(memory_id: str) -> str:
-        """Fetch one memory by id, including its evidence quotes and percepts."""
-        mem = ws.store.get_memory(memory_id)
+    def claim_get(claim_id: str) -> str:
+        """Fetch one claim by id, including its evidence quotes and percepts."""
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             return json.dumps({"error": "not found"})
         evidence = [{"quote": e.quote, "percept_id": e.percept_id}
-                    for e in ws.store.get_evidence(memory_id)]
-        return json.dumps({**_memory_to_dict(mem), "evidence": evidence}, ensure_ascii=False)
+                    for e in ws.store.get_evidence(claim_id)]
+        return json.dumps({**_claim_to_dict(mem), "evidence": evidence}, ensure_ascii=False)
 
     @mcp.tool()
-    def memory_related(entity: str) -> str:
-        """Entities and memories connected to a given entity name in the
+    def claim_related(entity: str) -> str:
+        """Entities and claims connected to a given entity name in the
         knowledge graph (projects, people, systems, tools)."""
         ent = ws.store.get_entity_by_name(entity)
         if ent is None:
             return json.dumps({"error": f"entity '{entity}' not found"})
-        memories = ws.store.memories_for_entity(ent.id)
+        memories = ws.store.claims_for_entity(ent.id)
         relations = ws.store.relations_for(ent.id)
         return json.dumps({
             "entity": {"id": ent.id, "name": ent.name, "type": ent.entity_type},
-            "memories": [_memory_to_dict(m) for m in memories[:20]],
+            "claims": [_claim_to_dict(m) for m in memories[:20]],
             "relations": [
                 {"subject": r.subject_id, "predicate": r.predicate, "object": r.object_id}
                 for r in relations[:50]
@@ -122,26 +122,26 @@ def create_server(home: Optional[str] = None):
         }, ensure_ascii=False)
 
     @mcp.tool()
-    def memory_project_context(project_name: str) -> str:
-        """Everything known about a project: memories linked to it plus the
+    def claim_project_context(project_name: str) -> str:
+        """Everything known about a project: claims linked to it plus the
         most recent decisions."""
         ent = ws.store.get_entity_by_name(project_name)
-        memories = ws.store.memories_for_entity(ent.id) if ent else []
+        memories = ws.store.claims_for_entity(ent.id) if ent else []
         result = search(ws.store, ws.embedder, project_name, target_domain="technical",
                         firewall=ws.firewall, limit=10)
         by_id = {m.id: m for m in memories}
         for h in result.hits:
-            by_id.setdefault(h.memory.id, h.memory)
+            by_id.setdefault(h.claim.id, h.claim)
         items = sorted(by_id.values(), key=lambda m: m.created_at, reverse=True)
         return json.dumps({
             "project": project_name,
-            "memories": [_memory_to_dict(m) for m in items[:25]],
+            "claims": [_claim_to_dict(m) for m in items[:25]],
         }, ensure_ascii=False)
 
     @mcp.tool()
-    def memory_recent_decisions(project_name: Optional[str] = None, limit: int = 10) -> str:
+    def claim_recent_decisions(project_name: Optional[str] = None, limit: int = 10) -> str:
         """Most recent technical/work decisions, optionally scoped to a project."""
-        decisions = ws.store.list_memories(type_="decision", limit=100)
+        decisions = ws.store.list_claims(type_="decision", limit=100)
         if project_name:
             needle = project_name.lower()
             decisions = [
@@ -150,32 +150,20 @@ def create_server(home: Optional[str] = None):
                 or any(needle == e.lower() for e in d.entities)
             ]
         return json.dumps(
-            [_memory_to_dict(d) for d in decisions[:limit]], ensure_ascii=False
+            [_claim_to_dict(d) for d in decisions[:limit]], ensure_ascii=False
         )
 
     @mcp.tool()
-    def memory_user_preferences(context: str = "") -> str:
+    def claim_user_preferences(context: str = "") -> str:
         """The user's stable preferences (technical + communication),
         optionally ranked by relevance to `context`."""
-        prefs = ws.store.list_memories(type_="preference", limit=100)
+        prefs = ws.store.list_claims(type_="preference", limit=100)
         if context:
             ranked = search(ws.store, ws.embedder, context, target_domain="assistant_preferences",
                             firewall=ws.firewall, type_="preference", limit=20)
-            ids_ranked = [h.memory.id for h in ranked.hits]
+            ids_ranked = [h.claim.id for h in ranked.hits]
             prefs.sort(key=lambda p: ids_ranked.index(p.id) if p.id in ids_ranked else 999)
-        return json.dumps([_memory_to_dict(p) for p in prefs[:20]], ensure_ascii=False)
-
-    @mcp.tool()
-    def memory_judgment_profile() -> str:
-        """Active judgment items (DB) plus YAML bootstrap. Prefer judgment_applicable
-        for scoped injection into a task."""
-        payload = dict(load_profile(ws.cfg.judgment_path))
-        if hasattr(ws.store, "list_judgment_items"):
-            payload["items"] = [
-                i.model_dump(mode="json")
-                for i in ws.store.list_judgment_items(status="active")
-            ]
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps([_claim_to_dict(p) for p in prefs[:20]], ensure_ascii=False)
 
     def _resolve_project_id(project: Optional[str]) -> Optional[str]:
         if not project:
@@ -193,7 +181,7 @@ def create_server(home: Optional[str] = None):
         task_profile: str = "general",
         project: Optional[str] = None,
         persona: str = "individual",
-        purpose: str = "memory_retrieval",
+        purpose: str = "context_retrieval",
         audience: str = "self",
         mode: str = "compact",
         session_id: Optional[str] = None,
@@ -344,7 +332,7 @@ def create_server(home: Optional[str] = None):
         external_session_id: str = "",
     ) -> str:
         """Append an ordered session delta (enqueues attention evaluate job)."""
-        from ..cognition.session_lifecycle import append_session_delta as _append
+        from twin.cognize.services.session_lifecycle import append_session_delta as _append
         try:
             ev = _append(
                 ws.store, session_id, text=text, sequence=sequence,
@@ -366,7 +354,7 @@ def create_server(home: Optional[str] = None):
     @mcp.tool()
     def get_attention(session_id: str, evaluate: bool = False) -> str:
         """List or re-evaluate attention outcomes for a session (prefer silence)."""
-        from ..cognition.attention import evaluate_attention
+        from twin.cognize.services.attention import evaluate_attention
         if evaluate:
             outcomes = evaluate_attention(
                 ws.store, ws.cfg, ws.embedder, session_id,
@@ -386,12 +374,12 @@ def create_server(home: Optional[str] = None):
         emission_id: str = "",
         session_id: str = "",
         verdict: str = "useful",
-        memory_id: Optional[str] = None,
+        claim_id: Optional[str] = None,
         note: str = "",
     ) -> str:
         """Feedback on attention emission or session usefulness."""
         if emission_id:
-            from ..cognition.attention import feedback_attention
+            from twin.cognize.services.attention import feedback_attention
             em = feedback_attention(ws.store, emission_id, verdict=verdict)
             if em is None:
                 return json.dumps({"error": "emission not found"})
@@ -400,7 +388,7 @@ def create_server(home: Optional[str] = None):
             try:
                 session = record_feedback(
                     ws.store, session_id, verdict,
-                    memory_id=memory_id, note=note,
+                    claim_id=claim_id, note=note,
                 )
             except ValueError as exc:
                 return json.dumps({"error": str(exc)})
@@ -480,6 +468,8 @@ def create_server(home: Optional[str] = None):
             "tools": [
                 "inject_context_pack",
                 "narrative_list", "narrative_show", "stance_list", "stance_proposals",
+                "stance_applicable", "stance_simulate", "stance_profile",
+                "stance_proposal_preview", "stance_proposal_approve",
                 "get_active_session", "get_attention", "append_session_delta",
                 "session_start", "session_complete", "provide_feedback",
                 "workspace_tick", "consolidate_cycle", "health", "capabilities",
@@ -542,14 +532,14 @@ def create_server(home: Optional[str] = None):
             "status": session.status.value,
             "consolidation_status": session.consolidation_status.value,
             "consolidation_error": session.consolidation_error,
-            "created_memory_ids": session.created_memory_ids,
+            "created_claim_ids": session.created_claim_ids,
         }, ensure_ascii=False)
 
     @mcp.tool()
     def session_feedback(
         session_id: str,
         verdict: str,
-        memory_id: Optional[str] = None,
+        claim_id: Optional[str] = None,
         note: str = "",
         scope: Optional[str] = None,
     ) -> str:
@@ -558,12 +548,12 @@ def create_server(home: Optional[str] = None):
         missing_context (the user had to re-explain something twin should
         have known), privacy_overblock, privacy_underblock. `scope` says what
         the verdict is about (session | pack | memory; defaults to memory
-        when memory_id is given, session otherwise). A memory_id must be one
+        when claim_id is given, session otherwise). A claim_id must be one
         of the memories this session supplied or created. This feeds twin's
         product metrics."""
         try:
             session = record_feedback(ws.store, session_id, verdict,
-                                      memory_id=memory_id, note=note, scope=scope)
+                                      claim_id=claim_id, note=note, scope=scope)
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
         return json.dumps({
@@ -640,7 +630,7 @@ def create_server(home: Optional[str] = None):
         """Workspace evaluation tick : reading → recall → optional
         delta interpretation (candidates only). Idempotent via session+sequence
         or idempotency_key. Never confirms Memory or Judgment."""
-        from ..cognition.workspace import workspace_tick as _tick
+        from twin.cognize.services.workspace import workspace_tick as _tick
         if input_mode not in ("snapshot", "delta"):
             return json.dumps({"error": "input_mode must be snapshot or delta"})
         result = _tick(
@@ -660,7 +650,7 @@ def create_server(home: Optional[str] = None):
         """Run a daily or weekly consolidation cycle (quality, safe automation,
         temporal belief/goal refresh; weekly may propose judgment). Default
         dry-run; set apply=true to write. Never confirms Memory/Judgment."""
-        from ..cognition.consolidation_cycle import run_consolidation_cycle
+        from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
         if kind not in ("daily", "weekly"):
             return json.dumps({"error": "kind must be daily or weekly"})
         result = run_consolidation_cycle(
@@ -672,55 +662,55 @@ def create_server(home: Optional[str] = None):
     # -- quality / review (read tools + gated mutations) -----------------
 
     @mcp.tool()
-    def memory_quality(memory_id: str) -> str:
-        """Analyze a memory for duplicates, conflicts, merge/split suggestions
+    def claim_quality(claim_id: str) -> str:
+        """Analyze a claim for duplicates, conflicts, merge/split suggestions
         and review priority."""
-        from ..cognition.quality import analyze_memory
-        report = analyze_memory(ws.store, ws.embedder, memory_id)
+        from twin.cognize.services.quality import analyze_claim
+        report = analyze_claim(ws.store, ws.embedder, claim_id)
         return json.dumps(report.model_dump(mode="json"), ensure_ascii=False)
 
     @mcp.tool()
-    def memory_neighbors(memory_id: str) -> str:
-        """Find semantically/entity-related neighbor memories for side-by-side review."""
-        from ..cognition.quality import discover_neighbors
-        mem = ws.store.get_memory(memory_id)
+    def claim_neighbors(claim_id: str) -> str:
+        """Find semantically/entity-related neighbor claims for side-by-side review."""
+        from twin.cognize.services.quality import discover_neighbors
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             return json.dumps({"error": "not found"})
         neighbors = discover_neighbors(ws.store, ws.embedder, mem)
         return json.dumps([
-            {"memory": _memory_to_dict(n), "similarity": sim, "reason": reason}
+            {"claim": _claim_to_dict(n), "similarity": sim, "reason": reason}
             for n, sim, reason in neighbors
         ], ensure_ascii=False)
 
     @mcp.tool()
-    def memory_provenance(memory_id: str) -> str:
+    def claim_provenance(claim_id: str) -> str:
         """Navigable lineage: memory → evidence → percept → artifact."""
-        from ..memory.provenance import memory_provenance as prov
-        return json.dumps(prov(ws.store, memory_id), ensure_ascii=False, default=str)
+        from twin.store.provenance import claim_provenance as prov
+        return json.dumps(prov(ws.store, claim_id), ensure_ascii=False, default=str)
 
     @mcp.tool()
     def review_queue(limit: int = 20, conflicts_only: bool = False) -> str:
         """Priority-ordered review queue (risk × impact, not FIFO)."""
-        from ..cognition.quality import review_queue as rq
+        from twin.cognize.services.quality import review_queue as rq
         queue = rq(ws.store, conflicts_only=conflicts_only, limit=limit)
-        return json.dumps([_memory_to_dict(m) for m in queue], ensure_ascii=False)
+        return json.dumps([_claim_to_dict(m) for m in queue], ensure_ascii=False)
 
     @mcp.tool()
     def review_batch_get(batch_id: str) -> str:
         """Get a review batch and its progress."""
-        from ..memory.batches import get_batch
+        from twin.store.batches import get_batch
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             return json.dumps({"error": "not found"})
         return json.dumps(batch.model_dump(), ensure_ascii=False)
 
     @mcp.tool()
-    def review_suggest_action(memory_id: str) -> str:
+    def review_suggest_action(claim_id: str) -> str:
         """Suggest a curation action without applying it (safe for external clients)."""
-        from ..cognition.quality import analyze_memory
-        report = analyze_memory(ws.store, ws.embedder, memory_id, persist=False)
+        from twin.cognize.services.quality import analyze_claim
+        report = analyze_claim(ws.store, ws.embedder, claim_id, persist=False)
         return json.dumps({
-            "memory_id": memory_id,
+            "claim_id": claim_id,
             "suggested_action": report.suggested_action.value,
             "requires_human_review": report.requires_human_review,
             "quality_flags": report.quality_flags,
@@ -729,48 +719,48 @@ def create_server(home: Optional[str] = None):
         }, ensure_ascii=False)
 
     @mcp.tool()
-    def memory_confirm(memory_id: str, confirm: bool = False) -> str:
-        """Confirm a candidate memory. Requires confirm=true."""
+    def claim_confirm(claim_id: str, confirm: bool = False) -> str:
+        """Confirm a candidate claim. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..memory.models import MemoryStatus
-        ws.store.set_status(memory_id, MemoryStatus.confirmed)
-        return json.dumps(_memory_to_dict(ws.store.get_memory(memory_id)), ensure_ascii=False)
+        from twin.store.models import ClaimStatus
+        ws.store.set_status(claim_id, ClaimStatus.confirmed)
+        return json.dumps(_claim_to_dict(ws.store.get_claim(claim_id)), ensure_ascii=False)
 
     @mcp.tool()
-    def memory_reject(memory_id: str, confirm: bool = False) -> str:
-        """Reject a candidate memory. Requires confirm=true."""
+    def claim_reject(claim_id: str, confirm: bool = False) -> str:
+        """Reject a candidate claim. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..memory.models import MemoryStatus
-        ws.store.set_status(memory_id, MemoryStatus.rejected)
-        return json.dumps(_memory_to_dict(ws.store.get_memory(memory_id)), ensure_ascii=False)
+        from twin.store.models import ClaimStatus
+        ws.store.set_status(claim_id, ClaimStatus.rejected)
+        return json.dumps(_claim_to_dict(ws.store.get_claim(claim_id)), ensure_ascii=False)
 
     @mcp.tool()
-    def memory_archive(memory_id: str, confirm: bool = False) -> str:
-        """Archive a memory (removed from default retrieval). Requires confirm=true."""
+    def claim_archive(claim_id: str, confirm: bool = False) -> str:
+        """Archive a claim (removed from default retrieval). Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..memory.lifecycle import archive_memory
-        result = archive_memory(ws.store, memory_id)
+        from twin.store.lifecycle import archive_claim
+        result = archive_claim(ws.store, claim_id)
         return json.dumps({"action": result.action, "operation_id": result.operation_id})
 
     @mcp.tool()
-    def memory_merge(memory_ids: list[str], confirm: bool = False,
+    def claim_merge(claim_ids: list[str], confirm: bool = False,
                      title: Optional[str] = None, summary: Optional[str] = None,
                      confirm_cross_scope_merge: bool = False,
                      output_type: Optional[str] = None,
                      output_domain: Optional[str] = None,
                      output_persona: Optional[str] = None,
                      output_project_id: Optional[str] = None) -> str:
-        """Merge memories into one. Requires confirm=true.
+        """Merge claims into one. Requires confirm=true.
 
         Mixed type/domain/persona/project requires the matching output_* field;
         confirm_cross_scope_merge only authorizes the attempt.
         """
         if not confirm:
-            return json.dumps({"error": "pass confirm=true to apply", "preview": memory_ids})
-        from ..memory.lifecycle import merge_memories
+            return json.dumps({"error": "pass confirm=true to apply", "preview": claim_ids})
+        from twin.store.lifecycle import merge_claims
         kwargs: dict = {
             "title": title, "summary": summary, "embedder": ws.embedder,
             "confirm_cross_scope_merge": confirm_cross_scope_merge,
@@ -780,33 +770,33 @@ def create_server(home: Optional[str] = None):
         if output_project_id is not None:
             kwargs["output_project_id"] = output_project_id
         try:
-            result = merge_memories(ws.store, memory_ids, **kwargs)
+            result = merge_claims(ws.store, claim_ids, **kwargs)
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
         return json.dumps({"merged_id": result.extras.get("merged_id"),
                            "operation_id": result.operation_id})
 
     @mcp.tool()
-    def memory_split(memory_id: str, parts: list[str], confirm: bool = False) -> str:
-        """Split a compound memory. parts are titles/summaries. Requires confirm=true."""
+    def claim_split(claim_id: str, parts: list[str], confirm: bool = False) -> str:
+        """Split a compound claim. parts are titles/summaries. Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply", "parts": parts})
-        from ..memory.lifecycle import split_memory
-        result = split_memory(
-            ws.store, memory_id,
+        from twin.store.lifecycle import split_claim
+        result = split_claim(
+            ws.store, claim_id,
             [{"title": p, "summary": p} for p in parts],
             embedder=ws.embedder,
         )
         return json.dumps({"children": result.extras.get("children"),
                            "operation_id": result.operation_id})
 
-    # -- judgment (read tools + gated mutations) ----------------------
+    # -- Stance -------------------------------------------------------------
 
     @mcp.tool()
-    def judgment_applicable(domain: str = "technical", task_profile: str = "general",
+    def stance_applicable(domain: str = "technical", task_profile: str = "general",
                             project: Optional[str] = None, query: str = "") -> str:
-        """Return only judgment items applicable to this domain/task — not the full profile."""
-        from ..judgment.application import applicable_pack
+        """Return only Stance items applicable to this domain/task — not the full profile."""
+        from twin.cognize.stance_engine.application import applicable_pack
         pack = applicable_pack(
             ws.store, domain=domain, task_profile=task_profile,
             project_id=_resolve_project_id(project), query=query,
@@ -814,41 +804,33 @@ def create_server(home: Optional[str] = None):
         return json.dumps(pack, ensure_ascii=False)
 
     @mcp.tool()
-    def judgment_simulate(query: str, domain: str = "technical",
+    def stance_simulate(query: str, domain: str = "technical",
                           task_profile: str = "architecture",
                           project: Optional[str] = None) -> str:
-        """Explain how active judgment would influence a recommendation (no side effects)."""
-        from ..judgment.simulate import simulate
+        """Explain how active Stance would influence a recommendation (no side effects)."""
+        from twin.cognize.stance_engine.simulate import simulate
         return json.dumps(simulate(
             ws.store, query, domain=domain, task_profile=task_profile,
             project_id=_resolve_project_id(project),
         ), ensure_ascii=False, default=str)
 
     @mcp.tool()
-    def judgment_proposals(status: str = "pending") -> str:
-        """List judgment proposals awaiting human review."""
-        return json.dumps(
-            [p.model_dump(mode="json") for p in ws.store.list_judgment_proposals(status=status)],
-            ensure_ascii=False,
-        )
-
-    @mcp.tool()
-    def judgment_proposal_preview(proposal_id: str) -> str:
-        """Preview a proposal and obtain a state-aware preview_token for approval."""
-        from ..judgment.proposals import preview_proposal
+    def stance_proposal_preview(proposal_id: str) -> str:
+        """Preview a Stance proposal and obtain a state-aware preview_token for approval."""
+        from twin.cognize.stance_engine.proposals import preview_proposal
         try:
             return json.dumps(preview_proposal(ws.store, proposal_id), ensure_ascii=False)
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def judgment_proposal_approve(proposal_id: str, preview_token: str,
+    def stance_proposal_approve(proposal_id: str, preview_token: str,
                                   confirm: bool = False,
                                   confirm_constitutional: bool = False) -> str:
-        """Approve a judgment proposal (creates a new version). Requires confirm=true."""
+        """Approve a Stance proposal (creates a new version). Requires confirm=true."""
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..judgment.proposals import approve_proposal
+        from twin.cognize.stance_engine.proposals import approve_proposal
         try:
             return json.dumps(approve_proposal(
                 ws.store, proposal_id, preview_token=preview_token,
@@ -858,11 +840,11 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def judgment_proposal_reject(proposal_id: str, confirm: bool = False,
+    def stance_proposal_reject(proposal_id: str, confirm: bool = False,
                                  reason: str = "") -> str:
         if not confirm:
             return json.dumps({"error": "pass confirm=true to apply"})
-        from ..judgment.proposals import reject_proposal
+        from twin.cognize.stance_engine.proposals import reject_proposal
         try:
             p = reject_proposal(ws.store, proposal_id, reason=reason)
             return json.dumps(p.model_dump(mode="json"), ensure_ascii=False)
@@ -870,22 +852,34 @@ def create_server(home: Optional[str] = None):
             return json.dumps({"error": str(exc)})
 
     @mcp.tool()
-    def judgment_conflicts(status: str = "open") -> str:
+    def stance_conflicts(status: str = "open") -> str:
         return json.dumps(
             [c.model_dump(mode="json") for c in ws.store.list_judgment_conflicts(status=status)],
             ensure_ascii=False,
         )
 
     @mcp.tool()
-    def judgment_version() -> str:
+    def stance_version() -> str:
         v = ws.store.get_active_judgment_version()
         return json.dumps(v.model_dump(mode="json") if v else None, ensure_ascii=False)
 
     @mcp.tool()
+    def stance_profile() -> str:
+        """Active Stance items (DB) plus YAML bootstrap. Prefer stance_applicable
+        for scoped injection into a task."""
+        payload = dict(load_profile(ws.cfg.judgment_path))
+        if hasattr(ws.store, "list_judgment_items"):
+            payload["items"] = [
+                i.model_dump(mode="json")
+                for i in ws.store.list_judgment_items(status="active")
+            ]
+        return json.dumps(payload, ensure_ascii=False)
+
+    @mcp.tool()
     def privacy_evaluate(
-        memory_ids: Optional[list[str]] = None,
+        claim_ids: Optional[list[str]] = None,
         persona: str = "individual",
-        purpose: str = "memory_retrieval",
+        purpose: str = "context_retrieval",
         audience: str = "self",
     ) -> str:
         """Evaluate privacy policies for memories under the MCP process identity
@@ -897,12 +891,12 @@ def create_server(home: Optional[str] = None):
             ws.store, persona=persona, purpose=purpose, audience=audience,
         )
         memories = []
-        for mid in memory_ids or []:
-            m = ws.store.get_memory(mid)
+        for mid in claim_ids or []:
+            m = ws.store.get_claim(mid)
             if m:
                 memories.append(m)
         if not memories:
-            memories = ws.store.list_memories(status="confirmed", limit=20)
+            memories = ws.store.list_claims(status="confirmed", limit=20)
         result = evaluate_access(ws.store, access, memories, persist=True)
         d = result["decision"]
         return json.dumps({
@@ -949,8 +943,8 @@ def create_server(home: Optional[str] = None):
     def connector_list() -> str:
         """List connector instances (type, status, ownership) this client is
         allowed to see. Requires capability connector:read. No secrets."""
-        from ..connectors import CAP_READ, authorize_connector, connector_health
-        from ..connectors import visible_connectors
+        from twin.sense.connectors import CAP_READ, authorize_connector, connector_health
+        from twin.sense.connectors import visible_connectors
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ)
         if not auth.allowed:
@@ -972,7 +966,7 @@ def create_server(home: Optional[str] = None):
     def connector_status(connector_id: str) -> str:
         """Health, last batch, checkpoints and dead-letter depth for a
         connector. Requires capability connector:read on that connector."""
-        from ..connectors import CAP_READ, authorize_connector, connector_health
+        from twin.sense.connectors import CAP_READ, authorize_connector, connector_health
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ,
                                    connector_id=connector_id)
@@ -984,8 +978,8 @@ def create_server(home: Optional[str] = None):
     def connector_health_all() -> str:
         """Aggregate health across the connectors this client may read.
         Requires capability connector:read."""
-        from ..connectors import CAP_READ, authorize_connector, connector_health
-        from ..connectors import visible_connectors
+        from twin.sense.connectors import CAP_READ, authorize_connector, connector_health
+        from twin.sense.connectors import visible_connectors
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ)
         if not auth.allowed:
@@ -1000,7 +994,7 @@ def create_server(home: Optional[str] = None):
     def connector_dead_letters(connector_id: str) -> str:
         """Open dead letters for a connector (sanitized errors only).
         Requires capability connector:read (or connector:read:errors)."""
-        from ..connectors import CAP_READ_ERRORS, authorize_connector
+        from twin.sense.connectors import CAP_READ_ERRORS, authorize_connector
         access = _connector_access()
         auth = authorize_connector(ws.store, access, CAP_READ_ERRORS,
                                    connector_id=connector_id)
@@ -1020,7 +1014,7 @@ def create_server(home: Optional[str] = None):
         vault, ingestion policy and provider-side volume estimates. Read
         only: previewing never starts ingestion. Requires capability
         connector:backfill on that connector."""
-        from ..connectors import (
+        from twin.sense.connectors import (
             CAP_BACKFILL,
             authorize_connector,
             backfill_preview,
@@ -1055,7 +1049,7 @@ def create_server(home: Optional[str] = None):
         identity). Then call again with confirm=true and that token; if the
         connector changed in between, the token no longer matches and a fresh
         preview is required. Never returns raw payloads."""
-        from ..connectors import (
+        from twin.sense.connectors import (
             CAP_SYNC,
             authorize_connector,
             build_credential_store,

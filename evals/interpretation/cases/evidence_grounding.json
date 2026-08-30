@@ -9,7 +9,7 @@
   },
   "interpreter_output": [
     {
-      "memory_type": "constraint",
+      "claim_type": "constraint",
       "cognitive_act": "statement",
       "title": "Indentation is tabs across all repositories",
       "summary": "The team standardized on tabs for indentation in every repository.",
@@ -18,7 +18,7 @@
       "evidence_span": "The team standardized on tabs for indentation across all repositories."
     },
     {
-      "memory_type": "fact",
+      "claim_type": "fact",
       "cognitive_act": "statement",
       "title": "Empty-span guess",
       "summary": "They probably deploy every Friday.",
@@ -27,7 +27,7 @@
       "evidence_span": ""
     },
     {
-      "memory_type": "fact",
+      "claim_type": "fact",
       "cognitive_act": "statement",
       "title": "Invented-span guess",
       "summary": "The team runs on Kubernetes.",
@@ -39,7 +39,7 @@
   "expected": {
     "status": "interpreted",
     "catalogued": 1,
-    "memories": [
+    "claims": [
       {"title_contains": "tabs", "evidence_grounded": true}
     ],
     "must_not_catalogue": ["deploy every Friday", "Kubernetes", "Invented", "Empty-span"]

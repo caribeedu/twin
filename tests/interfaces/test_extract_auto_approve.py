@@ -21,6 +21,6 @@ def test_extract_auto_approve_confirms_candidates(tmp_path, monkeypatch):
     approved = [mid for rep in body for mid in rep.get("auto_approved", [])]
     assert inserted
     assert set(approved) == set(inserted)
-    assert client.get("/api/memories", params={"status": "candidate"}).json() == []
-    confirmed = client.get("/api/memories", params={"status": "confirmed"}).json()
+    assert client.get("/api/claims", params={"status": "candidate"}).json() == []
+    confirmed = client.get("/api/claims", params={"status": "confirmed"}).json()
     assert {m["id"] for m in confirmed} >= set(inserted)

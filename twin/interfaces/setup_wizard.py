@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import os
 
-from ..cognition.llm import PROVIDER_PRESETS, list_wizard_providers, provider_kind
+from ..llm import PROVIDER_PRESETS, list_wizard_providers, provider_kind
 from ..config import Config
-from ..memory.embeddings import (
+from twin.store.embeddings import (
     ollama_reachable,
     openai_compat_reachable,
     sanitize_base_url,

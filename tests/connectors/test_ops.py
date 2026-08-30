@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     backfill_preview,
     build_credential_store,
@@ -21,20 +21,20 @@ from twin.connectors import (
     register_source_account,
     sync_connector,
 )
-from twin.connectors.counters import (
+from twin.sense.connectors.counters import (
     ensure_counters,
     reconcile_connector_counters,
     record_batch_counters,
     seed_counters_from_batches,
 )
-from twin.connectors.models import (
+from twin.sense.connectors.models import (
     BatchStatus,
     ConnectorBatch,
     ConnectorSyncState,
     HealthStatus,
 )
-from twin.connectors.ops import doctor_connector_checks
-from twin.memory.metrics import compute_metrics
+from twin.sense.connectors.ops import doctor_connector_checks
+from twin.store.metrics import compute_metrics
 
 PRINCIPAL = "principal_ops"
 
@@ -345,7 +345,7 @@ def test_claim_rolls_back_when_exception_before_bump(store, creds):
         raw_count=10, normalized_count=10, percept_count=10,
     )
     store.insert_connector_batch(batch)
-    from twin.connectors.counters import batch_contribution
+    from twin.sense.connectors.counters import batch_contribution
     contrib = batch_contribution(batch)
 
     with pytest.raises(_SimulatedCrash):
@@ -368,7 +368,7 @@ def test_claim_and_bump_roll_back_when_apply_fails(store, creds):
         raw_count=8, normalized_count=8, percept_count=8,
     )
     store.insert_connector_batch(batch)
-    from twin.connectors.counters import batch_contribution
+    from twin.sense.connectors.counters import batch_contribution
     contrib = batch_contribution(batch)
 
     def _boom(state: ConnectorSyncState) -> None:
@@ -429,7 +429,7 @@ def test_reconcile_repairs_orphaned_ledger_claim(store, creds):
         raw_count=12, normalized_count=12, percept_count=12,
     )
     store.insert_connector_batch(batch)
-    from twin.connectors.counters import batch_contribution
+    from twin.sense.connectors.counters import batch_contribution
 
     # Commit a claim alone (simulates the old early-commit bug residue)
     with store.transaction():
@@ -547,7 +547,7 @@ def test_due_and_sync_due(store, creds, tmp_path):
     _, inst = _make(store, creds)
     listed = list_due_connectors(store, tmp_path)
     assert listed["count"] >= 1
-    from twin.connectors import run_sync_due
+    from twin.sense.connectors import run_sync_due
     rows = run_sync_due(store, creds, tmp_path)
     assert any(r["connector_id"] == inst.id and r["ok"] for r in rows)
 
@@ -563,7 +563,7 @@ def test_sync_due_isolates_failures(store, creds, tmp_path):
         store, creds, account_id=acc2.id, secret="tok-b",
         configuration={"fail_mode": "rate_limit"},
     )
-    from twin.connectors import run_sync_due
+    from twin.sense.connectors import run_sync_due
     rows = run_sync_due(store, creds, tmp_path)
     by_id = {r["connector_id"]: r for r in rows}
     assert a.id in by_id and b.id in by_id
@@ -640,14 +640,14 @@ def test_contract_matrix_is_evidence_based():
 
 
 def test_contract_missing_method_fails(monkeypatch):
-    from twin.connectors import registry
+    from twin.sense.connectors import registry
 
     class Broken:
         connector_type = "broken_test_adapter"
 
         @staticmethod
         def adapter_manifest():
-            from twin.connectors.protocol import AdapterManifest
+            from twin.sense.connectors.protocol import AdapterManifest
             return AdapterManifest(
                 connector_type="broken_test_adapter",
                 auth_mode="none",

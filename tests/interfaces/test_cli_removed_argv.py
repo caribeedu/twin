@@ -14,7 +14,7 @@ from twin.interfaces import cli
         ("meditate",),
         ("correlate",),
         ("judgment", "list"),
-        ("memory", "unsupported"),
+        ("claim", "unsupported"),
     ],
 )
 def test_removed_argv_rejected(tmp_path, argv):

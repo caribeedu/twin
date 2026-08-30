@@ -16,26 +16,26 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from ..cognition import extract_pending
-from ..cognition.context_pack import build_context_pack
-from ..cognition.observer import observe
-from ..cognition.sessions import (
+from twin.cognize.services import extract_pending
+from twin.inject.context_pack import build_context_pack
+from twin.cognize.services.observer import observe
+from twin.cognize.services.sessions import (
     complete_session,
     ensure_project,
     observe_session,
     record_feedback,
     start_session,
 )
-from ..cognition.workspace import workspace_tick
+from twin.cognize.services.workspace import workspace_tick
 from ..config import ALL_DOMAINS, UNCLASSIFIED_DOMAIN
-from ..judgment.profile import load_profile
-from ..memory.models import (
+from twin.cognize.stance_engine.profile import load_profile
+from twin.store.models import (
     FeedbackVerdict,
     FindingStatus,
-    MemoryStatus,
+    ClaimStatus,
     TaskProfile,
 )
-from ..memory.search import search
+from twin.store.search import search
 from ..workspace import Workspace
 from .web import STATIC_DIR, read_index
 
@@ -82,6 +82,15 @@ class ConsolidationRequest(BaseModel):
     retry: bool = False
 
 
+class CognizeRunRequest(BaseModel):
+    vault_id: str = "default"
+    limit: int = Field(default=50, ge=1, le=200)
+    dry_run: bool = False
+    until: Optional[str] = None
+    percept_ids: list[str] = Field(default_factory=list)
+    priority: int = Field(default=100, ge=0, le=10_000)
+
+
 class RuntimeEnqueueRequest(BaseModel):
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -101,7 +110,7 @@ class PackRequest(BaseModel):
     project: Optional[str] = None  # project name, alias or id
     client: Optional[str] = None  # registered tool client; omit → restricted
     persona: str = "individual"
-    purpose: str = "memory_retrieval"
+    purpose: str = "context_retrieval"
     audience: str = "self"
     api_token: Optional[str] = None
     mode: Literal["compact", "explainable", "references_only"] = "compact"
@@ -140,9 +149,9 @@ class SessionCompleteRequest(BaseModel):
 
 class SessionFeedbackRequest(BaseModel):
     verdict: FeedbackVerdict
-    memory_id: Optional[str] = None
+    claim_id: Optional[str] = None
     note: str = Field(default="", max_length=10_000)
-    scope: Optional[Literal["session", "pack", "memory"]] = None
+    scope: Optional[Literal["session", "pack", "claim"]] = None
 
 
 class ProjectRequest(BaseModel):
@@ -182,7 +191,7 @@ class ConnectorSyncRequest(BaseModel):
 
 
 class MergeRequest(BaseModel):
-    memory_ids: list[str] = Field(min_length=2)
+    claim_ids: list[str] = Field(min_length=2)
     title: Optional[str] = None
     summary: Optional[str] = None
     confirm_cross_scope_merge: bool = False
@@ -204,7 +213,7 @@ class ResolveRequest(BaseModel):
     """Resolve a review finding / neighbor relation for one memory."""
 
     action: str  # merge|contradict|supersede|supersede_by|dismiss|archive|split|…
-    related_memory_id: Optional[str] = None
+    related_claim_id: Optional[str] = None
     finding_id: Optional[str] = None
     title: Optional[str] = None
     summary: Optional[str] = None
@@ -214,14 +223,14 @@ class ResolveRequest(BaseModel):
     sensitivity: Optional[str] = None
 
 
-def _mem_dict(mem, store=None) -> dict[str, Any]:
+def _claim_dict(mem, store=None) -> dict[str, Any]:
     data = mem.model_dump()
     data["type"] = mem.type.value
     data["sensitivity"] = mem.sensitivity.value
     data["status"] = mem.status.value
     try:
-        from ..cognition.quality import memory_altitude
-        data["altitude"] = (mem.payload or {}).get("altitude") or memory_altitude(mem)
+        from twin.cognize.services.quality import claim_altitude
+        data["altitude"] = (mem.payload or {}).get("altitude") or claim_altitude(mem)
     except Exception:
         data["altitude"] = (mem.payload or {}).get("altitude") or "ground"
     data["condensed"] = bool(
@@ -230,8 +239,8 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
     )
     if store is not None:
         try:
-            from ..memory.provenance import memory_source_summary
-            src = memory_source_summary(store, mem.id)
+            from twin.store.provenance import claim_source_summary
+            src = claim_source_summary(store, mem.id)
             data["sources"] = src.get("sensors") or []
             data["source_label"] = src.get("label") or ""
             data["source_refs"] = src.get("refs") or []
@@ -244,7 +253,7 @@ def _mem_dict(mem, store=None) -> dict[str, Any]:
         for mid in (mem.payload or {}).get("merged_from") or []:
             if not isinstance(mid, str):
                 continue
-            other = store.get_memory(mid)
+            other = store.get_claim(mid)
             if other is None:
                 based_in.append({
                     "id": mid, "title": mid, "status": "unknown",
@@ -305,16 +314,16 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/extract")
     def api_extract(auto_approve: bool = False):
-        from ..memory.models import MemoryStatus
+        from twin.store.models import ClaimStatus
 
         reports = extract_pending(ws.store, ws.cfg, ws.embedder)
         auto_approved: list[str] = []
         if auto_approve:
             for r in reports:
                 for mid in r.inserted:
-                    mem = ws.store.get_memory(mid)
+                    mem = ws.store.get_claim(mid)
                     if mem is not None and mem.status.value == "candidate":
-                        ws.store.set_status(mid, MemoryStatus.confirmed)
+                        ws.store.set_status(mid, ClaimStatus.confirmed)
                         auto_approved.append(mid)
         return [
             {
@@ -342,7 +351,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "percept not found")
         return p.model_dump(mode="json")
 
-    @app.get("/api/memories")
+    @app.get("/api/claims")
     def api_memories(
         status: Optional[str] = None,
         domain: Optional[str] = None,
@@ -350,56 +359,56 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         needs_review: Optional[bool] = None,
         limit: int = 500,
     ):
-        memories = ws.store.list_memories(
+        memories = ws.store.list_claims(
             status=status, domain=domain, type_=type,
             needs_review=needs_review, limit=max(1, min(limit, 2000)),
         )
-        return [_mem_dict(m, ws.store) for m in memories]
+        return [_claim_dict(m, ws.store) for m in memories]
 
-    @app.get("/api/memories/{memory_id}")
-    def api_memory(memory_id: str):
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/claims/{claim_id}")
+    def api_memory(claim_id: str):
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
-        evidence = [e.model_dump() for e in ws.store.get_evidence(memory_id)]
-        return {**_mem_dict(mem, ws.store), "evidence": evidence}
+        evidence = [e.model_dump() for e in ws.store.get_evidence(claim_id)]
+        return {**_claim_dict(mem, ws.store), "evidence": evidence}
 
-    @app.post("/api/memories/{memory_id}/review")
-    def api_review(memory_id: str, action: str, domain: Optional[str] = None,
+    @app.post("/api/claims/{claim_id}/review")
+    def api_review(claim_id: str, action: str, domain: Optional[str] = None,
                    sensitivity: Optional[str] = None):
         from ..clock import now_iso
-        from ..memory.lifecycle import archive_memory
-        mem = ws.store.get_memory(memory_id)
+        from twin.store.lifecycle import archive_claim
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if domain:
-            ws.store.update_memory(memory_id, domain=domain)
+            ws.store.update_claim(claim_id, domain=domain)
         if sensitivity:
-            ws.store.update_memory(memory_id, sensitivity=sensitivity)
+            ws.store.update_claim(claim_id, sensitivity=sensitivity)
         if action == "approve":
-            ws.store.set_status(memory_id, MemoryStatus.confirmed)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso(), needs_review=False)
+            ws.store.set_status(claim_id, ClaimStatus.confirmed)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso(), needs_review=False)
         elif action == "reject":
-            ws.store.set_status(memory_id, MemoryStatus.rejected)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso(), needs_review=False)
+            ws.store.set_status(claim_id, ClaimStatus.rejected)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso(), needs_review=False)
         elif action == "defer":
-            ws.store.update_memory(memory_id, needs_review=True, review_reason="deferred")
+            ws.store.update_claim(claim_id, needs_review=True, review_reason="deferred")
         elif action == "archive":
             try:
-                archive_memory(ws.store, memory_id)
+                archive_claim(ws.store, claim_id)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         elif action != "update":
             raise HTTPException(
                 400, "action must be approve | reject | update | defer | archive",
             )
-        return _mem_dict(ws.store.get_memory(memory_id), ws.store)
+        return _claim_dict(ws.store.get_claim(claim_id), ws.store)
 
     # -- memory formation ----------------------------------------------
 
     @app.get("/api/memory/candidates")
     def api_memory_candidates(state: Optional[str] = None, limit: int = 100):
-        from ..memory.formation import list_candidates
+        from twin.store.formation import list_candidates
         return [
             c.model_dump(mode="json")
             for c in list_candidates(ws.store, state=state, limit=limit)
@@ -416,60 +425,60 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         summary: Optional[str] = None
         domain: Optional[str] = None
 
-    @app.post("/api/memory/candidates/{memory_id}/confirm")
+    @app.post("/api/memory/candidates/{claim_id}/confirm")
     def api_formation_confirm(
-        memory_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
+        claim_id: str, req: FormationConfirmRequest = FormationConfirmRequest(),
     ):
-        from ..memory.formation import confirm_candidate
+        from twin.store.formation import confirm_candidate
         try:
             return confirm_candidate(
-                ws.store, memory_id, note=req.note,
+                ws.store, claim_id, note=req.note,
             ).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/memory/candidates/{memory_id}/reject")
-    def api_formation_reject(memory_id: str, req: FormationRejectRequest):
-        from ..memory.formation import reject_candidate
+    @app.post("/api/memory/candidates/{claim_id}/reject")
+    def api_formation_reject(claim_id: str, req: FormationRejectRequest):
+        from twin.store.formation import reject_candidate
         try:
             return reject_candidate(
-                ws.store, memory_id, reason=req.reason,
+                ws.store, claim_id, reason=req.reason,
             ).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/memory/candidates/{memory_id}/edit")
-    def api_formation_edit(memory_id: str, req: FormationEditRequest):
-        from ..memory.formation import edit_candidate
+    @app.post("/api/memory/candidates/{claim_id}/edit")
+    def api_formation_edit(claim_id: str, req: FormationEditRequest):
+        from twin.store.formation import edit_candidate
         try:
             return edit_candidate(
-                ws.store, memory_id,
+                ws.store, claim_id,
                 title=req.title, summary=req.summary, domain=req.domain,
             ).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/memory/candidates/{memory_id}/restore")
-    def api_formation_restore(memory_id: str):
-        from ..memory.formation import restore_candidate
+    @app.post("/api/memory/candidates/{claim_id}/restore")
+    def api_formation_restore(claim_id: str):
+        from twin.store.formation import restore_candidate
         try:
-            return restore_candidate(ws.store, memory_id).model_dump(mode="json")
+            return restore_candidate(ws.store, claim_id).model_dump(mode="json")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get("/api/memory/{memory_id}/explain")
-    def api_memory_explain(memory_id: str):
-        from ..memory.formation import explain_memory
+    @app.get("/api/memory/{claim_id}/explain")
+    def api_memory_explain(claim_id: str):
+        from twin.store.formation import explain_memory
         try:
-            return explain_memory(ws.store, memory_id)
+            return explain_memory(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
-    @app.get("/api/memory/{memory_id}/history")
-    def api_memory_history(memory_id: str):
-        from ..memory.formation import explain_memory
+    @app.get("/api/memory/{claim_id}/history")
+    def api_memory_history(claim_id: str):
+        from twin.store.formation import explain_memory
         try:
-            return {"memory_id": memory_id, "history": explain_memory(ws.store, memory_id)["history"]}
+            return {"claim_id": claim_id, "history": explain_memory(ws.store, claim_id)["history"]}
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -479,8 +488,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         result = search(ws.store, ws.embedder, q, target_domain=domain,
                         firewall=ws.firewall, type_=type, limit=limit)
         return {
-            "hits": [{**_mem_dict(h.memory, ws.store), "score": h.score, "why": h.why} for h in result.hits],
-            "blocked": [{"memory_id": b.memory_id, "reason": b.rule} for b in result.blocked],
+            "hits": [{**_claim_dict(h.claim, ws.store), "score": h.score, "why": h.why} for h in result.hits],
+            "blocked": [{"claim_id": b.claim_id, "reason": b.rule} for b in result.blocked],
         }
 
     def _resolve_project_id(project: Optional[str]) -> Optional[str]:
@@ -789,7 +798,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_stance_proposal_preview(
         proposal_id: str, req: StancePreviewBody = StancePreviewBody(),
     ):
-        from ..judgment.proposals import preview_proposal
+        from twin.cognize.stance_engine.proposals import preview_proposal
 
         try:
             return preview_proposal(ws.store, proposal_id, edits=req.edits)
@@ -798,7 +807,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/stances/proposals/{proposal_id}/approve")
     def api_stance_proposal_approve(proposal_id: str, req: StanceApproveBody):
-        from ..judgment.proposals import approve_proposal
+        from twin.cognize.stance_engine.proposals import approve_proposal
 
         if not (req.preview_token or "").strip():
             raise HTTPException(400, "preview_token required")
@@ -825,15 +834,48 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/center/summary")
     def api_center_summary(vault: str = "default"):
-        open_refs = 0
-        competing = 0
-        narratives = 0
-        if hasattr(ws.store, "list_open_reflections"):
-            open_refs = len(ws.store.list_open_reflections(vault))
-        if hasattr(ws.store, "list_competing_interpretations"):
-            competing = len(ws.store.list_competing_interpretations(vault))
-        if hasattr(ws.store, "list_narratives"):
-            narratives = len(ws.store.list_narratives(vault))
+        def _count(attr: str, *args, **kwargs) -> int:
+            if not hasattr(ws.store, attr):
+                return 0
+            try:
+                rows = getattr(ws.store, attr)(*args, **kwargs)
+                return len(list(rows) if rows is not None else [])
+            except TypeError:
+                try:
+                    rows = getattr(ws.store, attr)(*args)
+                    return len(list(rows) if rows is not None else [])
+                except Exception:
+                    return 0
+            except Exception:
+                return 0
+
+        open_refs = _count("list_open_reflections", vault)
+        competing = _count("list_competing_interpretations", vault)
+        narratives = _count("list_narratives", vault)
+        reflections = _count("list_reflections", vault)
+        interpretations = _count("list_cognize_interpretations", vault)
+        if interpretations == 0:
+            interpretations = _count("list_interpretations", vault)
+        situations = _count("list_situations", vault)
+        stances = 0
+        try:
+            from twin.cognize.stance import list_stances
+
+            stances = len(list_stances(ws.store) or [])
+        except Exception:
+            stances = _count("list_stances", vault)
+        evidence = _count("list_evidence_anchors", vault)
+        if evidence == 0:
+            evidence = _count("list_evidence", vault)
+        relations = _count("list_relations", vault)
+        traces = 0
+        if hasattr(ws.store, "list_traces"):
+            try:
+                traces = len(ws.store.list_traces(vault, limit=5000) or [])
+            except Exception:
+                traces = 0
+        percepts = _count("list_percepts")
+
         halt = ""
         if hasattr(ws.store, "last_cognize_run"):
             try:
@@ -845,18 +887,311 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         queue = {}
         if hasattr(ws.store, "runtime_queue_depth"):
             queue = ws.store.runtime_queue_depth() or {}
+        jobs_pending = int(
+            queue.get("pending")
+            or queue.get("ready")
+            or queue.get("queued")
+            or 0
+        )
+        jobs_running = int(queue.get("running") or 0)
         connectors = 0
         if hasattr(ws.store, "list_connector_instances"):
             connectors = len(ws.store.list_connector_instances())
+
+        review_items: list[dict[str, Any]] = []
+        if hasattr(ws.store, "list_open_reflections"):
+            for r in (ws.store.list_open_reflections(vault) or [])[:8]:
+                text = (r.text or "").strip()
+                status = r.status.value if hasattr(r.status, "value") else str(r.status or "open")
+                review_items.append({
+                    "kind": "reflection",
+                    "kind_label": "Reflection",
+                    "id": r.id,
+                    "status": status,
+                    "title": (text.split("\n")[0] or text)[:120],
+                    "text": text[:280],
+                    "created_at": getattr(r, "created_at", "") or "",
+                    "meta": {
+                        "situations": len(getattr(r, "situation_ids", None) or []),
+                        "evidence": len(getattr(r, "evidence_ids", None) or []),
+                    },
+                    "href": f"#explore/reflection/{r.id}",
+                })
+        if hasattr(ws.store, "list_competing_interpretations"):
+            for i in (ws.store.list_competing_interpretations(vault) or [])[:8]:
+                text = (getattr(i, "explanation", "") or "").strip()
+                status = i.status.value if hasattr(i.status, "value") else str(i.status or "competing")
+                review_items.append({
+                    "kind": "interpretation",
+                    "kind_label": "Interpretation",
+                    "id": i.id,
+                    "status": status,
+                    "title": (text.split("\n")[0] or text)[:120],
+                    "text": text[:280],
+                    "created_at": getattr(i, "created_at", "") or "",
+                    "meta": {
+                        "situations": len(getattr(i, "situation_ids", None) or []),
+                        "evidence": len(getattr(i, "evidence_ids", None) or []),
+                    },
+                    "href": f"#explore/interpretation/{i.id}",
+                })
+
+        # Domains that actually have substrate content (empty ones stay hidden).
+        from collections import Counter
+
+        from twin.config import UNCLASSIFIED_DOMAIN
+
+        domain_counts: Counter[str] = Counter()
+
+        def _bump_domain(raw: Any) -> None:
+            if raw is None:
+                return
+            value = getattr(raw, "value", raw)
+            value = str(value or "").strip()
+            if not value or value == UNCLASSIFIED_DOMAIN:
+                return
+            domain_counts[value] += 1
+
+        if hasattr(ws.store, "list_narratives"):
+            for nar in ws.store.list_narratives(vault) or []:
+                _bump_domain(getattr(nar, "domain", None))
+        if hasattr(ws.store, "list_situations"):
+            for sit in ws.store.list_situations(vault) or []:
+                _bump_domain(getattr(sit, "domain", None))
+        if hasattr(ws.store, "list_claims"):
+            try:
+                for claim in ws.store.list_claims(limit=2000) or []:
+                    _bump_domain(getattr(claim, "domain", None))
+            except Exception:
+                pass
+        try:
+            from twin.cognize.stance import list_stances
+
+            for st in list_stances(ws.store) or []:
+                _bump_domain(getattr(st, "domain", None))
+        except Exception:
+            pass
+
+        domains = [
+            {
+                "id": name,
+                "count": int(n),
+                "label": name.replace("_", " ").title(),
+            }
+            for name, n in sorted(domain_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+            if n > 0
+        ]
+
         return {
             "vault": vault,
             "open_reflections": open_refs,
             "competing_interpretations": competing,
             "narratives": narratives,
+            "reflections": reflections or open_refs,
+            "interpretations": interpretations or competing,
+            "situations": situations,
+            "stances": stances,
+            "evidence": evidence,
+            "relations": relations,
+            "traces": traces,
+            "percepts": percepts,
             "cognize_halt": halt,
-            "jobs_pending": int(queue.get("pending") or queue.get("ready") or 0),
+            "jobs_pending": jobs_pending,
+            "jobs_running": jobs_running,
             "connectors": connectors,
+            "review_items": review_items[:12],
+            "domains": domains,
+            "counts": {
+                "narratives": narratives,
+                "reflections": reflections or open_refs,
+                "interpretations": interpretations or competing,
+                "situations": situations,
+                "stances": stances,
+                "evidence": evidence,
+                "relations": relations,
+                "traces": traces,
+                "percepts": percepts,
+            },
         }
+
+    def _center_access():
+        from twin.privacy.identity import ensure_local_identity, resolve_access
+        ensure_local_identity(ws.store)
+        return resolve_access(
+            ws.store, surface="cli", purpose="context_retrieval", audience="self",
+        )
+
+    def _center_connector_row(inst) -> dict[str, Any]:
+        from twin.sense.connectors import connector_health
+        acc = ws.store.get_source_account(inst.account_id) if hasattr(ws.store, "get_source_account") else None
+        health = {}
+        try:
+            health = connector_health(ws.store, inst.id) or {}
+        except Exception as exc:
+            health = {"health": "unknown", "detail": str(exc)}
+        return {
+            "connector_id": inst.id,
+            "connector_type": inst.connector_type,
+            "status": inst.status.value if hasattr(inst.status, "value") else str(inst.status),
+            "account_id": inst.account_id,
+            "has_credential": bool(getattr(inst, "credential_ref", None)),
+            "source_owner": (
+                acc.source_owner.value if acc and hasattr(acc.source_owner, "value")
+                else (getattr(acc, "source_owner", None) if acc else None)
+            ),
+            "vault_id": getattr(acc, "vault_id", None) if acc else None,
+            "configuration": getattr(inst, "configuration", None) or {},
+            "health": health,
+        }
+
+    @app.get("/api/center/connectors")
+    def api_center_connectors():
+        from twin.sense.connectors import CAP_READ, authorize_connector, visible_connectors
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_READ)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        return [_center_connector_row(i) for i in visible_connectors(ws.store, access)]
+
+    @app.get("/api/center/connectors/{connector_id}")
+    def api_center_connector(connector_id: str):
+        from twin.sense.connectors import CAP_READ, authorize_connector
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_READ, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        inst = ws.store.get_connector_instance(connector_id)
+        if inst is None:
+            raise HTTPException(404, "connector not found")
+        return _center_connector_row(inst)
+
+    @app.post("/api/center/connectors/{connector_id}/sync")
+    def api_center_connector_sync(connector_id: str, stream: Optional[str] = None):
+        from twin.sense.connectors import (
+            CAP_SYNC, authorize_connector, build_credential_store, sync_connector,
+        )
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_SYNC, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            result = sync_connector(
+                ws.store, build_credential_store(ws.cfg.home), connector_id,
+                streams=[stream] if stream else None,
+                emit_percepts=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {
+            "connector_id": connector_id,
+            "health": result.health.value if hasattr(result.health, "value") else str(result.health),
+            "percepts": result.percepts,
+            "streams": [
+                {
+                    "stream": s.stream, "committed": s.committed, "skipped": s.skipped,
+                    "raw": s.raw, "normalized": s.normalized, "deduplicated": s.deduplicated,
+                    "quarantined": s.quarantined, "percepts": s.percepts, "failed": s.failed,
+                }
+                for s in (result.streams or [])
+            ],
+        }
+
+    @app.post("/api/center/connectors/{connector_id}/validate")
+    def api_center_connector_validate(connector_id: str):
+        from twin.sense.connectors import (
+            CAP_READ, authorize_connector, build_credential_store, validate_connector,
+        )
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_READ, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            health = validate_connector(
+                ws.store, build_credential_store(ws.cfg.home), connector_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {
+            "status": health.status.value if hasattr(health.status, "value") else str(health.status),
+            "detail": getattr(health, "detail", "") or "",
+        }
+
+    @app.post("/api/center/connectors/{connector_id}/pause")
+    def api_center_connector_pause(connector_id: str):
+        from twin.sense.connectors import CAP_OPERATE, authorize_connector, pause_connector
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_OPERATE, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            pause_connector(ws.store, connector_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"status": "paused"}
+
+    @app.post("/api/center/connectors/{connector_id}/resume")
+    def api_center_connector_resume(connector_id: str):
+        from twin.sense.connectors import CAP_OPERATE, authorize_connector, resume_connector
+        access = _center_access()
+        auth = authorize_connector(ws.store, access, CAP_OPERATE, connector_id=connector_id)
+        if not auth.allowed:
+            raise HTTPException(403, auth.reason)
+        try:
+            resume_connector(ws.store, connector_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"status": "active"}
+
+    @app.get("/api/cognize/status")
+    def api_cognize_status(vault: str = "default"):
+        from types import SimpleNamespace
+
+        from twin.interfaces.commands.cognize_cmd import cognize_status
+
+        return cognize_status(ws, SimpleNamespace(vault=vault))
+
+    @app.get("/api/cognize/plan")
+    def api_cognize_plan(vault: str = "default", limit: int = 50):
+        from twin.cognize.orchestrator import plan_cognize
+
+        return plan_cognize(
+            ws.store,
+            ws.cfg,
+            limit=max(1, min(limit, 200)),
+            vault_id=vault,
+        )
+
+    @app.post("/api/cognize/run")
+    def api_cognize_run(req: CognizeRunRequest):
+        from twin.interfaces.runtime.models import JobKind
+        from twin.interfaces.runtime.queue import RuntimeQueue
+
+        if req.until:
+            from twin.cognize.orchestrator import CognizeStage
+
+            try:
+                CognizeStage(req.until)
+            except ValueError as exc:
+                raise HTTPException(400, f"unknown until stage: {req.until}") from exc
+
+        payload: dict[str, Any] = {
+            "vault_id": req.vault_id,
+            "limit": req.limit,
+            "dry_run": req.dry_run,
+        }
+        if req.until:
+            payload["until"] = req.until
+        if req.percept_ids:
+            payload["percept_ids"] = list(req.percept_ids)
+
+        job = RuntimeQueue(ws.store).enqueue(
+            JobKind.cognize_batch,
+            payload=payload,
+            vault_id=req.vault_id,
+            priority=req.priority,
+            idempotency_key="",
+        )
+        return {"ok": True, "job": job.model_dump(mode="json")}
 
     @app.post("/api/narratives/commit")
     def api_narrative_commit(req: NarrativeCommitRequest):
@@ -981,7 +1316,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_session_feedback(session_id: str, req: SessionFeedbackRequest):
         try:
             session = record_feedback(ws.store, session_id, req.verdict.value,
-                                      memory_id=req.memory_id, note=req.note,
+                                      claim_id=req.claim_id, note=req.note,
                                       scope=req.scope)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
@@ -989,7 +1324,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/cleanup")
     def api_sessions_cleanup(max_idle_hours: float = 24.0):
-        from ..cognition.sessions import abandon_stale_sessions
+        from twin.cognize.services.sessions import abandon_stale_sessions
 
         return {"abandoned": abandon_stale_sessions(ws.store, max_idle_hours)}
 
@@ -1022,43 +1357,43 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         ws.store.update_project(project)
         return ws.store.get_project(project.id).model_dump()
 
-    @app.post("/api/memories/{memory_id}/promote")
-    def api_promote(memory_id: str):
-        from ..judgment.profile import promote_memory
+    @app.post("/api/claims/{claim_id}/promote")
+    def api_promote(claim_id: str):
+        from twin.cognize.stance_engine.profile import promote_claim
 
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         try:
-            section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
+            section = promote_claim(ws.cfg.judgment_path, mem, store=ws.store)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
-        ws.store.update_memory(memory_id, payload={**mem.payload, "promoted_to_judgment": True})
-        return {"memory_id": memory_id, "promoted_to": section}
+        ws.store.update_claim(claim_id, payload={**mem.payload, "promoted_to_judgment": True})
+        return {"claim_id": claim_id, "promoted_to": section}
 
-    @app.post("/api/memories/{memory_id}/supersede/{old_id}")
-    def api_supersede(memory_id: str, old_id: str):
-        from ..memory.lifecycle import supersede
+    @app.post("/api/claims/{claim_id}/supersede/{old_id}")
+    def api_supersede(claim_id: str, old_id: str):
+        from twin.store.lifecycle import supersede
 
         try:
-            result = supersede(ws.store, memory_id, old_id)
+            result = supersede(ws.store, claim_id, old_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         return result.__dict__
 
-    @app.post("/api/memories/{memory_id}/contradict/{other_id}")
-    def api_contradict(memory_id: str, other_id: str):
-        from ..memory.lifecycle import contradict
+    @app.post("/api/claims/{claim_id}/contradict/{other_id}")
+    def api_contradict(claim_id: str, other_id: str):
+        from twin.store.lifecycle import contradict
 
         try:
-            result = contradict(ws.store, memory_id, other_id)
+            result = contradict(ws.store, claim_id, other_id)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         return result.__dict__
 
     @app.get("/api/metrics")
     def api_metrics():
-        from ..memory.metrics import compute_metrics
+        from twin.store.metrics import compute_metrics
 
         return compute_metrics(ws.store)
 
@@ -1089,7 +1424,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/consolidate/{kind}")
     def api_consolidate(kind: str, req: ConsolidationRequest):
-        from ..cognition.consolidation_cycle import run_consolidation_cycle
+        from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
         if kind not in ("daily", "weekly"):
             raise HTTPException(400, "kind must be daily or weekly")
         result = run_consolidation_cycle(
@@ -1103,8 +1438,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/runtime/jobs")
     def api_runtime_enqueue(req: RuntimeEnqueueRequest):
-        from ..runtime.models import JobKind
-        from ..runtime.queue import RuntimeQueue
+        from twin.interfaces.runtime.models import JobKind
+        from twin.interfaces.runtime.queue import RuntimeQueue
         try:
             kind = JobKind(req.kind)
         except ValueError as exc:
@@ -1145,7 +1480,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/runtime/jobs/{job_id}/retry")
     def api_runtime_retry(job_id: str):
-        from ..runtime.queue import RuntimeQueue
+        from twin.interfaces.runtime.queue import RuntimeQueue
         job = RuntimeQueue(ws.store).retry(job_id)
         if job is None:
             raise HTTPException(404, "job not found")
@@ -1153,7 +1488,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/runtime/jobs/{job_id}/cancel")
     def api_runtime_cancel(job_id: str):
-        from ..runtime.queue import RuntimeQueue
+        from twin.interfaces.runtime.queue import RuntimeQueue
         ok = RuntimeQueue(ws.store).cancel(job_id)
         if not ok:
             raise HTTPException(409, "job not cancellable")
@@ -1180,30 +1515,60 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.post("/api/backup")
     def api_backup_create(req: BackupCreateRequest):
         from pathlib import Path
-        from ..sovereignty.backup import create_backup
+        from twin.interfaces.sovereignty.backup import create_backup
         db_path = Path(ws.store.path) if hasattr(ws.store, "path") else None
         manifest = create_backup(ws.store, req.dest, copy_sqlite_db=db_path)
         return manifest.model_dump(mode="json")
 
     @app.post("/api/backup/validate")
     def api_backup_validate(req: BackupValidateRequest):
-        from ..sovereignty.backup import validate_backup
+        from twin.interfaces.sovereignty.backup import validate_backup
         return validate_backup(req.bundle)
 
     @app.post("/api/restore/validate")
     def api_restore_validate(req: BackupValidateRequest):
-        from ..sovereignty.backup import validate_backup
+        from twin.interfaces.sovereignty.backup import validate_backup
         return validate_backup(req.bundle)
 
     @app.post("/api/restore")
     def api_restore(req: BackupRestoreRequest):
-        from ..sovereignty.backup import restore_sqlite_backup
+        from twin.interfaces.sovereignty.backup import restore_sqlite_backup
         return restore_sqlite_backup(req.bundle, req.target_db)
 
     @app.get("/api/health/cognition")
     def api_health_cognition():
-        from ..sovereignty.integrity import run_integrity_checks
+        from twin.interfaces.sovereignty.integrity import run_integrity_checks
         return run_integrity_checks(ws.store)
+
+    @app.get("/api/health/doctor")
+    @app.get("/api/doctor")
+    def api_doctor():
+        """Item-by-item ``twin doctor`` snapshot for the Web Center health card."""
+        from twin.interfaces.ops import FAIL, OK, WARN, doctor
+
+        checks = doctor(ws.cfg)
+        rows = [
+            {
+                "name": c.name,
+                "status": c.status,
+                "detail": c.detail or "",
+            }
+            for c in checks
+        ]
+        n_ok = sum(1 for c in checks if c.status == OK)
+        n_warn = sum(1 for c in checks if c.status == WARN)
+        n_fail = sum(1 for c in checks if c.status == FAIL)
+        return {
+            "checks_ok": n_ok,
+            "checks_total": len(checks),
+            "counts": {"ok": n_ok, "warn": n_warn, "fail": n_fail},
+            "checks": rows,
+            "extractor": ws.cfg.extractor,
+            "embedder": ws.cfg.embedder,
+            "llm": getattr(ws.cfg, "normalized_llm_provider", ""),
+            "model": getattr(ws.cfg, "resolved_llm_model", "") or "",
+            "home": str(ws.cfg.home),
+        }
 
     class SessionEventRequest(BaseModel):
         text: str = ""
@@ -1229,7 +1594,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/events")
     def api_session_event(session_id: str, req: SessionEventRequest):
-        from ..cognition.session_lifecycle import append_session_delta
+        from twin.cognize.services.session_lifecycle import append_session_delta
         try:
             ev = append_session_delta(
                 ws.store, session_id,
@@ -1243,7 +1608,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/sessions/{session_id}/attention")
     def api_session_attention(session_id: str, evaluate: bool = False):
-        from ..cognition.attention import evaluate_attention
+        from twin.cognize.services.attention import evaluate_attention
         if evaluate:
             outcomes = evaluate_attention(
                 ws.store, ws.cfg, ws.embedder, session_id,
@@ -1260,7 +1625,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/attention/{emission_id}/feedback")
     def api_attention_feedback(emission_id: str, req: AttentionFeedbackRequest):
-        from ..cognition.attention import feedback_attention
+        from twin.cognize.services.attention import feedback_attention
         em = feedback_attention(ws.store, emission_id, verdict=req.verdict)
         if em is None:
             raise HTTPException(404, "emission not found")
@@ -1268,7 +1633,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/checkpoint")
     def api_session_checkpoint(session_id: str, req: SessionCheckpointRequest):
-        from ..cognition.session_lifecycle import checkpoint_session
+        from twin.cognize.services.session_lifecycle import checkpoint_session
         try:
             cp = checkpoint_session(
                 ws.store, session_id,
@@ -1282,7 +1647,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/close")
     def api_session_close(session_id: str, req: SessionCloseRequest):
-        from ..cognition.session_lifecycle import close_session_structured
+        from twin.cognize.services.session_lifecycle import close_session_structured
         try:
             session, closure = close_session_structured(
                 ws.store, ws.cfg, ws.embedder, session_id,
@@ -1300,7 +1665,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/reopen")
     def api_session_reopen(session_id: str):
-        from ..cognition.session_lifecycle import reopen_session
+        from twin.cognize.services.session_lifecycle import reopen_session
         try:
             session = reopen_session(ws.store, session_id)
         except ValueError as exc:
@@ -1309,7 +1674,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/pause")
     def api_session_pause(session_id: str):
-        from ..cognition.session_lifecycle import pause_session
+        from twin.cognize.services.session_lifecycle import pause_session
         try:
             return pause_session(ws.store, session_id).model_dump(mode="json")
         except ValueError as exc:
@@ -1317,7 +1682,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/resume")
     def api_session_resume(session_id: str):
-        from ..cognition.session_lifecycle import resume_session
+        from twin.cognize.services.session_lifecycle import resume_session
         try:
             return resume_session(ws.store, session_id).model_dump(mode="json")
         except ValueError as exc:
@@ -1325,7 +1690,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/sessions/{session_id}/closure")
     def api_session_closure(session_id: str):
-        from ..cognition.session_lifecycle import get_session_closure
+        from twin.cognize.services.session_lifecycle import get_session_closure
         closure = get_session_closure(ws.store, session_id)
         if closure is None:
             raise HTTPException(404, "closure not found")
@@ -1343,31 +1708,31 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         conflicts: bool = False,
         limit: int = 100,
     ):
-        from ..cognition.quality import review_queue
+        from twin.cognize.services.quality import review_queue
         project_id = _resolve_project_id(project) if project else None
         queue = review_queue(
             ws.store, project_id=project_id, domain=domain, type_=type,
             sensitivity=sensitivity, min_priority=min_priority,
             conflicts_only=conflicts, limit=limit,
         )
-        return [_mem_dict(m, ws.store) for m in queue]
+        return [_claim_dict(m, ws.store) for m in queue]
 
     class BatchCreateRequest(BaseModel):
         name: str = Field(min_length=1, max_length=200)
         query: dict[str, Any] = Field(default_factory=dict)
-        memory_ids: list[str] = Field(default_factory=list)
+        claim_ids: list[str] = Field(default_factory=list)
 
     class BatchApplyRequest(BaseModel):
         action: str
-        memory_ids: Optional[list[str]] = None
+        claim_ids: Optional[list[str]] = None
         force: bool = False
         preview_token: Optional[str] = None
 
     def _finding_dict(finding, store) -> dict[str, Any]:
         data = finding.model_dump(mode="json")
-        rid = finding.related_memory_id
+        rid = finding.related_claim_id
         if rid:
-            related = store.get_memory(rid)
+            related = store.get_claim(rid)
             if related is not None:
                 data["related"] = {
                     "id": related.id,
@@ -1379,13 +1744,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 }
         return data
 
-    def _close_finding(store, memory_id: str, finding_id: Optional[str], *,
+    def _close_finding(store, claim_id: str, finding_id: Optional[str], *,
                        status: FindingStatus = FindingStatus.resolved,
                        operation_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         if not finding_id or not hasattr(store, "get_findings"):
             return None
         from ..clock import now_iso
-        findings = store.get_findings(memory_id, unresolved_only=False)
+        findings = store.get_findings(claim_id, unresolved_only=False)
         finding = next((f for f in findings if f.id == finding_id), None)
         if finding is None:
             return None
@@ -1399,13 +1764,13 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/review/batches")
     def api_create_batch(req: BatchCreateRequest):
-        from ..memory.batches import create_batch
-        batch = create_batch(ws.store, req.name, query=req.query, memory_ids=req.memory_ids or None)
+        from twin.store.batches import create_batch
+        batch = create_batch(ws.store, req.name, query=req.query, claim_ids=req.claim_ids or None)
         return batch.model_dump()
 
     @app.get("/api/review/batches/{batch_id}")
     def api_get_batch(batch_id: str):
-        from ..memory.batches import get_batch
+        from twin.store.batches import get_batch
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             raise HTTPException(404, "batch not found")
@@ -1413,12 +1778,12 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/review/batches/{batch_id}/apply")
     def api_apply_batch(batch_id: str, req: BatchApplyRequest):
-        from ..memory.automation import batch_apply, batch_preview
-        from ..memory.batches import get_batch
+        from twin.store.automation import batch_apply, batch_preview
+        from twin.store.batches import get_batch
         batch = get_batch(ws.store, batch_id)
         if batch is None:
             raise HTTPException(404, "batch not found")
-        ids = req.memory_ids or batch.memory_ids
+        ids = req.claim_ids or batch.claim_ids
         preview = batch_preview(ws.store, ids, req.action)
         if req.force is False and preview.get("requires_individual_review"):
             return {**preview, "preview_only": True}
@@ -1427,31 +1792,31 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             force=req.force, preview_token=req.preview_token,
         )
 
-    @app.get("/api/memories/{memory_id}/neighbors")
-    def api_neighbors(memory_id: str):
-        from ..cognition.quality import discover_neighbors
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/claims/{claim_id}/neighbors")
+    def api_neighbors(claim_id: str):
+        from twin.cognize.services.quality import discover_neighbors
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         neighbors = discover_neighbors(ws.store, ws.embedder, mem)
         return [
-            {**_mem_dict(n, ws.store), "similarity": sim, "reason": reason}
+            {**_claim_dict(n, ws.store), "similarity": sim, "reason": reason}
             for n, sim, reason in neighbors
         ]
 
-    @app.get("/api/memories/{memory_id}/quality")
-    def api_quality(memory_id: str, refresh: bool = False):
-        from ..cognition.quality import analyze_memory
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/claims/{claim_id}/quality")
+    def api_quality(claim_id: str, refresh: bool = False):
+        from twin.cognize.services.quality import analyze_claim
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         # Prefer stored findings unless caller asks to re-analyze.
         if not refresh and hasattr(ws.store, "get_findings"):
-            stored = ws.store.get_findings(memory_id, unresolved_only=True)
+            stored = ws.store.get_findings(claim_id, unresolved_only=True)
             if stored:
-                from ..cognition.quality import memory_altitude
+                from twin.cognize.services.quality import claim_altitude
                 return {
-                    "memory_id": memory_id,
+                    "claim_id": claim_id,
                     "quality_score": mem.quality_score,
                     "review_priority": mem.review_priority,
                     "impact": mem.impact,
@@ -1462,11 +1827,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                     "requires_human_review": bool(mem.needs_review),
                     "quality_flags": list(mem.quality_flags or []),
                     "neighbors": [],
-                    "altitude": memory_altitude(mem),
+                    "altitude": claim_altitude(mem),
                     "from_store": True,
                 }
         try:
-            report = analyze_memory(ws.store, ws.embedder, memory_id)
+            report = analyze_claim(ws.store, ws.embedder, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         data = report.model_dump(mode="json")
@@ -1474,49 +1839,49 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         data["from_store"] = False
         return data
 
-    @app.get("/api/memories/{memory_id}/findings")
-    def api_findings(memory_id: str, unresolved_only: bool = True):
-        mem = ws.store.get_memory(memory_id)
+    @app.get("/api/claims/{claim_id}/findings")
+    def api_findings(claim_id: str, unresolved_only: bool = True):
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if not hasattr(ws.store, "get_findings"):
             return []
         return [
             _finding_dict(f, ws.store)
-            for f in ws.store.get_findings(memory_id, unresolved_only=unresolved_only)
+            for f in ws.store.get_findings(claim_id, unresolved_only=unresolved_only)
         ]
 
-    @app.post("/api/memories/{memory_id}/findings/{finding_id}/dismiss")
-    def api_dismiss_finding(memory_id: str, finding_id: str):
+    @app.post("/api/claims/{claim_id}/findings/{finding_id}/dismiss")
+    def api_dismiss_finding(claim_id: str, finding_id: str):
         closed = _close_finding(
-            ws.store, memory_id, finding_id, status=FindingStatus.dismissed,
+            ws.store, claim_id, finding_id, status=FindingStatus.dismissed,
         )
         if closed is None:
             raise HTTPException(404, "finding not found")
         return closed
 
-    @app.post("/api/memories/{memory_id}/resolve")
-    def api_resolve(memory_id: str, req: ResolveRequest):
+    @app.post("/api/claims/{claim_id}/resolve")
+    def api_resolve(claim_id: str, req: ResolveRequest):
         from ..clock import now_iso
-        from ..memory.lifecycle import (
-            archive_memory,
+        from twin.store.lifecycle import (
+            archive_claim,
             contradict,
-            merge_memories,
-            split_memory,
+            merge_claims,
+            split_claim,
             supersede,
         )
 
-        mem = ws.store.get_memory(memory_id)
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if req.domain:
-            ws.store.update_memory(memory_id, domain=req.domain)
+            ws.store.update_claim(claim_id, domain=req.domain)
         if req.sensitivity:
-            ws.store.update_memory(memory_id, sensitivity=req.sensitivity)
+            ws.store.update_claim(claim_id, sensitivity=req.sensitivity)
 
         action = (req.action or "").strip().lower()
-        related_id = req.related_memory_id
-        result: dict[str, Any] = {"action": action, "memory_id": memory_id}
+        related_id = req.related_claim_id
+        result: dict[str, Any] = {"action": action, "claim_id": claim_id}
         op_id: Optional[str] = None
         remove_ids: list[str] = []
         finding_status = FindingStatus.resolved
@@ -1526,9 +1891,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 finding_status = FindingStatus.dismissed
             elif action == "merge":
                 if not related_id:
-                    raise ValueError("related_memory_id required for merge")
-                merged = merge_memories(
-                    ws.store, [memory_id, related_id],
+                    raise ValueError("related_claim_id required for merge")
+                merged = merge_claims(
+                    ws.store, [claim_id, related_id],
                     title=req.title, summary=req.summary,
                     embedder=ws.embedder,
                     confirm_cross_scope_merge=req.confirm_cross_scope_merge,
@@ -1541,76 +1906,76 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                     "operation_id": op_id,
                     **merged.extras,
                 })
-                remove_ids = [memory_id, related_id]
+                remove_ids = [claim_id, related_id]
             elif action == "contradict":
                 if not related_id:
-                    raise ValueError("related_memory_id required for contradict")
-                out = contradict(ws.store, memory_id, related_id)
+                    raise ValueError("related_claim_id required for contradict")
+                out = contradict(ws.store, claim_id, related_id)
                 op_id = out.operation_id
                 result["operation_id"] = op_id
             elif action == "supersede":
                 if not related_id:
-                    raise ValueError("related_memory_id required for supersede")
-                out = supersede(ws.store, memory_id, related_id)
+                    raise ValueError("related_claim_id required for supersede")
+                out = supersede(ws.store, claim_id, related_id)
                 # Keep the newer claim as confirmed — matches legacy review form.
-                ws.store.set_status(memory_id, MemoryStatus.confirmed)
-                ws.store.update_memory(
-                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                ws.store.set_status(claim_id, ClaimStatus.confirmed)
+                ws.store.update_claim(
+                    claim_id, reviewed_at=now_iso(), needs_review=False,
                 )
                 op_id = out.operation_id
                 result["operation_id"] = op_id
-                remove_ids = [memory_id, related_id]
+                remove_ids = [claim_id, related_id]
             elif action == "supersede_by":
                 if not related_id:
-                    raise ValueError("related_memory_id required for supersede_by")
-                out = supersede(ws.store, related_id, memory_id)
-                related_mem = ws.store.get_memory(related_id)
-                if related_mem is not None and related_mem.status == MemoryStatus.candidate:
-                    ws.store.set_status(related_id, MemoryStatus.confirmed)
-                    ws.store.update_memory(
+                    raise ValueError("related_claim_id required for supersede_by")
+                out = supersede(ws.store, related_id, claim_id)
+                related_mem = ws.store.get_claim(related_id)
+                if related_mem is not None and related_mem.status == ClaimStatus.candidate:
+                    ws.store.set_status(related_id, ClaimStatus.confirmed)
+                    ws.store.update_claim(
                         related_id, reviewed_at=now_iso(), needs_review=False,
                     )
                 op_id = out.operation_id
                 result["operation_id"] = op_id
-                remove_ids = [memory_id, related_id]
+                remove_ids = [claim_id, related_id]
             elif action == "split":
                 parts = req.parts or []
                 if len(parts) < 2:
                     raise ValueError("split requires at least two parts")
-                out = split_memory(ws.store, memory_id, parts, embedder=ws.embedder)
+                out = split_claim(ws.store, claim_id, parts, embedder=ws.embedder)
                 op_id = out.operation_id
                 result.update({
                     "children": out.extras.get("children"),
                     "operation_id": op_id,
                 })
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             elif action == "archive":
-                out = archive_memory(ws.store, memory_id)
+                out = archive_claim(ws.store, claim_id)
                 op_id = out.operation_id
                 result["operation_id"] = op_id
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             elif action == "request_evidence":
-                ws.store.update_memory(
-                    memory_id, needs_review=True,
+                ws.store.update_claim(
+                    claim_id, needs_review=True,
                     review_reason="more evidence requested",
                     quality_flags=list(set((mem.quality_flags or []) + ["weak_evidence"])),
                 )
             elif action == "defer":
-                ws.store.update_memory(
-                    memory_id, needs_review=True, review_reason="deferred",
+                ws.store.update_claim(
+                    claim_id, needs_review=True, review_reason="deferred",
                 )
             elif action == "confirm":
-                ws.store.set_status(memory_id, MemoryStatus.confirmed)
-                ws.store.update_memory(
-                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                ws.store.set_status(claim_id, ClaimStatus.confirmed)
+                ws.store.update_claim(
+                    claim_id, reviewed_at=now_iso(), needs_review=False,
                 )
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             elif action == "reject":
-                ws.store.set_status(memory_id, MemoryStatus.rejected)
-                ws.store.update_memory(
-                    memory_id, reviewed_at=now_iso(), needs_review=False,
+                ws.store.set_status(claim_id, ClaimStatus.rejected)
+                ws.store.update_claim(
+                    claim_id, reviewed_at=now_iso(), needs_review=False,
                 )
-                remove_ids = [memory_id]
+                remove_ids = [claim_id]
             else:
                 raise HTTPException(
                     400,
@@ -1622,28 +1987,28 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
         closed = _close_finding(
-            ws.store, memory_id, req.finding_id,
+            ws.store, claim_id, req.finding_id,
             status=finding_status, operation_id=op_id,
         )
         if closed is not None:
             result["finding"] = closed
         result["removed_from_queue"] = remove_ids
-        result["memory"] = _mem_dict(ws.store.get_memory(memory_id), ws.store) \
-            if ws.store.get_memory(memory_id) else None
+        result["claim"] = _claim_dict(ws.store.get_claim(claim_id), ws.store) \
+            if ws.store.get_claim(claim_id) else None
         return result
 
-    @app.get("/api/memories/{memory_id}/provenance")
-    def api_provenance(memory_id: str):
-        from ..memory.provenance import memory_provenance
+    @app.get("/api/claims/{claim_id}/provenance")
+    def api_provenance(claim_id: str):
+        from twin.store.provenance import claim_provenance
         try:
-            return memory_provenance(ws.store, memory_id)
+            return claim_provenance(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
-    @app.post("/api/memories/merge")
+    @app.post("/api/claims/merge")
     def api_merge(req: MergeRequest):
-        from ..memory.lifecycle import merge_memories
-        from ..memory.models import CanonicalClaim
+        from twin.store.lifecycle import merge_claims
+        from twin.store.models import CanonicalClaim
         merge_kwargs: dict[str, Any] = {
             "title": req.title,
             "summary": req.summary,
@@ -1662,42 +2027,42 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 CanonicalClaim(**claim) if isinstance(claim, dict) else claim
             )
         try:
-            result = merge_memories(ws.store, req.memory_ids, **merge_kwargs)
+            result = merge_claims(ws.store, req.claim_ids, **merge_kwargs)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "merged_id": result.extras.get("merged_id"),
                 "operation_id": result.operation_id, **result.extras}
 
-    @app.post("/api/memories/{memory_id}/split")
-    def api_split(memory_id: str, req: SplitRequest):
-        from ..memory.lifecycle import split_memory
+    @app.post("/api/claims/{claim_id}/split")
+    def api_split(claim_id: str, req: SplitRequest):
+        from twin.store.lifecycle import split_claim
         try:
-            result = split_memory(ws.store, memory_id, req.parts, embedder=ws.embedder)
+            result = split_claim(ws.store, claim_id, req.parts, embedder=ws.embedder)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"action": result.action, "children": result.extras.get("children"),
                 "operation_id": result.operation_id}
 
-    @app.post("/api/memories/{memory_id}/archive")
-    def api_archive(memory_id: str):
-        from ..memory.lifecycle import archive_memory
+    @app.post("/api/claims/{claim_id}/archive")
+    def api_archive(claim_id: str):
+        from twin.store.lifecycle import archive_claim
         try:
-            result = archive_memory(ws.store, memory_id)
+            result = archive_claim(ws.store, claim_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         return {"action": result.action, "operation_id": result.operation_id}
 
-    @app.post("/api/memories/{memory_id}/request-evidence")
-    def api_request_evidence(memory_id: str):
-        mem = ws.store.get_memory(memory_id)
+    @app.post("/api/claims/{claim_id}/request-evidence")
+    def api_request_evidence(claim_id: str):
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
-        ws.store.update_memory(
-            memory_id, needs_review=True,
+        ws.store.update_claim(
+            claim_id, needs_review=True,
             review_reason="more evidence requested",
             quality_flags=list(set(mem.quality_flags + ["weak_evidence"])),
         )
-        return _mem_dict(ws.store.get_memory(memory_id), ws.store)
+        return _claim_dict(ws.store.get_claim(claim_id), ws.store)
 
     @app.get("/api/artifacts/{artifact_id}")
     def api_artifact(artifact_id: str):
@@ -1710,7 +2075,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.delete("/api/artifacts/{artifact_id}")
     def api_delete_artifact(artifact_id: str, dry_run: bool = True):
-        from ..memory.retention import delete_artifact
+        from twin.store.retention import delete_artifact
         try:
             return delete_artifact(ws.store, artifact_id, dry_run=dry_run)
         except ValueError as exc:
@@ -1789,7 +2154,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/versions/{version_id}/restore")
     def api_judgment_restore(version_id: str):
-        from ..judgment.versions import restore_version
+        from twin.cognize.stance_engine.versions import restore_version
         try:
             ver = restore_version(ws.store, version_id, actor="api")
         except ValueError as exc:
@@ -1798,7 +2163,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/judgment/snapshots/{snapshot_id}/explain")
     def api_judgment_snapshot_explain(snapshot_id: str):
-        from ..judgment.explain import explain_judgment_snapshot
+        from twin.cognize.stance_engine.explain import explain_judgment_snapshot
         try:
             return explain_judgment_snapshot(ws.store, snapshot_id)
         except ValueError as exc:
@@ -1816,12 +2181,12 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/proposals/generate")
     def api_generate_proposals(domain: str = "technical"):
-        from ..judgment.proposals import propose_from_pattern
+        from twin.cognize.stance_engine.proposals import propose_from_pattern
         return [p.model_dump(mode="json") for p in propose_from_pattern(ws.store, domain=domain)]
 
     @app.post("/api/judgment/proposals/{proposal_id}/preview")
     def api_preview_proposal(proposal_id: str, req: ProposalPreviewRequest = ProposalPreviewRequest()):
-        from ..judgment.proposals import preview_proposal
+        from twin.cognize.stance_engine.proposals import preview_proposal
         try:
             return preview_proposal(ws.store, proposal_id, edits=req.edits)
         except ValueError as exc:
@@ -1829,7 +2194,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/proposals/{proposal_id}/approve")
     def api_approve_proposal(proposal_id: str, req: ProposalApproveRequest):
-        from ..judgment.proposals import approve_proposal
+        from twin.cognize.stance_engine.proposals import approve_proposal
         try:
             return approve_proposal(
                 ws.store, proposal_id, preview_token=req.preview_token,
@@ -1840,7 +2205,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/proposals/{proposal_id}/reject")
     def api_reject_proposal(proposal_id: str, reason: str = ""):
-        from ..judgment.proposals import reject_proposal
+        from twin.cognize.stance_engine.proposals import reject_proposal
         try:
             return reject_proposal(ws.store, proposal_id, reason=reason).model_dump(mode="json")
         except ValueError as exc:
@@ -1848,7 +2213,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/import")
     def api_judgment_import(req: JudgmentImportRequest):
-        from ..judgment.yaml_io import apply_yaml_import, preview_yaml_import
+        from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
         preview = preview_yaml_import(ws.cfg.judgment_path)
         if not req.apply:
             return {"preview": preview, "count": len(preview)}
@@ -1856,7 +2221,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/applicable")
     def api_judgment_applicable(req: JudgmentApplicableRequest):
-        from ..judgment.application import applicable_pack
+        from twin.cognize.stance_engine.application import applicable_pack
         return applicable_pack(
             ws.store, domain=req.domain, persona=req.persona,
             task_profile=req.task_profile, project_id=req.project_id,
@@ -1866,7 +2231,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/judgment/simulate")
     def api_judgment_simulate(req: JudgmentSimulateRequest):
-        from ..judgment.simulate import simulate
+        from twin.cognize.stance_engine.simulate import simulate
         return simulate(
             ws.store, req.query, domain=req.domain, task_profile=req.task_profile,
             project_id=req.project_id, options=req.options,
@@ -1880,8 +2245,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     # never implies connector authority, and credentials never return.
     from fastapi import Header
 
-    from ..connectors import build_credential_store as _bcs
-    from ..connectors import (
+    from twin.sense.connectors import build_credential_store as _bcs
+    from twin.sense.connectors import (
         CAP_BACKFILL,
         CAP_CONFIGURE,
         CAP_CREDENTIALS,
@@ -2149,11 +2514,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                    connector_id)
         try:
             if job_id:
-                from ..connectors import run_backfill_partition
+                from twin.sense.connectors import run_backfill_partition
                 return run_backfill_partition(
                     ws.store, _conn_creds(), job_id)
             if create:
-                from ..connectors import create_backfill_job
+                from twin.sense.connectors import create_backfill_job
                 job = create_backfill_job(
                     ws.store, _conn_creds(), connector_id)
                 return {
@@ -2180,7 +2545,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         # Authenticated by HMAC against a dedicated webhook secret — never by
         # twin identity, never by the API token. A valid delivery only nudges
         # the scheduler; the payload never becomes canonical state.
-        from ..connectors.github.webhook import WebhookRejected, handle_github_webhook
+        from twin.sense.connectors.github.webhook import WebhookRejected, handle_github_webhook
         body = await request.body()
         try:
             return handle_github_webhook(
@@ -2194,7 +2559,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/webhooks/slack/{connector_id}")
     async def api_slack_webhook(connector_id: str, request: Request):
-        from ..connectors.slack.webhook import WebhookRejected, handle_slack_webhook
+        from twin.sense.connectors.slack.webhook import WebhookRejected, handle_slack_webhook
         body = await request.body()
         try:
             return handle_slack_webhook(
@@ -2213,7 +2578,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.get("/api/export")
     def api_export():
         """Full JSON export (vendor-independence guarantee)."""
-        memories = ws.store.list_memories(limit=100000)
+        memories = ws.store.list_claims(limit=100000)
         judgment_export = load_profile(ws.cfg.judgment_path)
         if hasattr(ws.store, "list_judgment_items"):
             judgment_export = {
@@ -2221,8 +2586,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 "items": [i.model_dump(mode="json") for i in ws.store.list_judgment_items(status="active")],
             }
         return JSONResponse({
-            "memories": [
-                {**_mem_dict(m, ws.store), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
+            "claims": [
+                {**_claim_dict(m, ws.store), "evidence": [e.model_dump() for e in ws.store.get_evidence(m.id)]}
                 for m in memories
             ],
             "entities": [e.model_dump() for e in ws.store.list_entities()],
@@ -2247,35 +2612,35 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         # Tiny inline avoidance of 404 noise in logs
         return RedirectResponse("/static/app.css", status_code=302)
 
-    @app.post("/review/{memory_id}")
-    def ui_review(memory_id: str, action: str = Form(...), domain: str = Form(None),
+    @app.post("/review/{claim_id}")
+    def ui_review(claim_id: str, action: str = Form(...), domain: str = Form(None),
                   sensitivity: str = Form(None), neighbor_id: str = Form(None)):
         from ..clock import now_iso
-        from ..memory.lifecycle import archive_memory, contradict, merge_memories, supersede
-        mem = ws.store.get_memory(memory_id)
+        from twin.store.lifecycle import archive_claim, contradict, merge_claims, supersede
+        mem = ws.store.get_claim(claim_id)
         if mem is None:
             raise HTTPException(404, "memory not found")
         if domain:
-            ws.store.update_memory(memory_id, domain=domain)
+            ws.store.update_claim(claim_id, domain=domain)
         if sensitivity:
-            ws.store.update_memory(memory_id, sensitivity=sensitivity)
+            ws.store.update_claim(claim_id, sensitivity=sensitivity)
         if action == "approve":
-            ws.store.set_status(memory_id, MemoryStatus.confirmed)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso())
+            ws.store.set_status(claim_id, ClaimStatus.confirmed)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso())
         elif action == "reject":
-            ws.store.set_status(memory_id, MemoryStatus.rejected)
-            ws.store.update_memory(memory_id, reviewed_at=now_iso())
+            ws.store.set_status(claim_id, ClaimStatus.rejected)
+            ws.store.update_claim(claim_id, reviewed_at=now_iso())
         elif action == "defer":
-            ws.store.update_memory(memory_id, needs_review=True, review_reason="deferred")
+            ws.store.update_claim(claim_id, needs_review=True, review_reason="deferred")
         elif action == "archive":
-            archive_memory(ws.store, memory_id)
+            archive_claim(ws.store, claim_id)
         elif action == "supersede_hint" and neighbor_id:
-            supersede(ws.store, memory_id, neighbor_id)
-            ws.store.set_status(memory_id, MemoryStatus.confirmed)
+            supersede(ws.store, claim_id, neighbor_id)
+            ws.store.set_status(claim_id, ClaimStatus.confirmed)
         elif action == "contradict_hint" and neighbor_id:
-            contradict(ws.store, memory_id, neighbor_id)
+            contradict(ws.store, claim_id, neighbor_id)
         elif action == "merge_hint" and neighbor_id:
-            merge_memories(ws.store, [memory_id, neighbor_id], embedder=ws.embedder)
+            merge_claims(ws.store, [claim_id, neighbor_id], embedder=ws.embedder)
         elif action != "update":
             raise HTTPException(400, "unknown action")
         return RedirectResponse("/#review", status_code=303)

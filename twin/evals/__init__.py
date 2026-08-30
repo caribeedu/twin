@@ -12,16 +12,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .. import ids
-from ..cognition.context_pack import build_context_pack
-from ..cognition.pipeline import extract_percept
-from ..cognition.retrieval import retrieve
+from twin.inject.context_pack import build_context_pack
+from twin.cognize.services.pipeline import extract_percept
+from twin.cognize.services.retrieval import retrieve
 from ..clock import now_iso
 from ..config import Config
-from ..judgment.firewall import Firewall
-from ..memory.embeddings import Embedder, get_embedder
-from ..memory.models import Evidence, MemoryItem
-from ..memory.store.sqlite import SqliteStore
-from ..sensory.percept import Percept
+from twin.privacy.firewall import Firewall
+from twin.store.embeddings import Embedder, get_embedder
+from twin.store.models import Evidence, StoreClaim
+from twin.store.store.sqlite import SqliteStore
+from twin.sense.sensory.percept import Percept
 
 _DEFAULT_POLICIES = Path(__file__).resolve().parent.parent / "defaults" / "policies.yaml"
 
@@ -136,10 +136,10 @@ def run_extraction_eval(
                 )
                 iso_store.insert_percept(percept)
                 report = extract_percept(iso_store, eval_cfg, eval_embedder, percept)
-                inserted = [iso_store.get_memory(mid) for mid in report.inserted]
+                inserted = [iso_store.get_claim(mid) for mid in report.inserted]
                 inserted = [m for m in inserted if m]
 
-                expected_mems = expected.get("memories", [])
+                expected_mems = expected.get("claims", [])
                 must_not = expected.get("must_not_extract", [])
 
                 matched = 0
@@ -252,13 +252,13 @@ def run_retrieval_eval(
     mrrs: list[float] = []
 
     for case in cases:
-        expected_ids = list(case.get("expected_memory_ids") or [])
+        expected_ids = list(case.get("expected_claim_ids") or [])
         seed = case.get("seed_memories") or []
         if not expected_ids and not seed and not case.get("expected_claims"):
             results.append(EvalCaseResult(
                 case_id=case.get("id", "unknown"),
                 passed=False,
-                detail="invalid fixture: empty expected_memory_ids without seed",
+                detail="invalid fixture: empty expected_claim_ids without seed",
             ))
             continue
 
@@ -270,9 +270,9 @@ def run_retrieval_eval(
                 iso_firewall = Firewall(_policies_path(cfg), iso_store)
                 id_map: dict[str, str] = {}
                 for raw in seed:
-                    mid = raw.get("id") or ids.memory_id()
+                    mid = raw.get("id") or ids.claim_id()
                     real_id = (
-                        ids.memory_id()
+                        ids.claim_id()
                         if mid.startswith("mem_fixture") or mid in id_map
                         else mid
                     )
@@ -281,7 +281,7 @@ def run_retrieval_eval(
                     else:
                         real_id = mid
                         id_map[mid] = mid
-                    mem = MemoryItem(
+                    mem = StoreClaim(
                         id=id_map[mid],
                         type=raw.get("type", "fact"),  # type: ignore[arg-type]
                         title=raw["title"],
@@ -292,9 +292,9 @@ def run_retrieval_eval(
                         project_id=raw.get("project_id"),
                         entities=raw.get("entities") or [],
                     )
-                    iso_store.insert_memory(mem)
+                    iso_store.insert_claim(mem)
                     iso_store.store_embedding(
-                        mem.id, "memory", eval_embedder.name,
+                        mem.id, "claim", eval_embedder.name,
                         eval_embedder.embed(f"{mem.title}\n{mem.summary}"),
                     )
                     for quote in raw.get("evidence") or []:
@@ -304,14 +304,14 @@ def run_retrieval_eval(
                         )
                         iso_store.insert_percept(pct)
                         iso_store.insert_evidence(Evidence(
-                            id=ids.evidence_id(), memory_id=mem.id,
+                            id=ids.evidence_id(), claim_id=mem.id,
                             percept_id=pct.id, quote=quote,
                         ))
 
                 resolved_expected = [id_map.get(e, e) for e in expected_ids]
                 if case.get("expected_claims") and not resolved_expected:
                     for claim in case["expected_claims"]:
-                        for m in iso_store.list_memories(limit=1000):
+                        for m in iso_store.list_claims(limit=1000):
                             if _claim_match(claim, f"{m.title} {m.summary}") >= 0.6:
                                 resolved_expected.append(m.id)
                     resolved_expected = list(dict.fromkeys(resolved_expected))
@@ -324,7 +324,7 @@ def run_retrieval_eval(
                     ))
                     continue
 
-                forbidden = {id_map.get(f, f) for f in case.get("forbidden_memory_ids", [])}
+                forbidden = {id_map.get(f, f) for f in case.get("forbidden_claim_ids", [])}
                 query = case["query"]
                 project_id = case.get("project_id")
                 result = retrieve(
@@ -334,11 +334,11 @@ def run_retrieval_eval(
                     project_id=project_id,
                     limit=k,
                 )
-                hit_ids = [h.memory.id for h in result.hits]
+                hit_ids = [h.claim.id for h in result.hits]
 
                 inactive_hits = [
                     hid for hid in hit_ids
-                    if (m := iso_store.get_memory(hid)) and m.status.value in (
+                    if (m := iso_store.get_claim(hid)) and m.status.value in (
                         "merged", "split", "archived", "unsupported", "stale",
                         "deleted", "rejected", "deprecated", "contradicted",
                     )
@@ -441,8 +441,8 @@ def default_eval_root() -> Path:
 
 def run_judgment_eval(store, cfg, dataset_dir: Path) -> EvalRun:
     """Scope/precedence/constraint checks against judgment fixtures."""
-    from ..judgment.simulate import simulate
-    from ..judgment.yaml_io import apply_yaml_import, preview_yaml_import
+    from twin.cognize.stance_engine.simulate import simulate
+    from twin.cognize.stance_engine.yaml_io import apply_yaml_import, preview_yaml_import
 
     cases = _load_cases(dataset_dir)
     results: list[EvalCaseResult] = []

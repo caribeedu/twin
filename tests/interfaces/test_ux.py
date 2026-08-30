@@ -6,10 +6,10 @@ import io
 import os
 from pathlib import Path
 
-from twin.cognition import extract_pending
+from twin.cognize.services import extract_pending
 from twin.interfaces import ux
 from twin.interfaces.setup_wizard import run_setup_wizard
-from twin.sensory import sense_paths
+from twin.sense.sensory import sense_paths
 from tests.paths import EXAMPLES
 
 

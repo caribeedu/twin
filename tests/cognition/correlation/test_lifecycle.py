@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from twin.cognition.correlation.episodes import (
+from twin.cognize.services.correlation.episodes import (
     _rebuild_episode_from_active_links,
     correlate_records,
 )
-from twin.cognition.correlation.explain import (
+from twin.cognize.services.correlation.explain import (
     explain_episode,
     explain_identity_link,
     explain_project_link,
 )
-from twin.cognition.correlation.identity import (
+from twin.cognize.services.correlation.identity import (
     confirm_identity_link,
     propose_identity_links,
     reject_identity_link,
     unconfirm_identity_link,
     upsert_external_identity,
 )
-from twin.cognition.correlation.models import (
+from twin.cognize.services.correlation.models import (
     EpisodeLinkKind,
     EpisodeLinkStatus,
     EpisodeStatus,
@@ -26,14 +26,14 @@ from twin.cognition.correlation.models import (
     ProjectLinkStatus,
     WorkEpisode,
 )
-from twin.cognition.correlation.projects import (
+from twin.cognize.services.correlation.projects import (
     archive_project_link,
     link_project,
     reject_project_link,
     resolve_project_for_record,
 )
-from twin.cognition.sessions import ensure_project
-from twin.connectors.models import ConnectorRecord, idempotency_key
+from twin.cognize.services.sessions import ensure_project
+from twin.sense.connectors.models import ConnectorRecord, idempotency_key
 
 
 def _rec(**kwargs) -> ConnectorRecord:
@@ -119,7 +119,7 @@ def test_project_link_rejected_not_attachable(store):
 
 
 def test_legacy_confirmed_bool_migrates_to_status(store):
-    from twin.cognition.correlation.models import ProjectLink
+    from twin.cognize.services.correlation.models import ProjectLink
     raw = ProjectLink.model_validate({
         "project_id": "p1",
         "external_type": "github_repository",
@@ -262,7 +262,7 @@ def test_distinct_accounts_resolve_own_project_links(store):
         external_type="slack_channel", external_id="C123",
         source_account_id="ws_b", confirmed=True,
     )
-    from twin.cognition.correlation.projects import find_project_for_external
+    from twin.cognize.services.correlation.projects import find_project_for_external
     assert find_project_for_external(
         store, external_type="slack_channel", external_id="C123",
         source_account_id="ws_a",
@@ -274,7 +274,7 @@ def test_distinct_accounts_resolve_own_project_links(store):
 
 
 def test_episode_confidence_downgrades_when_membership_shrinks(store):
-    from twin.cognition.correlation.models import EpisodeLink
+    from twin.cognize.services.correlation.models import EpisodeLink
 
     ep = WorkEpisode(
         vault_id="vault_work_acme",
@@ -316,7 +316,7 @@ def test_episode_confidence_downgrades_when_membership_shrinks(store):
 
 
 def test_episode_reopens_when_active_links_return(store):
-    from twin.cognition.correlation.models import EpisodeLink
+    from twin.cognize.services.correlation.models import EpisodeLink
 
     ep = WorkEpisode(
         vault_id="vault_work_acme",

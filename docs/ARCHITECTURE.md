@@ -57,7 +57,7 @@ flowchart TB
 |---|---|---|
 | **Sense** | Capture, normalize, allowlists, percepts, connector state (**deterministic I/O**) | Thinking: Reflections, Interpretations, meaning, commit Narrative, packs |
 | **Cognize** | Entire **LLM-driven** pipeline (reflect / interpret / revise narratives / …); fade/remarkable *judgment* from the model | Speak to host UIs as Inject; own OAuth; any smart path without LLM; pretend the pipeline *is* the product architecture |
-| **Inject** | Firewall (deterministic) + pack render + **Observer slot** (LLM that watches the live conversation; reserved — `twin.cognition.inject_observer`, flag `TWIN_INJECT_OBSERVER`, default no-op) + **stale-as-fresh refusal** | Mutate Cognize substrate as a side-effect; invent Narratives; heuristic “fake observe”; serve stale as current |
+| **Inject** | Firewall (deterministic; lives in **privacy**) + pack render + **Observer slot** (LLM that watches the live conversation; reserved — today `twin.cognition.inject_observer`, flag `TWIN_INJECT_OBSERVER`, default no-op; target **`inject`**) + **stale-as-fresh refusal** | Mutate Cognize substrate as a side-effect; invent Narratives; heuristic “fake observe”; serve stale as current |
 
 A host **conversation** is not a fourth module and not a product “mode.”
 While it runs, Inject projects context outward and Sense absorbs residue
@@ -67,6 +67,32 @@ inward. Cognize never talks to Slack/Cursor directly.
 a heuristic meaning path is requested, Cognize refuses to run. Sense may
 still capture; Inject’s Domain Firewall may still refuse unsafe leakage.
 See [v2.md](v2.md) §0.
+
+---
+
+## Code packages (target layout)
+
+Public architecture is still **only** Sense → Cognize → Inject. Repository
+packages are being reorganized so code walls match those product walls —
+this is unfinished v2 work, not optional cosmetics.
+
+| Target package | Owns | Absorbs from today |
+|---|---|---|
+| **`sense`** | Capture, normalize, connector I/O, percepts | `twin.sense.connectors`, `twin.sense.sensory` (shims at old roots) |
+| **`cognize`** | Narrative pipeline + services + Stance engine | `twin.cognize` + `twin.cognize.services` + `twin.cognize.stance_engine` |
+| **`inject`** | Pack render, Observer slot, stale-as-fresh refusal | `twin.inject` |
+| **`store`** | Persistence, search indexes, embeddings, migrations | `twin.store` (`MemoryStore` name transitional) |
+| **`llm`** | Provider adapters and usage accounting | `twin.llm` |
+| **`privacy`** | Domain Firewall, PII, disclosure guardrails | `twin.privacy` (+ Firewall / PII) |
+| **`interfaces`** | CLI, MCP, REST, web, TUI Center, workers, export/backup | `twin.interfaces` (+ `runtime`, `sovereignty`) |
+
+Transitional shims at old package roots have been removed; import the target
+packages above. Dual-read `StoreClaim` rows and `judgment_*` table names may
+remain in the store until data migration finishes — product copy must not call
+them Memory or Judgment.
+
+Inventory and cuts: [v2-tracker.md](v2-tracker.md) (v2.5 Package walls) ·
+[ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -82,24 +108,24 @@ Twin does **not** simulate a biological brain. Neuroscience and cognitive scienc
 
 | Cognitive system | Function | Abstraction in Twin |
 |---|---|---|
-| Episodic memory | events, meetings, conversations, temporal context | `event`, sources, evidence, timeline |
-| Semantic memory | facts, concepts, consolidated relationships | `fact`, entities, relations, graph |
-| Procedural memory | ways of doing, habits, workflows | `procedure`, playbooks, scripts |
-| Working memory | current task focus | query, Memory Observer, context pack |
-| Executive control | selection, inhibition, judgment | Domain Firewall, policies, evolving judgment |
+| Episodic memory | events, meetings, conversations, temporal context | Percepts, Situations, Evidence, timeline |
+| Semantic memory | facts, concepts, consolidated relationships | Narratives, entities, Relations, graph |
+| Procedural memory | ways of doing, habits, workflows | procedures / playbooks (future) |
+| Working memory | current task focus | query, Inject Observer slot, context pack |
+| Executive control | selection, inhibition, evaluative posture | Domain Firewall, policies, Stance |
 
 ### Brain regions mapped to Twin components
 
 | Brain concept | Purpose | Twin abstraction |
 |---|---|---|
-| Hippocampus | Episodic encoding & consolidation | Percepts + Events + temporal validity |
-| Cortex | Semantic consolidation | Knowledge graph |
-| Prefrontal cortex | Executive control | Judgment + Domain Firewall |
+| Hippocampus | Episodic encoding & consolidation | Percepts + Situations + temporal validity |
+| Cortex | Semantic consolidation | Narrative graph + Relations |
+| Prefrontal cortex | Executive control | Stance + Domain Firewall |
 | Basal ganglia | Action selection | Action policy (future) |
 | Amygdala | Salience / risk | Sensitivity + review priority |
-| Working memory | Current reasoning | Context pack |
-| Global workspace | Conscious integration | Memory Observer |
-| Long-term memory | Stable knowledge | Graph + evidence |
+| Working memory | Current reasoning | Inject context pack |
+| Global workspace | Conscious integration | Inject Observer (slot) |
+| Long-term memory | Stable knowledge | Narratives + Evidence |
 | Procedural memory | Habits | Procedures / workflows |
 
 How that shows up in the pipeline:
@@ -108,19 +134,21 @@ How that shows up in the pipeline:
 Artifact / connector feed
         ↓  (hippocampus-like encoding)
 Percept
-        ↓  (correlation / situation structure)
-WorkEpisode arc (phases + narrative edges) — revisable, not Memory
+        ↓  (situation structure)
+Situation / WorkEpisode arc — revisable, not a durable product noun
         ↓  (cortical consolidation + human review)
-MemoryCandidate → confirmed Memory + evidence + embeddings (indexes only)
+Interpretation → committed Narrative + Evidence + embeddings (indexes only)
         ↓  (prefrontal / amygdala-like gates)
-Firewall + sensitivity + judgment
-        ↓  (working memory)
+Firewall + sensitivity + Stance
+        ↓  (working context)
 Safe context pack → Native / MCP / CLI / API
         ↕  (global workspace)
-Memory Observer (parallel suggestions)
+Inject Observer (parallel suggestions)
 ```
 
-If a feature blurs these boundaries — e.g. treating raw text as confirmed memory, or bypassing the firewall “for convenience” — it fights the architecture, not just a style preference.
+If a feature blurs these boundaries — e.g. treating raw text as a committed
+Narrative, or bypassing the firewall “for convenience” — it fights the
+architecture, not just a style preference.
 
 ### Brain analogies and CLI stages (episode pipeline)
 
@@ -143,7 +171,7 @@ gates (`twin review`, `twin stance approve`).
 | 2 | `basal` | Basal ganglia | read episode lifecycle | lifecycle (report-only) | `twin cognize run` |
 | 3 | `hippocampus_bind` | Hippocampus (binding) | membership consolidation | links | `twin cognize run` |
 | 4 | `cortex` | Cortex (semantic) | understand arc: phases + edges | phases/edges (`method=llm`) | `twin cognize run` |
-| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | MemoryCandidates | `twin episode reflect` |
+| 5 | `hippocampus_consolidate` | Hippocampus (consolidation) | reflect trajectory | review candidates (StoreClaim) | `twin episode reflect` |
 | 6 | `prefrontal` | Prefrontal cortex | draft Stance | pending Stance proposal | `twin stance propose-episode` |
 
 Human inhibition gates sit between consolidation and executive control: `twin review` (confirm candidates) precedes `prefrontal`, and `twin stance approve` is the executive gate for durable Stance. The Global Workspace (Memory Observer) runs in parallel and is **not** a stage in this chain.
@@ -185,14 +213,14 @@ sequenceDiagram
     Client->>ExtLLM: twin cognize run
     ExtLLM->>Store: read pending percepts
     ExtLLM->>PII: mask before any cloud LLM
-    ExtLLM->>Store: atomic MemoryCandidates + evidence
+    ExtLLM->>Store: atomic review candidates + evidence
     ExtLLM->>Human: selective review queue
 
     Client->>Corr: twin cognize run
     Corr->>Store: WorkEpisode membership, phases, edges
     Note over Corr: Structural scaffold never invents an arc.<br/>Semantic stages defer without a model.
     Corr->>ACC: consolidate-ready episodes
-    ACC->>Store: trajectory MemoryCandidates
+    ACC->>Store: trajectory review candidates
     ACC->>Human: review (+ optional Stance drafts)
 
     Human->>Store: confirm / reject / merge / resolve
@@ -259,7 +287,7 @@ sequenceDiagram
     Native-->>Host: ok (fail-open if configured)
     Runtime->>Sess: fold dialogue + deliberate notes
     Runtime->>Store: session_summary Percept
-    Runtime->>ExtLLM: cognize → MemoryCandidates
+    Runtime->>ExtLLM: cognize → review candidates
     ExtLLM->>Store: candidates for human review
     Note over Host,Store: Inject governed understanding at the start;<br/>absorb the session as evidence at the end.<br/>Humans still confirm durable Narrative / Stance.
 ```
@@ -297,7 +325,7 @@ sequenceDiagram
     ACC-->>Orch: AnalysisDossier (deterministic)
     Orch->>LLM: judge dossier → trajectory / pattern claims
     LLM-->>Orch: claims with evidence refs
-    Orch->>Store: MemoryCandidates only<br/>(needs_review, never auto-confirm)
+    Orch->>Store: review candidates only<br/>(needs_review, never auto-confirm)
     Orch->>Review: twin review / Stance gates
     Note over Orch,Review: Model proposes understanding<br/>humans constitute Narrative and Stance
 ```
@@ -313,25 +341,25 @@ These principles are the constitution of `twin`. Roadmaps can change, backends c
 
 That first principle changes the meaning of every technical decision in the project. The system is not valuable because it stores many facts; it is valuable if it helps the user continue thinking with less friction, fewer repeated explanations and stronger continuity across tools. The database, graph, embeddings, API and MCP server are implementation details in service of that larger goal.
 
-Autonomy is the boundary. `twin` may remember, organize, retrieve, suggest and explain, but it must not quietly take ownership of the user's values or decisions. The project succeeds when it gives external tools access to a safer cognitive substrate while keeping the user in control of durable memory, judgment and action.
+Autonomy is the boundary. `twin` may remember, organize, retrieve, suggest and explain, but it must not quietly take ownership of the user's values or decisions. The project succeeds when it gives external tools access to a safer cognitive substrate while keeping the user in control of durable Narrative, Stance and action.
 
 ### Knowledge is not understanding
 
-A million perfectly indexed facts do not produce good decisions. Knowledge answers what is known; understanding emerges from the interaction between memory, context, temporal state, constraints, relationships, consequences and judgment.
+A million perfectly indexed facts do not produce good decisions. Knowledge answers what is known; understanding emerges from the interaction between Narratives, context, temporal state, constraints, relationships, consequences and Stance.
 
-`twin` therefore stores facts, but optimizes for understanding. A useful context pack should not merely say "this fact matched the query". It should help an LLM understand why the fact matters now, whether it is still valid, which project or persona it belongs to, what evidence supports it and how it should affect the next decision.
+`twin` therefore stores structured accounts, but optimizes for understanding. A useful context pack should not merely say "this fact matched the query". It should help an LLM understand why the account matters now, whether it is still fresh, which project or persona it belongs to, what evidence supports it and how Stance should affect the next decision.
 
 This is the difference between a retrieval layer and a cognitive layer. Retrieval can return information; understanding requires organizing information so that future reasoning improves.
 
-### Memory is compression
+### Durable accounts are compression
 
 The system should never try to store reality itself. The brain does not preserve every signal; it compresses experience into patterns, episodes, concepts, salience and decision-relevant traces. `twin` should do the same.
 
-A memory is worth keeping when it can change future action: a decision, constraint, preference, rejected alternative, relationship, risk, commitment, lesson or contextual fact that will matter later. Raw artifacts can be stored or referenced when useful, but durable memory should be a compressed representation of what the system may need in order to reason better in the future.
+A Narrative is worth committing when it can change future action: a decision, constraint, preference, rejected alternative, relationship, risk, commitment, lesson or contextual fact that will matter later. Raw artifacts can be stored or referenced when useful, but durable substrate should be a compressed representation of what the system may need in order to reason better in the future.
 
 This principle changes the ingestion pipeline. The goal is not maximum capture. The goal is selective consolidation: preserve what has future cognitive value, keep evidence links for auditability and avoid turning the user's life into an indiscriminate archive.
 
-### Artifact ≠ Percept ≠ Memory ≠ Judgment
+### Artifact ≠ Percept ≠ Narrative ≠ Stance
 
 The backbone of the project is a pipeline from reality to action:
 
@@ -344,44 +372,44 @@ Artifact
 Percept
 (normalized observation)
     ↓
-Correlation / Situation Model
-(WorkEpisode arc — revisable structure, not Memory)
+Situation
+(working cluster — revisable structure, not the durable product)
     ↓
-Memory
-(consolidated knowledge with evidence and temporal validity; candidates until review)
+Interpretation → Narrative
+(competing explanation → human-committed account with evidence)
     ↓
-Judgment
-(how future decisions change)
+Stance
+(how future similar cases should be evaluated)
     ↓
-Action
+Inject / Action
 (suggestion, draft, reminder, automation or silence)
 ```
 
-An artifact is a source object. A percept is what the system notices from that artifact. Correlation proposes revisable situation structure (work episode and related links) without confirming Memory. A memory is a durable structured claim extracted from one or more percepts or reflected from an episode arc. A judgment is a decision rule, preference, value or trade-off that influences future reasoning. Action is downstream from all of them and must not be confused with memory.
+An artifact is a source object. A percept is what the system notices from that artifact. Situate proposes revisable situation structure without committing a Narrative. An Interpretation is a competing explanation; a Narrative is the durable account after human commit. Stance is evaluative posture — not another factual account. Action is downstream from all of them and must not be confused with Narrative.
 
-Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as memory, it is probably wrong. If it jumps directly from a percept to action without evidence, firewall and judgment, it is unsafe.
+Keeping these categories separate prevents the system from treating raw text as truth or treating temporary interpretation as stable belief. If a feature stores everything it sees as a committed Narrative, it is probably wrong. If it jumps directly from a percept to action without evidence, firewall and Stance, it is unsafe.
 
 ### The graph is truth; embeddings are indexes
 
-Embeddings answer similarity. They do not answer truth. They cannot explain why a memory exists, when it was true, which source supports it, whether it supersedes another memory or whether it is allowed in the current domain. They are indexes, not memory.
+Embeddings answer similarity. They do not answer truth. They cannot explain why a Narrative exists, when it was true, which source supports it, whether it supersedes another account or whether it is allowed in the current domain. They are indexes, not substrate.
 
-The canonical memory of `twin` is the temporal graph: memory items, entities, relations, evidence, domains, validity windows, confidence and status. Embeddings can make this graph easier to search, but the graph remains the authoritative representation of what the system knows.
+The canonical substrate of `twin` is the temporal graph: Narratives, entities, Relations, Evidence, domains, validity windows, EpistemicState and status. Embeddings can make this graph easier to search, but the graph remains the authoritative representation of what the system knows.
 
 This is both a technical and philosophical decision. The user must be able to delete every embedding, regenerate indexes with a different model and still preserve the cognitive substrate. Similarity is useful; truth requires structure, evidence and time.
 
-### Evidence before memory
+### Evidence before Narrative
 
-Every durable memory must point back to evidence. Evidence can be a source document, transcript segment, commit, issue, note, calendar event, message or explicit user confirmation. Without evidence, the system may hold a hypothesis, but it should not promote it to confirmed memory.
+Every durable Narrative must point back to evidence. Evidence can be a source document, transcript segment, commit, issue, note, calendar event, message or explicit user confirmation. Without evidence, the system may hold an Interpretation, but it should not promote it to a committed Narrative.
 
-Evidence is what makes the system inspectable. It lets the user correct bad extraction, distinguish fact from interpretation and understand why a future LLM received a particular context pack. It also gives implementers a defense against silent hallucinated memory.
+Evidence is what makes the system inspectable. It lets the user correct bad extraction, distinguish fact from interpretation and understand why a future LLM received a particular context pack. It also gives implementers a defense against silent hallucinated accounts.
 
 This principle does not mean all evidence must be exposed to every tool. Evidence has its own sensitivity and domain. But the link must exist inside the local system so the user can audit, export, revise or delete it.
 
-### Memory evolves
+### Narratives evolve
 
-`twin` is an evolving cognitive model, not a static database. It is expected to change continuously as projects, preferences, constraints, relationships and beliefs change. Static memories are a bug when they pretend old context is still current.
+`twin` is an evolving cognitive model, not a static database. It is expected to change continuously as projects, preferences, constraints, relationships and beliefs change. Static accounts are a bug when they pretend old context is still current.
 
-Memories should carry temporal validity through dates, conditions, supersedence or review triggers. A newer memory may replace or narrow an older one without deleting history. The system should preserve what used to be true while making clear what is true now.
+Narratives carry EpistemicState (fresh / stale / superseded / tombstoned) and may be revised, branched or superseded without deleting history. The system should preserve what used to be true while making clear what is true now.
 
 This protects the user from stale personalization. A tool that remembers the user well today but keeps applying years-old preferences without context is not intelligent; it is outdated with confidence.
 
@@ -391,35 +419,35 @@ A session is where context, intention, evidence and interpretation meet. It may 
 
 This prevents the system from overreacting to isolated sentences. A single utterance may be exploratory, emotional or provisional. A session gives enough surrounding context to understand whether something was a decision, a rejected option, a preference, a temporary constraint or just brainstorming.
 
-Session-based change also improves auditability. Instead of asking "why does the system believe this?", the user can inspect which session produced the candidate memory or judgment update, what evidence was present and whether the conclusion still holds.
+Session-based change also improves auditability. Instead of asking "why does the system believe this?", the user can inspect which session produced the candidate Interpretation or Stance draft, what evidence was present and whether the conclusion still holds.
 
 ### Firewall before reasoning
 
-Privacy and domain separation must happen before reasoning, not after. The main LLM should receive only the memories that are allowed for the current target domain, persona, sensitivity level and task.
+Privacy and domain separation must happen before reasoning, not after. The main LLM should receive only the accounts that are allowed for the current target domain, persona, sensitivity level and task.
+
+Features that bypass the firewall for convenience are architectural regressions. The right flow is retrieval, classification, filtering, logging and then context packing. The LLM reasons over the safe pack, not over the raw substrate universe.
+
+### Stance evolves independently
+
+Narrative describes what happened, what was decided, what exists and what evidence supports it. Stance describes how the user tends to decide, prioritize, reject, approve or communicate. They are related, but they should not be collapsed into the same mechanism.
+
+A new Narrative can be committed without changing Stance. Conversely, Stance can evolve after many sessions reveal a stable pattern. The evolution paths are different, and Stance changes should usually require stronger evidence, aggregation across sessions or explicit human approval.
+
+This independence makes the system safer and more explainable. Narratives can be frequent; Stance should be conservative because it changes how future tools act on behalf of the user.
 
 This is one of the project's hard safety boundaries. Once sensitive context enters a model prompt, the leak has already happened. Even if the model behaves well, the system has lost the ability to prove that forbidden content was not considered. A firewall is therefore not a formatting layer; it is an access-control layer.
 
-Features that bypass the firewall for convenience are architectural regressions. The right flow is retrieval, classification, filtering, logging and then context packing. The LLM reasons over the safe pack, not over the raw memory universe.
-
-### Judgment evolves independently
-
-Memory describes what happened, what was decided, what exists and what evidence supports it. Judgment describes how the user tends to decide, prioritize, reject, approve or communicate. They are related, but they should not be collapsed into the same mechanism.
-
-A new memory can be added without changing judgment. Conversely, judgment can evolve after many sessions reveal a stable pattern. The evolution paths are different, and judgment changes should usually require stronger evidence, aggregation across sessions or explicit human approval.
-
-This independence makes the system safer and more explainable. Memory can be frequent; judgment should be conservative because it changes how future tools act on behalf of the user.
-
 ### Native integration where possible, MCP everywhere
 
-`twin` should integrate directly into a host application's UI when the host provides supported APIs, hooks or protocols. Native integration offers the best experience because it can surface memory and context within the tool the user is already using.
+`twin` should integrate directly into a host application's UI when the host provides supported APIs, hooks or protocols. Native integration offers the best experience because it can surface Narratives and context within the tool the user is already using.
 
-When native integration is not available, MCP remains the universal and interoperable interface for safely requesting memory, context and judgment. The two modes share the same cognitive core and data; native integration must not create a proprietary memory silo.
+When native integration is not available, MCP remains the universal and interoperable interface for safely requesting Narratives, packs and Stance. The two modes share the same cognitive core and data; native integration must not create a proprietary silo.
 
 This keeps the project aligned with its role as infrastructure. The goal is not to replace ChatGPT, Claude, Cursor or future interfaces, but to improve them through native integration where possible and MCP everywhere else.
 
 ### Exportability over lock-in
 
-The user must be able to leave. Exportability is not a nice-to-have; it is a moral and architectural requirement for a system that stores personal cognition. Memories, evidence, entities, relations, policies, judgment profiles and index metadata should be representable in formats that can be inspected and migrated.
+The user must be able to leave. Exportability is not a nice-to-have; it is a moral and architectural requirement for a system that stores personal cognition. Narratives, Evidence, entities, Relations, policies, Stance profiles and index metadata should be representable in formats that can be inspected and migrated.
 
 This protects the user from the project itself. If `twin` succeeds, it may become deeply integrated into the user's thinking and work. That makes lock-in especially dangerous. The more important the system becomes, the easier it must be to audit and exit.
 
@@ -432,42 +460,42 @@ The system should never jump directly from observation to autonomy. Each cogniti
 ```text
 observe
   ↓
-remember
+form accounts
   ↓
 understand
   ↓
-judge
+take Stance
   ↓
 suggest
   ↓
 act
 ```
 
-This principle defines the roadmap more clearly than a feature list. A reliable importer, memory schema, firewall, context pack and MCP tool are more valuable than an impressive but unsafe agent loop. The system should first remember accurately, filter safely and explain itself clearly.
+This principle defines the roadmap more clearly than a feature list. A reliable importer, Narrative schema, firewall, context pack and MCP tool are more valuable than an impressive but unsafe agent loop. The system should first form accurate accounts, filter safely and explain itself clearly.
 
 Progressive cognition does not reduce the vision; it makes the vision survivable. Each version should create practical value while preserving the path toward deeper cognition and safer action.
 
 ### Local-first by default
 
-The default assumption is that personal memory, judgment, evidence and indexes live locally under user control. Cloud services may be useful for specific extraction, backup or collaboration flows, but they should not become mandatory for the core system to function.
+The default assumption is that personal Narratives, Stance, Evidence and indexes live locally under user control. Cloud services may be useful for specific extraction, backup or collaboration flows, but they should not become mandatory for the core system to function.
 
 Local-first is not nostalgia; it is a safety and agency requirement. The data in `twin` can contain private life context, third-party information, work constraints, health hints, relationship details and decision patterns. The user must be able to inspect it, back it up, delete it, move it and run the core system without asking a vendor for permission.
 
 This principle also improves longevity. A personal cognitive OS should outlive model providers, SaaS pricing changes and product shutdowns. Local data plus open export paths are what make that possible.
 
-### Human approval for durable judgment
+### Human approval for durable Stance
 
-Judgment changes affect future behavior. They can change what the system recommends, blocks, prioritizes, summarizes or exposes. For that reason, durable changes to judgment should require explicit human approval or a conservative review workflow.
+Stance changes affect future behavior. They can change what the system recommends, blocks, prioritizes, summarizes or exposes. For that reason, durable changes to Stance should require explicit human approval or a conservative review workflow.
 
-The system may propose judgment updates. It may notice repeated patterns, contradictions or stable preferences. But proposing is different from deciding. A user saying "this project is messy" during a frustrating session should not automatically become a durable belief that the user hates complexity everywhere.
+The system may propose Stance updates. It may notice repeated patterns, contradictions or stable preferences. But proposing is different from deciding. A user saying "this project is messy" during a frustrating session should not automatically become a durable belief that the user hates complexity everywhere.
 
 This principle preserves agency. `twin` can learn with the user, but it should not silently rewrite the user's values, boundaries or decision model.
 
-### Memory exists to improve future action
+### Narratives exist to improve future action
 
-Memory is not archival for its own sake. `twin` remembers because future thinking, decisions and actions can become better when the right context is available at the right moment.
+Narrative is not archival for its own sake. `twin` keeps accounts because future thinking, decisions and actions can become better when the right context is available at the right moment.
 
-Action does not need to mean autonomous execution. It can mean a better answer, a safer refusal, a more relevant suggestion, a draft, a reminder, a question for clarification or silence. The point is that memory should eventually reduce cognitive latency: the time between a thought and the information required to continue that thought.
+Action does not need to mean autonomous execution. It can mean a better answer, a safer refusal, a more relevant suggestion, a draft, a reminder, a question for clarification or silence. The point is that durable substrate should eventually reduce cognitive latency: the time between a thought and the information required to continue that thought.
 
 Reducing cognitive latency is one of `twin`'s primary goals. The system should make relevant context feel close to thought without sacrificing evidence, privacy or user control.
 
@@ -479,15 +507,15 @@ Preferences that should win when choices conflict:
 local-first > cloud-first
 cognitive interpretation > lexical classification
 deferred understanding > simulated understanding
-structured memory > raw text
-explicit judgment > implicit imitation
+structured Narrative > raw text
+explicit Stance > implicit imitation
 temporal graph > infinite markdown
 vectors as index > vectors as truth
 MCP > mandatory own UI
 deterministic governance > policy delegated to the LLM
 firewall before the LLM > trusting the LLM
 selective review > total manual curation
-mandatory evidence > sourceless memory
+mandatory evidence > sourceless account
 exportability > lock-in
 ```
 
@@ -501,7 +529,7 @@ Everything lives in `~/.twin` or `$TWIN_HOME`:
 
 - SQLite;
 - policies YAML;
-- judgment YAML;
+- Stance YAML bootstrap (`judgment.yaml` filename until package migration);
 - exportable data;
 - simple backups.
 
@@ -509,29 +537,31 @@ Backup = copy the folder.
 
 Full export = `twin export`.
 
-### Storage behind MemoryStore
+### Storage behind the store facade
 
-Canonical memory lives behind a single interface (`MemoryStore`).
+Canonical substrate lives behind a single store interface (today
+`MemoryStore` in `twin/memory/`; target package **`store`**).
 **PostgreSQL + pgvector** is the primary backend (server-side vector
 search, tsvector/GIN for full-text, JSONB). **SQLite** remains the
 zero-config backend for local/dev use. The logical model includes
-sources, memories, evidence, entities, relations, embeddings,
-firewall logs and full-text indexes — regardless of backend.
+sources, Narratives (and dual-read rows during migration), Evidence,
+entities, Relations, embeddings, firewall logs and full-text indexes —
+regardless of backend.
 
 Alternative graph stores (Neo4j, FalkorDB, Graphiti, …) may replace the
-engine later, but the canonical memory must remain exportable.
+engine later, but the canonical substrate must remain exportable.
 
-### Vectors as index, not as memory
+### Vectors as index, not as substrate
 
-Embeddings are useful for semantic search, but they are not the true memory.
+Embeddings are useful for semantic search, but they are not the true substrate.
 
 Project rule:
 
 ```text
-graph + events + evidence = canonical memory
+graph + Narratives + Evidence = canonical substrate
 vectors = regenerable index
-LLM = extractor/interpreter
-MCP = interface
+LLM = extractor/interpreter (Cognize)
+MCP / Native = interface
 ```
 
 This avoids lock-in and allows reindexing in the future.
@@ -553,13 +583,19 @@ The project must not depend on its own UI. Prefer **native** when a client can b
 
 ## Data model
 
-### Memory Item
+Product units are **Narrative**, **Stance**, **Evidence**, **Relation**,
+**Situation**, **Reflection**, **Interpretation** ([GLOSSARY.md](GLOSSARY.md) ·
+[COGNIZE.md](COGNIZE.md)). The `StoreClaim` shape below is the **dual-read /
+legacy row** still served by today’s store during migration — not the product
+noun.
 
-A memory item must contain:
+### StoreClaim (dual-read row)
+
+A store claim row must contain:
 
 ```json
 {
-  "id": "mem_...",
+  "id": "clm_...",
   "type": "event | fact | decision | preference | belief | task | procedure | relationship | communication_act | constraint",
   "title": "...",
   "summary": "...",
@@ -597,13 +633,13 @@ A memory item must contain:
 
 Every memory must carry evidence, preferably a verbatim excerpt from the source.
 
-Without evidence, a memory is suspect.
+Without evidence, a claim is suspect.
 
-This reduces memory hallucination and enables human review.
+This reduces hallucinated accounts and enables human review.
 
 ### Temporality
 
-Memories must have temporal validity.
+Narratives and claims must have temporal validity.
 
 Example:
 
@@ -724,9 +760,9 @@ contradict, defer, archive and request_more_evidence.
 
 ## Evolving judgment model
 
-Memories say **what happened**.
+Narratives say **what happened**.
 
-Judgment says **how the user thinks** — preferences, beliefs, principles, values, heuristics and hard constraints.
+Stances say **how the user thinks** — preferences, beliefs, principles, values, heuristics and hard constraints.
 
 YAML under `~/.twin/judgment.yaml` remains bootstrap and export. The operational source of truth is the judgment store (SQLite/PostgreSQL): immutable revisions, versioned composition, proposals and snapshots.
 
@@ -792,7 +828,7 @@ Desired format:
   "inferred_domain": "technical",
   "suggested_context": [
     {
-      "memory_id": "mem_...",
+      "claim_id": "mem_...",
       "summary": "...",
       "why_relevant": "semantic similarity + entity match",
       "confidence": 0.87,
@@ -801,7 +837,7 @@ Desired format:
   ],
   "blocked_context": [
     {
-      "memory_id": "mem_...",
+      "claim_id": "mem_...",
       "reason": "relationship_not_allowed_outside_own_domain"
     }
   ]
@@ -895,7 +931,7 @@ Local-first personal cognitive OS. Assets: memories, judgment, connector secrets
    Secrets in encrypted credential store (`credential_ref` only in DB). Least-privilege health warnings. Revoke is resumable and honest about residual secrets.
 
 4. **Silent corruption of confirmed cognition**  
-   Confirm requires evidence + human actor. Consolidation and session closure never confirm Memory/Judgment. Revision collisions go to DLQ, never overwrite.
+   Confirm requires evidence + human actor. Consolidation and session closure never auto-confirm Narratives/Stances. Revision collisions go to DLQ, never overwrite.
 
 5. **Runtime poison / stuck workers**  
    CAS claim, leases, DLQ for permanent errors; `model_unavailable` stays retryable (never DLQ). Vault isolation on claim.

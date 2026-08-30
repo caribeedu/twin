@@ -30,7 +30,7 @@ from twin.cognize.models import (
 )
 from twin.cognize.stale import mark_stale_for_new_percept
 from twin.config import Config
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 class CognizeStage(str, Enum):
@@ -54,6 +54,219 @@ STAGE_ORDER: list[CognizeStage] = [
     CognizeStage.narrative_revision,
     CognizeStage.evidence_audit,
 ]
+
+# Heuristic system prompts + expected completion size for Web/CLI token previews.
+# Not billed usage — rough chars÷4 estimates so operators can size a run.
+_STAGE_SYSTEM_EST: dict[CognizeStage, str] = {
+    CognizeStage.salience: (
+        'You gate cognitive work. Reply JSON: '
+        '{"keep_percept_ids":["..."],"drop_percept_ids":["..."],"rationale":"..."}'
+    ),
+    CognizeStage.situate: (
+        'Cluster percepts into one situation. JSON: '
+        '{"summary":"...","domain":"technical"}'
+    ),
+    CognizeStage.raise_reflections: (
+        'Raise the most important open question. JSON: '
+        '{"reflections":[{"text":"..."}]}'
+    ),
+    CognizeStage.form_interpretations: (
+        'Form competing explanations. JSON: '
+        '{"interpretations":[{"explanation":"...","evidence_percept_ids":["..."]}]}'
+    ),
+    CognizeStage.cross_reflections: (
+        "Relate reflections. JSON: "
+        '{"relations":[{"from_id":"...","to_id":"...","type":"related","rationale":"..."}]}'
+    ),
+    CognizeStage.cross_interpretations: (
+        "Relate interpretations. JSON: "
+        '{"relations":[{"from_id":"...","to_id":"...","type":"contradicts","rationale":"..."}]}'
+    ),
+    CognizeStage.narrative_revision: (
+        "Propose narrative revision decisions. JSON: "
+        '{"decision":"...","rationale":"...","evidence_percept_ids":["..."]}'
+    ),
+    CognizeStage.evidence_audit: (
+        "Audit evidence grounding. JSON: "
+        '{"relations":[{"from_id":"...","to_id":"...","type":"supports","rationale":"..."}]}'
+    ),
+}
+
+_STAGE_OUTPUT_EST: dict[CognizeStage, int] = {
+    CognizeStage.salience: 220,
+    CognizeStage.situate: 180,
+    CognizeStage.raise_reflections: 260,
+    CognizeStage.form_interpretations: 420,
+    CognizeStage.cross_reflections: 280,
+    CognizeStage.cross_interpretations: 280,
+    CognizeStage.narrative_revision: 240,
+    CognizeStage.evidence_audit: 260,
+}
+
+
+def _approx_tokens(text: str) -> int:
+    return max(1, (len(text) + 3) // 4)
+
+
+def plan_cognize(
+    store: Any,
+    cfg: Config,
+    *,
+    limit: int = 50,
+    vault_id: Optional[str] = None,
+    percept_ids: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """Pending items + per-stage token/cost estimates (no LLM calls).
+
+    One Cognize run processes up to ``limit`` percepts through stages 0–7.
+    Clearing a larger queue takes multiple runs; ``queue_totals`` scales the
+    batch estimate by ``runs_to_clear``.
+    """
+    import math
+    import os
+
+    from twin.cognize.gate import require_chat_llm
+    from twin.llm import llm_available
+    from twin.llm.usage import estimate_cost
+
+    vault = vault_id or "default"
+    batch_limit = max(1, int(limit or 50))
+    try:
+        reachable = llm_available(cfg)
+    except Exception:
+        reachable = False
+    gate = require_chat_llm(
+        extractor=cfg.extractor,
+        chat_provider=getattr(cfg, "normalized_llm_provider", "") or "",
+        chat_reachable=reachable,
+        allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
+    )
+
+    # Scan the full pending queue (capped), then take this Execute batch.
+    scan_cap = 5_000 if not percept_ids else batch_limit
+    scanned = _load_percepts(store, percept_ids, scan_cap)
+    if vault:
+        scanned = [
+            p for p in scanned
+            if str((p.metadata or {}).get("vault_id") or (p.metadata or {}).get("vault") or vault) == vault
+        ]
+    pending_total = len(scanned)
+    queue_truncated = (not percept_ids) and pending_total >= scan_cap
+    percepts = scanned[:batch_limit]
+
+    brief = _percept_brief(percepts)
+    # Later stages also send intermediate artefacts — pad input roughly (tokens).
+    stage_user_extra_tok = {
+        CognizeStage.raise_reflections: 40,
+        CognizeStage.form_interpretations: 120,
+        CognizeStage.cross_reflections: 140,
+        CognizeStage.cross_interpretations: 160,
+        CognizeStage.narrative_revision: 140,
+        CognizeStage.evidence_audit: 120,
+    }
+
+    stages: list[dict[str, Any]] = []
+    total_in = 0
+    total_out = 0
+    total_cost = 0.0
+    model = getattr(cfg, "resolved_llm_model", "") or ""
+    kind = ""
+    try:
+        kind = str(getattr(cfg, "llm_provider_kind", "") or "")
+    except Exception:
+        kind = ""
+    if not kind:
+        try:
+            kind = str(getattr(cfg, "normalized_llm_provider", "") or "")
+        except Exception:
+            kind = ""
+    home = getattr(cfg, "home", None)
+
+    any_priced = False
+    for stage in STAGE_ORDER:
+        system = _STAGE_SYSTEM_EST.get(stage, "")
+        user = f"Percepts:\n{brief}"
+        in_tok = (
+            _approx_tokens(system)
+            + _approx_tokens(user)
+            + int(stage_user_extra_tok.get(stage, 0))
+        )
+        out_tok = int(_STAGE_OUTPUT_EST.get(stage, 200))
+        # Price by model id even when kind is unknown (gateway / mislabeled provider).
+        cost, priced = estimate_cost(kind or "openai_compatible", model, in_tok, out_tok, home=home)
+        if priced:
+            any_priced = True
+        total_in += in_tok
+        total_out += out_tok
+        total_cost += cost
+        stages.append({
+            "stage": stage.value,
+            "label": stage.value.replace("_", " ").title(),
+            "input_tokens": in_tok,
+            "output_tokens_est": out_tok,
+            "total_tokens_est": in_tok + out_tok,
+            "cost_usd": cost,
+            "priced": priced,
+        })
+
+    items = []
+    for p in percepts:
+        body = (p.content or "").strip().replace("\n", " ")
+        title = body[:120] if body else p.id
+        items.append({
+            "id": p.id,
+            "title": title,
+            "source_sensor": p.source_sensor or "",
+            "href": f"#explore/percept/{p.id}",
+        })
+
+    runs_to_clear = math.ceil(pending_total / batch_limit) if pending_total else 0
+    total_cost_rounded = round(total_cost, 6)
+    queue_in = total_in * runs_to_clear
+    queue_out = total_out * runs_to_clear
+    queue_cost = round(total_cost * runs_to_clear, 6)
+
+    return {
+        "ok": True,
+        "vault_id": vault,
+        "gate_ok": gate.ok,
+        "halt_reason": gate.halt_reason.value if gate.halt_reason else None,
+        "detail": gate.detail,
+        "llm_reachable": reachable,
+        "model": model,
+        "provider_kind": kind,
+        "batch_limit": batch_limit,
+        "batch_count": len(items),
+        "pending_total": pending_total,
+        "queue_truncated": queue_truncated,
+        "runs_to_clear": runs_to_clear,
+        "item_count": len(items),
+        "items": items,
+        "stages": stages,
+        "totals": {
+            "scope": "batch",
+            "input_tokens": total_in,
+            "output_tokens_est": total_out,
+            "total_tokens_est": total_in + total_out,
+            "cost_usd": total_cost_rounded,
+            "priced": any_priced,
+        },
+        "queue_totals": {
+            "scope": "full_queue",
+            "runs": runs_to_clear,
+            "pending_total": pending_total,
+            "input_tokens": queue_in,
+            "output_tokens_est": queue_out,
+            "total_tokens_est": queue_in + queue_out,
+            "cost_usd": queue_cost,
+            "priced": any_priced,
+        },
+        "estimate_note": (
+            f"Heuristic chars÷4 · {model or 'model'}"
+            + (" · priced" if any_priced else " · cost unknown for this model")
+            + f" · one run = up to {batch_limit} items"
+        ),
+    }
 
 
 class StageRunStatus(str, Enum):
@@ -150,7 +363,7 @@ def _load_percepts(store: Any, percept_ids: Optional[list[str]], limit: int) -> 
                 out.append(p)
         return out
     if hasattr(store, "percepts_pending_interpretation"):
-        from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+        from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
 
         return store.percepts_pending_interpretation(
             max_attempts=MAX_INTERPRETATION_ATTEMPTS,
@@ -166,6 +379,67 @@ def _percept_brief(percepts: list[Percept], limit: int = 8) -> str:
     return "\n".join(lines)
 
 
+def _ctx_entity_ids(ctx: dict[str, Any]) -> dict[str, list[str]]:
+    return {
+        "situation_ids": [ctx["situation"].id] if ctx.get("situation") else [],
+        "reflection_ids": [r.id for r in (ctx.get("reflections") or [])],
+        "interpretation_ids": [r.id for r in (ctx.get("interpretations") or [])],
+        "relation_ids": [r.id for r in (ctx.get("relations") or [])],
+        "revision_ids": [ctx["revision"].id] if ctx.get("revision") else [],
+        "stale_narrative_ids": list(ctx.get("stale_narrative_ids") or []),
+    }
+
+
+def _progress_payload(
+    *,
+    stage: CognizeStage,
+    stage_index: int,
+    stage_total: int,
+    phase: str,
+    report: CognitionReport,
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Snapshot for runtime job.result.progress (and UI polling)."""
+    total = max(1, int(stage_total))
+    idx = max(0, min(int(stage_index), total))
+    if phase == "done":
+        percent = round(100.0 * min(idx + 1, total) / total, 1)
+    elif phase == "complete":
+        percent = 100.0
+    else:
+        percent = round(100.0 * idx / total, 1)
+    entities = _ctx_entity_ids(ctx)
+    # Fold ids already on the report (e.g. stale narratives marked before stages).
+    if report.stale_narrative_ids and not entities["stale_narrative_ids"]:
+        entities["stale_narrative_ids"] = list(report.stale_narrative_ids)
+    counts = {
+        "situations": len(entities["situation_ids"]),
+        "reflections": len(entities["reflection_ids"]),
+        "interpretations": len(entities["interpretation_ids"]),
+        "relations": len(entities["relation_ids"]),
+        "revisions": len(entities["revision_ids"]),
+        "stale_narratives": len(entities["stale_narrative_ids"]),
+    }
+    return {
+        "phase": phase,
+        "stage": stage.value,
+        "label": stage.value.replace("_", " ").title(),
+        "stage_index": idx,
+        "stage_total": total,
+        "percent": percent,
+        "stages_done": [
+            {
+                "stage": s.stage.value,
+                "status": s.status.value,
+                "counts": dict(s.counts),
+            }
+            for s in report.stages
+        ],
+        "counts": counts,
+        "entities": entities,
+    }
+
+
 def run_cognize(
     store: Any,
     cfg: Config,
@@ -176,15 +450,28 @@ def run_cognize(
     limit: int = 50,
     vault_id: Optional[str] = None,
     chat_reachable: Optional[bool] = None,
+    on_progress: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> CognitionReport:
-    """Run Cognize stages 0–7. Never commits Narratives."""
+    """Run Cognize stages 0–7. Never commits Narratives.
+
+    ``on_progress`` receives a dict after each stage start/finish (and once at
+    completion) so runtime jobs can expose live percent / entity ids.
+    """
     allow_echo = os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1"
     has_overrides = bool(_OVERRIDES)
+
+    def _emit(payload: dict[str, Any]) -> None:
+        if on_progress is None:
+            return
+        try:
+            on_progress(payload)
+        except Exception:
+            pass
 
     reachable = chat_reachable
     if reachable is None and not has_overrides:
         try:
-            from twin.cognition.llm import llm_available
+            from twin.llm import llm_available
 
             reachable = llm_available(cfg)
         except Exception:
@@ -241,7 +528,7 @@ def run_cognize(
 
     llm = None
     if not has_overrides:
-        from twin.cognition.llm import get_chat_client
+        from twin.llm import get_chat_client
 
         llm = get_chat_client(cfg)
 
@@ -260,6 +547,8 @@ def run_cognize(
     }
 
     stop_at = _until_index(until)
+    stage_total = stop_at + 1
+    ctx["stale_narrative_ids"] = list(report.stale_narrative_ids)
     try:
         for i, stage in enumerate(STAGE_ORDER):
             if i > stop_at:
@@ -271,8 +560,28 @@ def run_cognize(
                     )
                 )
                 continue
+            _emit(
+                _progress_payload(
+                    stage=stage,
+                    stage_index=i,
+                    stage_total=stage_total,
+                    phase="running",
+                    report=report,
+                    ctx=ctx,
+                )
+            )
             result = _run_stage(store, cfg, stage, ctx, dry_run=dry_run)
             report.stages.append(result)
+            _emit(
+                _progress_payload(
+                    stage=stage,
+                    stage_index=i,
+                    stage_total=stage_total,
+                    phase="done",
+                    report=report,
+                    ctx=ctx,
+                )
+            )
             if result.status is StageRunStatus.halted:
                 report.ok = False
                 report.halted = True
@@ -298,6 +607,16 @@ def run_cognize(
             (report.detail + "; " if report.detail else "")
             + f"ungrounded_dropped={ctx['ungrounded_dropped']}"
         )
+    _emit(
+        _progress_payload(
+            stage=STAGE_ORDER[min(stop_at, len(STAGE_ORDER) - 1)],
+            stage_index=stage_total - 1,
+            stage_total=stage_total,
+            phase="complete",
+            report=report,
+            ctx=ctx,
+        )
+    )
     _persist_run(store, vault, report)
     return report
 
@@ -331,12 +650,21 @@ def _run_stage(
     return _llm_stage(store, cfg, stage, ctx, dry_run=dry_run)
 
 
+_OPEN_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": True,
+}
+
+
 def _llm_json(ctx: dict[str, Any], system: str, user: str) -> dict[str, Any]:
     llm = ctx.get("llm")
     if llm is None:
         raise RuntimeError("chat LLM unavailable for Cognize stage")
     return llm.complete_json(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        system=system,
+        user=user,
+        schema=_OPEN_JSON_SCHEMA,
     )
 
 

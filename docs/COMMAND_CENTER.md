@@ -1,36 +1,30 @@
 # Command Center
 
-Operator TUI for Twin — Sense → Cognize → Inject — launched by bare `twin`
-on a TTY.
+Operator TUI for Twin process supervision — launched by bare `twin` on a TTY.
 
 Non-TTY (`echo | twin`, CI, pipes): prints concise help and exits; never
 enters the TUI.
 
-## Screens (MVP)
+Cognition browse, review, jobs, and inject live in the
+[Web Command Center](WEB_CENTER.md) (`twin serve`) and scripted CLI — not
+in this TUI.
 
-| Key | Screen | Role |
-|---|---|---|
-| Home | status | doctor summary, serve/runtime state, backlog, open Reflections |
-| `s` | Services | start/stop supervised `twin serve` + `twin runtime`; shows serve URL |
-| `c` | Connectors | list + **test / pause / resume** (revoke stays CLI-confirmed) |
-| `j` | Jobs | queue depth; enqueue `cognize_batch` / `consolidate_daily` / `backfill_partition`; backfill progress |
-| `g` | Cognize | halt reason + open reflections; **Run cognize** via shared handler |
-| `r` | Review | backlog + open Reflections + Fade recommendations + workbench URL |
-| `n` | Narratives | list with epistemic status / grain |
-| `t` | Stance | list + approve pending proposal (preview token) |
-| `m` | MCP | client env + narrative/stance tool names |
-| `/` | Palette | fuzzy over Cognize / Narrative / Stance / Inject verbs |
+## Single screen
 
-Screens call `twin.interfaces.center.actions` — same store/CLI functions, no duplicated logic.
+One layout — no bottom bar, no screen switching:
 
-Web visibility cockpit (single route, all Cognize entities): [WEB_CENTER.md](WEB_CENTER.md).
+| Region | Role |
+|---|---|
+| **Health** | Doctor summary + checks in one section (LLM / extractor / embedder / home + warnings) |
+| **Services** | Start/stop supervised **web** (`twin serve`) and `twin runtime`; logs — controls inside the Services box |
+| **MCP** (right rail) | Per-provider install status (Cursor / Claude Code / Claude Desktop) + preferred tools |
 
-## Exit
-
-`q` prompts: **Yes — stop** supervised children · **Leave running** · **Cancel**.
+`q` quits (prompt: **Yes — stop** supervised children · **Leave running** · **Cancel**).
 
 ## Notes
 
-- Does not embed Cognize LLM work in the TUI process — triggers jobs / CLI.
-- Primary labels use Cognize / Narrative / Stance (no “Memory” screen title).
-- See [CLI.md](CLI.md), [ARCHITECTURE.md](ARCHITECTURE.md).
+- On launch, auto-starts supervised `twin serve` and `twin runtime` when they
+  are not already running (port listen / existing worker). Existing processes
+  are left alone (attached for status).
+- Does not embed Cognize LLM work in the TUI process.
+- See [CLI.md](CLI.md), [WEB_CENTER.md](WEB_CENTER.md), [ARCHITECTURE.md](ARCHITECTURE.md).

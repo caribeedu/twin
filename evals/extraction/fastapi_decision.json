@@ -6,7 +6,7 @@
     "source_trust": 0.9
   },
   "expected": {
-    "memories": [
+    "claims": [
       {
         "type": "decision",
         "canonical_claim": "FastAPI",

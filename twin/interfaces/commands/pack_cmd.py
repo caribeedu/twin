@@ -6,7 +6,7 @@ from typing import Any
 
 
 def build_pack(ws, args) -> Any:
-    from twin.cognition.context_pack import build_context_pack
+    from twin.inject.context_pack import build_context_pack
     from twin.privacy.identity import ensure_local_identity, resolve_access
     from twin.privacy.yaml_io import bootstrap_policy_set
 
@@ -19,7 +19,7 @@ def build_pack(ws, args) -> Any:
         surface="cli",
         client="local-cli",
         persona=persona,
-        purpose=getattr(args, "purpose", None) or "memory_retrieval",
+        purpose=getattr(args, "purpose", None) or "context_retrieval",
         audience=getattr(args, "audience", None) or "self",
         requested_domains=[args.domain] if getattr(args, "domain", None) else [],
     )

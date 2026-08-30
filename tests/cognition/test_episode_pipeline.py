@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from twin.cognition import (
+from twin.cognize.services import (
     BrainStage,
     run_episode_cognition,
     set_reflect_override,
     set_stage_override,
 )
-from twin.cognition.episode_pipeline import STAGE_ORDER
-from twin.connectors.models import (
+from twin.cognize.services.episode_pipeline import STAGE_ORDER
+from twin.sense.connectors.models import (
     ConnectorInstance,
     ConnectorRecord,
     ConnectorStatus,
@@ -56,7 +56,7 @@ def _understand(phases, quotes, cfg):
 
 
 def _sqs_reflector(brief, cfg):
-    from twin.cognition.episode_reflect import TrajectoryClaim
+    from twin.cognize.services.episode_reflect import TrajectoryClaim
 
     if len(brief.phases) < 2:
         return []
@@ -160,7 +160,7 @@ def test_pipeline_consolidate_creates_candidates(store, cfg, embedder):
     )
     assert report.stages["hippocampus_consolidate"].status.value == "ok"
     assert report.candidate_ids
-    mem = store.get_memory(report.candidate_ids[0])
+    mem = store.get_claim(report.candidate_ids[0])
     assert mem is not None
     assert mem.status.value == "candidate"
 

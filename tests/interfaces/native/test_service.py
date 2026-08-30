@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 
 from twin import ids
-from twin.cognition.host_session import recommend_intervention
-from twin.cognition.sessions import start_session
+from twin.cognize.services.host_session import recommend_intervention
+from twin.cognize.services.sessions import start_session
 from twin.interfaces.native.claude_code import (
     OBSERVATION_PROFILES,
     MissingExternalSessionId,
@@ -26,9 +26,9 @@ from twin.interfaces.native.claude_code import (
 from twin.interfaces.native.events import HostCapabilities, HostEvent
 from twin.interfaces.native.redact import redact_text
 from twin.interfaces.native.service import NativeHostService
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.runtime.handlers import dispatch
-from twin.runtime.queue import RuntimeQueue
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType
+from twin.interfaces.runtime.handlers import dispatch
+from twin.interfaces.runtime.queue import RuntimeQueue
 
 
 def _drain_runtime_jobs(store, cfg, embedder, *, limit: int = 10) -> int:
@@ -417,7 +417,7 @@ def test_frozen_vault_on_binding(store, cfg, embedder):
 def test_is_unique_violation_narrow():
     import sqlite3
 
-    from twin.memory.store.host_binding_mixin import is_unique_violation
+    from twin.store.store.host_binding_mixin import is_unique_violation
 
     unique = sqlite3.IntegrityError("UNIQUE constraint failed: host_observed_events.event_id")
     assert is_unique_violation(unique)
@@ -448,7 +448,7 @@ def test_not_null_observed_event_not_silent_duplicate(store, cfg, embedder):
     """Integrity errors unrelated to unique must propagate, not become duplicates."""
     import sqlite3
 
-    from twin.memory.store.host_binding_mixin import is_unique_violation
+    from twin.store.store.host_binding_mixin import is_unique_violation
 
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
@@ -512,7 +512,7 @@ def test_fail_open_on_store_error(store, cfg, embedder):
 
 def test_no_confirmed_memory_delta(store, cfg, embedder):
     before = {
-        m.id for m in store.list_memories(limit=5000)
+        m.id for m in store.list_claims(limit=5000)
         if getattr(m.status, "value", m.status) == "confirmed"
     }
     svc = NativeHostService(store, cfg, embedder)
@@ -532,29 +532,29 @@ def test_no_confirmed_memory_delta(store, cfg, embedder):
         summary="Chose PostgreSQL.",
     ))
     after = {
-        m.id for m in store.list_memories(limit=5000)
+        m.id for m in store.list_claims(limit=5000)
         if getattr(m.status, "value", m.status) == "confirmed"
     }
     assert after - before == set()
 
 
 def test_intervention_is_heuristic_display_only(store, cfg, embedder):
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         title="Use PostgreSQL for Twin store",
         summary="We chose PostgreSQL instead of Neo4j for the primary store.",
         domain="technical",
         confidence=0.9,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     started = start_session(
         store, cfg, embedder, "Use PostgreSQL for Twin store",
         client="cli", domain="technical",
     )
-    if mem.id not in started.session.supplied_memory_ids:
-        started.session.supplied_memory_ids.append(mem.id)
+    if mem.id not in started.session.supplied_claim_ids:
+        started.session.supplied_claim_ids.append(mem.id)
         store.update_session(started.session)
     recs = recommend_intervention(
         store,
@@ -805,18 +805,18 @@ def test_claude_hooks_stdout_user_prompt_submit_pack():
 
 
 def _seed_confirmed_memory(store, embedder, *, title: str, summary: str, domain: str = "technical"):
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         domain=domain,
         title=title,
         summary=summary,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
         confidence=0.9,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name, embedder.embed(f"{title}\n{summary}"),
+        mem.id, "claim", embedder.name, embedder.embed(f"{title}\n{summary}"),
     )
     return mem
 
@@ -1029,7 +1029,7 @@ def test_user_message_pack_skipped_over_budget(store, cfg, embedder, monkeypatch
 
 def test_session_start_stamps_stable_host_instance(store, cfg, embedder):
     """host_instance is stable per (home, host, user) and never a raw path."""
-    from twin.cognition.host_session import host_instance_id
+    from twin.cognize.services.host_session import host_instance_id
 
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
@@ -1153,7 +1153,7 @@ def test_hot_path_user_message_never_calls_llm(store, cfg, embedder, monkeypatch
         calls["n"] += 1
         raise AssertionError("read_context must not run on native hot path")
 
-    monkeypatch.setattr("twin.cognition.observer.read_context", boom)
+    monkeypatch.setattr("twin.cognize.services.observer.read_context", boom)
     svc = NativeHostService(store, cfg, embedder)
     svc.handle(HostEvent(
         kind="session_start", host_type="claude-code",
@@ -1169,9 +1169,9 @@ def test_hot_path_user_message_never_calls_llm(store, cfg, embedder, monkeypatch
 
 
 def test_pending_context_pack_emitted_on_next_user_message(store, cfg, embedder, monkeypatch):
-    from twin.cognition.observer import ObserverReading
-    from twin.runtime.handlers import handle_session_domain_resolve
-    from twin.runtime.models import JobKind, RuntimeJob
+    from twin.cognize.services.observer import ObserverReading
+    from twin.interfaces.runtime.handlers import handle_session_domain_resolve
+    from twin.interfaces.runtime.models import JobKind, RuntimeJob
 
     svc = NativeHostService(store, cfg, embedder)
     start = svc.handle(HostEvent(
@@ -1187,7 +1187,7 @@ def test_pending_context_pack_emitted_on_next_user_message(store, cfg, embedder,
     ))
     assert msg.extras.get("domain_resolve_job_id")
     monkeypatch.setattr(
-        "twin.cognition.observer.read_context",
+        "twin.cognize.services.observer.read_context",
         lambda *_a, **_k: ObserverReading(
             domain="technical", task_profile="coding", mode="llm",
             confidences={"domain": 0.9, "task_profile": 0.8, "project": 0.0},
@@ -1283,7 +1283,7 @@ def test_pack_deadline_aborts_before_retrieve(store, cfg, embedder):
     """Deadline already past → PackDeadlineExceeded at before_retrieve."""
     import time
 
-    from twin.cognition.context_pack import PackDeadlineExceeded, build_context_pack
+    from twin.inject.context_pack import PackDeadlineExceeded, build_context_pack
 
     with pytest.raises(PackDeadlineExceeded) as exc:
         build_context_pack(

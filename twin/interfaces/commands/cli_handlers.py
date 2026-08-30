@@ -71,7 +71,7 @@ def _add_json_flag_tree(parser) -> None:
 
 def cmd_init(args) -> None:
     from twin.interfaces import ux
-    from .setup_wizard import run_setup_wizard
+    from twin.interfaces.setup_wizard import run_setup_wizard
 
     ws = Workspace(args.home)
     interactive = not getattr(args, "skip_setup", False)
@@ -143,7 +143,7 @@ def cmd_interpret(args) -> None:
     from collections import Counter
 
     from twin.interfaces import ux
-    from twin.cognition.interpreter import MAX_INTERPRETATION_ATTEMPTS
+    from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
 
     ws = Workspace(args.home)
     if args.interpret_command == "deferred":
@@ -227,8 +227,8 @@ def cmd_interpret(args) -> None:
 
 
 def cmd_review(args) -> None:
-    from twin.cognition.quality import analyze_candidates, review_queue
-    from twin.memory.models import MemoryStatus
+    from twin.cognize.services.quality import analyze_candidates, review_queue
+    from twin.store.models import ClaimStatus
     from twin.interfaces import ux
 
     ws = Workspace(args.home)
@@ -236,7 +236,7 @@ def cmd_review(args) -> None:
         reports = analyze_candidates(ws.store, ws.embedder)
         rows = [
             {
-                "memory_id": r.memory_id,
+                "claim_id": r.claim_id,
                 "priority": round(r.review_priority, 2),
                 "action": r.suggested_action.value,
                 "flags": list(r.quality_flags),
@@ -250,8 +250,8 @@ def cmd_review(args) -> None:
                 ux.print_ok("no candidates to analyze")
                 return
             ux.print_table(
-                ["memory", "priority", "action", "flags"],
-                [[r["memory_id"], f"{r['priority']:.2f}", r["action"],
+                ["claim", "priority", "action", "flags"],
+                [[r["claim_id"], f"{r['priority']:.2f}", r["action"],
                   ", ".join(r["flags"]) or "—"] for r in rows[:20]],
             )
             ux.print_ok(f"analyzed {len(rows)} candidate(s)")
@@ -282,8 +282,8 @@ def cmd_review(args) -> None:
         title="queue",
     )
     ux.print_legend([
-        ("a", "approve — confirm memory (enters retrieval / packs)"),
-        ("r", "reject — discard memory (never retrieved)"),
+        ("a", "approve — confirm claim (enters retrieval / packs)"),
+        ("r", "reject — discard claim (never retrieved)"),
         ("s", "skip — leave as candidate, move to next"),
         ("q", "quit — stop review, keep remaining candidates"),
     ], title="legend")
@@ -305,11 +305,11 @@ def cmd_review(args) -> None:
         ux.print_panel(body, title=f"{idx}/{len(queue)}")
         choice = ux.read_key("  [a]pprove [r]eject [s]kip [q]uit  ", allowed="arsq")
         if choice == "a":
-            ws.store.set_status(mem.id, MemoryStatus.confirmed)
+            ws.store.set_status(mem.id, ClaimStatus.confirmed)
             approved += 1
             ux.print_ok("approved")
         elif choice == "r":
-            ws.store.set_status(mem.id, MemoryStatus.rejected)
+            ws.store.set_status(mem.id, ClaimStatus.rejected)
             rejected += 1
             ux.print_err("rejected")
         elif choice == "q":
@@ -323,7 +323,7 @@ def cmd_review(args) -> None:
 
 def cmd_review_batch(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.batches import create_batch, get_batch
+    from twin.store.batches import create_batch, get_batch
 
     ws = Workspace(args.home)
     if args.batch_command == "create":
@@ -352,8 +352,8 @@ def cmd_review_batch(args) -> None:
         if batch is None:
             raise SystemExit(f"batch {args.batch_id} not found")
         upcoming = []
-        for mid in batch.memory_ids[batch.progress_reviewed:batch.progress_reviewed + 5]:
-            m = ws.store.get_memory(mid)
+        for mid in batch.claim_ids[batch.progress_reviewed:batch.progress_reviewed + 5]:
+            m = ws.store.get_claim(mid)
             if m:
                 upcoming.append({"id": m.id, "title": m.title})
         data = {
@@ -369,7 +369,7 @@ def cmd_review_batch(args) -> None:
             ])
             if upcoming:
                 ux.print_table(
-                    ["memory", "title"],
+                    ["claim", "title"],
                     [[u["id"], u["title"]] for u in upcoming],
                 )
             ux.print_next([("→", "twin review   — review candidates interactively")])
@@ -379,13 +379,13 @@ def cmd_review_batch(args) -> None:
 
 def _narrative_lifecycle(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import archive_memory, merge_memories, split_memory, undo_operation
+    from twin.store.lifecycle import archive_claim, merge_claims, split_claim, undo_operation
 
-    from twin.memory.provenance import memory_provenance
+    from twin.store.provenance import claim_provenance
 
     ws = Workspace(args.home)
     if args.narrative_command == "diff":
-        a, b = ws.store.get_memory(args.id_a), ws.store.get_memory(args.id_b)
+        a, b = ws.store.get_claim(args.id_a), ws.store.get_claim(args.id_b)
         if not a or not b:
             raise SystemExit("memory not found")
 
@@ -399,7 +399,7 @@ def _narrative_lifecycle(args) -> None:
             "b": {"id": b.id, "title": b.title, "summary": b.summary},
         }, pretty)
     elif args.narrative_command == "merge":
-        result = merge_memories(ws.store, args.ids, embedder=ws.embedder)
+        result = merge_claims(ws.store, args.ids, embedder=ws.embedder)
         merged = result.extras.get("merged_id")
 
         def pretty():
@@ -410,35 +410,35 @@ def _narrative_lifecycle(args) -> None:
         _emit(args, {"merged_id": merged, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "split":
         parts = [{"title": p, "summary": p} for p in args.parts]
-        result = split_memory(ws.store, args.memory_id, parts, embedder=ws.embedder)
+        result = split_claim(ws.store, args.claim_id, parts, embedder=ws.embedder)
         children = result.extras.get("children")
 
         def pretty():
             ux.print_rule("narrative split")
-            ux.print_ok(f"split {args.memory_id} → {children}")
+            ux.print_ok(f"split {args.claim_id} → {children}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
         _emit(args, {"children": children, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "provenance":
-        prov = memory_provenance(ws.store, args.memory_id)
+        prov = claim_provenance(ws.store, args.claim_id)
 
         def pretty():
-            ux.print_rule(f"provenance · {args.memory_id}")
+            ux.print_rule(f"provenance · {args.claim_id}")
             ux.print_panel(json.dumps(prov, indent=2, default=str), title="lineage")
 
         _emit(args, prov, pretty)
     elif args.narrative_command == "archive":
-        result = archive_memory(ws.store, args.memory_id)
+        result = archive_claim(ws.store, args.claim_id)
 
         def pretty():
             ux.print_rule("narrative archive")
-            ux.print_ok(f"archived {args.memory_id}")
+            ux.print_ok(f"archived {args.claim_id}")
             ux.print_dim(f"operation {result.operation_id} (undo with: twin undo {result.operation_id})")
 
-        _emit(args, {"archived": args.memory_id, "operation_id": result.operation_id}, pretty)
+        _emit(args, {"archived": args.claim_id, "operation_id": result.operation_id}, pretty)
     elif args.narrative_command == "unsupported":
         rows = [{"id": m.id, "title": m.title}
-                for m in ws.store.list_memories(status="unsupported", limit=200)]
+                for m in ws.store.list_claims(status="unsupported", limit=200)]
 
         def pretty():
             ux.print_rule("narrative · unsupported")
@@ -515,7 +515,7 @@ def cmd_eval(args) -> None:
 
 def cmd_source(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.calibration import load_calibration, source_report
+    from twin.store.calibration import load_calibration, source_report
 
     ws = Workspace(args.home)
     cal = load_calibration(ws.cfg.calibration_path)
@@ -531,7 +531,7 @@ def cmd_source(args) -> None:
 
 def cmd_retention(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.retention import apply_retention_policies
+    from twin.store.retention import apply_retention_policies
 
     ws = Workspace(args.home)
     dry = not getattr(args, "apply", False)
@@ -551,7 +551,7 @@ def cmd_retention(args) -> None:
 
 def cmd_delete_source(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.retention import delete_by_source_system
+    from twin.store.retention import delete_by_source_system
 
     ws = Workspace(args.home)
     dry = not getattr(args, "apply", False)
@@ -571,7 +571,7 @@ def cmd_delete_source(args) -> None:
 
 def cmd_undo(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import undo_operation
+    from twin.store.lifecycle import undo_operation
 
     ws = Workspace(args.home)
     out = undo_operation(ws.store, args.operation_id)
@@ -585,7 +585,7 @@ def cmd_undo(args) -> None:
 
 
 def cmd_search(args) -> None:
-    from twin.memory.search import search
+    from twin.store.search import search
     from twin.interfaces import ux
 
     ws = Workspace(args.home)
@@ -607,7 +607,7 @@ def cmd_search(args) -> None:
     else:
         ux.print_ok(f"{len(result.hits)} hit(s)")
         for i, h in enumerate(result.hits, start=1):
-            mem = h.memory
+            mem = h.claim
             body = (
                 f"{ux.score_bar(h.score)}  {h.why}\n"
                 f"[{mem.type.value}] {mem.domain} · {mem.status.value} · "
@@ -621,7 +621,7 @@ def cmd_search(args) -> None:
     if result.blocked:
         ux.print_warn(f"{len(result.blocked)} blocked by firewall")
         for b in result.blocked[:12]:
-            ux.print_dim(f"  {b.memory_id}: {b.rule} — {b.reason}")
+            ux.print_dim(f"  {b.claim_id}: {b.rule} — {b.reason}")
         if len(result.blocked) > 12:
             ux.print_dim(f"  … +{len(result.blocked) - 12} more")
 
@@ -665,7 +665,7 @@ def cmd_pack(args) -> None:
     if pack.sources:
         lines = []
         for src in pack.sources[:15]:
-            mid = src.get("memory_id") or src.get("id") or "?"
+            mid = src.get("claim_id") or src.get("id") or "?"
             title = src.get("title") or ""
             conf = src.get("confidence")
             why = src.get("why_relevant") or src.get("label") or ""
@@ -677,7 +677,7 @@ def cmd_pack(args) -> None:
         for b in pack.blocked[:8]:
             if isinstance(b, dict):
                 ux.print_dim(
-                    f"  {b.get('memory_id', '?')}: {b.get('rule', b.get('reason', ''))}"
+                    f"  {b.get('claim_id', '?')}: {b.get('rule', b.get('reason', ''))}"
                 )
             else:
                 ux.print_dim(f"  {b}")
@@ -686,7 +686,7 @@ def cmd_pack(args) -> None:
 
 def cmd_observe(args) -> None:
     from twin.interfaces import ux
-    from twin.cognition.observer import observe
+    from twin.cognize.services.observer import observe
 
     ws = Workspace(args.home)
     ux_domain = args.domain or "(inferred)"
@@ -716,7 +716,7 @@ def cmd_observe(args) -> None:
 
 def cmd_workspace(args) -> None:
     from twin.interfaces import ux
-    from twin.cognition.workspace import workspace_tick
+    from twin.cognize.services.workspace import workspace_tick
 
     ws = Workspace(args.home)
     if args.workspace_command != "tick":
@@ -746,7 +746,7 @@ def cmd_workspace(args) -> None:
 
 def cmd_consolidate(args) -> None:
     from twin.interfaces import ux
-    from twin.cognition.consolidation_cycle import run_consolidation_cycle
+    from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
 
     ws = Workspace(args.home)
     kind = args.consolidate_command
@@ -774,10 +774,10 @@ def cmd_consolidate(args) -> None:
 
 def cmd_runtime(args) -> None:
     from twin.interfaces import ux
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
-    from twin.runtime.scheduler import RuntimeScheduler
-    from twin.runtime.service import TwinRuntime
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.scheduler import RuntimeScheduler
+    from twin.interfaces.runtime.service import TwinRuntime
 
     ws = Workspace(args.home)
     cmd = args.runtime_command
@@ -960,21 +960,21 @@ def cmd_reindex(args) -> None:
 
 def cmd_promote(args) -> None:
     from twin.interfaces import ux
-    from twin.judgment.profile import promote_memory
+    from twin.cognize.stance_engine.profile import promote_claim
 
     ws = Workspace(args.home)
-    mem = ws.store.get_memory(args.memory_id)
+    mem = ws.store.get_claim(args.claim_id)
     if mem is None:
-        raise SystemExit(f"memory {args.memory_id} not found")
-    section = promote_memory(ws.cfg.judgment_path, mem, store=ws.store)
-    ws.store.update_memory(mem.id, payload={**mem.payload, "promoted_to_judgment": True})
+        raise SystemExit(f"memory {args.claim_id} not found")
+    section = promote_claim(ws.cfg.judgment_path, mem, store=ws.store)
+    ws.store.update_claim(mem.id, payload={**mem.payload, "promoted_to_judgment": True})
 
     def pretty():
         ux.print_rule("promote")
         ux.print_ok(f"promoted {mem.id} → {section}")
         ux.print_dim("pending human approval if a proposal was created")
 
-    _emit(args, {"memory_id": mem.id, "section": section}, pretty)
+    _emit(args, {"claim_id": mem.id, "section": section}, pretty)
 
 
 def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
@@ -1053,9 +1053,9 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     signed = preview.get("signed_payload") or {}
     metadata = proposal.get("metadata") or {}
     mem_count = (
-        signed.get("memory_count")
-        if signed.get("memory_count") is not None
-        else len(proposal.get("supporting_memory_ids") or [])
+        signed.get("claim_count")
+        if signed.get("claim_count") is not None
+        else len(proposal.get("supporting_claim_ids") or [])
     )
     independent = (
         signed.get("independent_sources")
@@ -1068,7 +1068,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     if support is None:
         support = independent if independent is not None else mem_count
     contra = proposal.get("contradiction_count") or len(
-        proposal.get("contradicting_memory_ids") or []
+        proposal.get("contradicting_claim_ids") or []
     )
     if independent is not None:
         support_line = f"{independent} independent source(s) · {mem_count} memories"
@@ -1096,7 +1096,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
     supporting = signed.get("supporting") or []
     if supporting:
         ux.print_table(
-            ["memory", "title", "sources"],
+            ["claim", "title", "sources"],
             [[
                 str(s.get("id") or "—"),
                 (str(s.get("title") or "")[:56]),
@@ -1104,7 +1104,7 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
             ] for s in supporting[:8]],
         )
     else:
-        mem_ids = list(prov.get("memory_ids") or proposal.get("supporting_memory_ids") or [])
+        mem_ids = list(prov.get("claim_ids") or proposal.get("supporting_claim_ids") or [])
         if mem_ids:
             ux.print_dim("from memories: " + ", ".join(mem_ids[:8])
                          + (" …" if len(mem_ids) > 8 else ""))
@@ -1124,14 +1124,14 @@ def _render_judgment_preview(preview: dict, proposal_id: str) -> None:
 
 def _stance_ops(args) -> None:
     from twin.interfaces import ux
-    from twin.judgment.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
-    from twin.judgment.proposals import (
+    from twin.cognize.stance_engine.conflicts import detect_behavior_conflicts, detect_judgment_conflicts, resolve_conflict
+    from twin.cognize.stance_engine.proposals import (
         approve_proposal, defer_proposal, preview_proposal, propose_from_episode,
-        propose_from_memory, propose_from_pattern, reject_proposal,
+        propose_from_claim, propose_from_pattern, reject_proposal,
     )
-    from twin.judgment.simulate import counterfactual, simulate
-    from twin.judgment.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
-    from twin.judgment.versions import active_items
+    from twin.cognize.stance_engine.simulate import counterfactual, simulate
+    from twin.cognize.stance_engine.yaml_io import apply_yaml_import, export_judgment_yaml, preview_yaml_import
+    from twin.cognize.stance_engine.versions import active_items
 
 
     ws = Workspace(args.home)
@@ -1247,8 +1247,8 @@ def _stance_ops(args) -> None:
 
         _emit(args, {"proposals": rows, "count": len(rows)}, pretty)
     elif cmd == "propose":
-        if args.from_memory:
-            p = propose_from_memory(ws.store, args.from_memory)
+        if args.from_claim:
+            p = propose_from_claim(ws.store, args.from_claim)
         else:
             props = propose_from_pattern(ws.store, domain=args.domain or "technical")
             if not props:
@@ -1408,12 +1408,12 @@ def cmd_privacy(args) -> None:
     elif cmd == "simulate":
         bootstrap_policy_set(ws.store)
         memories = []
-        for mid in args.memory or []:
-            m = ws.store.get_memory(mid)
+        for mid in args.claim or []:
+            m = ws.store.get_claim(mid)
             if m:
                 memories.append(m)
         if not memories:
-            memories = ws.store.list_memories(status="confirmed", limit=20)
+            memories = ws.store.list_claims(status="confirmed", limit=20)
         req = AccessRequest(
             principal_id=f"tool_{args.tool}",
             persona=args.persona,
@@ -1482,7 +1482,7 @@ def cmd_privacy(args) -> None:
 
 def _connector_adapter(ws, creds, connector_id: str):
     """Build a live adapter for discovery helpers (raises if not found)."""
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.registry import build_adapter
 
     inst = ws.store.get_connector_instance(connector_id)
     if inst is None:
@@ -1553,7 +1553,7 @@ def cmd_connector(args) -> None:
     import json as _json
 
     from twin.interfaces import ux
-    from twin.connectors import (
+    from twin.sense.connectors import (
         add_connector_instance,
         build_credential_store,
         connector_health,
@@ -1653,14 +1653,14 @@ def cmd_connector(args) -> None:
             ws.store.update_connector_instance(
                 args.connector_id, configuration=_json.loads(args.config))
         if args.secret:
-            from twin.connectors import set_credential
+            from twin.sense.connectors import set_credential
             set_credential(ws.store, creds, args.connector_id, args.secret)
         if getattr(args, "webhook_secret", None):
             inst = ws.store.get_connector_instance(args.connector_id)
             if inst and inst.connector_type == "slack":
-                from twin.connectors.slack.webhook import set_webhook_secret
+                from twin.sense.connectors.slack.webhook import set_webhook_secret
             else:
-                from twin.connectors.github.webhook import set_webhook_secret
+                from twin.sense.connectors.github.webhook import set_webhook_secret
             set_webhook_secret(ws.store, creds, args.connector_id,
                                args.webhook_secret)
         inst = ws.store.get_connector_instance(args.connector_id)
@@ -1818,7 +1818,7 @@ def cmd_connector(args) -> None:
         if getattr(args, "run_partition", False):
             if not args.job_id:
                 raise SystemExit("--run-partition requires --job-id")
-            from twin.connectors import run_backfill_partition
+            from twin.sense.connectors import run_backfill_partition
             out = run_backfill_partition(
                 ws.store, creds, args.job_id,
                 emit_percepts=not getattr(args, "no_percepts", False),
@@ -1845,8 +1845,8 @@ def cmd_connector(args) -> None:
             _emit(args, out, pretty)
             return
         if getattr(args, "run", False):
-            from twin.runtime.backfill_sched import enqueue_backfill_partition_jobs
-            from twin.runtime.queue import RuntimeQueue
+            from twin.interfaces.runtime.backfill_sched import enqueue_backfill_partition_jobs
+            from twin.interfaces.runtime.queue import RuntimeQueue
 
             job_id = getattr(args, "job_id", None)
             if not job_id:
@@ -1903,7 +1903,7 @@ def cmd_connector(args) -> None:
         if getattr(args, "cancel", False):
             if not args.job_id:
                 raise SystemExit("--cancel requires --job-id")
-            from twin.connectors import cancel_backfill_job
+            from twin.sense.connectors import cancel_backfill_job
             job = cancel_backfill_job(ws.store, args.job_id)
             data = {"job": job.id, "status": job.status.value}
 
@@ -1919,7 +1919,7 @@ def cmd_connector(args) -> None:
             _emit(args, data, pretty)
             return
         if getattr(args, "create", False):
-            from twin.connectors import create_backfill_job
+            from twin.sense.connectors import create_backfill_job
             job = create_backfill_job(ws.store, creds, args.connector_id)
             total = (job.progress or {}).get("total_partitions")
             data = {"job": job.id, "status": job.status.value, "partitions": total}
@@ -1975,7 +1975,7 @@ def cmd_connector(args) -> None:
                 "BackfillJob, --jobs to list, --run to watch runtime drain, "
                 "or --run-partition --job-id ID for one-shot debug "
                 "(previewing never ingests)")
-        from twin.connectors import backfill_preview
+        from twin.sense.connectors import backfill_preview
         preview = backfill_preview(ws.store, creds, args.connector_id,
                                    principal_id="principal_local_cli")
 
@@ -2067,7 +2067,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, {"dead_letters": rows}, pretty)
     elif cmd == "replay":
-        from twin.connectors import retry_dead_letter
+        from twin.sense.connectors import retry_dead_letter
         dlq = retry_dead_letter(ws.store, creds, args.dead_letter_id)
         data = {"id": dlq.id, "status": dlq.status.value, "attempts": dlq.attempts,
                 "last_error": dlq.last_error}
@@ -2103,7 +2103,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, {"deletion_events": rows}, pretty)
     elif cmd == "setup":
-        from twin.connectors import plan_connector_setup
+        from twin.sense.connectors import plan_connector_setup
         plan = plan_connector_setup(
             ws.store,
             connector_type=args.connector_type,
@@ -2160,7 +2160,7 @@ def cmd_connector(args) -> None:
         if not plan.get("ok"):
             raise SystemExit(1)
     elif cmd == "due":
-        from twin.connectors import list_due_connectors
+        from twin.sense.connectors import list_due_connectors
         due = list_due_connectors(ws.store, ws.cfg.home)
 
         def pretty():
@@ -2180,7 +2180,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, due, pretty)
     elif cmd == "sync-due":
-        from twin.connectors import run_sync_due
+        from twin.sense.connectors import run_sync_due
         rows = run_sync_due(
             ws.store, creds, ws.cfg.home,
             emit_percepts=not getattr(args, "no_percepts", False),
@@ -2201,7 +2201,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, {"results": rows, "count": len(rows)}, pretty)
     elif cmd == "contract":
-        from twin.connectors import contract_matrix
+        from twin.sense.connectors import contract_matrix
         matrix = contract_matrix()
 
         def pretty():
@@ -2225,7 +2225,7 @@ def cmd_connector(args) -> None:
 
         _emit(args, matrix, pretty)
     elif cmd == "production-ready":
-        from twin.connectors import production_ready_adapters
+        from twin.sense.connectors import production_ready_adapters
         report = production_ready_adapters()
 
         def pretty():
@@ -2256,7 +2256,7 @@ def cmd_connector(args) -> None:
 
 def cmd_supersede(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import supersede
+    from twin.store.lifecycle import supersede
 
     ws = Workspace(args.home)
     result = supersede(ws.store, args.new_id, args.old_id)
@@ -2274,7 +2274,7 @@ def cmd_supersede(args) -> None:
 
 def cmd_contradict(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.lifecycle import contradict
+    from twin.store.lifecycle import contradict
 
     ws = Workspace(args.home)
     result = contradict(ws.store, args.id_a, args.id_b)
@@ -2292,7 +2292,7 @@ def cmd_contradict(args) -> None:
 
 def cmd_stats(args) -> None:
     from twin.interfaces import ux
-    from twin.memory.metrics import compute_metrics
+    from twin.store.metrics import compute_metrics
 
     ws = Workspace(args.home)
     metrics = compute_metrics(ws.store)
@@ -2313,13 +2313,13 @@ def cmd_stats(args) -> None:
 
 
 def cmd_serve(args) -> None:
-    from .api import main as serve_main
+    from twin.interfaces.api import main as serve_main
 
     serve_main(args.home, host=args.host, port=args.port)
 
 
 def cmd_mcp(args) -> None:
-    from .mcp_server import main as mcp_main
+    from twin.interfaces.mcp_server import main as mcp_main
 
     mcp_main(args.home)
 
@@ -2328,7 +2328,7 @@ def cmd_backup(args) -> None:
     from pathlib import Path
 
     from twin.interfaces import ux
-    from twin.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
+    from twin.interfaces.sovereignty.backup import create_backup, restore_sqlite_backup, validate_backup
 
     ws = Workspace(args.home)
     cmd = args.backup_command
@@ -2374,12 +2374,12 @@ def cmd_backup(args) -> None:
 
 def cmd_export(args) -> None:
     from twin.interfaces import ux
-    from twin.judgment.profile import load_profile
+    from twin.cognize.stance_engine.profile import load_profile
 
     ws = Workspace(args.home)
-    memories = ws.store.list_memories(limit=100000)
+    memories = ws.store.list_claims(limit=100000)
     data = {
-        "memories": [
+        "claims": [
             {
                 **m.model_dump(),
                 "type": m.type.value, "sensitivity": m.sensitivity.value,
@@ -2395,7 +2395,7 @@ def cmd_export(args) -> None:
     def pretty():
         ux.print_rule("export")
         ux.print_kv([
-            ("memories", str(len(data["memories"]))),
+            ("claims", str(len(data["claims"]))),
             ("entities", str(len(data["entities"]))),
         ])
         ux.print_warn("summary only — pipe with --json to capture the full dump")
@@ -2404,7 +2404,7 @@ def cmd_export(args) -> None:
 
 
 def cmd_session_start(args) -> None:
-    from twin.cognition.sessions import start_session
+    from twin.cognize.services.sessions import start_session
 
     ws = Workspace(args.home)
     started = start_session(
@@ -2422,13 +2422,13 @@ def cmd_session_start(args) -> None:
         print("  ⚠ domain unclassified — no context supplied (default-deny)."
               " Re-run with --domain work|technical|personal_preferences|"
               "assistant_preferences")
-    print(f"  supplied {len(ses.supplied_memory_ids)} memories"
+    print(f"  supplied {len(ses.supplied_claim_ids)} memories"
           f" ({ses.pack_chars // 4} tokens approx)\n")
     print(started.pack.context_pack or "(empty pack)")
 
 
 def cmd_session_observe(args) -> None:
-    from twin.cognition.sessions import observe_session
+    from twin.cognize.services.sessions import observe_session
 
     ws = Workspace(args.home)
     artifact = {"kind": args.kind}
@@ -2441,7 +2441,7 @@ def cmd_session_observe(args) -> None:
 
 
 def cmd_session_complete(args) -> None:
-    from twin.cognition.sessions import complete_session
+    from twin.cognize.services.sessions import complete_session
 
     ws = Workspace(args.home)
     # a summary typed at the CLI comes from the human: origin "user"
@@ -2453,23 +2453,23 @@ def cmd_session_complete(args) -> None:
     if ses.consolidation_error:
         print(f"  ⚠ consolidation failed: {ses.consolidation_error}")
         print("  retry with: twin session complete " + ses.id)
-    if ses.created_memory_ids:
-        print(f"  {len(ses.created_memory_ids)} candidate memories created"
+    if ses.created_claim_ids:
+        print(f"  {len(ses.created_claim_ids)} candidate memories created"
               f" — review with: twin review")
 
 
 def cmd_session_feedback(args) -> None:
-    from twin.cognition.sessions import record_feedback
+    from twin.cognize.services.sessions import record_feedback
 
     ws = Workspace(args.home)
     ses = record_feedback(ws.store, args.session_id, args.verdict,
-                          memory_id=args.memory, note=args.note or "",
+                          claim_id=args.claim, note=args.note or "",
                           scope=args.scope)
     print(f"session {ses.id}: feedback '{args.verdict}' recorded")
 
 
 def cmd_session_cleanup(args) -> None:
-    from twin.cognition.sessions import abandon_stale_sessions
+    from twin.cognize.services.sessions import abandon_stale_sessions
 
     ws = Workspace(args.home)
     abandoned = abandon_stale_sessions(ws.store, args.max_idle_hours)
@@ -2482,7 +2482,7 @@ def cmd_session_cleanup(args) -> None:
 def cmd_project(args) -> None:
     ws = Workspace(args.home)
     if args.project_command == "add":
-        from twin.cognition.sessions import ensure_project
+        from twin.cognize.services.sessions import ensure_project
 
         # idempotent: repos/aliases merge into an existing project
         project = ensure_project(ws.store, args.name,
@@ -2492,8 +2492,8 @@ def cmd_project(args) -> None:
             ws.store.update_project(project)
         print(f"{project.id}: {project.name} (repos: {', '.join(project.repos) or '—'})")
     elif args.project_command == "link":
-        from twin.cognition.correlation.projects import link_project
-        from twin.cognition.sessions import ensure_project
+        from twin.cognize.services.correlation.projects import link_project
+        from twin.cognize.services.sessions import ensure_project
 
         project = ensure_project(ws.store, args.name)
         link = link_project(
@@ -2510,8 +2510,8 @@ def cmd_project(args) -> None:
             f"(status={status})"
         )
     elif args.project_command in ("reject", "historical", "confirm"):
-        from twin.cognition.correlation.projects import set_project_link_status
-        from twin.cognition.correlation.models import ProjectLinkStatus
+        from twin.cognize.services.correlation.projects import set_project_link_status
+        from twin.cognize.services.correlation.models import ProjectLinkStatus
 
         mapping = {
             "reject": ProjectLinkStatus.rejected,
@@ -2524,7 +2524,7 @@ def cmd_project(args) -> None:
         print(f"{link.id} status={link.status.value}")
     elif args.project_command == "explain":
         import json as _json
-        from twin.cognition.correlation.explain import explain_project_link
+        from twin.cognize.services.correlation.explain import explain_project_link
         print(_json.dumps(explain_project_link(ws.store, args.link_id),
                           indent=2, default=str))
     elif args.project_command == "links":
@@ -2540,7 +2540,7 @@ def cmd_project(args) -> None:
     else:
         for p in ws.store.list_projects():
             sessions = len(ws.store.list_sessions(project_id=p.id))
-            memories = len(ws.store.list_memories(project_id=p.id, limit=100000))
+            memories = len(ws.store.list_claims(project_id=p.id, limit=100000))
             print(f"{p.id}  {p.name} [{p.status}]"
                   f" — {memories} memories, {sessions} sessions,"
                   f" repos: {', '.join(p.repos) or '—'}")
@@ -2743,7 +2743,7 @@ def _clip(text: object, n: int = 28) -> str:
 
 def _stage_status_line(report) -> list[tuple[str, str]]:
     """KV rows summarizing each brain stage's status + counts."""
-    from twin.cognition.episode_pipeline import STAGE_ORDER
+    from twin.cognize.services.episode_pipeline import STAGE_ORDER
 
     rows: list[tuple[str, str]] = []
     for st in STAGE_ORDER:
@@ -3051,7 +3051,7 @@ def cmd_episode(args) -> None:
               pretty)
 
     elif cmd in ("confirm-edge", "reject-edge"):
-        from twin.cognition.correlation.edges import confirm_edge, reject_edge
+        from twin.cognize.services.correlation.edges import confirm_edge, reject_edge
 
         action = "confirm" if cmd == "confirm-edge" else "reject"
         ed = (confirm_edge if action == "confirm" else reject_edge)(
@@ -3079,7 +3079,7 @@ def cmd_episode(args) -> None:
         _emit(args, data, pretty)
 
     elif cmd == "reflect":
-        from twin.cognition.episode_reflect import reflect_episode
+        from twin.cognize.services.episode_reflect import reflect_episode
 
         ep = _require(args.episode_id)
         dry = bool(args.dry_run)
@@ -3127,7 +3127,7 @@ def cmd_episode(args) -> None:
                 ux.print_kv([
                     ("valid_from", claim.get("valid_from") or "—"),
                     ("action", marker),
-                    ("candidate", claim.get("memory_id") or "—"),
+                    ("candidate", claim.get("claim_id") or "—"),
                 ])
             if result.claims and not dry:
                 ux.print_next([
@@ -3139,7 +3139,7 @@ def cmd_episode(args) -> None:
         _emit(args, data, pretty)
 
     elif cmd == "explain":
-        from twin.cognition.correlation.explain import explain_episode
+        from twin.cognize.services.correlation.explain import explain_episode
 
         data = explain_episode(ws.store, args.episode_id)
         if data.get("error"):
@@ -3170,23 +3170,23 @@ def cmd_identity(args) -> None:
                 f"signals={','.join(link.signals)}"
             )
     elif args.identity_command == "confirm":
-        from twin.cognition.correlation.identity import confirm_identity_link
+        from twin.cognize.services.correlation.identity import confirm_identity_link
 
         link = confirm_identity_link(
             ws.store, args.link_id, entity_id=args.entity,
         )
         print(f"confirmed {link.id} status={link.status.value}")
     elif args.identity_command == "unconfirm":
-        from twin.cognition.correlation.identity import unconfirm_identity_link
+        from twin.cognize.services.correlation.identity import unconfirm_identity_link
         link = unconfirm_identity_link(ws.store, args.link_id)
         print(f"unconfirmed {link.id} status={link.status.value}")
     elif args.identity_command == "reject":
-        from twin.cognition.correlation.identity import reject_identity_link
+        from twin.cognize.services.correlation.identity import reject_identity_link
         link = reject_identity_link(ws.store, args.link_id)
         print(f"rejected {link.id} status={link.status.value}")
     elif args.identity_command == "why":
         import json as _json
-        from twin.cognition.correlation.explain import explain_identity_link
+        from twin.cognize.services.correlation.explain import explain_identity_link
         print(_json.dumps(explain_identity_link(ws.store, args.link_id),
                           indent=2, default=str))
     else:
@@ -3200,7 +3200,7 @@ def cmd_identity(args) -> None:
 def cmd_watch(args) -> None:
     import time
 
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
 
     ws = Workspace(args.home)
     print(f"watching {', '.join(args.paths)} every {args.interval}s (Ctrl+C to stop)")
@@ -3219,7 +3219,7 @@ def cmd_watch(args) -> None:
 
 def cmd_doctor(args) -> None:
     from twin.interfaces import ux
-    from .ops import doctor
+    from twin.interfaces.ops import doctor
 
     ws = Workspace(args.home)
     ux.print_rule("doctor")
@@ -3232,7 +3232,7 @@ def cmd_doctor(args) -> None:
     try:
         from datetime import datetime, timedelta, timezone
 
-        from twin.cognition.llm.usage import JsonlLedger, default_ledger_path, summarize
+        from twin.llm.usage import JsonlLedger, default_ledger_path, summarize
         _since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         _rows = JsonlLedger(default_ledger_path(ws.cfg.home)).read(since=_since)
         if _rows:
@@ -3308,7 +3308,7 @@ def cmd_usage(args) -> None:
     from datetime import datetime, timedelta, timezone
 
     from twin.interfaces import ux
-    from twin.cognition.llm.usage import JsonlLedger, default_ledger_path, summarize
+    from twin.llm.usage import JsonlLedger, default_ledger_path, summarize
 
     ws = Workspace(args.home)
     ledger = JsonlLedger(default_ledger_path(ws.cfg.home))
@@ -3418,7 +3418,7 @@ def cmd_usage(args) -> None:
 
 def cmd_setup(args) -> None:
     from twin.interfaces import ux
-    from .ops import setup_mcp, setup_ollama, setup_postgres
+    from twin.interfaces.ops import setup_mcp, setup_ollama, setup_postgres
 
     ws = Workspace(args.home)
     ux.print_rule(f"setup {args.target}")

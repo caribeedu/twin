@@ -1,7 +1,7 @@
 """Shared meeting model, speakers, and correlation helpers."""
 from __future__ import annotations
 
-from twin.connectors.meeting import (
+from twin.sense.connectors.meeting import (
     MeetingRecord,
     TranscriptSegment,
     correlation_fingerprint,
@@ -9,15 +9,15 @@ from twin.connectors.meeting import (
     records_from_meeting,
     revision_for_meeting,
 )
-from twin.connectors.meeting.normalize import (
+from twin.sense.connectors.meeting.normalize import (
     MAX_CHUNK_CHARS,
     revision_for_summary,
 )
-from twin.connectors.meeting.speakers import (
+from twin.sense.connectors.meeting.speakers import (
     ACTOR_PROMOTE_THRESHOLD,
     attach_speaker_ids,
 )
-from twin.connectors.calendar.normalize import (
+from twin.sense.connectors.calendar.normalize import (
     freebusy_projection,
     qualified_event_id,
     record_from_event,

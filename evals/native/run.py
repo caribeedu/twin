@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from twin.cognition.sessions import start_session
+from twin.cognize.services.sessions import start_session
 from twin.config import Config
 from twin.interfaces.native.claude_code import (
     MissingExternalSessionId,
@@ -15,15 +15,15 @@ from twin.interfaces.native.claude_code import (
 )
 from twin.interfaces.native.events import HostEvent
 from twin.interfaces.native.service import NativeHostService
-from twin.memory.embeddings import get_embedder
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.store.sqlite import SqliteStore
 
 CASES = Path(__file__).parent / "cases"
 
 
 def _confirmed_ids(store) -> set[str]:
     return {
-        m.id for m in store.list_memories(limit=5000)
+        m.id for m in store.list_claims(limit=5000)
         if getattr(m.status, "value", m.status) == "confirmed"
     }
 

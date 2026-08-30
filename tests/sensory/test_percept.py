@@ -5,10 +5,10 @@ from pathlib import Path
 
 from tests.paths import EXAMPLES
 
-from twin.sensory import sense_paths
-from twin.sensory.sensors.document import DocumentSensor
-from twin.sensory.sensors.meeting import MeetingSensor
-from twin.sensory.sensors.slack import SlackSensor
+from twin.sense.sensory import sense_paths
+from twin.sense.sensory.sensors.document import DocumentSensor
+from twin.sense.sensory.sensors.meeting import MeetingSensor
+from twin.sense.sensory.sensors.slack import SlackSensor
 
 PERCEPT_CONTRACT_FIELDS = {
     "id", "percept_type", "source_sensor", "occurred_at", "ingested_at",
@@ -99,7 +99,7 @@ def _git_repo(tmp_path):
 
 
 def test_git_sensor_emits_one_percept_per_commit(tmp_path):
-    from twin.sensory.sensors.git import GitSensor
+    from twin.sense.sensory.sensors.git import GitSensor
 
     repo = _git_repo(tmp_path)
     sensor = GitSensor()
@@ -121,7 +121,7 @@ def test_git_sensor_emits_one_percept_per_commit(tmp_path):
 
 
 def test_git_sensor_dedup_is_incremental(tmp_path, store):
-    from twin.sensory.sensors.git import GitSensor
+    from twin.sense.sensory.sensors.git import GitSensor
 
     repo = _git_repo(tmp_path)
     for p in GitSensor().sense(repo):
@@ -134,7 +134,7 @@ def test_git_sensor_dedup_is_incremental(tmp_path, store):
 def test_git_sensor_identity_distinguishes_same_basename(tmp_path, store):
     """Two unrelated repositories named 'atlas-api' must not dedupe into one
     — repository identity comes from the remote/toplevel, never the name."""
-    from twin.sensory.sensors.git import GitSensor, repository_identity
+    from twin.sense.sensory.sensors.git import GitSensor, repository_identity
 
     repo_a = _git_repo(tmp_path / "work")
     repo_b = _git_repo(tmp_path / "personal")
@@ -151,7 +151,7 @@ def test_git_sensor_identity_distinguishes_same_basename(tmp_path, store):
 def test_git_sensor_identity_prefers_remote(tmp_path):
     import subprocess
 
-    from twin.sensory.sensors.git import repository_identity
+    from twin.sense.sensory.sensors.git import repository_identity
 
     repo = _git_repo(tmp_path)
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",

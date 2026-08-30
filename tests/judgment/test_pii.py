@@ -1,4 +1,4 @@
-from twin.judgment.pii import detect, mask
+from twin.privacy.pii import detect, mask
 
 
 def test_detects_email_and_masks():

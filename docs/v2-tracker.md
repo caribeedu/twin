@@ -63,15 +63,17 @@ A version ships only when **every required task** for that version is `done` and
 | **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals; research logging for surprise | T-051 T-052 · T-112 T-113 T-115 | Consolidation never auto-commits; fade/trace tests green; package `2.2.0` |
 | **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
 | **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): browse **all** Cognize entities with purpose-shaped UI; operator panes aligned with TUI Center; retire Memory-as-product UI | T-130–T-139 | Every §2.2 entity list+detail reachable; no Memory nav; REST contract tests green; package `2.4.0` (+ exit-criteria hardening in `2.4.1`) |
+| **v2.5** | Package walls | Code packages match Sense / Cognize / Inject (+ store, llm, privacy, interfaces); fold `cognition` → `cognize`; split `memory` / `judgment` by function; MCP names follow product vocabulary | T-140–T-149 | Import graph uses target packages; no product Memory/Judgment nouns in public surfaces; package `2.5.0` |
+| **v2.6** | Dual-read schema rename | Retire `MemoryItem` / `memory_id` dual-read names → `StoreClaim` / `claim_id`; migrate tables/columns; MCP `claim_*` only (no `memory_*` / `judgment_*` shims) | T-150–T-152 | Public store API uses claim vocabulary; store/tests/export green; package `2.6.0` |
 
 ### Completing this tracker ≠ ROADMAP v3 “Extended Brain”
 
-[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.4** completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + TUI Center + **Web Command Center**) and unblocks v3.
+[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.6** completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + TUI/Web Centers + package walls + **dual-read retirement**) and unblocks v3.
 
 ### Version dependency
 
 ```text
-v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web Command Center)
+v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package walls)  →  v2.6 (Dual-read schema)
 ```
 
 
@@ -116,6 +118,17 @@ v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web Command Center)
 - [x] T-135 T-136 T-137 T-138 T-139
 - [x] `__version__ = 2.4.0` + CHANGELOG + tag `v2.4.0`
 
+#### v2.5 — Package walls
+
+- [x] T-140 T-141 T-142 T-143 T-144
+- [x] T-145 T-146 T-147 T-148 T-149
+- [x] `__version__ = 2.5.0` + CHANGELOG (tag after merge approval)
+
+#### v2.6 — Dual-read schema rename
+
+- [x] T-150 T-151 T-152
+- [x] `__version__ = 2.6.0` + CHANGELOG (tag after merge approval)
+
 ---
 
 ## Engineering phase map (implementation order)
@@ -137,9 +150,11 @@ P10 MCP / REST / Review UI / Native pack surfaces
 P11 Experiments + evals (§9.3 priority)
 P12 Doc split (ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH) + README trim
 P13 Web Command Center — single-route entity visibility + operator panes
+P14 Package walls — sense / cognize / inject / store / llm / privacy / interfaces
+P15 Dual-read schema rename — MemoryItem → StoreClaim vocabulary
 ```
 
-Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must not claim “fresh Narratives” until P1+P6 exist. P13 starts after v2.3 ships.
+Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must not claim “fresh Narratives” until P1+P6 exist. P13 starts after v2.3 ships. P14 starts after v2.4 ships. P15 starts after v2.5 ships.
 
 ---
 
@@ -208,6 +223,19 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-137 | **v2.4** | P13 | Visual language — entity-coherent design system | done |
 | T-138 | **v2.4** | P13 | Docs: WEB_CENTER + REST/COMMAND_CENTER sync | done |
 | T-139 | **v2.4** | P13 | QA gate — entity routes, no Memory product UI | done |
+| T-140 | **v2.5** | P14 | Docs lock — package target layout + vocabulary | done |
+| T-141 | **v2.5** | P14 | `twin.sense` — connectors + sensory | done |
+| T-142 | **v2.5** | P14 | `twin.llm` — provider adapters | done |
+| T-143 | **v2.5** | P14 | `twin.store` — persistence facade (ex-memory data layer) | done |
+| T-144 | **v2.5** | P14 | `twin.inject` — packs + Observer slot | done |
+| T-145 | **v2.5** | P14 | Fold `twin.cognition` into `twin.cognize` | done |
+| T-146 | **v2.5** | P14 | Split `twin.judgment` → cognize Stance + privacy | done |
+| T-147 | **v2.5** | P14 | `privacy` owns Firewall / PII / guardrails | done |
+| T-148 | **v2.5** | P14 | `interfaces` absorbs runtime + sovereignty | done |
+| T-149 | **v2.5** | P14 | QA gate — imports, MCP names, package `2.5.0` | done |
+| T-150 | **v2.6** | P15 | Rename dual-read types (`MemoryItem` → store claim) | done |
+| T-151 | **v2.6** | P15 | Migrate store columns / FKs (`memory_id` → claim id) | done |
+| T-152 | **v2.6** | P15 | QA gate — API/MCP/export without Memory* product names | done |
 
 
 ---
@@ -242,7 +270,7 @@ Update `docs/GLOSSARY.md` and `docs/COGNITION.md` so the v2 entity names are can
 ### Assumptions
 
 - `docs/v2.md` remains authoritative; this task only mirrors settled naming.
-- Existing code still uses `MemoryItem` — docs may say “code still uses Memory* until T-014.”
+- Existing code still uses `MemoryItem` / store claim rows — docs may say “code still uses Memory* until T-014 / T-150.”
 - IDENTITY.md unit-of-value text may still say “understanding”; leave it unless it contradicts Narrative as durable product unit — if conflict, prefer v2 §0− and note the IDENTITY update in T-121.
 
 ### Expected QA
@@ -384,7 +412,7 @@ Provide JSON-schema export or pydantic `.model_json_schema()` used by LLM stage 
 - [x] Types importable; unit tests construct valid and reject invalid Relation types.
 - [x] `NarrativeRevisionDecision.outcome` enum matches `integrate \| branch \| contradict \| supersede \| keep_separate \| defer`.
 - [x] Docstrings cite `docs/v2.md` §2.2 / §10.
-- [x] No `MemoryItem` subclass pretending to be Narrative without an explicit `LegacyMemoryAdapter` name.
+- [x] No `MemoryItem` / `StoreClaim` subclass pretending to be Narrative without an explicit `LegacyMemoryAdapter` name.
 
 ### Assumptions
 
@@ -546,7 +574,7 @@ Provide query helpers: neighbors by type, collapse independent-origin sets for I
 
 ### Description
 
-Ship an explicit dual-read adapter so existing confirmed `MemoryItem`s remain usable while Cognize writes Narratives:
+Ship an explicit dual-read adapter so existing confirmed `StoreClaim`s remain usable while Cognize writes Narratives:
 
 1. Document mapping:
    - confirmed Memory (decision/event/fact…) → provisional **Narrative** or **Interpretation** (choose one rule and stick to it; recommended: confirmed memories become Narratives with EpistemicState `freshness_boundary=valid_from`, flagged `migrated_from_memory=true`; candidates become Interpretations `competing`).
@@ -655,7 +683,7 @@ Wire gate into future orchestrator and, temporarily, into existing `extract` / `
 
 ### Exit criteria
 
-- [x] With LLM stopped: cognize/extract/meditate semantic paths halt; percepts remain pending/deferred — **no new MemoryCandidates invented by heuristics in interpreting modes**.
+- [x] With LLM stopped: cognize/extract/meditate semantic paths halt; percepts remain pending/deferred — **no new review candidates invented by heuristics in interpreting modes**.
 - [x] Status command/API shows last halt reason + timestamp.
 - [x] Unit test covers each halt reason.
 
@@ -699,7 +727,7 @@ Update docs/SETUP: heuristic is not a cognition backend.
 
 ### Exit criteria
 
-- [x] Test: `TWIN_EXTRACTOR=heuristic` + `twin cognize`/`extract` does not insert MemoryItems or Interpretations; returns blocked/halt.
+- [x] Test: `TWIN_EXTRACTOR=heuristic` + `twin cognize`/`extract` does not insert StoreClaims or Interpretations; returns blocked/halt.
 - [x] CI still has a deterministic stand-in for tests via **authored overrides** / recorded fixtures (like `set_interpreter_override`), not lexical meaning.
 - [x] CHANGELOG/OPERATIONS note the behavior change.
 
@@ -957,7 +985,7 @@ Status `open` by default. Always visible in Review later (T-040).
 
 ### Description
 
-LLM forms competing **Interpretations** (candidate explanations) for Reflections/Situations — not “answers to user queries,” not MemoryCandidates.
+LLM forms competing **Interpretations** (candidate explanations) for Reflections/Situations — not “answers to user queries,” not StoreClaim review candidates.
 
 Each Interpretation must cite Evidence anchors (percept spans). Ungrounded items dropped (deterministic validation).
 
@@ -2605,20 +2633,312 @@ Unless a new tracker ID is added, do **not**:
 
 ---
 
-## Suggested first slice (if starting cold)
+## T-140 — Docs lock — package target layout + vocabulary
 
-**v2.0–v2.3 are shipped.** For **v2.4**:
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-139  
+**Blocks:** T-141–T-149
 
-1. T-131 (REST entity visibility) can start in parallel with T-130 (shell).
-2. T-137 early tokens while T-132–T-134 land pane content.
-3. T-136 after Interpretation/Reflection panes exist (T-133).
-4. T-135 Sense strip anytime after T-130+T-131.
-5. T-138 docs alongside UI; T-139 cuts `2.4.0`.
+### Description
 
-Historical cold-start for v2.0 remains: T-000…T-110 → then v2.1 → v2.2 → v2.3.
+Lock product docs to Narrative / Stance / Inject vocabulary and publish the
+target package map (`sense` / `cognize` / `inject` / `store` / `llm` /
+`privacy` / `interfaces`) in ARCHITECTURE. PRODUCT, GLOSSARY, MCP preference
+tables, COGNITION/COGNIZE frontiers aligned.
+
+### Exit criteria
+
+- [x] ARCHITECTURE § Code packages matches agreed layout.
+- [x] PRODUCT no longer teaches memory → judgment → action as product layers.
+- [x] Tracker tasks T-141–T-149 defined and indexed.
+
+### Resources
+
+- `docs/ARCHITECTURE.md` · `docs/PRODUCT.md` · `docs/GLOSSARY.md`
 
 ---
 
-*Tracker for Twin package line **v2.0–v2.4** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, TUI + Web command center).*
+## T-141 — `twin.sense` — connectors + sensory
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140  
+**Blocks:** T-149
+
+### Description
+
+Create `twin/sense/` owning connectors and sensory capture. Update imports;
+leave thin re-exports only where needed for one release.
+
+### Exit criteria
+
+- [x] `twin.sense` is the import path for connectors + sensory.
+- [x] Tests that touch connectors/sensors green.
+
+---
+
+## T-142 — `twin.llm` — provider adapters
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140  
+**Blocks:** T-145, T-149
+
+### Description
+
+Move `twin/cognition/llm/` to `twin/llm/`. Cognize and Inject depend on it;
+no product LLM logic inside store or interfaces.
+
+### Exit criteria
+
+- [x] `from twin.llm` works for providers + usage.
+- [x] No new code imports `twin.cognition.llm`.
+
+---
+
+## T-143 — `twin.store` — persistence facade
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140  
+**Blocks:** T-145, T-146, T-149
+
+### Description
+
+Move the data layer under `twin/store/` (today’s `twin/memory/` store,
+embeddings, search, mixins). Product noun remains Narrative — package name
+is store. Retire `MemoryStore` name when safe, or alias during transition.
+
+### Exit criteria
+
+- [x] Persistence imported via `twin.store`.
+- [x] Dual-read tables still work; export/backup green.
+
+---
+
+## T-144 — `twin.inject` — packs + Observer slot
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140, T-142  
+**Blocks:** T-145, T-149
+
+### Description
+
+Move context pack, inject observer, and related Inject surfaces out of
+`twin.cognition` into `twin/inject/`.
+
+### Exit criteria
+
+- [x] `build_context_pack` and Observer slot live under `twin.inject`.
+- [x] MCP `inject_context_pack` still works.
+
+---
+
+## T-145 — Fold `twin.cognition` into `twin.cognize`
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-142, T-143, T-144  
+**Blocks:** T-149
+
+### Description
+
+Remaining cognition services (interpreter, episode pipeline, extract bridge)
+move under `twin/cognize/`. Delete or shim-empty `twin/cognition/` when
+imports are gone.
+
+### Exit criteria
+
+- [x] No required runtime import of `twin.cognition` except deprecated shim.
+- [x] Cognize orchestrator + late stages still halt without LLM.
+
+---
+
+## T-146 — Split `twin.judgment` → cognize Stance + privacy
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-143, T-147  
+**Blocks:** T-149
+
+### Description
+
+Stance models, proposals, revisions, versions → `twin.cognize` (or
+`twin.cognize.stance`). Firewall / PII → `twin.privacy`. Drop the public
+`judgment` package name when call sites are updated.
+
+### Exit criteria
+
+- [x] Stance code lives under cognize; firewall under privacy.
+- [x] CLI `twin stance` and approve preview still work.
+
+---
+
+## T-147 — `privacy` owns Firewall / PII / guardrails
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140  
+**Blocks:** T-146, T-149
+
+### Description
+
+Expand `twin/privacy/` to own Domain Firewall, PII helpers, and disclosure
+guardrails used by Inject.
+
+### Exit criteria
+
+- [x] Inject imports Firewall from `twin.privacy`.
+- [x] Policy YAML paths unchanged for operators.
+
+---
+
+## T-148 — `interfaces` absorbs runtime + sovereignty
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140  
+**Blocks:** T-149
+
+### Description
+
+Move `twin/runtime/` and `twin/sovereignty/` under `twin/interfaces/`
+(workers, queue, export, backup). Keep CLI entrypoints stable.
+
+### Exit criteria
+
+- [x] Runtime and sovereignty import paths are under interfaces.
+- [x] `twin serve` / workers / export smoke green.
+
+---
+
+## T-149 — QA gate — imports, MCP names, package `2.5.0`
+
+**Twin version:** `v2.5` · **Phase:** P14 · **Status:** `done`  
+**Depends on:** T-140–T-148  
+**Blocks:** none (release gate)
+
+### Description
+
+Full import/graph check, prefer `narrative_*` / `stance_*` MCP docs and
+aliases, CHANGELOG + tag `v2.5.0`.
+
+### Exit criteria
+
+- [x] CI green on interfaces + cognize + store slices.
+- [x] Package `2.5.0` recorded; old package roots removed (no shims).
+
+---
+
+## T-150 — Rename dual-read types (`MemoryItem` → store claim)
+
+**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
+**Depends on:** T-149  
+**Blocks:** T-151, T-152
+
+### Description
+
+Retire dual-read **type names** that still say Memory in the Python store
+API. Target vocabulary (finalize in implementation, keep one canonical set):
+
+| Today (dual-read) | Target |
+|---|---|
+| `MemoryItem` | `StoreClaim` |
+| `MemoryType` / `MemoryStatus` | `ClaimType` / `ClaimStatus` |
+| `MemoryOperation` | `ClaimOperation` |
+| `MemoryStore` | keep as store facade name |
+
+Scope: `twin/store/models.py` and all importers. Do **not** change product
+nouns Narrative / Interpretation / Stance. No transitional type aliases.
+
+Out of scope here: physical DB column renames (T-151).
+
+### Exit criteria
+
+- [x] Public store models use claim vocabulary; no `MemoryItem` / `MemoryType` / `MemoryStatus` / `MemoryOperation` shims.
+- [x] Docs (GLOSSARY / ARCHITECTURE store section) describe claim rows, not product “memory.”
+- [x] Unit tests for models + formation/lifecycle green.
+
+### Assumptions
+
+- Column/FK renames completed in T-151 (`claim_id` / `store_claims`).
+- MCP `claim_*` only; no `memory_*` / `judgment_*` tool shims (T-152).
+
+### Expected QA
+
+- `pytest tests/memory/` (or renamed test path) + cognize dual-read smoke.
+
+### Resources
+
+- `twin/store/models.py` · `docs/GLOSSARY.md` migration note · T-014 dual-read history
+
+---
+
+## T-151 — Migrate store columns / FKs (`memory_id` → claim id)
+
+**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
+**Depends on:** T-150  
+**Blocks:** T-152
+
+### Description
+
+Schema migration for SQLite + Postgres: rename dual-read tables/columns that
+still use `memory` / `memories` / `claim_id` to the claim vocabulary chosen
+in T-150. Preserve export/backup/restore. Evidence, relations, findings,
+sessions, and connector links must keep referential integrity.
+
+Provide a one-shot migrator (and downgrade policy: none — forward only).
+
+### Exit criteria
+
+- [x] Fresh DB and upgraded DB both use claim column names.
+- [x] Export → restore round-trip green on SQLite and Postgres CI jobs.
+- [x] No silent data loss on dual-read rows or Evidence FKs.
+
+### Assumptions
+
+- Cognize `cognize_*` tables already use Narrative ids — do not conflate.
+- ID *prefixes* (`mem_`) may remain for existing rows; new ids may switch to `clm_` (document choice).
+
+### Expected QA
+
+- `tests/memory/store/` + sovereignty backup/export + postgres job.
+
+### Resources
+
+- `twin/store/store/sqlite.py` · `postgres.py` · `docs/OPERATIONS.md`
+
+---
+
+## T-152 — QA gate — API/MCP/export without Memory* product names
+
+**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
+**Depends on:** T-150, T-151  
+**Blocks:** none (release gate for `2.6.0`)
+
+### Description
+
+Finish dual-read retirement on host surfaces:
+
+1. MCP: retarget or remove `memory_*` tools; prefer Narrative/claim search as documented.
+2. REST/OpenAPI: no Memory product schemas in operator docs.
+3. CHANGELOG + `__version__ = 2.6.0` + tag.
+
+### Exit criteria
+
+- [x] MCP tools and docs use Narrative / claim / stance language; no `memory_*` or `judgment_*` tool shims.
+- [x] Grep gate: no `MemoryItem` / type aliases in `twin/`.
+- [x] Package `2.6.0` recorded; focused local suites green (CI after push/PR).
+
+### Resources
+
+- `docs/MCP.md` · `docs/REST.md` · `docs/CHANGELOG.md`
+
+---
+
+## Suggested first slice (if starting cold)
+
+**v2.0–v2.5 are shipped (or cut).** For **v2.6**:
+
+1. T-150 rename Python dual-read types to claim vocabulary.
+2. T-151 migrate DB columns/FKs.
+3. T-152 MCP/docs QA gate → `2.6.0`.
+
+---
+
+*Tracker for Twin package line **v2.0–v2.6** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, TUI + Web command center, package walls, dual-read retirement).*
 
 ATTENTION: Do not mention task numbers in any Git resource (PR/release/commit).

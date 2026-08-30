@@ -1,18 +1,18 @@
-"""Multi-stage retrieval pipeline (twin.cognition.retrieval)."""
+"""Multi-stage retrieval pipeline (twin.cognize.services.retrieval)."""
 
 from twin import ids
-from twin.cognition.retrieval import retrieve
-from twin.memory.models import Evidence, MemoryItem
-from twin.sensory.percept import Percept
+from twin.cognize.services.retrieval import retrieve
+from twin.store.models import Evidence, StoreClaim
+from twin.sense.sensory.percept import Percept
 
 
 def _mem(store, embedder, title, summary, **kw):
-    base = dict(id=ids.memory_id(), type="fact", title=title, summary=summary,
+    base = dict(id=ids.claim_id(), type="fact", title=title, summary=summary,
                 domain="technical", confidence=0.9, status="confirmed")
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)  # also links mem.entities in the graph
-    store.store_embedding(mem.id, "memory", embedder.name,
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)  # also links mem.entities in the graph
+    store.store_embedding(mem.id, "claim", embedder.name,
                           embedder.embed(f"{title}\n{summary}"))
     return mem
 
@@ -32,9 +32,9 @@ def test_project_boost_reorders(store, embedder):
                   project_id="proj_atlas")
     result = retrieve(store, embedder, "webhook retries backoff",
                       project_id="proj_atlas")
-    scores = {h.memory.id: h.score for h in result.hits}
+    scores = {h.claim.id: h.score for h in result.hits}
     assert scores[linked.id] > scores[plain.id]
-    assert result.hits[0].memory.id == linked.id
+    assert result.hits[0].claim.id == linked.id
     assert "project match" in result.hits[0].why
 
 
@@ -45,9 +45,9 @@ def test_graph_expansion_pulls_adjacent_memories(store, embedder):
     adjacent = _mem(store, embedder, "Provisioning quirk",
                     "Provisioning needs the eu-west bucket.", entities=["Zephyr"])
     result = retrieve(store, embedder, "FastAPI webhooks")
-    ids_found = {h.memory.id for h in result.hits}
+    ids_found = {h.claim.id for h in result.hits}
     assert adjacent.id in ids_found
-    graph_hit = next(h for h in result.hits if h.memory.id == adjacent.id)
+    graph_hit = next(h for h in result.hits if h.claim.id == adjacent.id)
     assert "graph expansion" in graph_hit.why
     assert result.stages["after_graph"] >= result.stages["candidates"]
 
@@ -57,7 +57,7 @@ def test_temporal_filter_drops_expired(store, embedder):
          valid_until="2020-01-01T00:00:00+00:00")
     current = _mem(store, embedder, "Webhook stack", "Webhooks run on FastAPI.")
     result = retrieve(store, embedder, "webhook stack")
-    assert {h.memory.id for h in result.hits} == {current.id}
+    assert {h.claim.id for h in result.hits} == {current.id}
 
 
 def test_source_trust_weights_scores(store, embedder):
@@ -67,14 +67,14 @@ def test_source_trust_weights_scores(store, embedder):
                           source_trust=trust).seal()
         store.insert_percept(percept)
         mem = _mem(store, embedder, "Deploy cadence", "Deploys happen on Tuesdays.")
-        store.insert_evidence(Evidence(id=ids.evidence_id(), memory_id=mem.id,
+        store.insert_evidence(Evidence(id=ids.evidence_id(), claim_id=mem.id,
                                        percept_id=percept.id, quote="deploys on Tuesdays"))
         return mem
 
     trusted = mem_with_trust(1.0)
     dubious = mem_with_trust(0.1)
     result = retrieve(store, embedder, "deploy cadence Tuesdays")
-    scores = {h.memory.id: h.score for h in result.hits}
+    scores = {h.claim.id: h.score for h in result.hits}
     assert scores[trusted.id] > scores[dubious.id]
 
 
@@ -87,14 +87,14 @@ def test_reranker_is_applied_and_best_effort(store, embedder):
 
     baseline = retrieve(store, embedder, "webhooks")
     reranked = retrieve(store, embedder, "webhooks", reranker=reversed_order)
-    assert [h.memory.id for h in reranked.hits] == \
-        [h.memory.id for h in reversed(baseline.hits)]
+    assert [h.claim.id for h in reranked.hits] == \
+        [h.claim.id for h in reversed(baseline.hits)]
 
     def broken(query, hits):
         raise RuntimeError("model gone")
 
     survived = retrieve(store, embedder, "webhooks", reranker=broken)
-    assert {h.memory.id for h in survived.hits} == {a.id, b.id}
+    assert {h.claim.id for h in survived.hits} == {a.id, b.id}
 
 
 def test_reranker_failure_is_observable(store, embedder, caplog):
@@ -103,7 +103,7 @@ def test_reranker_failure_is_observable(store, embedder, caplog):
     def broken(query, hits):
         raise RuntimeError("model gone")
 
-    with caplog.at_level("WARNING", logger="twin.cognition.retrieval"):
+    with caplog.at_level("WARNING", logger="twin.cognize.services.retrieval"):
         result = retrieve(store, embedder, "webhooks", reranker=broken)
     assert result.diagnostics["reranker"] == {
         "attempted": True, "succeeded": False, "error_type": "RuntimeError",
@@ -132,8 +132,8 @@ def test_graph_expansion_damps_broad_entities(store, embedder):
         for i in range(12)
     ]
     result = retrieve(store, embedder, "FastAPI webhooks", limit=30)
-    scores = {h.memory.id: h.score for h in result.hits}
-    whys = {h.memory.id: h.why for h in result.hits}
+    scores = {h.claim.id: h.score for h in result.hits}
+    whys = {h.claim.id: h.why for h in result.hits}
     assert specific.id in scores
     assert "via Zephyr" in whys[specific.id]
     for mem in broad_members:
@@ -145,6 +145,6 @@ def test_candidates_excluded_unless_requested(store, embedder):
     cand = _mem(store, embedder, "Maybe switch to Kafka", "Considering Kafka.",
                 status="candidate")
     strict = retrieve(store, embedder, "Kafka switch")
-    assert all(h.memory.id != cand.id for h in strict.hits)
+    assert all(h.claim.id != cand.id for h in strict.hits)
     loose = retrieve(store, embedder, "Kafka switch", include_candidates=True)
-    assert any(h.memory.id == cand.id for h in loose.hits)
+    assert any(h.claim.id == cand.id for h in loose.hits)

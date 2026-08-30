@@ -5,13 +5,13 @@ import json
 import httpx
 
 from twin import ids
-from twin.cognition.observer import (
+from twin.cognize.services.observer import (
     infer_domain_from_search,
     read_context,
     resolve_context_domain,
 )
-from twin.cognition.sessions import ensure_project
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
+from twin.cognize.services.sessions import ensure_project
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType
 
 
 def test_ambiguous_personal_text_stays_unclassified_without_llm(store, cfg):
@@ -56,7 +56,7 @@ def test_deep_fallback_is_logged(store, cfg, caplog):
 
     client = httpx.Client(transport=httpx.MockTransport(broken),
                           base_url=cfg.ollama_url)
-    with caplog.at_level("WARNING", logger="twin.cognition.observer"):
+    with caplog.at_level("WARNING", logger="twin.cognize.services.observer"):
         read_context(store, cfg, "hmm ok", client=client)
     assert any("deep observer failed" in r.message for r in caplog.records)
     # the text being classified never reaches the log
@@ -142,14 +142,14 @@ def test_deep_read_rejects_unknown_labels(store, cfg):
 
 
 def _mem(store, embedder, *, title, summary, domain="technical"):
-    mem = MemoryItem(
-        id=ids.memory_id(), type=MemoryType.decision, domain=domain,
-        title=title, summary=summary, status=MemoryStatus.confirmed,
+    mem = StoreClaim(
+        id=ids.claim_id(), type=ClaimType.decision, domain=domain,
+        title=title, summary=summary, status=ClaimStatus.confirmed,
         confidence=0.9,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name, embedder.embed(f"{title}\n{summary}"),
+        mem.id, "claim", embedder.name, embedder.embed(f"{title}\n{summary}"),
     )
     return mem
 
@@ -185,7 +185,7 @@ def test_resolve_uses_search_before_llm(store, cfg, embedder, monkeypatch):
     def explode(*_a, **_k):
         raise AssertionError("LLM must not run when search votes")
 
-    monkeypatch.setattr("twin.cognition.observer.read_context", explode)
+    monkeypatch.setattr("twin.cognize.services.observer.read_context", explode)
     reading = resolve_context_domain(
         store, cfg, embedder, "Atlas webhook retry strategy",
     )
@@ -202,10 +202,10 @@ def test_resolve_stays_unclassified_without_search_vote(store, cfg, embedder, mo
         raise AssertionError("read_context must not run on hot-path resolve")
 
     monkeypatch.setattr(
-        "twin.cognition.observer.infer_domain_from_search",
+        "twin.cognize.services.observer.infer_domain_from_search",
         lambda *_a, **_k: None,
     )
-    monkeypatch.setattr("twin.cognition.observer.read_context", boom)
+    monkeypatch.setattr("twin.cognize.services.observer.read_context", boom)
     reading = resolve_context_domain(store, cfg, embedder, "get ready for tomorrow")
     assert reading.mode == "unresolved"
     assert reading.domain == "unclassified"

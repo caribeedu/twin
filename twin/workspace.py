@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config, load_config
-from .judgment.firewall import Firewall
-from .memory.crypto import build_codec
-from .memory.embeddings import Embedder, get_embedder_for_config
-from .memory.store import MemoryStore, create_store
+from .privacy.firewall import Firewall
+from .store.crypto import build_codec
+from .store.embeddings import Embedder, get_embedder_for_config
+from .store.store import TwinStore, create_store
 
 
 class Workspace:
@@ -18,11 +18,11 @@ class Workspace:
         self.cfg: Config = load_config(home)
         self.cfg.ensure_home()
         codec = build_codec(self.cfg.encryption_key, self.cfg.home)
-        self.store: MemoryStore = create_store(self.cfg.resolved_db_url, codec=codec)
+        self.store: TwinStore = create_store(self.cfg.resolved_db_url, codec=codec)
         self.embedder: Embedder = get_embedder_for_config(self.cfg)
         # Record LLM token/cost usage to the home ledger (idempotent per home).
         try:
-            from .cognition.llm.usage import install_ledger_sink
+            from .llm.usage import install_ledger_sink
             install_ledger_sink(self.cfg.home)
         except Exception:
             pass
@@ -35,7 +35,7 @@ class Workspace:
     def ingest(self, paths: list[str | Path]) -> tuple[list[str], list[str]]:
         """Sense external signals and persist the resulting percepts.
         Returns (new_percept_ids, skipped)."""
-        from .sensory import sense_paths
+        from .sense.sensory import sense_paths
 
         percepts, skipped = sense_paths(paths)
         new_ids: list[str] = []
@@ -51,9 +51,9 @@ class Workspace:
         """Regenerate every memory embedding with the current embedder
         (run after switching TWIN_EMBEDDER / embedding model)."""
         count = 0
-        for mem in self.store.list_memories(limit=1_000_000):
+        for mem in self.store.list_claims(limit=1_000_000):
             vector = self.embedder.embed(f"{mem.title}\n{mem.summary}")
-            self.store.store_embedding(mem.id, "memory", self.embedder.name, vector)
+            self.store.store_embedding(mem.id, "claim", self.embedder.name, vector)
             count += 1
         return count
 

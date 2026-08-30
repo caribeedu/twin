@@ -9,9 +9,9 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..judgment.firewall import Firewall
-from ..memory.models import MemoryItem
-from ..memory.store.base import MemoryStore
+from twin.privacy.firewall import Firewall
+from twin.store.models import StoreClaim
+from twin.store.store.base import TwinStore
 from .classify import classify_memory
 from .grants import (
     consume_grant,
@@ -22,6 +22,7 @@ from .grants import (
 from .identity import (
     active_consent_covers,
     principal_can_read,
+    purpose_allowed,
     resolve_execution_location,
     restricted_access,
     validate_vault_access,
@@ -67,6 +68,14 @@ def _wildcard_match(patterns: list[str], value: str) -> bool:
     return False
 
 
+def _purpose_match(patterns: list[str], purpose: str) -> bool:
+    if not patterns or "*" in patterns:
+        return True
+    if purpose_allowed(purpose, patterns):
+        return True
+    return _wildcard_match(patterns, purpose)
+
+
 def policy_matches(
     policy: PrivacyPolicy,
     request: AccessRequest,
@@ -97,7 +106,7 @@ def policy_matches(
     if res.third_party is False and classification.third_party:
         return False
     ctx = policy.context
-    if not _wildcard_match(ctx.purposes, request.purpose):
+    if not _purpose_match(ctx.purposes, request.purpose):
         return False
     if not _wildcard_match(ctx.audiences, request.audience):
         return False
@@ -134,10 +143,10 @@ def evaluate_resource(
     classification: ResourceClassification,
     *,
     execution_location: str,
-    store: Optional[MemoryStore] = None,
+    store: Optional[TwinStore] = None,
     consume_grants: bool = False,
     legacy_firewall: Optional[Firewall] = None,
-    memory: Optional[MemoryItem] = None,
+    memory: Optional[StoreClaim] = None,
     target_domain: Optional[str] = None,
     principal: Optional[Principal] = None,
 ) -> ResourceDecision:
@@ -315,9 +324,9 @@ def evaluate_resource(
 
 
 def evaluate_access(
-    store: MemoryStore,
+    store: TwinStore,
     request: AccessRequest,
-    memories: list[MemoryItem],
+    memories: list[StoreClaim],
     *,
     policies_path: Optional[Path | str] = None,
     policies: Optional[list[PrivacyPolicy]] = None,
@@ -411,14 +420,14 @@ def evaluate_access(
                 grant_ids.append(rd.grant_id)
 
             if rd.effect == PolicyEffect.deny:
-                denied.append({"memory_id": mem.id, "reason": rd.reason,
+                denied.append({"claim_id": mem.id, "reason": rd.reason,
                                "rule": rd.matched_policy_ids[0] if rd.matched_policy_ids else ""})
             elif rd.effect == PolicyEffect.require_grant:
-                needs_grant.append({"memory_id": mem.id, "reason": rd.reason})
-                denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_grant"})
+                needs_grant.append({"claim_id": mem.id, "reason": rd.reason})
+                denied.append({"claim_id": mem.id, "reason": rd.reason, "rule": "require_grant"})
             elif rd.effect == PolicyEffect.require_confirmation:
-                needs_confirm.append({"memory_id": mem.id, "reason": rd.reason})
-                denied.append({"memory_id": mem.id, "reason": rd.reason, "rule": "require_confirmation"})
+                needs_confirm.append({"claim_id": mem.id, "reason": rd.reason})
+                denied.append({"claim_id": mem.id, "reason": rd.reason, "rule": "require_confirmation"})
             elif rd.effect in (
                 PolicyEffect.redact, PolicyEffect.generalize,
                 PolicyEffect.aggregate, PolicyEffect.pseudonymize,
@@ -513,7 +522,7 @@ def evaluate_access(
 
 
 def evaluate_judgment_items(
-    store: MemoryStore,
+    store: TwinStore,
     request: AccessRequest,
     items: list[Any],
     *,
@@ -521,13 +530,13 @@ def evaluate_judgment_items(
     persist: bool = True,
 ) -> dict[str, Any]:
     """Run governance over judgment items (as classified resources)."""
-    from ..judgment.models import JudgmentItem
+    from twin.cognize.stance_engine.models import JudgmentItem
 
-    synthetic: list[MemoryItem] = []
+    synthetic: list[StoreClaim] = []
     for it in items:
         if not isinstance(it, JudgmentItem):
             continue
-        synthetic.append(MemoryItem(
+        synthetic.append(StoreClaim(
             id=it.id,
             type="constraint" if it.kind.value == "constraint" else "belief",
             title=it.statement[:80],
@@ -556,7 +565,7 @@ def evaluate_judgment_items(
     )
 
 
-def explain_decision(store: MemoryStore, decision_id: str) -> dict[str, Any]:
+def explain_decision(store: TwinStore, decision_id: str) -> dict[str, Any]:
     d = store.get_privacy_decision(decision_id)
     if d is None:
         raise ValueError(f"decision {decision_id} not found")
@@ -593,7 +602,7 @@ def validate_output(
     access: AccessRequest,
     decision: Optional[PrivacyDecision] = None,
     forbidden_substrings: Optional[list[str]] = None,
-    store: Optional[MemoryStore] = None,
+    store: Optional[TwinStore] = None,
 ) -> dict[str, Any]:
     """Scan generated/exported text before release to an external consumer."""
     findings = leakage_scan(output, forbidden_substrings=forbidden_substrings)

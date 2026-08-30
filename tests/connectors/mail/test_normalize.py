@@ -1,5 +1,5 @@
 """Shared mail MIME / normalize helpers."""
-from twin.connectors.mail.classification import (
+from twin.sense.connectors.mail.classification import (
     CLASS_CODE_REVIEW,
     CLASS_HUMAN,
     CLASS_NEWSLETTER,
@@ -7,8 +7,8 @@ from twin.connectors.mail.classification import (
     classify_message,
     is_memory_relevant,
 )
-from twin.connectors.mail.mime import split_authored, strip_html, untrusted_html_stub
-from twin.connectors.mail.normalize import record_from_message, thread_key
+from twin.sense.connectors.mail.mime import split_authored, strip_html, untrusted_html_stub
+from twin.sense.connectors.mail.normalize import record_from_message, thread_key
 
 
 def test_classify_noreply_and_newsletter():

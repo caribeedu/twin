@@ -27,13 +27,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
     sync_connector,
 )
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.store.sqlite import SqliteStore
 
 _CASES = Path(__file__).resolve().parent / "cases"
 
@@ -209,7 +209,7 @@ def _github_env():
         sys.path.insert(0, str(tests_dir))
     from tests.connectors.github.github_mock import FakeGitHubAPI, _user
 
-    from twin.connectors.github import client as ghclient
+    from twin.sense.connectors.github import client as ghclient
 
     api = FakeGitHubAPI()
     real_build = ghclient._build_http
@@ -296,13 +296,13 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
             # outranks (trust scales confidence), nothing auto-confirms. The
             # interpretation is authored ground truth (recorded LLM output for
             # these exact bodies), keyed to the fixture content — not lexical.
-            from twin.cognition import extract_pending, set_interpreter_override
-            from twin.cognition.interpreter.schema import (
+            from twin.cognize.services import extract_pending, set_interpreter_override
+            from twin.cognize.services.interpreter.schema import (
                 CognitiveAct, InterpretationResult, InterpretationStatus,
                 InterpretedItem,
             )
             from twin.config import Config
-            from twin.memory.embeddings import get_embedder
+            from twin.store.embeddings import get_embedder
             authored = {
                 "We decided to use Redis for the queue.": "Use Redis",
                 "We decided to use PostgreSQL advisory locks for the queue.":
@@ -311,7 +311,7 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
 
             def _authored(percept, text, _c):
                 items = [InterpretedItem(
-                    memory_type="decision", cognitive_act=CognitiveAct.decision,
+                    claim_type="decision", cognitive_act=CognitiveAct.decision,
                     title=t, summary=p, domain="technical", confidence=0.9,
                     evidence_span=p) for p, t in authored.items() if p in text]
                 return InterpretationResult(
@@ -330,7 +330,7 @@ def _run_github_pr_lifecycle(case: dict) -> tuple[bool, str]:
                 extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
             finally:
                 set_interpreter_override(None)
-            decisions = [m for m in store.list_memories()
+            decisions = [m for m in store.list_claims()
                          if m.type.value == "decision"]
             pg = [m for m in decisions if "PostgreSQL" in m.summary]
             redis = [m for m in decisions if "Redis" in m.summary
@@ -376,15 +376,15 @@ def _run_github_bot_lineage(case: dict) -> tuple[bool, str]:
             if bot.source_metadata.get("lineage_root") != exp["lineage_root"]:
                 return False, "bot comment lost the lineage root it references"
 
-            from twin.cognition import extract_pending
+            from twin.cognize.services import extract_pending
             from twin.config import Config
-            from twin.memory.embeddings import get_embedder
+            from twin.store.embeddings import get_embedder
             cfg = Config(home=Path(tmp) / "twin-home")
             cfg.extractor = "echo"
             cfg.embedder = "hash"
             cfg.ensure_home()
             extract_pending(store, cfg, get_embedder("hash", cfg.embedding_dim))
-            memories = store.list_memories()
+            memories = store.list_claims()
             if not memories:
                 return False, "extraction produced nothing to review"
             if not all(m.needs_review for m in memories):
@@ -402,7 +402,7 @@ def _slack_env():
         sys.path.insert(0, str(tests_dir))
     from tests.connectors.slack.slack_mock import FakeSlackAPI
 
-    from twin.connectors.slack import client as slclient
+    from twin.sense.connectors.slack import client as slclient
 
     api = FakeSlackAPI()
     real_build = slclient._build_http
@@ -483,7 +483,7 @@ def _gmail_env():
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
     from tests.connectors.gmail.gmail_mock import FakeGmailAPI
-    from twin.connectors.gmail import client as gclient
+    from twin.sense.connectors.gmail import client as gclient
 
     api = FakeGmailAPI()
     real_build = gclient._build_http
@@ -505,7 +505,7 @@ def _gmail_env():
 def _calendar_env():
     import httpx
     from tests.connectors.calendar.calendar_mock import FakeCalendarAPI
-    from twin.connectors.calendar import client as cclient
+    from twin.sense.connectors.calendar import client as cclient
 
     api = FakeCalendarAPI()
     real_build = cclient._build_http
@@ -527,7 +527,7 @@ def _calendar_env():
 def _fireflies_env():
     import httpx
     from tests.connectors.fireflies.fireflies_mock import FakeFirefliesAPI
-    from twin.connectors.fireflies import client as fclient
+    from twin.sense.connectors.fireflies import client as fclient
 
     api = FakeFirefliesAPI()
     real_build = fclient._build_http
@@ -810,12 +810,12 @@ def _run_folder_document_revisions(case: dict) -> tuple[bool, str]:
 
 def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
     """PR + Slack → WorkEpisode; shared independence; temporal conflict."""
-    from twin.cognition.correlation import (
+    from twin.cognize.services.correlation import (
         independence_group_for,
         run_correlation_pass,
     )
-    from twin.cognition.sessions import ensure_project
-    from twin.connectors.models import (
+    from twin.cognize.services.sessions import ensure_project
+    from twin.sense.connectors.models import (
         ConnectorInstance,
         ConnectorRecord,
         ConnectorStatus,
@@ -823,7 +823,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
         SourceAccount,
         idempotency_key,
     )
-    from twin.memory.models import FindingType
+    from twin.store.models import FindingType
 
     exp = case["expected"]
     root = exp["lineage_root"]
@@ -920,7 +920,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
         findings = store.get_findings(f"episode:{ep.id}", unresolved_only=False)
         if not any(f.type.value == exp["conflict_type"] for f in findings):
             # also accept findings keyed only by type across all open findings
-            # when memory_id lookup is empty
+            # when claim_id lookup is empty
             if report.conflicts < 1:
                 return False, "expected cross_source_temporal_conflict"
         _ = slack  # retained for lineage in episode source_refs
@@ -930,7 +930,7 @@ def _run_cross_source_work_episode(case: dict) -> tuple[bool, str]:
 
 def _run_ops_health_metrics(case: dict) -> tuple[bool, str]:
     """Health snapshot, metrics, and setup/preview never ingest."""
-    from twin.connectors import (
+    from twin.sense.connectors import (
         backfill_preview,
         compute_connector_metrics,
         connector_health,

@@ -32,20 +32,20 @@ def test_full_flow_over_api(client):
     assert inserted
 
     # review queue lists candidates
-    r = client.get("/api/memories", params={"status": "candidate"})
+    r = client.get("/api/claims", params={"status": "candidate"})
     memories = r.json()
     assert memories
 
     # approve one, fixing its domain
     mem_id = memories[0]["id"]
-    r = client.post(f"/api/memories/{mem_id}/review",
+    r = client.post(f"/api/claims/{mem_id}/review",
                     params={"action": "approve", "domain": "technical"})
     assert r.json()["status"] == "confirmed"
     assert r.json()["domain"] == "technical"
 
     # reject another
     mem_id2 = memories[1]["id"]
-    r = client.post(f"/api/memories/{mem_id2}/review", params={"action": "reject"})
+    r = client.post(f"/api/claims/{mem_id2}/review", params={"action": "reject"})
     assert r.json()["status"] == "rejected"
 
     # search
@@ -71,7 +71,7 @@ def test_full_flow_over_api(client):
     export = client.get("/api/export").json()
     # the offline mock grounds content as memories but extracts no entities —
     # entity resolution is the cognitive interpreter's job, not a mock's
-    assert export["memories"]
+    assert export["claims"]
     assert "entities" in export
 
     # UI renders
@@ -128,7 +128,7 @@ def test_session_lifecycle_over_api(client):
                           "summary_origin": "user"})
     assert r.json()["status"] == "completed"
     assert r.json()["consolidation_status"] == "completed"
-    assert r.json()["created_memory_ids"]
+    assert r.json()["created_claim_ids"]
 
     r = client.post(f"/api/sessions/{session_id}/feedback",
                     json={"verdict": "useful", "note": "had the right decisions"})
@@ -141,7 +141,7 @@ def test_session_lifecycle_over_api(client):
     # a memory foreign to the session is rejected by the domain layer
     assert client.post(f"/api/sessions/{session_id}/feedback",
                        json={"verdict": "useful",
-                             "memory_id": "mem_ghost"}).status_code == 400
+                             "claim_id": "mem_ghost"}).status_code == 400
 
     # listings and filters
     assert client.get(f"/api/sessions/{session_id}").json()["status"] == "completed"
@@ -246,13 +246,13 @@ def test_context_pack_accepts_profile_and_project(client):
 def test_review_ui_form_roundtrip(client):
     client.post("/api/ingest", json={"paths": [str(EXAMPLES / "docs")]})
     client.post("/api/extract")
-    memories = client.get("/api/memories", params={"status": "candidate"}).json()
+    memories = client.get("/api/claims", params={"status": "candidate"}).json()
     mem_id = memories[0]["id"]
     r = client.post(f"/review/{mem_id}",
                     data={"action": "approve", "domain": "work", "sensitivity": "internal"},
                     follow_redirects=False)
     assert r.status_code == 303
-    updated = client.get(f"/api/memories/{mem_id}").json()
+    updated = client.get(f"/api/claims/{mem_id}").json()
     assert updated["status"] == "confirmed"
     assert updated["domain"] == "work"
 
@@ -260,9 +260,9 @@ def test_review_ui_form_roundtrip(client):
 def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     """Review workbench resolve endpoint: merge, contradict, dismiss finding."""
     from twin import ids
-    from twin.memory.models import (
+    from twin.store.models import (
         FindingType,
-        MemoryItem,
+        StoreClaim,
         ReviewFinding,
         SuggestedAction,
     )
@@ -275,14 +275,14 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     ws = Workspace(home)
 
     def _seed(title, summary, **kw):
-        mem = MemoryItem(
-            id=ids.memory_id(), type="fact", title=title, summary=summary,
+        mem = StoreClaim(
+            id=ids.claim_id(), type="fact", title=title, summary=summary,
             domain="technical", confidence=0.85, status="candidate",
             needs_review=True, **kw,
         )
-        ws.store.insert_memory(mem)
+        ws.store.insert_claim(mem)
         ws.store.store_embedding(
-            mem.id, "memory", ws.embedder.name,
+            mem.id, "claim", ws.embedder.name,
             ws.embedder.embed(f"{mem.title}\n{mem.summary}"),
         )
         return mem
@@ -292,46 +292,46 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     b = _seed("Retry uses exponential backoff",
               "Webhook retries use exponential backoff with jitter.")
     finding = ReviewFinding(
-        id=ids.finding_id(), memory_id=b.id, type=FindingType.near_duplicate,
-        related_memory_id=a.id, confidence=0.95,
+        id=ids.finding_id(), claim_id=b.id, type=FindingType.near_duplicate,
+        related_claim_id=a.id, confidence=0.95,
         reason="near-duplicate via test",
         suggested_action=SuggestedAction.merge,
         requires_human_review=True,
     )
     ws.store.insert_finding(finding)
 
-    findings = client.get(f"/api/memories/{b.id}/findings").json()
+    findings = client.get(f"/api/claims/{b.id}/findings").json()
     assert len(findings) == 1
     assert findings[0]["related"]["id"] == a.id
 
     # Dismiss leaves both memories intact.
     c = _seed("Unrelated note", "Something else entirely.")
     f2 = ReviewFinding(
-        id=ids.finding_id(), memory_id=c.id, type=FindingType.weak_evidence,
+        id=ids.finding_id(), claim_id=c.id, type=FindingType.weak_evidence,
         confidence=0.9, reason="no evidence",
         suggested_action=SuggestedAction.request_more_evidence,
     )
     ws.store.insert_finding(f2)
-    r = client.post(f"/api/memories/{c.id}/resolve", json={
+    r = client.post(f"/api/claims/{c.id}/resolve", json={
         "action": "dismiss", "finding_id": f2.id,
     })
     assert r.status_code == 200
     assert r.json()["finding"]["status"] == "dismissed"
-    assert client.get(f"/api/memories/{c.id}/findings").json() == []
+    assert client.get(f"/api/claims/{c.id}/findings").json() == []
 
     # Contradict marks the relation without removing the candidate.
     d = _seed("Use linear retry", "Retries should be linear, not exponential.")
-    r = client.post(f"/api/memories/{d.id}/resolve", json={
-        "action": "contradict", "related_memory_id": a.id,
+    r = client.post(f"/api/claims/{d.id}/resolve", json={
+        "action": "contradict", "related_claim_id": a.id,
     })
     assert r.status_code == 200
     assert r.json()["action"] == "contradict"
     assert d.id not in (r.json().get("removed_from_queue") or [])
 
     # Merge collapses the near-duplicates.
-    r = client.post(f"/api/memories/{b.id}/resolve", json={
+    r = client.post(f"/api/claims/{b.id}/resolve", json={
         "action": "merge",
-        "related_memory_id": a.id,
+        "related_claim_id": a.id,
         "finding_id": finding.id,
         "title": "Webhook retries use exponential backoff",
         "summary": "Webhook retries use exponential backoff with jitter.",
@@ -340,7 +340,7 @@ def test_review_resolve_merge_conflict_and_dismiss(tmp_path, monkeypatch):
     body = r.json()
     assert body["merged_id"]
     assert set(body["removed_from_queue"]) >= {a.id, b.id}
-    merged = client.get(f"/api/memories/{body['merged_id']}").json()
+    merged = client.get(f"/api/claims/{body['merged_id']}").json()
     assert merged["status"] in ("candidate", "confirmed", "merged") or merged["title"]
 
 

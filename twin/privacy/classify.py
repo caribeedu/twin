@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..memory.models import MemoryItem
+from twin.store.models import StoreClaim
 from .models import FieldSensitivity, ResourceClassification, SensitivityClass
 
 _DOMAIN_LABELS = {
@@ -24,7 +24,7 @@ _SENSITIVITY_MAP = {
 }
 
 
-def classify_memory(mem: MemoryItem) -> ResourceClassification:
+def classify_memory(mem: StoreClaim) -> ResourceClassification:
     payload = dict(mem.payload or {})
     labels: list[str] = list(payload.get("privacy_labels") or [])
     labels.extend(_DOMAIN_LABELS.get(mem.domain, []))

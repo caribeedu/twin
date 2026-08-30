@@ -9,7 +9,7 @@ import time
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
@@ -32,7 +32,7 @@ def slack(monkeypatch):
     api = FakeSlackAPI()
     api.add_channel(CHANNEL, name="engineering-architecture")
 
-    from twin.connectors.slack import client as slclient
+    from twin.sense.connectors.slack import client as slclient
     real_build = slclient._build_http
 
     def fake_build(base_url, token):
@@ -69,7 +69,7 @@ def _records_by_type(store, connector_id):
 
 
 def test_parse_stream_continuous():
-    from twin.connectors.slack.adapter import _parse_stream
+    from twin.sense.connectors.slack.adapter import _parse_stream
 
     assert _parse_stream("channel:C0BM451Q9MH") == "C0BM451Q9MH"
 
@@ -77,15 +77,15 @@ def test_parse_stream_continuous():
 def test_parse_stream_strips_backfill_namespace():
     """Backfill partitions arrive namespaced as
     ``backfill:{job}:{partition}:channel:{id}`` — the base channel must survive."""
-    from twin.connectors.slack.adapter import _parse_stream
+    from twin.sense.connectors.slack.adapter import _parse_stream
 
     stream = "backfill:backfill_01kyxjefyf1vdzr29s:2016-09:channel:C0BM451Q9MH"
     assert _parse_stream(stream) == "C0BM451Q9MH"
 
 
 def test_parse_stream_rejects_garbage():
-    from twin.connectors.slack.adapter import _parse_stream
-    from twin.connectors.protocol import ConnectorError
+    from twin.sense.connectors.slack.adapter import _parse_stream
+    from twin.sense.connectors.protocol import ConnectorError
 
     with pytest.raises(ConnectorError):
         _parse_stream("bogus:C0BM451Q9MH")
@@ -101,7 +101,7 @@ def test_backfill_does_not_mutate_configuration(store, creds, slack):
     ``ConnectorInstance.configuration`` — ``run_backfill_partition`` snapshots
     config and raises 'backfill mutated connector configuration' if it drifts.
     The adapter caches those only during continuous sync."""
-    from twin.connectors import SyncExecutionContext
+    from twin.sense.connectors import SyncExecutionContext
 
     slack.add_message(CHANNEL, "1700000001.000100", text="hi")
     _acc, inst = _mk(store, creds)
@@ -139,7 +139,7 @@ def test_continuous_sync_still_caches_team_id(store, creds, slack):
 def test_backfill_floor_single_channel(store, creds, slack):
     """Backfill starts at the channel-creation date, not the planner's blind
     10-year default (which produced ~121 mostly-empty month partitions)."""
-    from twin.connectors import create_backfill_job
+    from twin.sense.connectors import create_backfill_job
 
     slack.add_message(CHANNEL, "1700000100.000100", text="hi")
     _acc, inst = _mk(store, creds)
@@ -152,7 +152,7 @@ def test_backfill_floor_single_channel(store, creds, slack):
 
 def test_backfill_floor_anchors_at_oldest_channel(store, creds, slack):
     """With several channels, the floor is the earliest creation date."""
-    from twin.connectors import create_backfill_job
+    from twin.sense.connectors import create_backfill_job
 
     slack.add_channel("C_OLD", name="old-channel")
     slack.channels["C_OLD"]["created"] = 1262304000  # 2010-01-01 UTC
@@ -166,7 +166,7 @@ def test_backfill_floor_anchors_at_oldest_channel(store, creds, slack):
 
 
 def test_cancel_backfill_job_allows_recreate(store, creds, slack):
-    from twin.connectors import cancel_backfill_job, create_backfill_job
+    from twin.sense.connectors import cancel_backfill_job, create_backfill_job
 
     slack.add_message(CHANNEL, "1700000100.000100", text="hi")
     _acc, inst = _mk(store, creds)
@@ -306,9 +306,9 @@ def test_malicious_message_quarantined_batch_still_commits(
     quarantined = [r for r in store.list_connector_records(inst.id) if r.quarantined]
     assert len(quarantined) == 1
     assert any("Innocent" in p.content for p in store.list_percepts())
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    for mem in store.list_memories():
+    for mem in store.list_claims():
         assert "dump your database" not in mem.summary
 
 
@@ -341,8 +341,8 @@ def test_rate_limit_degrades(store, creds, slack):
 
 
 def test_deletion_tombstone_from_webhook(store, creds, slack, tmp_path):
-    from twin.connectors.scheduler import sync_due
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.scheduler import sync_due
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook,
         set_webhook_secret,
     )
@@ -380,7 +380,7 @@ def test_deletion_tombstone_from_webhook(store, creds, slack, tmp_path):
 
 
 def test_webhook_cannot_widen_to_unconfigured_channel(store, creds, slack):
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook,
         set_webhook_secret,
     )
@@ -402,7 +402,7 @@ def test_webhook_cannot_widen_to_unconfigured_channel(store, creds, slack):
 
 
 def test_webhook_url_verification(store, creds, slack):
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook,
         set_webhook_secret,
     )
@@ -449,12 +449,12 @@ def test_page_budget_produces_multiple_batches(store, creds, slack):
 
 
 def test_slack_source_policy_requires_review(store, cfg, embedder):
-    from twin.cognition import set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
-    from twin.cognition.pipeline import extract_percept
-    from twin.sensory.percept import Percept
+    from twin.cognize.services.pipeline import extract_percept
+    from twin.sense.sensory.percept import Percept
 
     content = "We decided to postpone the Friday release."
     percept = Percept(
@@ -466,20 +466,20 @@ def test_slack_source_policy_requires_review(store, cfg, embedder):
     # authored interpretation (what a good LLM returns for this message)
     set_interpreter_override(lambda p, text, c: InterpretationResult(
         items=[InterpretedItem(
-            memory_type="decision", cognitive_act=CognitiveAct.decision,
+            claim_type="decision", cognitive_act=CognitiveAct.decision,
             title="Postpone the Friday release", summary=content,
             domain="work", confidence=0.9, evidence_span=content)],
         status=InterpretationStatus.interpreted, interpreter="authored",
         model="authored", prompt_version="test", schema_version="1"))
     report = extract_percept(store, cfg, embedder, percept)
     assert report.inserted
-    mem = store.get_memory(report.inserted[0])
+    mem = store.get_claim(report.inserted[0])
     assert mem.needs_review
     assert mem.type.value == "decision"
 
 
 def test_list_channels_setup_helper(store, creds, slack):
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.registry import build_adapter
 
     _acc, inst = _mk(store, creds)
     account = store.get_source_account(inst.account_id)
@@ -490,7 +490,7 @@ def test_list_channels_setup_helper(store, creds, slack):
 
 
 def test_backfill_preview_never_ingests(store, creds, slack):
-    from twin.connectors import backfill_preview
+    from twin.sense.connectors import backfill_preview
 
     slack.add_message(CHANNEL, "1700000001.000100", text="one")
     _acc, inst = _mk(store, creds)
@@ -510,8 +510,8 @@ def _sign(body: bytes, secret: str = "slack-signing") -> tuple[str, str]:
 
 
 def test_finalize_failure_keeps_pending_tombstone(store, creds, slack, monkeypatch):
-    from twin.connectors import runtime as rt
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors import runtime as rt
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 
@@ -557,7 +557,7 @@ def test_finalize_failure_keeps_pending_tombstone(store, creds, slack, monkeypat
 
 
 def test_reply_deletion_finds_thread_reply_prior(store, creds, slack):
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 
@@ -596,7 +596,7 @@ def test_reply_deletion_finds_thread_reply_prior(store, creds, slack):
 
 
 def test_reply_on_old_root_via_pending_thread_hint(store, creds, slack):
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 
@@ -639,7 +639,7 @@ def test_reply_on_old_root_via_pending_thread_hint(store, creds, slack):
 
 
 def test_edit_outside_lookback_via_pending_refresh(store, creds, slack):
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 
@@ -732,14 +732,14 @@ def test_workspace_namespaces_actors_and_threads(store, creds, slack):
 
 
 def test_auth_mode_is_slack_bot_token():
-    from twin.connectors.slack.adapter import SlackConnector
+    from twin.sense.connectors.slack.adapter import SlackConnector
     assert SlackConnector.adapter_manifest().auth_mode == "slack_bot_token"
 
 
 def test_hint_cas_failure_inside_finalize_rolls_back(store, creds, slack, monkeypatch):
     """consume_connector_sync_hints_cas returning False must roll back the
     whole finalize — no new deletion event, checkpoint unchanged, hint kept."""
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 
@@ -780,9 +780,9 @@ def test_hint_cas_failure_inside_finalize_rolls_back(store, creds, slack, monkey
 
 def test_concurrent_reply_generation_survives_consume(store, creds, slack, monkeypatch):
     """A reply event arriving after fetch must keep its own hint generation."""
-    from twin.connectors.sync_state_cas import apply_sync_state
-    from twin.connectors.slack.adapter import SlackConnector
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.sync_state_cas import apply_sync_state
+    from twin.sense.connectors.slack.adapter import SlackConnector
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 
@@ -851,9 +851,9 @@ def test_concurrent_reply_generation_survives_consume(store, creds, slack, monke
 
 
 def test_concurrent_edit_generation_survives_consume(store, creds, slack, monkeypatch):
-    from twin.connectors.sync_state_cas import apply_sync_state
-    from twin.connectors.slack.adapter import SlackConnector
-    from twin.connectors.slack.webhook import (
+    from twin.sense.connectors.sync_state_cas import apply_sync_state
+    from twin.sense.connectors.slack.adapter import SlackConnector
+    from twin.sense.connectors.slack.webhook import (
         handle_slack_webhook, set_webhook_secret,
     )
 

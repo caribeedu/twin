@@ -18,17 +18,17 @@ import sys
 import tempfile
 from pathlib import Path
 
-from twin.cognition import set_interpreter_override
-from twin.cognition.interpreter.schema import (
+from twin.cognize.services import set_interpreter_override
+from twin.cognize.services.interpreter.schema import (
     InterpretationResult,
     InterpretationStatus,
     InterpretedItem,
 )
-from twin.cognition.pipeline import extract_percept
+from twin.cognize.services.pipeline import extract_percept
 from twin.config import Config
-from twin.memory.embeddings import get_embedder
-from twin.memory.store.sqlite import SqliteStore
-from twin.sensory.percept import Percept
+from twin.store.embeddings import get_embedder
+from twin.store.store.sqlite import SqliteStore
+from twin.sense.sensory.percept import Percept
 
 _CASES = Path(__file__).resolve().parent / "cases"
 
@@ -73,7 +73,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
         finally:
             set_interpreter_override(None)
 
-        memories = [store.get_memory(mid) for mid in report.inserted]
+        memories = [store.get_claim(mid) for mid in report.inserted]
         memories = [m for m in memories if m]
         exp = case["expected"]
 
@@ -89,7 +89,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
         for m in memories:
             by_type.setdefault(m.type.value, []).append(m)
 
-        for want in exp.get("memories", []):
+        for want in exp.get("claims", []):
             match = None
             for m in memories:
                 if want.get("type") and m.type.value != want["type"]:

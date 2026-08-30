@@ -3,13 +3,13 @@
 Lexical rules may flag that a span *looks like* it could carry a decision or
 task, but they must never establish a memory type, domain, entity or cognitive
 confidence. In ``TWIN_EXTRACTOR=heuristic`` the pipeline records
-``DetectionSignal``s and creates no ``MemoryItem`` at all.
+``DetectionSignal``s and creates no ``StoreClaim`` at all.
 """
 
 from tests.paths import EXAMPLES
 
-from twin.cognition import extract_pending, extract_percept
-from twin.sensory import sense_paths
+from twin.cognize.services import extract_pending, extract_percept
+from twin.sense.sensory import sense_paths
 
 
 def _percept(store, subpath):
@@ -29,7 +29,7 @@ def test_heuristic_mode_never_creates_semantic_memory(store, cfg, embedder):
     report = extract_percept(store, cfg, embedder, percept)
 
     # no cognitive memory is established by lexical rules
-    assert store.list_memories() == []
+    assert store.list_claims() == []
     assert report.inserted == []
     assert report.interpretation_status == "heuristic_detection"
 
@@ -57,7 +57,7 @@ def test_heuristic_detection_is_terminal_not_reinterpreted(store, cfg, embedder)
 
 def test_scan_detects_rejected_alternatives():
     """The rejected-alternative detector still fires — as a hint, not a memory."""
-    from twin.cognition.extractors.heuristic import scan
+    from twin.cognize.services.extractors.heuristic import scan
 
     hits = scan("Instead of Redis we will use PostgreSQL advisory locks. "
                 "We also decided against MongoDB because of licensing.")
@@ -77,7 +77,7 @@ def test_echo_mock_makes_no_semantic_classification(store, cfg, embedder):
     percept = _percept(store, "transcripts/standup-2026-07-08.txt")
     report = extract_percept(store, cfg, embedder, percept)   # cfg.extractor == "echo"
     assert report.extractor == "echo"
-    memories = [store.get_memory(mid) for mid in report.inserted]
+    memories = [store.get_claim(mid) for mid in report.inserted]
     assert memories
     # NO semantic categories are invented — everything is the null 'fact'
     assert {m.type.value for m in memories} == {"fact"}

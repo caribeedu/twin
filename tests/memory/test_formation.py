@@ -1,18 +1,18 @@
 """Memory formation — deterministic identity, corroborate, confirm/reject/restore."""
 
 from twin.clock import now_iso
-from twin.memory.formation import (
+from twin.store.formation import (
     FormationState,
     as_candidate,
     confirm_candidate,
     formation_identity,
-    memory_id_for_identity,
+    claim_id_for_identity,
     propose_or_corroborate,
     reject_candidate,
     restore_candidate,
 )
-from twin.memory.models import Evidence, MemoryItem, MemoryStatus, MemoryType
-from twin.sensory.percept import Percept
+from twin.store.models import Evidence, StoreClaim, ClaimStatus, ClaimType
+from twin.sense.sensory.percept import Percept
 
 
 def _seed_percept(store, text="We decided to use SQLite for local store."):
@@ -45,15 +45,15 @@ def test_formation_identity_stable():
     )
     assert a == b
     assert a != c
-    assert memory_id_for_identity(a).startswith("mem_f")
+    assert claim_id_for_identity(a).startswith("mem_f")
 
 
 def test_propose_idempotent_corroborates(store):
     p1 = _seed_percept(store, "Decision: use SQLite.")
     p2 = _seed_percept(store, "Again: we use SQLite locally.")
-    mem = MemoryItem(
+    mem = StoreClaim(
         id="tmp",
-        type=MemoryType.decision,
+        type=ClaimType.decision,
         title="Use SQLite",
         summary="Local store is SQLite",
         domain="technical",
@@ -75,16 +75,16 @@ def test_propose_idempotent_corroborates(store):
 
 
 def test_confirm_requires_evidence(store):
-    mem = MemoryItem(
+    mem = StoreClaim(
         id="mem_noev",
-        type=MemoryType.fact,
+        type=ClaimType.fact,
         title="No evidence",
         summary="Should not confirm",
         domain="technical",
-        status=MemoryStatus.candidate,
+        status=ClaimStatus.candidate,
         confidence=0.9,
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     try:
         confirm_candidate(store, mem.id)
         assert False, "expected error"
@@ -94,9 +94,9 @@ def test_confirm_requires_evidence(store):
 
 def test_confirm_reject_restore_with_reason(store):
     p = _seed_percept(store)
-    mem = MemoryItem(
+    mem = StoreClaim(
         id="tmp",
-        type=MemoryType.fact,
+        type=ClaimType.fact,
         title="Twin uses hash embedder in tests",
         summary="Offline tests use hash embedder",
         domain="technical",
@@ -107,7 +107,7 @@ def test_confirm_reject_restore_with_reason(store):
     )
     confirmed = confirm_candidate(store, created.id, note="looks good")
     assert confirmed.formation_state == FormationState.confirmed
-    assert confirmed.memory.status == MemoryStatus.confirmed
+    assert confirmed.claim.status == ClaimStatus.confirmed
 
     # cannot reject confirmed via formation reject
     try:
@@ -118,9 +118,9 @@ def test_confirm_reject_restore_with_reason(store):
 
     # fresh candidate → reject with reason → restore
     p2 = _seed_percept(store, "Belief: purple is best.")
-    belief = MemoryItem(
+    belief = StoreClaim(
         id="tmp2",
-        type=MemoryType.belief,
+        type=ClaimType.belief,
         title="Purple is best",
         summary="User likes purple themes",
         domain="technical",
@@ -135,14 +135,14 @@ def test_confirm_reject_restore_with_reason(store):
     assert rejected.reject_reason == "not a durable belief"
     restored = restore_candidate(store, b.id)
     assert restored.formation_state == FormationState.awaiting_review
-    assert restored.memory.status == MemoryStatus.candidate
+    assert restored.claim.status == ClaimStatus.candidate
 
 
 def test_belief_never_auto_confirmed_by_formation(store):
     p = _seed_percept(store, "I believe we should always write tests.")
-    mem = MemoryItem(
+    mem = StoreClaim(
         id="tmp",
-        type=MemoryType.belief,
+        type=ClaimType.belief,
         title="Always write tests",
         summary="Team belief about testing",
         domain="technical",
@@ -152,5 +152,5 @@ def test_belief_never_auto_confirmed_by_formation(store):
         store, mem, percept_id=p.id, evidence_quote=p.content,
     )
     assert action == "created"
-    assert out.status == MemoryStatus.candidate
+    assert out.status == ClaimStatus.candidate
     assert out.needs_review

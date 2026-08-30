@@ -6,7 +6,8 @@ from typing import Any, Optional
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import TwinStore
+from .identity import purpose_allowed
 from .models import AccessRequest, GrantStatus, PermissionGrant, PolicyEffect, ResourceClassification
 
 # Grant allowed_effects → maximum PolicyEffect they authorize
@@ -52,7 +53,7 @@ def most_restrictive(a: PolicyEffect, b: PolicyEffect) -> PolicyEffect:
 
 
 def create_grant(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     principal_id: str,
     persona: str,
@@ -96,7 +97,7 @@ def create_grant(
     return grant
 
 
-def revoke_grant(store: MemoryStore, grant_id: str) -> PermissionGrant:
+def revoke_grant(store: TwinStore, grant_id: str) -> PermissionGrant:
     g = store.get_permission_grant(grant_id)
     if g is None:
         raise ValueError(f"grant {grant_id} not found")
@@ -128,7 +129,9 @@ def grant_covers(
         return False
     if grant.persona not in ("*", request.persona):
         return False
-    if grant.purpose and grant.purpose not in ("*", request.purpose):
+    if grant.purpose and grant.purpose != "*" and not purpose_allowed(
+        request.purpose, [grant.purpose]
+    ):
         return False
     if grant.tool_ids and request.tool_id not in grant.tool_ids and "*" not in grant.tool_ids:
         return False
@@ -153,14 +156,14 @@ def grant_covers(
     labels = scope.get("labels") or []
     if labels and not (set(labels) & set(classification.labels)) and "*" not in labels:
         return False
-    memory_ids = scope.get("memory_ids") or []
-    if memory_ids and classification.resource_id not in memory_ids:
+    claim_ids = scope.get("claim_ids") or []
+    if claim_ids and classification.resource_id not in claim_ids:
         return False
     return True
 
 
 def find_applicable_grant(
-    store: MemoryStore,
+    store: TwinStore,
     request: AccessRequest,
     classification: ResourceClassification,
     *,
@@ -175,7 +178,7 @@ def find_applicable_grant(
 
 
 def consume_grant(
-    store: MemoryStore,
+    store: TwinStore,
     grant_id: str,
     *,
     expected_version: Optional[int] = None,

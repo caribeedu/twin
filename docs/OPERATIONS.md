@@ -217,10 +217,10 @@ Happy path is `twin cognize run` (already used above). Stage-by-stage:
 ```bash
 twin cognize run                        # Sense→Cognize; builds arcs when evidence allows
 twin episode list                       # consolidate=ready ⇒ ≥2 phases
-twin episode reflect <episode_id>       # trajectory MemoryCandidates
+twin episode reflect <episode_id>       # trajectory review candidates
 twin episode reflect <episode_id> --dry-run
 twin review
-twin stance propose-episode <episode_id>   # after trajectory memories confirmed
+twin stance propose-episode <episode_id>   # after trajectory claims confirmed
 twin stance preview <proposal_id>
 # twin stance approve …                 # human only
 ```
@@ -328,7 +328,9 @@ pytest -q
 Install in [SETUP.md](SETUP.md). Interfaces in [INTERFACES.md](INTERFACES.md). Overview in [README](../README.md).
 
 Prefer `twin cognize run`, `twin narrative …`, `twin stance …`, `twin inject pack`.
-On a TTY, bare `twin` opens the [Command Center](COMMAND_CENTER.md).
+On a TTY, bare `twin` opens the [Command Center](COMMAND_CENTER.md)
+(single screen: Health · Services · MCP rail). Browse and review stay in
+[Web Command Center](WEB_CENTER.md).
 Web visibility of every Cognize entity: [WEB_CENTER.md](WEB_CENTER.md)
 (`twin serve` → `/`).
 

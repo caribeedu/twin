@@ -17,7 +17,7 @@ from twin.cognize.orchestrator import (
     set_cognize_stage_override,
 )
 from twin.cognize.research import attention_score
-from twin.sensory.percept import Percept, SourceClass
+from twin.sense.sensory.percept import Percept, SourceClass
 
 
 def test_eval_disagreement_vs_echo_via_revision_store(store):

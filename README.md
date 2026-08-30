@@ -10,23 +10,6 @@
   <em>One cognitive core. Any model. Any interface.</em>
 </p>
 
-## Architecture (Sense → Cognize → Inject)
-
-Twin is a **longitudinal Narrative** system with three hard walls:
-
-| Module | Owns | Must not |
-|---|---|---|
-| **Sense** | Connectors, percepts, session residue absorb | Invent meaning without Cognize |
-| **Cognize** | LLM-driven Situations → Reflections → Interpretations → Narrative Revision; human Commit Narrative / Stance | Speak to hosts as Inject; expand ACL beyond evidence |
-| **Inject** | Domain Firewall, context packs, stale-as-fresh refusal, reserved Observer slot | Mutate Cognize substrate; serve stale as fresh |
-
-There is no fourth “session mode.” Host conversations use Sense edges in and
-Inject edges out. Durable product unit: **Narrative** + **EpistemicState**,
-not a memory blob or a one-shot answer.
-
-Operator TTY: bare `twin` opens the [Command Center](docs/COMMAND_CENTER.md).  
-Pipeline detail: [ARCHITECTURE.md](docs/ARCHITECTURE.md) · [COGNIZE.md](docs/COGNIZE.md) · [EPISTEMICS.md](docs/EPISTEMICS.md).
-
 <p align="center">
   <a href="docs/SETUP.md"><img src="https://img.shields.io/badge/quickstart-setup-7c3aed?style=for-the-badge" alt="Setup"></a>
   <a href="https://pypi.org/project/twin-cognition/"><img src="https://img.shields.io/pypi/v/twin-cognition.svg?style=for-the-badge&amp;logo=pypi&amp;logoColor=white&amp;label=twin-cognition" alt="PyPI twin-cognition"></a>
@@ -542,7 +525,7 @@ concepts without hiding them.
 | **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How Twin works — Sense → Cognize → Inject, data model, threat model |
 | **[COGNIZE.md](docs/COGNIZE.md)** | Cognize pipeline stages (internal — not the public architecture) |
 | **[EPISTEMICS.md](docs/EPISTEMICS.md)** | Freshness, independence, ACL on derived claims, read-time confidence |
-| **[COMMAND_CENTER.md](docs/COMMAND_CENTER.md)** | Bare `twin` TTY operator surface (Services, Jobs, Cognize, …) |
+| **[COMMAND_CENTER.md](docs/COMMAND_CENTER.md)** | Bare `twin` TTY — single screen (Health · Services · MCP rail) |
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
 | **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
 | **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |

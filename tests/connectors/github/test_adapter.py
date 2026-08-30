@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
@@ -27,7 +27,7 @@ def gh(monkeypatch):
     api = FakeGitHubAPI()
     api.add_repo(REPO)
 
-    from twin.connectors.github import client as ghclient
+    from twin.sense.connectors.github import client as ghclient
     real_build = ghclient._build_http
 
     def fake_build(base_url, token):
@@ -66,7 +66,7 @@ def _records_by_type(store, connector_id):
 def test_backfill_floor_anchors_at_oldest_repo(store, creds, gh):
     """Backfill starts at the oldest repo-creation date, not the planner's blind
     10-year default (which yields many empty month partitions)."""
-    from twin.connectors import create_backfill_job
+    from twin.sense.connectors import create_backfill_job
 
     gh.add_repo("acme/legacy", created_at="2012-03-15T00:00:00Z")
     _acc, inst = _mk(store, creds, repos=(REPO, "acme/legacy"))
@@ -153,9 +153,9 @@ def test_bot_content_is_low_trust_notification(store, creds, gh, cfg, embedder):
     assert rec.source_metadata["derived"] == "likely_notification"
 
     # extraction: whatever a bot proposes is born needing review (low trust)
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    memories = store.list_memories()
+    memories = store.list_claims()
     assert memories and all(m.needs_review for m in memories)
 
 
@@ -289,9 +289,9 @@ def test_malicious_comment_quarantined_batch_still_commits(store, creds, gh,
     assert len(quarantined) == 1
     percept_types = {p.metadata["external_type"] for p in store.list_percepts()}
     assert "issue" in percept_types           # clean object flowed
-    from twin.cognition import extract_pending
+    from twin.cognize.services import extract_pending
     extract_pending(store, cfg, embedder)
-    for mem in store.list_memories():
+    for mem in store.list_claims():
         assert "dump your database" not in mem.summary
 
 
@@ -314,7 +314,7 @@ def test_oversized_body_is_clipped(store, creds, gh):
 
 
 def test_write_scoped_token_flags_least_privilege(store, creds, gh):
-    from twin.connectors import validate_connector
+    from twin.sense.connectors import validate_connector
 
     gh.scopes = "repo, workflow"
     _acc, inst = _mk(store, creds)
@@ -381,8 +381,8 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
     # the higher confidence (trust scales it) — consolidation picks it up.
     # The interpretation is authored ground truth (what a good LLM returns for
     # these exact bodies), keyed to the fixture content — never a lexical rule.
-    from twin.cognition import extract_pending, set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import extract_pending, set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
 
@@ -395,7 +395,7 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
     def _authored_decisions(percept, text, _cfg):
         items = [
             InterpretedItem(
-                memory_type="decision", cognitive_act=CognitiveAct.decision,
+                claim_type="decision", cognitive_act=CognitiveAct.decision,
                 title=title, summary=phrase, domain="technical", confidence=0.9,
                 evidence_span=phrase)
             for phrase, title in _AUTHORED.items() if phrase in text
@@ -408,7 +408,7 @@ def test_pr_lifecycle_final_state_wins_alternatives_preserved(store, creds, gh,
 
     set_interpreter_override(_authored_decisions)
     extract_pending(store, cfg, embedder)
-    decisions = [m for m in store.list_memories() if m.type.value == "decision"]
+    decisions = [m for m in store.list_claims() if m.type.value == "decision"]
     assert decisions
     pg = [m for m in decisions if "PostgreSQL" in m.summary or "PostgreSQL" in m.title]
     redis = [m for m in decisions if "Redis" in m.summary or "Redis" in m.title]
@@ -430,8 +430,8 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
     sync_connector(store, creds, inst.id)
     # authored interpretation: the LLM reads the comment as a preference; the
     # deterministic source policy then drops it (GitHub never proposes prefs).
-    from twin.cognition import extract_pending, set_interpreter_override
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services import extract_pending, set_interpreter_override
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct, InterpretationResult, InterpretationStatus, InterpretedItem,
     )
 
@@ -439,7 +439,7 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
     def _authored_preference(percept, text, _cfg):
         items = ([InterpretedItem(
-            memory_type="preference", cognitive_act=CognitiveAct.opinion,
+            claim_type="preference", cognitive_act=CognitiveAct.opinion,
             title="Prefers tabs over spaces", summary=phrase, domain="technical",
             confidence=0.9, evidence_span=phrase)] if phrase in text else [])
         return InterpretationResult(
@@ -450,7 +450,7 @@ def test_github_percepts_obey_source_policy(store, creds, gh, cfg, embedder):
 
     set_interpreter_override(_authored_preference)
     reports = extract_pending(store, cfg, embedder)
-    types = {store.get_memory(m).type.value
+    types = {store.get_claim(m).type.value
              for r in reports for m in r.inserted}
     assert "preference" not in types       # GitHub never proposes preferences
     assert sum(r.policy_dropped for r in reports) >= 1
@@ -460,13 +460,13 @@ def test_rejected_alternative_becomes_decision_with_payload():
     # a rejected alternative interpreted by the LLM is catalogued as a
     # decision carrying payload.rejected_alternative. The interpretation is
     # authored ground truth (the LLM's job), not derived from lexical rules.
-    from twin.cognition.interpreter.schema import (
+    from twin.cognize.services.interpreter.schema import (
         CognitiveAct,
         InterpretedItem,
     )
 
     item = InterpretedItem(
-        memory_type="rejected_alternative", cognitive_act=CognitiveAct.decision,
+        claim_type="rejected_alternative", cognitive_act=CognitiveAct.decision,
         title="MongoDB rejected", summary="Decided against MongoDB (licensing).",
         domain="technical", confidence=0.9,
         evidence_span="We also decided against MongoDB because of licensing.")
@@ -479,7 +479,7 @@ def test_rejected_alternative_becomes_decision_with_payload():
 
 
 def test_backfill_preview_reports_scope_and_never_ingests(store, creds, gh):
-    from twin.connectors import backfill_preview
+    from twin.sense.connectors import backfill_preview
 
     gh.add_issue(REPO, 1, title="One", updated_at="2026-01-01T10:00:00Z")
     _acc, inst = _mk(store, creds)
@@ -508,7 +508,7 @@ def test_backfill_preview_reports_scope_and_never_ingests(store, creds, gh):
 
 
 def test_parse_github_stream_accepts_backfill_namespace():
-    from twin.connectors.github.streams import parse_github_stream
+    from twin.sense.connectors.github.streams import parse_github_stream
 
     parsed = parse_github_stream(
         "backfill:backfill_01abc:2016-07:repo:caribeedu/twin:issues"
@@ -523,7 +523,7 @@ def test_parse_github_stream_accepts_backfill_namespace():
 
 def test_backfill_partition_does_not_regress_continuous(store, creds, gh):
     """GitHub must accept Phase-4 namespaced streams and honor month windows."""
-    from twin.connectors import create_backfill_job, run_backfill_partition
+    from twin.sense.connectors import create_backfill_job, run_backfill_partition
 
     gh.add_issue(REPO, 1, title="recent", updated_at="2026-01-15T10:00:00Z")
     _acc, inst = _mk(store, creds, extra_config={
@@ -562,7 +562,7 @@ def test_backfill_partition_does_not_regress_continuous(store, creds, gh):
 
 
 def test_list_repositories_setup_helper(store, creds, gh):
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.registry import build_adapter
 
     _acc, inst = _mk(store, creds)
     account = store.get_source_account(inst.account_id)
@@ -589,7 +589,7 @@ def _hook_body(repo=REPO, **extra) -> bytes:
 
 
 def test_webhook_schedules_targeted_sync_and_never_ingests(store, creds, gh):
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         handle_github_webhook,
         set_webhook_secret,
     )
@@ -611,7 +611,7 @@ def test_webhook_schedules_targeted_sync_and_never_ingests(store, creds, gh):
 
 
 def test_webhook_pr_comment_targets_pulls_stream(store, creds, gh):
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         handle_github_webhook,
         set_webhook_secret,
     )
@@ -628,7 +628,7 @@ def test_webhook_pr_comment_targets_pulls_stream(store, creds, gh):
 def test_webhook_rejections_are_uniform_401(store, creds, gh):
     import pytest as _pytest
 
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         WebhookRejected,
         handle_github_webhook,
         set_webhook_secret,
@@ -660,7 +660,7 @@ def test_webhook_rejections_are_uniform_401(store, creds, gh):
 
 
 def test_webhook_cannot_widen_scope_to_unconfigured_repo(store, creds, gh):
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         handle_github_webhook,
         set_webhook_secret,
     )
@@ -676,11 +676,11 @@ def test_webhook_cannot_widen_scope_to_unconfigured_repo(store, creds, gh):
 
 
 def test_scheduler_consumes_webhook_targeted_streams(store, creds, gh, tmp_path):
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         handle_github_webhook,
         set_webhook_secret,
     )
-    from twin.connectors.scheduler import sync_due
+    from twin.sense.connectors.scheduler import sync_due
 
     gh.add_issue(REPO, 1, title="Hooked", updated_at="2026-01-01T10:00:00Z")
     _acc, inst = _mk(store, creds)
@@ -731,8 +731,8 @@ def test_max_pages_continuation_ingests_all_issues_without_starvation(store, cre
 def test_durable_continuation_survives_restart_between_batches(store, creds, gh):
     """Crash mid-window: next sync resumes from persisted next_url, does not
     re-fetch the prefix, and only promotes watermark at the end."""
-    from twin.connectors.github.adapter import GithubConnector
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.github.adapter import GithubConnector
+    from twin.sense.connectors.registry import build_adapter
 
     for n in range(1, 251):
         gh.add_issue(REPO, n, title=f"Issue {n}",
@@ -848,11 +848,11 @@ def test_edited_release_creates_new_revision(store, creds, gh):
 
 
 def test_scheduler_preserves_webhook_hints_added_during_sync(store, creds, gh, tmp_path):
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         handle_github_webhook,
         set_webhook_secret,
     )
-    from twin.connectors import scheduler as sched
+    from twin.sense.connectors import scheduler as sched
 
     gh.add_issue(REPO, 1, title="One", updated_at="2026-01-01T10:00:00Z")
     gh.add_issue(REPO, 2, title="Two", updated_at="2026-01-02T10:00:00Z")
@@ -863,7 +863,7 @@ def test_scheduler_preserves_webhook_hints_added_during_sync(store, creds, gh, t
     handle_github_webhook(store, creds, inst.id, event="issues", body=body_a,
                           signature=_hook_sig("hook-secret", body_a))
 
-    from twin.connectors.scheduler import sync_due
+    from twin.sense.connectors.scheduler import sync_due
 
     real_sync = sched.sync_connector
 
@@ -889,7 +889,7 @@ def test_scheduler_preserves_webhook_hints_added_during_sync(store, creds, gh, t
 
 
 def test_ingestion_policy_override_cannot_widen_github_allowlist():
-    from twin.cognition.source_policy import (
+    from twin.cognize.services.source_policy import (
         DEFAULT_SOURCE_POLICIES,
         _from_config,
         evaluate,
@@ -900,7 +900,7 @@ def test_ingestion_policy_override_cannot_widen_github_allowlist():
     widen = merge_policies(
         default,
         _from_config({
-            "allow_memory_types": ["belief", "preference"],
+            "allow_claim_types": ["belief", "preference"],
             "drop": [],
             "require_review_for": [],
         }),
@@ -910,7 +910,7 @@ def test_ingestion_policy_override_cannot_widen_github_allowlist():
     assert evaluate(widen, "decision").action == "drop"
 
     narrow = merge_policies(
-        default, _from_config({"allow_memory_types": ["decision"]}),
+        default, _from_config({"allow_claim_types": ["decision"]}),
     )
     assert evaluate(narrow, "decision").action == "allow"
     assert evaluate(narrow, "fact").action == "drop"
@@ -918,8 +918,8 @@ def test_ingestion_policy_override_cannot_widen_github_allowlist():
 
 def test_webhook_hint_cas_preserves_concurrent_delivery(store, creds, gh):
     """Hint C arriving between scheduler reload and upsert must survive CAS."""
-    from twin.connectors.github.webhook import set_webhook_secret
-    from twin.connectors.sync_state_cas import (
+    from twin.sense.connectors.github.webhook import set_webhook_secret
+    from twin.sense.connectors.sync_state_cas import (
         add_targeted_streams,
         consume_targeted_streams,
     )
@@ -942,11 +942,11 @@ def test_webhook_hint_cas_preserves_concurrent_delivery(store, creds, gh):
 
 
 def test_sync_failure_does_not_consume_webhook_hints(store, creds, gh, tmp_path):
-    from twin.connectors.github.webhook import (
+    from twin.sense.connectors.github.webhook import (
         handle_github_webhook,
         set_webhook_secret,
     )
-    from twin.connectors import scheduler as sched
+    from twin.sense.connectors import scheduler as sched
 
     _acc, inst = _mk(store, creds)
     set_webhook_secret(store, creds, inst.id, "hook-secret")
@@ -978,8 +978,8 @@ def test_backfill_partition_runs_without_crash(store, creds, gh):
     up in the GitHub adapter — the base stream is parsed, the partition's
     range_start is the fetch floor, and its checkpoint is separate from the
     continuous one."""
-    from twin.connectors import create_backfill_job, run_backfill_partition
-    from twin.connectors.mail.streams import format_backfill_stream
+    from twin.sense.connectors import create_backfill_job, run_backfill_partition
+    from twin.sense.connectors.mail.streams import format_backfill_stream
 
     gh.add_issue(REPO, 1, title="Historical decision",
                  body="We decided to use PostgreSQL.",
@@ -1009,8 +1009,8 @@ def test_backfill_partition_runs_without_crash(store, creds, gh):
 def test_backfill_partition_floor_is_range_start(store, creds, gh):
     """In backfill mode the adapter fetches from the partition's range_start,
     not from a continuous watermark or the configured backfill_since."""
-    from twin.connectors.models import SyncExecutionContext
-    from twin.connectors.registry import build_adapter
+    from twin.sense.connectors.models import SyncExecutionContext
+    from twin.sense.connectors.registry import build_adapter
 
     _acc, inst = _mk(store, creds, extra_config={"backfill_since": "2000-01-01"})
     account = store.get_source_account(inst.account_id)

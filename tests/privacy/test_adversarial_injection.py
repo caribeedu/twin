@@ -1,9 +1,9 @@
 """Adversarial privacy / injection checks for."""
 
 from twin import ids
-from twin.judgment.firewall import Firewall
-from twin.memory.models import MemoryItem, MemoryStatus, MemoryType
-from twin.memory.search import search
+from twin.privacy.firewall import Firewall
+from twin.store.models import StoreClaim, ClaimStatus, ClaimType
+from twin.store.search import search
 from twin.privacy.quarantine import detect_injection
 
 
@@ -13,30 +13,30 @@ def test_injection_does_not_become_instruction():
 
 
 def test_cross_domain_recall_denied(store, embedder, cfg):
-    personal = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.fact,
+    personal = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.fact,
         title="anniversary dinner mention of SQLite joke",
         summary="personal chat joking about SQLite",
         domain="relationship",
         sensitivity="private",
         confidence=0.9,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
     )
-    work = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    work = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         title="Use SQLite locally",
         summary="Twin local store is SQLite",
         domain="technical",
         confidence=0.9,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
     )
-    store.insert_memory(personal)
-    store.insert_memory(work)
+    store.insert_claim(personal)
+    store.insert_claim(work)
     for m in (personal, work):
         store.store_embedding(
-            m.id, "memory", embedder.name,
+            m.id, "claim", embedder.name,
             embedder.embed(f"{m.title}\n{m.summary}"),
         )
 
@@ -45,7 +45,7 @@ def test_cross_domain_recall_denied(store, embedder, cfg):
         store, embedder, "SQLite",
         target_domain="technical", firewall=fw,
     )
-    assert all(h.memory.id != personal.id for h in result.hits)
-    assert any(b.memory_id == personal.id for b in result.blocked) or all(
-        h.memory.domain == "technical" for h in result.hits
+    assert all(h.claim.id != personal.id for h in result.hits)
+    assert any(b.claim_id == personal.id for b in result.blocked) or all(
+        h.claim.domain == "technical" for h in result.hits
     )

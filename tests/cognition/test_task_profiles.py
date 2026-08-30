@@ -1,9 +1,9 @@
-"""Task-aware pack profiles (twin.cognition.task_profiles + context_pack)."""
+"""Task-aware pack profiles (twin.cognize.services.task_profiles + context_pack)."""
 
 from twin import ids
-from twin.cognition.context_pack import build_context_pack
-from twin.cognition.task_profiles import PROFILES, get_profile, infer_task_profile
-from twin.memory.models import MemoryItem
+from twin.inject.context_pack import build_context_pack
+from twin.cognize.services.task_profiles import PROFILES, get_profile, infer_task_profile
+from twin.store.models import StoreClaim
 from twin.privacy.identity import ensure_local_identity, resolve_access
 from twin.privacy.yaml_io import bootstrap_policy_set
 
@@ -12,7 +12,7 @@ def _cli_access(store):
     bootstrap_policy_set(store)
     ensure_local_identity(store)
     return resolve_access(store, surface="cli", persona="individual",
-                          purpose="memory_retrieval", audience="self")
+                          purpose="context_retrieval", audience="self")
 
 
 
@@ -48,10 +48,10 @@ def _seed(store, embedder):
         ("fact", "Webhooks ship v2", "Webhook v2 shipped in June."),
     ]
     for type_, title, summary in data:
-        mem = MemoryItem(id=ids.memory_id(), type=type_, title=title, summary=summary,
+        mem = StoreClaim(id=ids.claim_id(), type=type_, title=title, summary=summary,
                          domain="technical", confidence=0.9, status="confirmed")
-        store.insert_memory(mem)
-        store.store_embedding(mem.id, "memory", embedder.name,
+        store.insert_claim(mem)
+        store.store_embedding(mem.id, "claim", embedder.name,
                               embedder.embed(f"{title}\n{summary}"))
 
 
@@ -68,7 +68,7 @@ def test_profiles_reorder_sections(store, cfg, embedder):
         < arch.context_pack.index("## Constraints")
     assert "## Active project context" in coding.context_pack
     # same memories, different packaging — firewall guarantees unchanged
-    assert {s["memory_id"] for s in arch.sources} == {s["memory_id"] for s in coding.sources}
+    assert {s["claim_id"] for s in arch.sources} == {s["claim_id"] for s in coding.sources}
 
 
 def test_unknown_profile_uses_general_sections(store, cfg, embedder):

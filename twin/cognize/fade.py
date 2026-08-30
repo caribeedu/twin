@@ -32,7 +32,7 @@ def recommend_accessibility(
             nid = meta.get("narrative_id") or (item.provenance or {}).get("narrative_id") if hasattr(item, "provenance") else None
             # JudgmentItem may store provenance differently
             prov = getattr(item, "provenance", None)
-            if prov is not None and getattr(prov, "memory_ids", None) is None:
+            if prov is not None and getattr(prov, "claim_ids", None) is None:
                 nid = nid or (getattr(prov, "metadata", None) or {}).get("narrative_id")
             proposed = getattr(item, "statement", None)
             # Check proposed_item-like metadata on judgment proposals is separate

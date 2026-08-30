@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 from twin import ids
-from twin.judgment.proposals import (
+from twin.cognize.stance_engine.proposals import (
     propose_from_episode,
     propose_from_episode_patterns,
 )
-from twin.memory.models import CanonicalClaim, MemoryItem, MemoryStatus, MemoryType
+from twin.store.models import CanonicalClaim, StoreClaim, ClaimStatus, ClaimType
 
 
 def _confirmed_trajectory_memory(store, *, episode_id, title, summary,
                                  project_id=None, domain="technical"):
-    mem = MemoryItem(
-        id=ids.memory_id(),
-        type=MemoryType.decision,
+    mem = StoreClaim(
+        id=ids.claim_id(),
+        type=ClaimType.decision,
         title=title,
         summary=summary,
         domain=domain,
         confidence=0.7,
-        status=MemoryStatus.confirmed,
+        status=ClaimStatus.confirmed,
         valid_from="2026-07-03T09:00:00Z",
         project_id=project_id,
         payload={
@@ -32,7 +32,7 @@ def _confirmed_trajectory_memory(store, *, episode_id, title, summary,
             object="SQS",
         ),
     )
-    store.insert_memory(mem)
+    store.insert_claim(mem)
     return mem
 
 
@@ -52,13 +52,13 @@ def test_propose_from_episode_creates_pending_proposal(store):
     proposal = propose_from_episode(store, ep)
     assert proposal is not None
     assert proposal.status.value == "pending"
-    assert m.id in proposal.supporting_memory_ids
+    assert m.id in proposal.supporting_claim_ids
     assert proposal.proposed_item["provenance"]["source"] == "episode_pattern"
     assert proposal.metadata.get("episode_id") == ep
 
 
 def test_propose_from_episode_support_counts_independent_sources(store):
-    # two confirmed trajectory memories from the SAME episode → one source,
+    # two confirmed trajectory claims from the SAME episode → one source,
     # not "support=2" (the memory count is surfaced separately).
     ep = "episode_shared"
     _confirmed_trajectory_memory(
@@ -72,7 +72,7 @@ def test_propose_from_episode_support_counts_independent_sources(store):
     proposal = propose_from_episode(store, ep)
     assert proposal is not None
     assert proposal.support_count == 1
-    assert proposal.metadata.get("memory_count") == 2
+    assert proposal.metadata.get("claim_count") == 2
     assert proposal.metadata.get("independent_sources") == 1
 
 

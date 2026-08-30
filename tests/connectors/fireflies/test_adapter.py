@@ -4,14 +4,14 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from twin.connectors import (
+from twin.sense.connectors import (
     add_connector_instance,
     build_credential_store,
     register_source_account,
     sync_connector,
 )
-from twin.connectors.meeting.correlate import correlation_fingerprint
-from twin.connectors.meeting.speakers import ACTOR_PROMOTE_THRESHOLD
+from twin.sense.connectors.meeting.correlate import correlation_fingerprint
+from twin.sense.connectors.meeting.speakers import ACTOR_PROMOTE_THRESHOLD
 
 from tests.connectors.fireflies.fireflies_mock import FakeFirefliesAPI
 
@@ -26,7 +26,7 @@ def creds(tmp_path):
 @pytest.fixture()
 def fireflies(monkeypatch):
     api = FakeFirefliesAPI()
-    from twin.connectors.fireflies import client as fclient
+    from twin.sense.connectors.fireflies import client as fclient
     real_build = fclient._build_http
 
     def fake_build(base_url, token):
@@ -309,7 +309,7 @@ def test_failed_finalize_keeps_pending(store, creds, fireflies, monkeypatch):
     ]
     fireflies.transcripts["mtg_pend"]["summary"] = {"overview": "done"}
 
-    from twin.connectors import runtime as rt
+    from twin.sense.connectors import runtime as rt
     real_finalize = rt._finalize_committed
 
     def boom(*args, **kwargs):
@@ -331,7 +331,7 @@ def test_failed_finalize_keeps_pending(store, creds, fireflies, monkeypatch):
 
 def test_chunk_shrink_tombstones_via_sync(store, creds, fireflies):
     # Many short segments → multiple chunks under default MAX_CHUNK_CHARS.
-    from twin.connectors.meeting.normalize import MAX_CHUNK_CHARS
+    from twin.sense.connectors.meeting.normalize import MAX_CHUNK_CHARS
     pad = "x" * (MAX_CHUNK_CHARS // 3)
     sentences = [
         {"index": i, "speaker_name": "Alice", "speaker_id": "a",

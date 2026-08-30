@@ -1,6 +1,6 @@
 """Continuous attention — silence default, cooldown, delta enqueue."""
 
-from twin.cognition.attention import (
+from twin.cognize.services.attention import (
     AttentionKind,
     AttentionPolicy,
     evaluate_attention,
@@ -8,9 +8,9 @@ from twin.cognition.attention import (
     feedback_attention,
     working_memory_text,
 )
-from twin.cognition.session_lifecycle import append_session_delta, checkpoint_session
-from twin.cognition.sessions import start_session
-from twin.runtime.models import JobKind
+from twin.cognize.services.session_lifecycle import append_session_delta, checkpoint_session
+from twin.cognize.services.sessions import start_session
+from twin.interfaces.runtime.models import JobKind
 
 
 def test_expected_value_prefers_silence_on_low_signal():
@@ -55,14 +55,14 @@ def test_delta_enqueues_attention_job(store, cfg, embedder):
 
 
 def test_feedback_suppresses_emission(store, cfg, embedder):
-    from twin.cognition.attention import AttentionOutcome
+    from twin.cognize.services.attention import AttentionOutcome
 
     started = start_session(store, cfg, embedder, "feedback path", client="cli")
     sid = started.session.id
     em = AttentionOutcome(
         session_id=sid,
         kind=AttentionKind.suggestion,
-        memory_id="mem_x",
+        claim_id="mem_x",
         summary="hint",
         expected_value=0.8,
         status="open",
@@ -71,4 +71,4 @@ def test_feedback_suppresses_emission(store, cfg, embedder):
     out = feedback_attention(store, em.id, verdict="irrelevant")
     assert out is not None
     assert out.status == "suppressed"
-    assert store.is_attention_suppressed(sid, kind="suggestion", memory_id="mem_x")
+    assert store.is_attention_suppressed(sid, kind="suggestion", claim_id="mem_x")

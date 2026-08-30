@@ -7,12 +7,12 @@ import pytest
 from twin.cognize.acl import intersect_sensitivity
 from twin.cognize.commit import CommitError, commit_narrative
 from twin.cognize.models import EpistemicStatus
-from twin.cognition.context_pack import build_context_pack
-from twin.memory.embeddings import HashEmbedder
-from twin.memory.models import Artifact
-from twin.memory.retention import delete_artifact
+from twin.inject.context_pack import build_context_pack
+from twin.store.embeddings import HashEmbedder
+from twin.store.models import Artifact
+from twin.store.retention import delete_artifact
 from twin.privacy.models import AccessRequest
-from twin.sensory.percept import Percept, SourceClass
+from twin.sense.sensory.percept import Percept, SourceClass
 
 
 def test_intersect_sensitivity_picks_strictest():
@@ -95,7 +95,7 @@ def test_pack_acl_hides_private_from_client_audience(store, cfg):
         audience="client",
         principal_id="ext",
         persona="individual",
-        purpose="memory_retrieval",
+        purpose="context_retrieval",
         tool_id="test",
         requested_domains=["technical"],
         metadata={"allowed_source_sensors": ["github"]},

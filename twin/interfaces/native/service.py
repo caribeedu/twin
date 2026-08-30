@@ -27,8 +27,8 @@ _PROTO_DENY_EXTRAS = frozenset({
     "traceback", "traceback_tail", "stack", "error_class",
 })
 
-from ...cognition.context_pack import PackDeadlineExceeded
-from ...cognition.host_session import (
+from twin.inject.context_pack import PackDeadlineExceeded
+from twin.cognize.services.host_session import (
     BindingScopeError,
     NativeSessionStart,
     bind_and_start,
@@ -41,9 +41,9 @@ from ...cognition.host_session import (
     resolve_active_binding,
 )
 from ...config import Config
-from ...memory.embeddings import Embedder
-from ...memory.models import HostSessionBinding, InterventionRecommendation
-from ...memory.store.base import MemoryStore
+from twin.store.embeddings import Embedder
+from twin.store.models import HostSessionBinding, InterventionRecommendation
+from twin.store.store.base import TwinStore
 from .events import ALLOWED_HOST_EVENT_KINDS, PACK_EMIT_KINDS, HostEvent
 
 logger = logging.getLogger("twin.interfaces.native")
@@ -116,7 +116,7 @@ class NativeEventResult:
 class NativeHostService:
     """Thin host façade — pack/session logic stays in cognition."""
 
-    def __init__(self, store: MemoryStore, cfg: Config, embedder: Embedder):
+    def __init__(self, store: TwinStore, cfg: Config, embedder: Embedder):
         self.store = store
         self.cfg = cfg
         self.embedder = embedder
@@ -167,7 +167,7 @@ class NativeHostService:
     def handle(self, event: HostEvent) -> NativeEventResult:
         try:
             try:
-                from twin.cognition.inject_observer import get_inject_observer
+                from twin.inject.inject_observer import get_inject_observer
 
                 get_inject_observer().observe_turn(
                     self.store,
@@ -270,7 +270,7 @@ class NativeHostService:
             # Parallel workspace tick: confidence-aware spontaneous recall.
             # Silent when nothing clears the bar; blocked stay ids-only.
             try:
-                from ...cognition.workspace import workspace_tick
+                from twin.cognize.services.workspace import workspace_tick
                 tick = workspace_tick(
                     self.store, self.cfg, self.embedder, event.text or "",
                     session_id=binding.cognitive_session_id,
@@ -281,7 +281,7 @@ class NativeHostService:
                     recs.append(InterventionRecommendation(
                         type="info",
                         reason=(
-                            f"Spontaneous recall: {sug.get('summary') or sug.get('memory_id')}"
+                            f"Spontaneous recall: {sug.get('summary') or sug.get('claim_id')}"
                         ),
                         urgency="low",
                         session_id=binding.cognitive_session_id,
@@ -289,7 +289,7 @@ class NativeHostService:
                         requires_confirmation=False,
                         metadata={
                             "stage": "suggestion",
-                            "memory_id": sug.get("memory_id"),
+                            "claim_id": sug.get("claim_id"),
                             "confidence": sug.get("confidence"),
                             "salience": sug.get("salience"),
                             "why_relevant": sug.get("why_relevant"),
@@ -613,7 +613,7 @@ class NativeHostService:
 
 
 def handle_normalized_event(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     event: HostEvent,
@@ -622,7 +622,7 @@ def handle_normalized_event(
 
 
 def proactive_pack(
-    store: MemoryStore,
+    store: TwinStore,
     cfg: Config,
     embedder: Embedder,
     *,

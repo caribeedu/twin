@@ -31,6 +31,10 @@ A raw piece of information collected from a connector or local source.
 A normalized, attributable observation produced by Sense from one or more
 artifacts. Immutable once stored.
 
+**Observed** percepts come from Sense connectors. **Derived** percepts are
+Cognize-synthesized (episode/pattern arcs) and are *not* Cognize Reflections
+(open epistemic gaps).
+
 ## Situation
 
 Clustering of percepts that appear to belong to the same happening
@@ -124,14 +128,27 @@ same person over time rather than repeatedly starting from zero. See
 
 | Deprecated (avoid in product / CLI / MCP copy) | Prefer |
 |---|---|
-| **Memory** (as product noun / `twin memory`) | **Narrative** (+ Relations); code may still use `Memory*` until dual-read migration finishes |
-| **Judgment** (public name) | **Stance** (`twin stance`; `judgment` remains a deprecated alias) |
+| **Memory** (as product noun / `twin memory`) | **Narrative** (+ Relations) |
+| **Judgment** (public name) | **Stance** (`twin stance`) |
 | **Situation Model** (as sole label) | **Situation** (+ Narrative as the durable account) |
 | Understanding as a stored row / table | Understanding as **emergent** (above) |
+| Package names `twin.memory` / `twin.judgment` / `twin.cognition` as product architecture | Target packages in [ARCHITECTURE — Code packages](ARCHITECTURE.md#code-packages-target-layout) |
+| Purpose `memory_retrieval` | `context_retrieval` |
+| Store facade `MemoryStore` | `TwinStore` |
+| Lifecycle `merge_memories` / `archive_memory` / `split_memory` | `merge_claims` / `archive_claim` / `split_claim` |
+| REST `/api/memories` | `/api/claims` |
+| Interpreter JSON `memory_type` | `claim_type` |
+| Connector config `allow_memory_types` | `allow_claim_types` |
+| Metrics `memory_usage_rate` / `false_memory_rate` | `claim_usage_rate` / `false_claim_rate` |
+| `gather_related_memories` / `related_memories` | `gather_related_claims` / `related_claims` |
+| Job kind `reembed_memory` | `reembed_claim` |
+| Stance proposal metadata `memory_count` | `claim_count` |
+| Privacy purpose / pack default | `context_retrieval` only |
 
 Academic citations may still say “memory” (paper titles). Everyday speech
 (“Twin remembers”) is fine in conversation; commands, schema, and product
 docs should not.
 
-Code note: internal `MemoryItem` / `WorkEpisode` types remain until Cognize
-store migration completes — see [v2-tracker.md](v2-tracker.md).
+Code note: internal `StoreClaim` rows (table `store_claims`, id prefix
+`clm_`) hold dual-read claim data until Cognize maps them to Narratives —
+see [v2-tracker.md](v2-tracker.md) (v2.6 dual-read schema rename).

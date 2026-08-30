@@ -7,14 +7,14 @@ neighbor (a Slack symptom next to a GitHub fix) is a genuine second source.
 from __future__ import annotations
 
 from twin.clock import now_iso
-from twin.memory.formation import propose_or_corroborate
-from twin.memory.models import MemoryItem, MemoryType
-from twin.memory.provenance import (
+from twin.store.formation import propose_or_corroborate
+from twin.store.models import StoreClaim, ClaimType
+from twin.store.provenance import (
     attach_corroborating_evidence,
     count_independent_sources,
-    memory_source_keys,
+    claim_source_keys,
 )
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _percept(store, text, sensor="test"):
@@ -33,9 +33,9 @@ def _percept(store, text, sensor="test"):
 
 
 def _mem(title):
-    return MemoryItem(
+    return StoreClaim(
         id="tmp",
-        type=MemoryType.decision,
+        type=ClaimType.decision,
         title=title,
         summary=title,
         domain="technical",
@@ -74,7 +74,7 @@ def test_cross_sense_counts_as_two_sources(store):
         independence_group="xsense:slack:rec1",
     )
     assert count_independent_sources(store, [mem.id]) == 2
-    keys = memory_source_keys(store, mem.id)
+    keys = claim_source_keys(store, mem.id)
     assert any(k.startswith("xsense:") for k in keys)
 
 
@@ -84,7 +84,7 @@ def test_counting_accepts_ids_and_objects(store):
         store, _mem("Decision"), percept_id=p.id,
         evidence_quote="decision", independence_group="episode:EP3",
     )
-    reloaded = store.get_memory(mem.id)
+    reloaded = store.get_claim(mem.id)
     assert count_independent_sources(store, [mem.id]) == 1
     assert count_independent_sources(store, [reloaded]) == 1
 
@@ -94,6 +94,6 @@ def test_fallback_to_episode_when_no_evidence_groups(store):
     mem = _mem("No-evidence claim")
     mem.id = "mem_noevidence"
     mem.payload = {"episode_id": "EP_fallback"}
-    store.insert_memory(mem)
-    assert memory_source_keys(store, "mem_noevidence") == {"episode:EP_fallback"}
+    store.insert_claim(mem)
+    assert claim_source_keys(store, "mem_noevidence") == {"episode:EP_fallback"}
     assert count_independent_sources(store, ["mem_noevidence"]) == 1

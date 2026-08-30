@@ -14,36 +14,36 @@ import tempfile
 from pathlib import Path
 
 from twin import ids
-from twin.cognition.consolidation_cycle import run_consolidation_cycle
-from twin.cognition.recall import RecallPolicy, apply_recall_policy
-from twin.cognition.workspace import workspace_tick
+from twin.cognize.services.consolidation_cycle import run_consolidation_cycle
+from twin.cognize.services.recall import RecallPolicy, apply_recall_policy
+from twin.cognize.services.workspace import workspace_tick
 from twin.config import Config
-from twin.memory.embeddings import get_embedder
-from twin.memory.models import MemoryItem
-from twin.memory.store.sqlite import SqliteStore
+from twin.store.embeddings import get_embedder
+from twin.store.models import StoreClaim
+from twin.store.store.sqlite import SqliteStore
 
 _CASES = Path(__file__).resolve().parent / "cases"
 
 
-def _seed_memory(store, embedder, **kw) -> MemoryItem:
+def _seed_memory(store, embedder, **kw) -> StoreClaim:
     base = dict(
-        id=ids.memory_id(), type="decision",
+        id=ids.claim_id(), type="decision",
         title="Postgres primary",
         summary="Use Postgres as the primary database.",
         domain="technical", confidence=0.9, status="confirmed",
     )
     base.update(kw)
-    mem = MemoryItem(**base)
-    store.insert_memory(mem)
+    mem = StoreClaim(**base)
+    store.insert_claim(mem)
     store.store_embedding(
-        mem.id, "memory", embedder.name,
+        mem.id, "claim", embedder.name,
         embedder.embed(f"{mem.title}\n{mem.summary}"),
     )
     return mem
 
 
 def _confirmed_ids(store) -> set[str]:
-    return {m.id for m in store.list_memories(status="confirmed", limit=10_000)}
+    return {m.id for m in store.list_claims(status="confirmed", limit=10_000)}
 
 
 def _run_case(case: dict) -> tuple[bool, str]:
@@ -69,7 +69,7 @@ def _run_case(case: dict) -> tuple[bool, str]:
             if "silent" in exp and result.silent != exp["silent"]:
                 return False, f"silent {result.silent} != {exp['silent']}"
             if "suggestion_ids" in exp:
-                got = [s.memory_id for s in result.suggestions]
+                got = [s.claim_id for s in result.suggestions]
                 if got != exp["suggestion_ids"]:
                     return False, f"suggestions {got} != {exp['suggestion_ids']}"
             if "suggestion_count" in exp and len(result.suggestions) != exp["suggestion_count"]:

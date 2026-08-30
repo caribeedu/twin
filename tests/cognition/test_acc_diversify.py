@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from twin.cognition.analysis_dossier import (
+from twin.cognize.services.analysis_dossier import (
     CROSS_SENSE_RESERVED,
     MAX_CROSS_SENSE,
     _diversify_cross_sense,
@@ -42,7 +42,7 @@ def test_diversify_reserves_other_sense_slots():
     )
     assert len(picked) == MAX_CROSS_SENSE
     senses = []
-    from twin.cognition import sense_lenses
+    from twin.cognize.services import sense_lenses
     for rec, _s, _a in picked:
         senses.append(sense_lenses.sense_for_record(rec))
     assert senses.count("slack") >= 2

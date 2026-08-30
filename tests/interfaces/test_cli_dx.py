@@ -31,7 +31,7 @@ def _offline_embedder(monkeypatch):
         (("connector", "adapters", "--json"), ("adapters",)),
         (("connector", "list", "--json"), ("connectors", "count")),
         (("interpret", "status", "--json"), ("never_interpreted", "interpreted")),
-        (("stats", "--json"), ("percepts", "memories")),
+        (("stats", "--json"), ("percepts", "claims")),
         (("stance", "list", "--json"), ("stances", "count")),
         (("narrative", "unsupported", "--json"), ("unsupported", "count")),
         (("cognize", "status", "--json"), ("pending_percepts", "gate_ok")),
@@ -69,12 +69,12 @@ def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
     and never crashes on a repo the credential cannot see."""
     import types
 
-    from twin.connectors.models import (
+    from twin.sense.connectors.models import (
         ConnectorInstance, ConnectorStatus, OwnershipClass, SourceAccount,
     )
     from twin.interfaces import cli
     from twin.interfaces.commands import cli_handlers
-    from twin.memory.store.sqlite import SqliteStore
+    from twin.store.store.sqlite import SqliteStore
 
     store = SqliteStore(str(tmp_path / "twin.db"))
     acc = SourceAccount(connector_type="github", source_owner=OwnershipClass.personal,

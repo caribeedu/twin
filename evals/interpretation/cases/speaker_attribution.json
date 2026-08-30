@@ -10,7 +10,7 @@
   },
   "interpreter_output": [
     {
-      "memory_type": "fact",
+      "claim_type": "fact",
       "cognitive_act": "third_party_claim",
       "title": "Vendor API rate limit is 5000 req/hour",
       "summary": "Priya relayed the vendor's claim that the API rate limit is 5000 requests per hour.",
@@ -24,7 +24,7 @@
   "expected": {
     "status": "interpreted",
     "catalogued": 1,
-    "memories": [
+    "claims": [
       {"type": "fact", "cognitive_act": "third_party_claim", "attributed_to": "Priya", "needs_review": true, "evidence_grounded": true}
     ]
   }

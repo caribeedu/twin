@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from twin.cognition.consolidation_cycle import (
+from twin.cognize.services.consolidation_cycle import (
     MAX_JUDGMENT_DRAFTS_PER_WINDOW,
     run_consolidation_cycle,
 )

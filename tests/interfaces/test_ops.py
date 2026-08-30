@@ -23,8 +23,8 @@ def test_doctor_reports_all_areas(cfg):
 
 def test_doctor_flags_review_backlog(cfg, store, embedder):
     from tests.paths import EXAMPLES
-    from twin.cognition import extract_pending
-    from twin.sensory import sense_paths
+    from twin.cognize.services import extract_pending
+    from twin.sense.sensory import sense_paths
 
     percepts, _ = sense_paths([EXAMPLES])
     for p in percepts:
@@ -42,8 +42,8 @@ def test_doctor_runtime_queue_ok_when_empty(cfg):
 
 
 def test_doctor_flags_pending_runtime_jobs(cfg, store):
-    from twin.runtime.models import JobKind
-    from twin.runtime.queue import RuntimeQueue
+    from twin.interfaces.runtime.models import JobKind
+    from twin.interfaces.runtime.queue import RuntimeQueue
 
     RuntimeQueue(store).enqueue(JobKind.session_domain_resolve, payload={"x": 1})
     checks = {c.name: c for c in doctor(cfg)}

@@ -1,30 +1,59 @@
 # Web Command Center
 
-Operator web cockpit for Twin — Sense → Cognize → Inject — served by
+Operator web cockpit for Twin — Cognize → Review → Inject — served by
 `twin serve` at a single route (`/`).
 
 The TUI Command Center ([COMMAND_CENTER.md](COMMAND_CENTER.md)) supervises
-long-lived processes. This surface is **visibility and human gates**: browse
-every Cognize entity, review Interpretations, commit Narratives, inspect
-Sense I/O, and build Inject packs.
+long-lived processes on one screen (**Health · Services · MCP rail**). This
+surface is **visibility and human gates**: browse every Cognize entity, review
+Interpretations, commit Narratives, run Cognize batches, and build Inject packs.
 
-## Rail
+## Shell
+
+No side rail. Home is a dashboard of linked sections; deep links stay in-shell
+(`#explore/narrative/<id>`, `#review`, `#review/reflection/<id>`, `#cognize`, `#ops`, `#sessions`, …).
+A brand bar + **← Home** recovers navigation from any pane.
+
+| Home section | Role | Full view |
+|---|---|---|
+| Sessions | Open sessions by provider (mock until telemetry) | `#sessions` |
+| Jobs | Running / pending | `#cognize` |
+| Substrate | Entity counts | `#explore` |
+| To review | Open Reflections + competing Interpretations | `#review` (one-at-a-time deck) |
+| Search | Fuzzy match across entity types | `#explore` |
+| Inject | Inline context pack builder (no deep-link) | `#inject` |
+| Health | Cognize gate + connectors | `#ops` |
+
+## Former rail panes
 
 | Pane | Role |
 |---|---|
-| Home | Counts, Cognize halt, shortcuts |
+| Home | Dashboard above |
 | Explore | List + detail for all substrate entities |
-| Review | Open Reflections, competing Interpretations, Narrative commit |
-| Cognize | Halt / health (runs stay CLI or TUI) |
-| Sense | Percepts, connectors, jobs |
-| Inject | Context pack builder |
-| Ops | Health, runtime queue, Stance proposals |
+| Review | One-at-a-time deck: Open Reflections + competing Interpretations; lineage graph; commit Narrative in-card |
+| Cognize | Run batch, live stage progress (bar · ETA · entities), token estimate, jobs, integrity |
+| Connectors | Instance list, health, sync / validate / pause / resume |
+| Inject | Context pack builder (domain select) |
+| Ops | Doctor, runtime queue, integrity (no raw JSON) |
 
-Deep-links stay in-shell: `#explore/narrative/<id>`, `#review`, `#sense`, …
+## Cognize pane
+
+Home-style sections (not raw JSON): **Run** (execute / dry-run enqueue of
+`cognize_batch`), **Estimate** (heuristic tokens + USD by model), **Items
+to execute**, **Active jobs**, **Past jobs**, and **Integrity** stats.
+Endpoints: `GET /api/cognize/status`, `GET /api/cognize/plan`,
+`POST /api/cognize/run`.
 
 ## Entities (Explore)
 
-Purpose-shaped views — not a generic CRUD grid:
+Purpose-shaped accordion list — click a row to expand in place (no separate
+detail page). A per-type search bar filters the current pill; when the query
+is non-empty the chrome title becomes **Search in {Entity}** (e.g. Search in
+Relations). Status sits left of the title (PascalCase); expansion shows
+description, metadata, and a pan/zoom **Lineage** graph (multi-hop Past /
+Here / Next). Percepts split into **Observed** (Sense) and **Derived**
+(Cognize-synthesized). Relations is a flowchart-only pill (last). Clicking a
+lineage node stays in Explore and switches the entity-type pill when needed.
 
 | Entity | Emphasizes |
 |---|---|
@@ -32,11 +61,11 @@ Purpose-shaped views — not a generic CRUD grid:
 | Reflection | Open question / tension |
 | Interpretation | Competing explanation → Review |
 | Situation | Working cluster |
-| Stance | Evaluative posture (≠ factual account); Ops preview→approve |
-| Evidence | Anchored warrant |
-| Relation | Typed edges |
+| Stance | Evaluative posture (≠ factual account); Explore + API preview→approve |
+| Evidences | Anchored warrant |
 | Trace | Accessibility / retrieval ledger |
-| Percept | Immutable observation (Sense) |
+| Percept | Observed Sense input, or **Derived** Cognize-synthesized percepts (episode/pattern arcs); PR meta is structured, not a card |
+| Relation | Full entity flowchart (last pill) — no accordion list |
 
 No product **Memories** tab.
 
@@ -60,7 +89,7 @@ Empty connectors state guides to CLI/TUI setup without inventing wizards here.
 | candidate | orange rule | Interpretation |
 | posture | green rule | Stance |
 | warrant | blue rule | Evidence |
-| observation | Sense pane rows | Percept |
+| observation | Explore Percept rows | Percept |
 | cluster | gray rule | Situation |
 | edge / ledger | typed chips | Relation / Trace |
 

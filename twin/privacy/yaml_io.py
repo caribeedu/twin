@@ -9,7 +9,7 @@ import yaml
 
 from .. import ids
 from ..clock import now_iso
-from ..memory.store.base import MemoryStore
+from twin.store.store.base import TwinStore
 from .models import (
     PolicyContext,
     PolicyEffect,
@@ -121,7 +121,7 @@ def builtin_governance_policies() -> list[PrivacyPolicy]:
 def load_governance_policies(
     path: Optional[Path | str] = None,
     *,
-    store: Optional[MemoryStore] = None,
+    store: Optional[TwinStore] = None,
 ) -> list[PrivacyPolicy]:
     policies = {p.id: p for p in builtin_governance_policies()}
     if path and Path(path).exists():
@@ -203,7 +203,7 @@ def _policy_from_yaml(raw: dict[str, Any]) -> PrivacyPolicy:
     )
 
 
-def resolve_tool(tool_id: str, *, store: Optional[MemoryStore] = None) -> Optional[ToolIdentity]:
+def resolve_tool(tool_id: str, *, store: Optional[TwinStore] = None) -> Optional[ToolIdentity]:
     if store is not None and hasattr(store, "get_tool_identity"):
         t = store.get_tool_identity(tool_id)
         if t is not None:
@@ -212,7 +212,7 @@ def resolve_tool(tool_id: str, *, store: Optional[MemoryStore] = None) -> Option
 
 
 def bootstrap_policy_set(
-    store: MemoryStore,
+    store: TwinStore,
     *,
     actor: str = "system",
     policies_path: Optional[Path | str] = None,
@@ -299,7 +299,7 @@ def bootstrap_policy_set(
     return version
 
 
-def load_active_policy_revisions(store: MemoryStore) -> list[PrivacyPolicy]:
+def load_active_policy_revisions(store: TwinStore) -> list[PrivacyPolicy]:
     """Load policies exclusively from the active PolicySetVersion revisions."""
     version = store.get_active_policy_set_version() if hasattr(store, "get_active_policy_set_version") else None
     if version and version.revision_ids and hasattr(store, "get_privacy_policy_revision"):
@@ -315,7 +315,7 @@ def load_active_policy_revisions(store: MemoryStore) -> list[PrivacyPolicy]:
     return load_governance_policies(store=store)
 
 
-def export_governance_yaml(store: MemoryStore) -> str:
+def export_governance_yaml(store: TwinStore) -> str:
     policies = store.list_privacy_policies() if hasattr(store, "list_privacy_policies") else []
     payload = {
         "governance": [

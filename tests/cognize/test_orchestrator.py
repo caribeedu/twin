@@ -20,7 +20,7 @@ from twin.cognize.orchestrator import (
     run_cognize,
     set_cognize_stage_override,
 )
-from twin.sensory.percept import Percept
+from twin.sense.sensory.percept import Percept
 
 
 def _install_overrides():
@@ -116,6 +116,30 @@ def test_run_cognize_with_overrides(store, cfg):
         assert report.reflection_ids
         assert report.interpretation_ids
         assert store.get_reflection(report.reflection_ids[0]) is not None
+    finally:
+        clear_cognize_stage_overrides()
+
+
+def test_run_cognize_emits_progress(store, cfg):
+    _install_overrides()
+    events = []
+    try:
+        p = Percept(
+            percept_type="message",
+            source_sensor="test",
+            content="Feature A blocks launch",
+            metadata={"vault_id": "default", "domain": "technical"},
+        )
+        store.insert_percept(p)
+        report = run_cognize(
+            store, cfg, percept_ids=[p.id], on_progress=events.append,
+        )
+        assert report.ok
+        assert events
+        assert events[0]["phase"] == "running"
+        assert events[-1]["phase"] == "complete"
+        assert events[-1]["percent"] == 100
+        assert any(e.get("entities", {}).get("reflection_ids") for e in events)
     finally:
         clear_cognize_stage_overrides()
 
