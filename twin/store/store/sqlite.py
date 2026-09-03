@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS percepts (
     cognized_at TEXT,
     content_hash TEXT NOT NULL UNIQUE
 );
-CREATE INDEX IF NOT EXISTS idx_percepts_cognized_at ON percepts(cognized_at);
 
 CREATE TABLE IF NOT EXISTS percept_interpretations (
     percept_id TEXT PRIMARY KEY,
