@@ -151,4 +151,4 @@ docs should not.
 
 Code note: internal `StoreClaim` rows (table `store_claims`, id prefix
 `clm_`) hold dual-read claim data until Cognize maps them to Narratives —
-see [v2-tracker.md](v2-tracker.md) (v2.6 dual-read schema rename).
+see [v2-tracker.md](v2-tracker.md) (v2.5 dual-read schema rename).
