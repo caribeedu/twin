@@ -154,7 +154,8 @@ def plan_cognize(
     queue_truncated = (not percept_ids) and pending_total >= scan_cap
     percepts = scanned[:batch_limit]
 
-    brief = _percept_brief(percepts)
+    brief_n = _brief_limit(batch_limit)
+    brief = _percept_brief(percepts, limit=brief_n)
     # Later stages also send intermediate artefacts — pad input roughly (tokens).
     stage_user_extra_tok = {
         CognizeStage.raise_reflections: 40,
@@ -261,10 +262,12 @@ def plan_cognize(
             "cost_usd": queue_cost,
             "priced": any_priced,
         },
+        "brief_limit": brief_n,
         "estimate_note": (
             f"Heuristic chars÷4 · {model or 'model'}"
             + (" · priced" if any_priced else " · cost unknown for this model")
             + f" · one run = up to {batch_limit} items"
+            + (f" · brief {brief_n}" if brief_n != batch_limit else "")
         ),
     }
 
@@ -362,16 +365,27 @@ def _load_percepts(store: Any, percept_ids: Optional[list[str]], limit: int) -> 
             if p is not None:
                 out.append(p)
         return out
-    if hasattr(store, "percepts_pending_interpretation"):
-        from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
-
-        return store.percepts_pending_interpretation(
-            max_attempts=MAX_INTERPRETATION_ATTEMPTS,
-        )[:limit]
+    if hasattr(store, "percepts_pending_cognize"):
+        return store.percepts_pending_cognize(limit=limit)
     return store.list_percepts()[:limit]
 
 
-def _percept_brief(percepts: list[Percept], limit: int = 8) -> str:
+def _brief_limit(batch_limit: int) -> int:
+    """How many percepts enter each stage prompt.
+
+    Defaults to the full batch. Cap with ``TWIN_COGNIZE_BRIEF_LIMIT`` when you
+    want a cheaper / smaller context window.
+    """
+    raw = os.environ.get("TWIN_COGNIZE_BRIEF_LIMIT", "").strip()
+    if raw:
+        try:
+            return max(1, min(int(raw), max(1, batch_limit)))
+        except ValueError:
+            pass
+    return max(1, batch_limit)
+
+
+def _percept_brief(percepts: list[Percept], limit: int) -> str:
     lines = []
     for p in percepts[:limit]:
         body = (p.content or "").strip().replace("\n", " ")[:240]
@@ -544,6 +558,7 @@ def run_cognize(
         "llm": llm,
         "model_id": getattr(cfg, "resolved_llm_model", "") or "",
         "ungrounded_dropped": 0,
+        "brief_limit": _brief_limit(limit),
     }
 
     stop_at = _until_index(until)
@@ -617,6 +632,13 @@ def run_cognize(
             ctx=ctx,
         )
     )
+    if not dry_run and report.ok and not report.halted:
+        ids = [p.id for p in percepts]
+        if hasattr(store, "mark_percepts_cognized"):
+            try:
+                store.mark_percepts_cognized(ids)
+            except Exception:
+                pass
     _persist_run(store, vault, report)
     return report
 
@@ -677,7 +699,8 @@ def _llm_stage(
     dry_run: bool,
 ) -> StageResult:
     vault = ctx["vault_id"]
-    brief = _percept_brief(ctx["kept_percepts"] if stage != CognizeStage.salience else ctx["percepts"])
+    source = ctx["kept_percepts"] if stage != CognizeStage.salience else ctx["percepts"]
+    brief = _percept_brief(source, limit=int(ctx.get("brief_limit") or len(source) or 1))
     try:
         if stage is CognizeStage.salience:
             data = _llm_json(

@@ -48,8 +48,10 @@ CREATE TABLE IF NOT EXISTS percepts (
     source_confidentiality TEXT NOT NULL DEFAULT 'internal',
     source_class TEXT NOT NULL DEFAULT 'unknown',
     project_id TEXT,
+    cognized_at TEXT,
     content_hash TEXT NOT NULL UNIQUE
 );
+CREATE INDEX IF NOT EXISTS idx_percepts_cognized_at ON percepts(cognized_at);
 
 CREATE TABLE IF NOT EXISTS percept_interpretations (
     percept_id TEXT PRIMARY KEY,
@@ -848,9 +850,13 @@ class SqliteStore(
             ("source_confidentiality", "TEXT NOT NULL DEFAULT 'internal'"),
             ("source_class", "TEXT NOT NULL DEFAULT 'unknown'"),
             ("project_id", "TEXT"),
+            ("cognized_at", "TEXT"),
         ):
             if name not in cols:
                 self.conn.execute(f"ALTER TABLE percepts ADD COLUMN {name} {ddl}")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_percepts_cognized_at ON percepts(cognized_at)"
+        )
         mem_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(store_claims)")}
         if "project_id" not in mem_cols:
             self.conn.execute("ALTER TABLE store_claims ADD COLUMN project_id TEXT")
@@ -1095,6 +1101,7 @@ class SqliteStore(
             source_confidentiality=row["source_confidentiality"],
             source_class=sc,
             project_id=row["project_id"],
+            cognized_at=row["cognized_at"] if "cognized_at" in keys else None,
         )
 
     def get_percept(self, percept_id: str) -> Optional[Percept]:
@@ -1112,6 +1119,33 @@ class SqliteStore(
             " ORDER BY p.ingested_at"
         ).fetchall()
         return [self._row_to_percept(r) for r in rows]
+
+    def percepts_pending_cognize(self, *, limit: int = 500) -> list[Percept]:
+        rows = self.conn.execute(
+            "SELECT * FROM percepts"
+            " WHERE cognized_at IS NULL OR cognized_at = ''"
+            " ORDER BY ingested_at LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_percept(r) for r in rows]
+
+    def mark_percepts_cognized(
+        self, percept_ids: list[str], *, when: Optional[str] = None,
+    ) -> int:
+        ids = [pid for pid in percept_ids if pid]
+        if not ids:
+            return 0
+        ts = when or now_iso()
+        updated = 0
+        for pid in ids:
+            cur = self.conn.execute(
+                "UPDATE percepts SET cognized_at = ?"
+                " WHERE id = ? AND (cognized_at IS NULL OR cognized_at = '')",
+                (ts, pid),
+            )
+            updated += cur.rowcount
+        self._maybe_commit()
+        return updated
 
     # -- interpretation state  --------------------------------------
 
