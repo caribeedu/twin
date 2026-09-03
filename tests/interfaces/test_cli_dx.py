@@ -30,7 +30,6 @@ def _offline_embedder(monkeypatch):
     [
         (("connector", "adapters", "--json"), ("adapters",)),
         (("connector", "list", "--json"), ("connectors", "count")),
-        (("interpret", "status", "--json"), ("never_interpreted", "interpreted")),
         (("stats", "--json"), ("percepts", "claims")),
         (("stance", "list", "--json"), ("stances", "count")),
         (("narrative", "unsupported", "--json"), ("unsupported", "count")),
@@ -72,7 +71,6 @@ def test_github_repositories_select_writes_scope(tmp_path, capsys, monkeypatch):
     from twin.sense.connectors.models import (
         ConnectorInstance, ConnectorStatus, OwnershipClass, SourceAccount,
     )
-    from twin.interfaces import cli
     from twin.interfaces.commands import cli_handlers
     from twin.store.store.sqlite import SqliteStore
 
@@ -116,9 +114,3 @@ def test_connector_setup_plan_is_stepped_and_never_ingests(tmp_path, capsys):
     )
     assert "connector setup" in out
     assert "plan only" in out
-
-
-def test_interpret_status_human_shows_counts(tmp_path, capsys):
-    out = _run(tmp_path / "home", capsys, "interpret", "status")
-    assert "interpret" in out
-    assert "never interpreted" in out

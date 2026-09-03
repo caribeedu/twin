@@ -100,6 +100,8 @@ class Percept(BaseModel):
     source_confidentiality: str = "internal"
     # explicit project link (resolved by sensors/sessions when known)
     project_id: Optional[str] = None
+    # set when Cognize successfully processes this percept in a batch
+    cognized_at: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.source_class is SourceClass.unknown:

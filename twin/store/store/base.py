@@ -40,6 +40,16 @@ class TwinStore(ABC):
     def unprocessed_percepts(self) -> list[Percept]:
         """Percepts no memory/evidence has been derived from yet."""
 
+    @abstractmethod
+    def percepts_pending_cognize(self, *, limit: int = 500) -> list[Percept]:
+        """Percepts Cognize has not yet successfully processed."""
+
+    @abstractmethod
+    def mark_percepts_cognized(
+        self, percept_ids: list[str], *, when: Optional[str] = None,
+    ) -> int:
+        """Stamp ``cognized_at`` on percepts after a successful Cognize batch."""
+
     # -- interpretation state  --------------------------------------
 
     @abstractmethod

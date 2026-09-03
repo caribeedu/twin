@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS percepts (
     source_confidentiality TEXT NOT NULL DEFAULT 'internal',
     source_class TEXT NOT NULL DEFAULT 'unknown',
     project_id TEXT,
+    cognized_at TEXT,
     content_hash TEXT NOT NULL UNIQUE
 );
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_trust REAL NOT NULL DEFAULT 0.8;
@@ -61,6 +62,8 @@ ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_scope TEXT NOT NULL DEFAULT
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_confidentiality TEXT NOT NULL DEFAULT 'internal';
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS source_class TEXT NOT NULL DEFAULT 'unknown';
 ALTER TABLE percepts ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE percepts ADD COLUMN IF NOT EXISTS cognized_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_percepts_cognized_at ON percepts(cognized_at);
 
 CREATE TABLE IF NOT EXISTS percept_interpretations (
     percept_id TEXT PRIMARY KEY,
@@ -1066,6 +1069,7 @@ class PostgresStore(
             source_confidentiality=row["source_confidentiality"],
             source_class=row.get("source_class") or "unknown",
             project_id=row["project_id"],
+            cognized_at=row.get("cognized_at") or None,
         )
 
     def get_percept(self, percept_id: str) -> Optional[Percept]:
@@ -1083,6 +1087,30 @@ class PostgresStore(
             " ORDER BY p.ingested_at"
         )
         return [self._row_to_percept(r) for r in rows]
+
+    def percepts_pending_cognize(self, *, limit: int = 500) -> list[Percept]:
+        rows = self._exec(
+            "SELECT * FROM percepts"
+            " WHERE cognized_at IS NULL OR cognized_at = ''"
+            " ORDER BY ingested_at LIMIT %s",
+            (limit,),
+        )
+        return [self._row_to_percept(r) for r in rows]
+
+    def mark_percepts_cognized(
+        self, percept_ids: list[str], *, when: Optional[str] = None,
+    ) -> int:
+        ids = [pid for pid in percept_ids if pid]
+        if not ids:
+            return 0
+        ts = when or now_iso()
+        rows = self._exec(
+            "UPDATE percepts SET cognized_at = %s"
+            " WHERE id = ANY(%s) AND (cognized_at IS NULL OR cognized_at = '')"
+            " RETURNING id",
+            (ts, ids),
+        )
+        return len(rows)
 
     # -- interpretation state  --------------------------------------
 

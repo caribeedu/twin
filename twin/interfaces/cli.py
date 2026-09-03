@@ -43,7 +43,6 @@ from ..workspace import Workspace
 from .commands.cli_handlers import (  # noqa: E402
     cmd_init,
     cmd_ingest,
-    cmd_interpret,
     cmd_review,
     cmd_review_batch,
     cmd_eval,
@@ -146,16 +145,6 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("ingest", help="run sensors over files or directories")
     p.add_argument("paths", nargs="+")
     p.set_defaults(func=cmd_ingest)
-
-    pi = sub.add_parser("interpret", help="cognitive interpretation status ")
-    pis = pi.add_subparsers(dest="interpret_command", required=True)
-    pistatus = pis.add_parser("status", help="counts by interpretation status")
-    pistatus.set_defaults(func=cmd_interpret)
-    pisd = pis.add_parser("deferred", help="percepts awaiting a cognitive interpreter")
-    pisd.set_defaults(func=cmd_interpret)
-    pisig = pis.add_parser("signals", help="non-cognitive detection hints (never Narratives)")
-    pisig.set_defaults(func=cmd_interpret)
-    _add_json_flag_tree(pi)
 
     p = sub.add_parser("review", help="interactive priority review queue")
     p.add_argument("--priority", choices=["high"], default=None)

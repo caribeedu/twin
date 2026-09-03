@@ -25,14 +25,11 @@ def cognize_status(ws, args) -> dict[str, Any]:
     import os
 
     from twin.cognize.gate import require_chat_llm
-    from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
     from twin.llm import llm_available
 
     pending = []
-    if hasattr(ws.store, "percepts_pending_interpretation"):
-        pending = ws.store.percepts_pending_interpretation(
-            max_attempts=MAX_INTERPRETATION_ATTEMPTS,
-        )
+    if hasattr(ws.store, "percepts_pending_cognize"):
+        pending = ws.store.percepts_pending_cognize(limit=5_000)
     try:
         reachable = llm_available(ws.cfg)
     except Exception:

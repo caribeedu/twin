@@ -89,7 +89,7 @@ def cmd_init(args) -> None:
     )
     ux.print_legend([
         ("1", "twin ingest <paths>  — sense docs / transcripts"),
-        ("2", "twin cognize run     — interpret pending percepts"),
+        ("2", "twin cognize run     — process pending percepts"),
         ("3", "twin review          — approve / reject candidates"),
         ("4", "twin doctor          — verify local setup"),
         ("5", "twin setup mcp cursor — wire MCP client"),
@@ -133,97 +133,11 @@ def cmd_ingest(args) -> None:
         ux.print_dim("skipped: 0")
 
     ux.print_legend([
-        ("→", "twin cognize run   — interpret pending percepts"),
-        ("→", "twin interpret status — see queue health"),
-        ("→", "twin review    — after extract creates candidates"),
+        ("→", "twin cognize run   — process pending percepts"),
+        ("→", "twin cognize status — queue + gate"),
+        ("→", "twin review    — after Cognize creates candidates"),
     ], title="next")
 
-
-def cmd_interpret(args) -> None:
-    from collections import Counter
-
-    from twin.interfaces import ux
-    from twin.cognize.services.interpreter import MAX_INTERPRETATION_ATTEMPTS
-
-    ws = Workspace(args.home)
-    if args.interpret_command == "deferred":
-        # Include backoff / terminal errors — status alone is easy to miss.
-        stuck = [
-            i for i in ws.store.list_interpretations(limit=10000)
-            if i.status in ("deferred", "error")
-        ]
-        rows = [
-            {
-                "percept_id": st.percept_id,
-                "status": f"{st.status}/{st.failure_class or '-'}",
-                "attempts": st.attempts,
-                "kind": "terminal" if st.terminal else "retryable",
-                "next": st.next_attempt_at or "now",
-                "detail": st.detail,
-            }
-            for st in stuck
-        ]
-
-        def pretty():
-            ux.print_rule("interpret · deferred")
-            if not rows:
-                ux.print_ok("no deferred/error percepts")
-                return
-            ux.print_table(
-                ["percept", "status", "attempts", "kind", "next", "detail"],
-                [[r["percept_id"], r["status"], r["attempts"], r["kind"],
-                  r["next"], (r["detail"] or "")[:50]] for r in rows],
-            )
-            ux.print_warn(f"{len(rows)} percept(s) awaiting retry")
-
-        _emit(args, {"deferred": rows, "count": len(rows)}, pretty)
-        return
-    if args.interpret_command == "signals":
-        signals = ws.store.list_detection_signals(limit=10000)
-        rows = [{"percept_id": s.percept_id, "kind": s.kind, "span": s.span}
-                for s in signals]
-
-        def pretty():
-            ux.print_rule("interpret · signals")
-            if not rows:
-                ux.print_warn("no detection signals (heuristic mode records hints, not memories)")
-                return
-            ux.print_table(
-                ["percept", "kind", "span"],
-                [[r["percept_id"], r["kind"], (r["span"] or "")[:70]] for r in rows],
-            )
-            ux.print_ok(f"{len(rows)} routing hint(s)")
-
-        _emit(args, {"signals": rows, "count": len(rows)}, pretty)
-        return
-    # status
-    counts = Counter(i.status for i in ws.store.list_interpretations(limit=10000))
-    never = len([p for p in ws.store.percepts_pending_interpretation(
-        max_attempts=MAX_INTERPRETATION_ATTEMPTS)
-        if ws.store.get_interpretation(p.id) is None])
-    statuses = ("interpreted", "empty", "deferred", "error",
-                "heuristic_detection", "quarantined")
-    signal_count = len(ws.store.list_detection_signals(limit=10000))
-    data = {
-        "never_interpreted": never,
-        **{s: counts.get(s, 0) for s in statuses},
-        "detection_signals": signal_count,
-    }
-
-    def pretty():
-        ux.print_rule("interpret · status")
-        ux.print_kv([
-            ("never interpreted", str(never)),
-            *[(s, str(counts.get(s, 0))) for s in statuses],
-            ("detection_signals", f"{signal_count} (routing hints, not memories)"),
-        ])
-        pending = never + counts.get("deferred", 0) + counts.get("error", 0)
-        if pending:
-            ux.print_next([("→", "twin cognize run   — interpret pending percepts")])
-        else:
-            ux.print_ok("nothing pending interpretation")
-
-    _emit(args, data, pretty)
 
 
 def cmd_review(args) -> None:
@@ -1643,7 +1557,7 @@ def cmd_connector(args) -> None:
             ux.print_next([
                 ("→", f"twin connector auth {inst.id}      — verify credential"),
                 ("→", f"twin connector sync {inst.id}      — first sync pass"),
-                ("→", "twin cognize run                    — interpret percepts"),
+                ("→", "twin cognize run                    — process pending percepts"),
                 ("→", "twin review                         — approve candidates"),
             ])
 
@@ -1736,7 +1650,7 @@ def cmd_connector(args) -> None:
             else:
                 ux.print_warn(f"sync finished with health={result.health.value}")
             if result.percepts:
-                ux.print_next([("→", "twin cognize run   — interpret the new percepts")])
+                ux.print_next([("→", "twin cognize run   — process the new percepts")])
 
         _emit(args, data, pretty)
     elif cmd == "github":
@@ -3108,7 +3022,7 @@ def cmd_episode(args) -> None:
                     ])
                 elif "deferred" in low or "unavailable" in low:
                     ux.print_next([
-                        ("→", "twin interpret   # model unreachable; "
+                        ("→", "twin doctor      # model unreachable; "
                               "start Ollama / configure a chat client"),
                         ("→", f"twin episode reflect {ep.id}   # retry once it's up"),
                     ])
