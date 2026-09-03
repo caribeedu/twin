@@ -5,7 +5,12 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
-### v2.6.0 — Dual-read schema rename
+### v2.5.0 — Package walls & dual-read schema rename
+
+Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,
+privacy, interfaces). Fold cognition into cognize.services and judgment into
+cognize.stance_engine; Domain Firewall under privacy; MCP prefers
+``stance_*`` tools. Transitional import shims at old package roots removed.
 
 Retire `MemoryItem` / `memory_id` dual-read vocabulary in favor of store
 **claim** vocabulary: `StoreClaim`, `claim_id`, `store_claims` tables,
@@ -15,13 +20,6 @@ SQLite/Postgres migrations rename legacy `memories` / `memory_id` columns.
 
 TUI Command Center is a **single screen** (Health · Services · MCP right rail;
 no bottom bar). Browse / review / jobs / cognize live in Web Center + scripted CLI.
-
-### v2.5.0 — Package walls
-
-Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,
-privacy, interfaces). Fold cognition into cognize.services and judgment into
-cognize.stance_engine; Domain Firewall under privacy; MCP prefers
-``stance_*`` tools. Transitional import shims at old package roots removed.
 
 ### v2.4.1 — Web Center exit-criteria hardening
 

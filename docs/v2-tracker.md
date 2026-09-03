@@ -63,17 +63,16 @@ A version ships only when **every required task** for that version is `done` and
 | **v2.2** | Consolidation & accessibility | Nightly consolidation judgment (caps); Fade / Remarkable + Trace; quiet-reversal and disagreement-attention evals; research logging for surprise | T-051 T-052 · T-112 T-113 T-115 | Consolidation never auto-commits; fade/trace tests green; package `2.2.0` |
 | **v2.3** | Command Center (TUI) | Bare `twin` TUI cockpit (Home / Services / Connectors / Jobs / Cognize / Review / Narratives / Stance / MCP); docs split ARCHITECTURE / COGNIZE / EPISTEMICS / RESEARCH; README architecture-layer only | T-090–T-092 · T-120 T-121 | Non-TTY safe; supervised serve/runtime; docs link audit; package `2.3.0` |
 | **v2.4** | Web Command Center | Single-route web cockpit (`twin serve`): browse **all** Cognize entities with purpose-shaped UI; operator panes aligned with TUI Center; retire Memory-as-product UI | T-130–T-139 | Every §2.2 entity list+detail reachable; no Memory nav; REST contract tests green; package `2.4.0` (+ exit-criteria hardening in `2.4.1`) |
-| **v2.5** | Package walls | Code packages match Sense / Cognize / Inject (+ store, llm, privacy, interfaces); fold `cognition` → `cognize`; split `memory` / `judgment` by function; MCP names follow product vocabulary | T-140–T-149 | Import graph uses target packages; no product Memory/Judgment nouns in public surfaces; package `2.5.0` |
-| **v2.6** | Dual-read schema rename | Retire `MemoryItem` / `memory_id` dual-read names → `StoreClaim` / `claim_id`; migrate tables/columns; MCP `claim_*` only (no `memory_*` / `judgment_*` shims) | T-150–T-152 | Public store API uses claim vocabulary; store/tests/export green; package `2.6.0` |
+| **v2.5** | Package walls & dual-read schema rename | Code packages match Sense / Cognize / Inject (+ store, llm, privacy, interfaces); fold `cognition` → `cognize`; split `memory` / `judgment` by function; MCP names follow product vocabulary; retire `MemoryItem` / `memory_id` dual-read names → `StoreClaim` / `claim_id`; migrate tables/columns; MCP `claim_*` only (no `memory_*` / `judgment_*` shims) | T-140–T-152 | Import graph uses target packages; no product Memory/Judgment nouns in public surfaces; public store API uses claim vocabulary; store/tests/export green; package `2.5.0` |
 
 ### Completing this tracker ≠ ROADMAP v3 “Extended Brain”
 
-[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.6** completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + TUI/Web Centers + package walls + **dual-read retirement**) and unblocks v3.
+[`docs/ROADMAP.md`](./ROADMAP.md) places **Extended Brain** (personal domains, voice capture, autobiographical expansion, …) at Twin **v3**. Those items are **not** in this task inventory. Finishing **v2.0–v2.5** completes the redesign in `docs/v2.md` (longitudinal Narratives + Cognize pipeline + Inject receipts + TUI/Web Centers + package walls + **dual-read retirement**) and unblocks v3.
 
 ### Version dependency
 
 ```text
-v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package walls)  →  v2.6 (Dual-read schema)
+v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package walls + dual-read schema)
 ```
 
 
@@ -118,16 +117,12 @@ v2.0  →  v2.1  →  v2.2  →  v2.3 (TUI)  →  v2.4 (Web)  →  v2.5 (Package
 - [x] T-135 T-136 T-137 T-138 T-139
 - [x] `__version__ = 2.4.0` + CHANGELOG + tag `v2.4.0`
 
-#### v2.5 — Package walls
+#### v2.5 — Package walls & dual-read schema rename
 
 - [x] T-140 T-141 T-142 T-143 T-144
 - [x] T-145 T-146 T-147 T-148 T-149
-- [x] `__version__ = 2.5.0` + CHANGELOG (tag after merge approval)
-
-#### v2.6 — Dual-read schema rename
-
 - [x] T-150 T-151 T-152
-- [x] `__version__ = 2.6.0` + CHANGELOG (tag after merge approval)
+- [x] `__version__ = 2.5.0` + CHANGELOG (tag after merge approval)
 
 ---
 
@@ -233,9 +228,9 @@ Phases P3–P5 can overlap with P6–P7 once P1–P2 are done, but Inject must n
 | T-147 | **v2.5** | P14 | `privacy` owns Firewall / PII / guardrails | done |
 | T-148 | **v2.5** | P14 | `interfaces` absorbs runtime + sovereignty | done |
 | T-149 | **v2.5** | P14 | QA gate — imports, MCP names, package `2.5.0` | done |
-| T-150 | **v2.6** | P15 | Rename dual-read types (`MemoryItem` → store claim) | done |
-| T-151 | **v2.6** | P15 | Migrate store columns / FKs (`memory_id` → claim id) | done |
-| T-152 | **v2.6** | P15 | QA gate — API/MCP/export without Memory* product names | done |
+| T-150 | **v2.5** | P15 | Rename dual-read types (`MemoryItem` → store claim) | done |
+| T-151 | **v2.5** | P15 | Migrate store columns / FKs (`memory_id` → claim id) | done |
+| T-152 | **v2.5** | P15 | QA gate — API/MCP/export without Memory* product names | done |
 
 
 ---
@@ -2825,7 +2820,7 @@ aliases, CHANGELOG + tag `v2.5.0`.
 
 ## T-150 — Rename dual-read types (`MemoryItem` → store claim)
 
-**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
+**Twin version:** `v2.5` · **Phase:** P15 · **Status:** `done`  
 **Depends on:** T-149  
 **Blocks:** T-151, T-152
 
@@ -2869,7 +2864,7 @@ Out of scope here: physical DB column renames (T-151).
 
 ## T-151 — Migrate store columns / FKs (`memory_id` → claim id)
 
-**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
+**Twin version:** `v2.5` · **Phase:** P15 · **Status:** `done`  
 **Depends on:** T-150  
 **Blocks:** T-152
 
@@ -2905,9 +2900,9 @@ Provide a one-shot migrator (and downgrade policy: none — forward only).
 
 ## T-152 — QA gate — API/MCP/export without Memory* product names
 
-**Twin version:** `v2.6` · **Phase:** P15 · **Status:** `done`  
+**Twin version:** `v2.5` · **Phase:** P15 · **Status:** `done`  
 **Depends on:** T-150, T-151  
-**Blocks:** none (release gate for `2.6.0`)
+**Blocks:** none (release gate for `2.5.0`)
 
 ### Description
 
@@ -2915,13 +2910,13 @@ Finish dual-read retirement on host surfaces:
 
 1. MCP: retarget or remove `memory_*` tools; prefer Narrative/claim search as documented.
 2. REST/OpenAPI: no Memory product schemas in operator docs.
-3. CHANGELOG + `__version__ = 2.6.0` + tag.
+3. CHANGELOG + `__version__ = 2.5.0` + tag.
 
 ### Exit criteria
 
 - [x] MCP tools and docs use Narrative / claim / stance language; no `memory_*` or `judgment_*` tool shims.
 - [x] Grep gate: no `MemoryItem` / type aliases in `twin/`.
-- [x] Package `2.6.0` recorded; focused local suites green (CI after push/PR).
+- [x] Package `2.5.0` recorded; focused local suites green (CI after push/PR).
 
 ### Resources
 
@@ -2931,14 +2926,15 @@ Finish dual-read retirement on host surfaces:
 
 ## Suggested first slice (if starting cold)
 
-**v2.0–v2.5 are shipped (or cut).** For **v2.6**:
+**v2.0–v2.4 are shipped (or cut).** For **v2.5**:
 
-1. T-150 rename Python dual-read types to claim vocabulary.
-2. T-151 migrate DB columns/FKs.
-3. T-152 MCP/docs QA gate → `2.6.0`.
+1. T-140–T-149 package walls (code layout + MCP vocabulary).
+2. T-150 rename Python dual-read types to claim vocabulary.
+3. T-151 migrate DB columns/FKs.
+4. T-152 MCP/docs QA gate → `2.5.0`.
 
 ---
 
-*Tracker for Twin package line **v2.0–v2.6** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, TUI + Web command center, package walls, dual-read retirement).*
+*Tracker for Twin package line **v2.0–v2.5** — redesign intent in `docs/v2.md` (longitudinal narratives, architecture vs pipeline, TUI + Web command center, package walls, dual-read retirement).*
 
 ATTENTION: Do not mention task numbers in any Git resource (PR/release/commit).
