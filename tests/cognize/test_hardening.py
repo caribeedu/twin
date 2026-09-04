@@ -253,17 +253,17 @@ def test_backfill_idempotent_and_skips_needs_review(store):
 def test_cognize_review_surface(store, cfg):
     from types import SimpleNamespace
 
-    ref = Reflection(vault_id="default", text="Still open?", status=ReflectionStatus.open)
+    ref = Reflection(vault_id="vault_general", text="Still open?", status=ReflectionStatus.open)
     store.upsert_reflection(ref)
     intp = Interpretation(
-        vault_id="default",
+        vault_id="vault_general",
         explanation="maybe",
         status=InterpretationStatus.competing,
         evidence_ids=["e1"],
     )
     store.upsert_interpretation(intp)
     ws = SimpleNamespace(store=store, cfg=cfg)
-    args = SimpleNamespace(vault="default")
+    args = SimpleNamespace(vault="vault_general")
     data = cognize_cmd.cognize_review(ws, args)
     assert data["counts"]["open_reflections"] >= 1
     assert data["counts"]["competing_interpretations"] >= 1

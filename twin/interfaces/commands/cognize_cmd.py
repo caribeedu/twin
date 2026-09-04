@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from twin.privacy.vault import resolve_vault
+
 
 def cognize_run(ws, args) -> dict[str, Any]:
     from twin.cognize.orchestrator import CognizeStage, run_cognize
@@ -16,7 +18,7 @@ def cognize_run(ws, args) -> dict[str, Any]:
         until=until_stage,
         dry_run=bool(getattr(args, "dry_run", False)),
         limit=int(getattr(args, "limit", 50) or 50),
-        vault_id=getattr(args, "vault", None) or None,
+        vault_id=resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store),
     )
     return report.to_dict()
 
@@ -25,11 +27,11 @@ def cognize_status(ws, args) -> dict[str, Any]:
     import os
 
     from twin.cognize.gate import require_chat_llm
+    from twin.cognize.orchestrator import _load_percepts
     from twin.llm import llm_available
 
-    pending = []
-    if hasattr(ws.store, "percepts_pending_cognize"):
-        pending = ws.store.percepts_pending_cognize(limit=5_000)
+    vault = resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store)
+    pending = _load_percepts(ws.store, None, 5_000, vault_id=vault)
     try:
         reachable = llm_available(ws.cfg)
     except Exception:
@@ -40,7 +42,6 @@ def cognize_status(ws, args) -> dict[str, Any]:
         chat_reachable=reachable,
         allow_echo_cognition=os.environ.get("TWIN_ALLOW_ECHO_COGNITION", "") == "1",
     )
-    vault = getattr(args, "vault", None) or "default"
     open_refs = 0
     competing = 0
     if hasattr(ws.store, "list_open_reflections"):
@@ -52,6 +53,7 @@ def cognize_status(ws, args) -> dict[str, Any]:
         last = ws.store.last_cognize_run(vault)
     return {
         "pending_percepts": len(pending),
+        "vault_id": vault,
         "open_reflections": open_refs,
         "competing_interpretations": competing,
         "llm_reachable": reachable,
@@ -65,7 +67,7 @@ def cognize_status(ws, args) -> dict[str, Any]:
 
 
 def cognize_review(ws, args) -> dict[str, Any]:
-    vault = getattr(args, "vault", None) or "default"
+    vault = resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store)
     open_refs = []
     if hasattr(ws.store, "list_open_reflections"):
         open_refs = [
@@ -104,7 +106,7 @@ def narrative_show(ws, args) -> dict[str, Any]:
 
 
 def narrative_search(ws, args) -> dict[str, Any]:
-    vault = getattr(args, "vault", None) or "default"
+    vault = resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store)
     q = (getattr(args, "query", "") or "").lower()
     rows = []
     for nar in ws.store.list_narratives(vault):
@@ -135,7 +137,7 @@ def narrative_commit_preview(ws, args) -> dict[str, Any]:
     token = preview_commit_token(
         account=getattr(args, "account", None) or "",
         evidence_ids=evidence,
-        vault_id=getattr(args, "vault", None) or "default",
+        vault_id=resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store),
         interpretation_ids=list(getattr(args, "interpretation", None) or []),
         dissent_interpretation_ids=list(getattr(args, "dissent", None) or []),
         domain=getattr(args, "domain", None) or "",
@@ -145,7 +147,7 @@ def narrative_commit_preview(ws, args) -> dict[str, Any]:
         "preview_token": token,
         "account": getattr(args, "account", None) or "",
         "evidence_ids": evidence,
-        "vault_id": getattr(args, "vault", None) or "default",
+        "vault_id": resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store),
     }
 
 
@@ -159,7 +161,7 @@ def narrative_commit(ws, args) -> dict[str, Any]:
         nar = commit_narrative(
             ws.store,
             account=args.account,
-            vault_id=getattr(args, "vault", None) or "default",
+            vault_id=resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store),
             evidence_ids=evidence,
             committed_by=getattr(args, "actor", None) or "user",
             interpretation_ids=list(getattr(args, "interpretation", None) or []),
@@ -184,7 +186,7 @@ def narrative_backfill(ws, args) -> dict[str, Any]:
 
     return backfill_from_memories(
         ws.store,
-        vault_id=getattr(args, "vault", None) or "default",
+        vault_id=resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store),
         dry_run=not bool(getattr(args, "apply", False)),
         limit=int(getattr(args, "limit", 10_000) or 10_000),
     )
@@ -207,6 +209,7 @@ def inject_pack(ws, args) -> dict[str, Any]:
         query=args.query,
         target_domain=getattr(args, "domain", None) or "technical",
         max_tokens=int(getattr(args, "max_tokens", 1200) or 1200),
+        vault_id=resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store),
     )
     return pack.to_dict()
 
@@ -217,7 +220,7 @@ def narrative_accessibility(ws, args) -> dict[str, Any]:
         recommend_accessibility,
     )
 
-    vault = getattr(args, "vault", None) or "default"
+    vault = resolve_vault(getattr(args, "vault", None), cfg=ws.cfg, store=ws.store)
     if getattr(args, "apply", False):
         recs = recommend_accessibility(ws.store, vault_id=vault, dry_run=False)
     else:

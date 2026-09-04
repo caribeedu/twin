@@ -576,6 +576,16 @@ def _ensure_derived_percept(
     body = claim.summary
     if claim.evidence_quotes:
         body = body + "\n\n" + "\n".join(claim.evidence_quotes)
+    source_ids: list[str] = []
+    seen_src: set[str] = set()
+    for candidate in list(claim.percept_ids or []) + list(
+        (brief.percept_by_ref or {}).values()
+    ):
+        s = str(candidate or "").strip()
+        if not s or s in seen_src:
+            continue
+        seen_src.add(s)
+        source_ids.append(s)
     percept = Percept(
         id=pid,
         percept_type="derived_episode",
@@ -588,6 +598,7 @@ def _ensure_derived_percept(
             "episode_id": brief.episode_id,
             "phase_keys": list(claim.phase_keys),
             "edge_ids": list(claim.edge_ids),
+            "source_percept_ids": source_ids,
         },
     )
     try:

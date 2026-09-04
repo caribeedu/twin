@@ -8,6 +8,8 @@ draft after Narrative commit (never auto-approves).
 
 from __future__ import annotations
 
+from twin.privacy.vault import FALLBACK_VAULT, resolve_vault
+
 from typing import Any, Callable, Optional
 
 from twin.cognize.fade import recommend_accessibility
@@ -94,7 +96,7 @@ def run_consolidation_judgment(
     store: Any,
     cfg: Any,
     *,
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
     max_drafts: int = 20,
     max_tokens: int = 50_000,
     dry_run: bool = False,
@@ -176,7 +178,7 @@ def run_fade_judgment(
     store: Any,
     cfg: Any,
     *,
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Stage 12 — LLM accessibility recommendations; never delete Narratives."""

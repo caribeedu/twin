@@ -17,6 +17,8 @@ runtime may enqueue these as jobs; this module remains the deterministic core.
 
 from __future__ import annotations
 
+from twin.privacy.vault import FALLBACK_VAULT, iter_vault_ids, resolve_vault
+
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -42,12 +44,13 @@ MAX_CONSOLIDATION_TOKENS = 50_000
 def _narrative_committed_ids(store: TwinStore) -> set[str]:
     if not hasattr(store, "list_narratives"):
         return set()
-    return {
-        n.id
-        for n in store.list_narratives("default")
-        if getattr(getattr(n, "status", None), "value", n.status) == "committed"
-        or getattr(n, "status", None) is not None
-    }
+    out: set[str] = set()
+    for vault in (iter_vault_ids(store) or [FALLBACK_VAULT]):
+        for n in store.list_narratives(vault):
+            if getattr(getattr(n, "status", None), "value", n.status) == "committed" \
+                    or getattr(n, "status", None) is not None:
+                out.add(n.id)
+    return out
 
 
 @dataclass
@@ -897,7 +900,7 @@ def run_consolidation_cycle(
         else:
             from twin.cognize.stages_late import run_fade_judgment
 
-            fade = run_fade_judgment(store, cfg, vault_id="default", dry_run=False)
+            fade = run_fade_judgment(store, cfg, vault_id=resolve_vault(None, store=store), dry_run=False)
             result.notes.append(
                 f"fade_recommendations={len(fade.get('recommendations') or [])}"
                 + (" halted" if fade.get("halted") else "")

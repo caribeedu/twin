@@ -24,6 +24,8 @@ Client config example:
 
 from __future__ import annotations
 
+from twin.privacy.vault import resolve_vault
+
 import json
 from typing import Any, Optional
 
@@ -396,8 +398,9 @@ def create_server(home: Optional[str] = None):
         return json.dumps({"error": "emission_id or session_id required"})
 
     @mcp.tool()
-    def narrative_list(vault: str = "default", domain: str = "") -> str:
+    def narrative_list(vault: str = "", domain: str = "") -> str:
         """List committed Narratives with EpistemicState status (not memory blobs)."""
+        vault = resolve_vault(vault or None, cfg=ws.cfg, store=ws.store)
         if not hasattr(ws.store, "list_narratives"):
             return json.dumps({"narratives": []})
         rows = []

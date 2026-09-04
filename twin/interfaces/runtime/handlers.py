@@ -169,12 +169,18 @@ def handle_cognize_batch(
             )
 
     # Mark as starting before the first LLM call so the UI can poll immediately.
+    from twin.cognize.orchestrator import STAGE_COUNT
+
+    batch_n = max(1, int(p.get("limit") or 50))
     on_progress({
         "phase": "starting",
         "stage": "starting",
         "label": "Starting",
         "stage_index": 0,
-        "stage_total": 8,
+        "stage_total": STAGE_COUNT,
+        "batch_count": batch_n,
+        "percept_total": batch_n,
+        "percept_done": 0,
         "percent": 0,
         "stages_done": [],
         "counts": {},
@@ -189,6 +195,7 @@ def handle_cognize_batch(
         dry_run=bool(p.get("dry_run")),
         limit=int(p.get("limit") or 50),
         vault_id=p.get("vault_id") or p.get("vault") or None,
+        brief_limit=int(p["brief_limit"]) if p.get("brief_limit") is not None else None,
         on_progress=on_progress,
     )
     out = report.to_dict()
@@ -200,8 +207,8 @@ def handle_cognize_batch(
             "phase": "complete",
             "stage": "done",
             "label": "Done",
-            "stage_index": 7,
-            "stage_total": 8,
+            "stage_index": max(0, STAGE_COUNT - 1),
+            "stage_total": STAGE_COUNT,
             "percent": 100,
             "counts": {
                 "situations": len(out.get("situation_ids") or []),

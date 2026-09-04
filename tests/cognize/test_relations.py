@@ -7,6 +7,7 @@ import pytest
 from twin.cognize.models import Relation, RelationAssertedBy, RelationType
 from twin.cognize.relations import (
     RelationValidationError,
+    coerce_relation_type,
     refuse_similarity_causal_assert,
     upsert_validated_relation,
     validate_relation,
@@ -16,6 +17,16 @@ from twin.cognize.relations import (
 def test_unknown_relation_type_rejected():
     with pytest.raises(ValueError):
         RelationType("not-a-real-type")
+
+
+def test_coerce_supported_by_alias():
+    assert coerce_relation_type("supported_by") is RelationType.supports
+    assert coerce_relation_type("reinforces") is RelationType.supports
+    assert coerce_relation_type("supports") is RelationType.supports
+    assert coerce_relation_type("depends_on") is RelationType.depends_on
+    assert coerce_relation_type("same-as") is RelationType.same_as
+    # Unknown LLM invention must not abort the run.
+    assert coerce_relation_type("not-a-real-type") is RelationType.related
 
 
 def test_same_originating_decision_requires_llm():

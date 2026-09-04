@@ -653,13 +653,23 @@ def active_consent_covers(
 
 def ensure_local_identity(store: TwinStore) -> Principal:
     """Admin/bootstrap helper — create local CLI principal + vaults if missing."""
+    from twin.privacy.vault import vault_display_name
+
     for vid, personas in DEFAULT_VAULT_PERSONAS.items():
-        if hasattr(store, "get_vault") and store.get_vault(vid) is None:
+        if not hasattr(store, "get_vault"):
+            continue
+        label = vault_display_name(vid)
+        existing = store.get_vault(vid)
+        if existing is None:
             store.insert_vault(Vault(
                 id=vid,
-                name=vid,
+                name=label,
                 allowed_personas=sorted(personas),
             ))
+        elif hasattr(store, "update_vault") and (
+            not (existing.name or "").strip() or existing.name == vid
+        ):
+            store.update_vault(vid, name=label, allowed_personas=sorted(personas))
     if hasattr(store, "get_persona") and hasattr(store, "insert_persona"):
         for rec in default_persona_records():
             if store.get_persona(rec.id) is None:

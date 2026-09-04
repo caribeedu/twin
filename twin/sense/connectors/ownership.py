@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from twin.privacy.models import Vault
+from twin.privacy.vault import vault_display_name
 from .models import OwnershipClass
 
 OWNERSHIP_CLASSES = frozenset(o.value for o in OwnershipClass)
@@ -92,4 +93,8 @@ def ensure_vault_for_account(store, source_owner: str, vault_id: str,
         ensure_org_vault(store, org_key, source_owner=source_owner)
         return
     if store.get_vault(vault_id) is None:
-        store.insert_vault(Vault(id=vault_id, name=vault_id, source_owner=source_owner))
+        store.insert_vault(Vault(
+            id=vault_id,
+            name=vault_display_name(vault_id),
+            source_owner=source_owner,
+        ))

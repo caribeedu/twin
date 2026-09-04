@@ -6,6 +6,8 @@ Age alone is not Cognize deletion policy.
 
 from __future__ import annotations
 
+from twin.privacy.vault import FALLBACK_VAULT, resolve_vault
+
 from typing import Any, Optional
 
 from twin.clock import now_iso
@@ -14,7 +16,7 @@ from twin.cognize.models import NarrativeStatus, Trace
 
 def recommend_accessibility(
     store: Any,
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
     *,
     dry_run: bool = False,
     max_recs: int = 50,
@@ -110,7 +112,7 @@ def recommend_accessibility(
     return recs
 
 
-def list_accessibility_recommendations(store: Any, vault_id: str = "default") -> list[dict]:
+def list_accessibility_recommendations(store: Any, vault_id: str = FALLBACK_VAULT) -> list[dict]:
     out: list[dict] = []
     if not hasattr(store, "list_narratives"):
         return out

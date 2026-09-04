@@ -23,6 +23,8 @@ pass over the best remaining hits.
 
 from __future__ import annotations
 
+from twin.privacy.vault import resolve_vault
+
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
@@ -147,6 +149,7 @@ def build_context_pack(
     mode: PackMode = "compact",
     request_scope: Optional[str] = None,
     deadline_monotonic: Optional[float] = None,
+    vault_id: Optional[str] = None,
 ) -> ContextPack:
     firewall = firewall or Firewall(cfg.policies_path, store)
     profile = get_profile(task_profile)
@@ -514,9 +517,16 @@ def build_context_pack(
         from twin.cognize.models import EpistemicStatus, derive_confidence
         from twin.cognize.models import RelationType
 
-        vault = "default"
-        if access and isinstance(getattr(access, "metadata", None), dict):
-            vault = str(access.metadata.get("vault_id") or vault)
+        vault = resolve_vault(
+            vault_id
+            or (
+                access.metadata.get("vault_id")
+                if access and isinstance(getattr(access, "metadata", None), dict)
+                else None
+            ),
+            cfg=cfg,
+            store=store,
+        )
         for nar in store.list_narratives(vault):
             if nar.domain and nar.domain != target_domain and target_domain not in ("general", "*"):
                 continue

@@ -2,7 +2,8 @@
 
 const app = $("#app");
 const toastEl = $("#toast");
-const VAULT = "default";
+const VAULT_STORAGE_KEY = "twin.center.vault";
+let VAULT = localStorage.getItem(VAULT_STORAGE_KEY) || "";
 
 const ENTITY_TYPES = [
   { id: "narrative", label: "Narratives", role: "account", list: "/api/narratives", show: (id) => `/api/narratives/${id}` },
@@ -97,6 +98,55 @@ function setChrome(eyebrow, title, { home = false } = {}) {
   if (t) t.textContent = title;
 }
 
+function paintVaultSelect(rows, active) {
+  const sel = $("#vault-select");
+  if (!sel) return;
+  const list = Array.isArray(rows) ? rows : [];
+  sel.innerHTML = list.map((v) => {
+    const id = v.id || v;
+    const name = v.name || id;
+    const selected = id === active ? " selected" : "";
+    return `<option value="${esc(id)}"${selected}>${esc(name)}</option>`;
+  }).join("");
+  if (active) sel.value = active;
+}
+
+async function initVaultPicker() {
+  const sel = $("#vault-select");
+  if (!sel) return;
+  try {
+    const data = await api("/api/center/vaults");
+    const active = data.active || VAULT;
+    VAULT = active;
+    if (active) localStorage.setItem(VAULT_STORAGE_KEY, active);
+    paintVaultSelect(data.vaults || [], active);
+  } catch (err) {
+    if (VAULT) paintVaultSelect([{ id: VAULT, name: VAULT }], VAULT);
+    toast(err.message, false);
+  }
+  sel.addEventListener("change", async () => {
+    const next = sel.value;
+    if (!next || next === VAULT) return;
+    sel.disabled = true;
+    try {
+      const out = await api("/api/center/vault", {
+        method: "PUT",
+        body: JSON.stringify({ vault_id: next }),
+      });
+      VAULT = out.active || next;
+      localStorage.setItem(VAULT_STORAGE_KEY, VAULT);
+      const label = sel.options[sel.selectedIndex]?.textContent || VAULT;
+      toast(`Vault · ${label}`);
+      await route();
+    } catch (err) {
+      toast(err.message, false);
+      sel.value = VAULT;
+    } finally {
+      sel.disabled = false;
+    }
+  });
+}
+
 function paneLoading(message = "Loading…") {
   return `<div class="pane-loading" role="status" aria-live="polite">
     <span class="pane-loading-spinner" aria-hidden="true"></span>
@@ -159,22 +209,73 @@ function textIncludes(query, text) {
 }
 
 function badge(status) {
-  const s = (status || "").toLowerCase();
+  const raw = String(status || "").trim();
+  const s = raw.toLowerCase().replace(/\s+/g, "_");
   let cls = "tag";
-  if (s === "fresh" || s === "open" || s === "active" || s === "committed") cls += " ok";
-  else if (s === "stale" || s === "pending" || s === "competing") cls += " warn";
-  else if (s === "tombstoned" || s === "rejected" || s === "deprecated") cls += " err";
-  return `<span class="${cls}">${esc(status || "—")}</span>`;
+  if (s === "fresh" || s === "open" || s === "active" || s === "committed" || s === "completed" || s === "ok") cls += " ok";
+  else if (s === "running") cls += " run";
+  else if (s === "stale" || s === "pending" || s === "competing" || s === "halted" || s === "queued") cls += " warn";
+  else if (s === "tombstoned" || s === "rejected" || s === "deprecated" || s === "failed" || s === "dead_letter") cls += " err";
+  return `<span class="${cls}">${esc(statusLabel(raw))}</span>`;
+}
+
+const JOB_KIND_LABELS = {
+  cognize_batch: "Cognition - Batch",
+  interpret_percept: "Interpretation - Percept",
+  workspace_tick: "Workspace - Tick",
+  attention_evaluate: "Attention - Evaluate",
+  consolidate_daily: "Consolidate - Daily",
+  consolidate_weekly: "Consolidate - Weekly",
+  reembed_claim: "Re-embed - Claim",
+  integrity_check: "Integrity - Check",
+  connector_reconcile: "Connector - Reconcile",
+  backfill_partition: "Backfill - Partition",
+  session_domain_resolve: "Session - Domain Resolve",
+  session_complete: "Session - Complete",
+};
+
+function titleWords(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function statusLabel(status) {
+  return titleWords(status) || "—";
+}
+
+function jobKindLabel(kind) {
+  const k = String(kind || "").trim();
+  if (!k) return "Job";
+  if (JOB_KIND_LABELS[k]) return JOB_KIND_LABELS[k];
+  const parts = k.split("_").filter(Boolean);
+  if (parts.length >= 2) {
+    return `${titleWords(parts[0])} - ${titleWords(parts.slice(1).join(" "))}`;
+  }
+  return titleWords(k);
 }
 
 function empty(title, body = "") {
   return `<div class="empty"><strong>${esc(title)}</strong>${body ? `<p>${esc(body)}</p>` : ""}</div>`;
 }
 
+function cleanReflectionText(raw) {
+  return String(raw || "")
+    .replace(
+      /^(?:the\s+)?(?:most\s+important\s+)?open\s+question(?:\s+right\s+now)?(?:\s+is)?\s*:\s*/i,
+      "",
+    )
+    .trim() || String(raw || "").trim();
+}
+
 function entityHeadline(row, type) {
   let raw = row.id;
   if (type === "narrative") raw = row.account || row.id;
-  else if (type === "reflection") raw = row.text || row.question || row.id;
+  else if (type === "reflection") raw = cleanReflectionText(row.text || row.question || row.id);
   else if (type === "interpretation") raw = row.explanation || row.id;
   else if (type === "stance") raw = row.statement || row.id;
   else if (type === "situation") raw = row.summary || row.label || row.id;
@@ -471,9 +572,10 @@ function renderPrMetaCard(pr) {
 
 /** Body text for expand: full field minus the list title line (no duplicate). */
 function expandBodyText(meta, row) {
-  const full =
+  let full =
     row.account || row.text || row.question || row.explanation || row.summary
     || row.statement || row.quote || row.content || "";
+  if (meta.id === "reflection") full = cleanReflectionText(full);
   if (!full) return "";
   const title = entityHeadline(row, meta.id);
   const lines = String(full).replace(/\r\n/g, "\n").split("\n");
@@ -872,6 +974,7 @@ function wireHomeInject() {
         body: JSON.stringify({
           query: fd.get("query"),
           target_domain: fd.get("domain") || "technical",
+          vault_id: VAULT,
         }),
       });
       meta.textContent = `Narratives: ${(pack.narratives || []).length} · Reflections: ${(pack.open_reflections || []).length}`;
@@ -1112,12 +1215,36 @@ function originNodesFor(meta, row) {
       for (const id of row.evidence_ids || []) add(id, "evidence", "evidence");
       for (const r of row.open_reflections || []) add(r.id || r, "reflection", "reflection");
       break;
-    case "evidence":
+    case "evidence": {
       if (row.percept_id) add(row.percept_id, "percept", "percept");
+      for (const id of row.source_percept_ids || []) add(id, "source", "percept");
+      for (const o of row.origin_percepts || []) add(o?.id || o, "source", "percept");
       if (row.source_id && entityTypeFromId(row.source_id)) {
         add(row.source_id, "source", entityTypeFromId(row.source_id));
       }
+      // Surface connector origins (GitHub / Slack / …) on the evidence card itself.
+      const sensors = [
+        ...(row.origin_sensors || []),
+        row.source_sensor,
+        ...((row.origin_percepts || []).map((o) => o?.source_sensor)),
+      ];
+      const seenSensor = new Set();
+      for (const sensor of sensors) {
+        const key = String(sensor || "").trim();
+        if (!key || seenSensor.has(key)) continue;
+        seenSensor.add(key);
+        const label = connectorLabel(key);
+        if (!label) continue;
+        out.push({
+          id: `origin:${key}`,
+          type: null,
+          title: label,
+          label: "connector",
+          synthetic: true,
+        });
+      }
       break;
+    }
     case "situation":
       for (const id of row.percept_ids || []) add(id, "percept", "percept");
       break;
@@ -1140,12 +1267,32 @@ function originNodesFor(meta, row) {
     case "percept": {
       if (isDerivedPercept(row)) {
         const md = row.metadata || {};
-        for (const id of md.source_percept_ids || md.percept_ids || []) {
-          add(id, "source", "percept");
-        }
+        const sources = [
+          ...(row.source_percept_ids || []),
+          ...(md.source_percept_ids || []),
+          ...(md.percept_ids || []),
+          ...((row.origin_percepts || []).map((o) => o?.id || o)),
+        ];
+        for (const id of sources) add(id, "source", "percept");
         for (const id of md.evidence_ids || []) add(id, "evidence", "evidence");
         for (const e of md.evidence || []) add(e.id || e, "evidence", "evidence");
-        // Connector synthetic is wrong for Cognize-derived percepts — skip it.
+        // Connector chips from resolved observed origins (GitHub / Slack / …).
+        const seenSensor = new Set();
+        for (const o of row.origin_percepts || []) {
+          const key = String(o?.source_sensor || "").trim();
+          if (!key || seenSensor.has(key)) continue;
+          seenSensor.add(key);
+          const label = connectorLabel(key);
+          if (!label) continue;
+          out.push({
+            id: `origin:${key}`,
+            type: null,
+            title: label,
+            label: "connector",
+            synthetic: true,
+          });
+        }
+        // Connector synthetic from the derived sensor itself is wrong — skip it.
         break;
       }
       let sensor = row.source_sensor || "";
@@ -1341,7 +1488,7 @@ function buildFlowEdgeSvg(edges, pos, markerId) {
     const label = relationEdgeLabel(e.type || e.label || "");
     const { d, lx, ly, sameCol } = flowEdgeGeometry(a, b, idx);
     const labelHtml = label
-      ? `<foreignObject x="${lx - 52}" y="${ly - 12}" width="104" height="24">
+      ? `<foreignObject x="${lx - 52}" y="${ly - 12}" width="104" height="24" pointer-events="none">
         <div xmlns="http://www.w3.org/1999/xhtml" class="flow-edge-label">${esc(label)}</div>
       </foreignObject>`
       : "";
@@ -1349,7 +1496,8 @@ function buildFlowEdgeSvg(edges, pos, markerId) {
       ? `marker-start="url(#${markerId})" marker-end="url(#${markerId})"`
       : `marker-end="url(#${markerId})"`;
     return `<g class="flow-edge${sameCol ? " flow-edge--local" : ""}${e.bidirectional ? " flow-edge--bidir" : ""}" data-from="${esc(e.from_id)}" data-to="${esc(e.to_id)}">
-      <path d="${d}" ${markers} />
+      <path class="flow-edge-hit" d="${d}" />
+      <path class="flow-edge-vis" d="${d}" ${markers} />
       ${labelHtml}
     </g>`;
   }).join("");
@@ -1362,6 +1510,109 @@ function readFlowNodePos(el) {
     w: el.offsetWidth,
     h: el.offsetHeight,
   };
+}
+
+function setFlowEdgeMarker(el, canvas, lit) {
+  const vis = el?.querySelector?.("path.flow-edge-vis");
+  if (!vis) return;
+  const markerId = canvas.dataset.markerId || "flow-arrow";
+  const mid = lit ? `${markerId}-lit` : markerId;
+  if (el.classList.contains("flow-edge--bidir")) {
+    vis.setAttribute("marker-start", `url(#${mid})`);
+  } else {
+    vis.removeAttribute("marker-start");
+  }
+  vis.setAttribute("marker-end", `url(#${mid})`);
+}
+
+function clearFlowEdgeFocus(canvas) {
+  if (!canvas) return;
+  canvas.classList.remove("is-edge-focus");
+  canvas.querySelectorAll(".flow-edge.is-lit").forEach((el) => {
+    el.classList.remove("is-lit");
+    setFlowEdgeMarker(el, canvas, false);
+  });
+  // Also reset any edge whose marker may have stuck purple without is-lit.
+  canvas.querySelectorAll(".flow-edge[data-from][data-to]").forEach((el) => {
+    setFlowEdgeMarker(el, canvas, false);
+  });
+  canvas.querySelectorAll(".flow-node.is-lit, .flow-node.is-dim").forEach((el) => {
+    el.classList.remove("is-lit", "is-dim");
+  });
+}
+
+/**
+ * Highlight direct relations of the hovered entity (1 hop only).
+ * Includes same-column links (same origin / depends on) and cross-column ones.
+ */
+function lightFlowEdgeFamily(canvas, seedIds) {
+  if (!canvas || !seedIds?.length) {
+    clearFlowEdgeFocus(canvas);
+    return;
+  }
+  const seeds = new Set(seedIds.filter(Boolean));
+  const litNodes = new Set(seeds);
+  const litEdges = new Set();
+  const edgeEls = [...canvas.querySelectorAll(".flow-edge[data-from][data-to]")];
+
+  for (const el of edgeEls) {
+    const a = el.dataset.from;
+    const b = el.dataset.to;
+    if (!a || !b) continue;
+    const touchesSeed = seeds.has(a) || seeds.has(b);
+    if (!touchesSeed) continue;
+    litEdges.add(el);
+    litNodes.add(a);
+    litNodes.add(b);
+  }
+
+  canvas.classList.add("is-edge-focus");
+  for (const el of edgeEls) {
+    const lit = litEdges.has(el);
+    el.classList.toggle("is-lit", lit);
+    setFlowEdgeMarker(el, canvas, lit);
+  }
+  canvas.querySelectorAll(".flow-node[data-node-id]").forEach((el) => {
+    const id = el.dataset.nodeId;
+    const inFamily = litNodes.has(id);
+    el.classList.toggle("is-lit", inFamily);
+    el.classList.toggle("is-dim", !inFamily);
+  });
+}
+
+function bindFlowEdgeFocus(canvas) {
+  if (!canvas || canvas.dataset.edgeFocusBound === "1") return;
+  canvas.dataset.edgeFocusBound = "1";
+  let currentKey = "";
+
+  const resolveSeeds = (ev) => {
+    const node = ev.target.closest?.(".flow-node[data-node-id]");
+    if (node) return [node.dataset.nodeId];
+    const edge = ev.target.closest?.(".flow-edge[data-from][data-to]");
+    if (edge) return [edge.dataset.from, edge.dataset.to];
+    return null;
+  };
+
+  const sync = (ev) => {
+    const seeds = resolveSeeds(ev);
+    if (!seeds) {
+      if (currentKey) {
+        currentKey = "";
+        clearFlowEdgeFocus(canvas);
+      }
+      return;
+    }
+    const key = seeds.slice().sort().join("|");
+    if (key === currentKey) return;
+    currentKey = key;
+    lightFlowEdgeFamily(canvas, seeds);
+  };
+
+  canvas.addEventListener("pointermove", sync);
+  canvas.addEventListener("pointerleave", () => {
+    currentKey = "";
+    clearFlowEdgeFocus(canvas);
+  });
 }
 
 function redrawFlowEdges(canvas) {
@@ -1384,11 +1635,22 @@ function redrawFlowEdges(canvas) {
   else {
     svg.insertAdjacentHTML("afterbegin", `<defs>
       <marker id="${markerId}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="#9a92b8" />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#c9c0de" />
+      </marker>
+      <marker id="${markerId}-lit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b4f9a" />
       </marker>
     </defs>`);
   }
+  // Ensure lit marker exists even when defs were reused from first paint.
+  if (defs && !document.getElementById(`${markerId}-lit`)) {
+    defs.insertAdjacentHTML("beforeend", `
+      <marker id="${markerId}-lit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b4f9a" />
+      </marker>`);
+  }
   svg.insertAdjacentHTML("beforeend", buildFlowEdgeSvg(edges, pos, markerId));
+  bindFlowEdgeFocus(canvas);
 }
 
 function bindGraphPan(root) {
@@ -1397,6 +1659,7 @@ function bindGraphPan(root) {
     viewport.dataset.panBound = "1";
     const canvas = $(".flow-graph-canvas", viewport);
     if (!canvas) return;
+    bindFlowEdgeFocus(canvas);
     let tx = 0;
     let ty = 0;
     let scale = 1;
@@ -1436,6 +1699,8 @@ function bindGraphPan(root) {
         node.classList.add("is-dragging");
         viewport.classList.add("is-dragging-node");
       } else {
+        // Edges / SVG / labels: also kill native drag ghost so pan works.
+        ev.preventDefault();
         mode = "pan";
         viewport.classList.add("is-panning");
         ox = tx;
@@ -1445,7 +1710,7 @@ function bindGraphPan(root) {
     });
 
     viewport.addEventListener("dragstart", (ev) => {
-      if (ev.target.closest(".flow-node")) ev.preventDefault();
+      ev.preventDefault();
     });
 
     viewport.addEventListener("pointermove", (ev) => {
@@ -1507,7 +1772,85 @@ function bindGraphPan(root) {
     shell?.querySelector("[data-graph-zoom-out]")?.addEventListener("click", () => {
       scale = Math.max(0.55, scale - 0.12); apply();
     });
+
+    const fsBtn = shell?.querySelector("[data-graph-fullscreen]");
+    const syncFsBtn = () => {
+      const on = !!document.fullscreenElement && document.fullscreenElement === shell;
+      shell?.classList.toggle("flow-graph--fullscreen", on);
+      if (!fsBtn) return;
+      fsBtn.textContent = on ? "Exit" : "Full";
+      fsBtn.title = on ? "Exit fullscreen" : "Fullscreen";
+      fsBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    };
+    fsBtn?.addEventListener("click", async () => {
+      if (!shell) return;
+      try {
+        if (document.fullscreenElement === shell) {
+          await document.exitFullscreen?.();
+        } else {
+          // Native browser fullscreen — no modal / backdrop.
+          await shell.requestFullscreen?.();
+        }
+      } catch {
+        toast("Fullscreen unavailable", false);
+      }
+      syncFsBtn();
+    });
+    if (!shell._fsChangeBound) {
+      shell._fsChangeBound = true;
+      document.addEventListener("fullscreenchange", syncFsBtn);
+    }
   });
+}
+
+function flowNodeKindKey(n) {
+  if (n?.synthetic) return "origin";
+  return String(n?.type || "entity");
+}
+
+function flowKindColumnLabel(kind) {
+  if (kind === "origin") return "Origin";
+  return titleWords(kind) || "Entity";
+}
+
+/** Column header for lineage: type-based, not repeated bare "Past". */
+function flowLayerColumnLabel(lk, col, layerKeys, layers) {
+  if (lk === 0) return "Here";
+  const counts = new Map();
+  for (const n of col || []) {
+    const k = flowNodeKindKey(n);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  let best = "entity";
+  let bestN = -1;
+  for (const [k, n] of counts) {
+    if (n > bestN) {
+      best = k;
+      bestN = n;
+    }
+  }
+  const typeLabel = flowKindColumnLabel(best);
+  const sameSide = (layerKeys || []).filter((k) => k !== 0 && Math.sign(k) === Math.sign(lk));
+  const sameType = sameSide.filter((k) => {
+    const peer = layers.get(k) || [];
+    const peerCounts = new Map();
+    for (const n of peer) {
+      const key = flowNodeKindKey(n);
+      peerCounts.set(key, (peerCounts.get(key) || 0) + 1);
+    }
+    let peerBest = "entity";
+    let peerN = -1;
+    for (const [key, n] of peerCounts) {
+      if (n > peerN) {
+        peerBest = key;
+        peerN = n;
+      }
+    }
+    return peerBest === best;
+  });
+  if (sameType.length <= 1) return typeLabel;
+  // Several hops of the same kind — keep column layout, disambiguate by depth.
+  return `${typeLabel} · ${lk > 0 ? `+${lk}` : String(lk)}`;
 }
 
 /** Layered HTML+SVG flowchart with pan/zoom chrome. */
@@ -1522,21 +1865,23 @@ function renderFlowGraph({
   if (!nodes.length) return empty(`No ${title.toLowerCase()} yet`);
 
   const typeOrder = [
-    "percept", "evidence", "situation", "reflection", "interpretation",
-    "narrative", "stance", "trace", "entity", "origin",
+    "origin", "percept", "evidence", "situation", "reflection", "interpretation",
+    "narrative", "stance", "trace", "entity", "relation",
   ];
+  const typeRank = new Map(typeOrder.map((t, i) => [t, i]));
 
   const layers = new Map();
   if (typeof layerOf === "function") {
     for (const n of nodes) {
-      const li = Number(layerOf(n)) || 0;
+      const raw = Number(layerOf(n));
+      const li = Number.isFinite(raw) ? raw : 0;
       if (!layers.has(li)) layers.set(li, []);
       layers.get(li).push(n);
     }
   } else {
     const byType = new Map();
     for (const n of nodes) {
-      const t = n.type || "entity";
+      const t = flowNodeKindKey(n);
       if (!byType.has(t)) byType.set(t, []);
       byType.get(t).push(n);
     }
@@ -1551,6 +1896,16 @@ function renderFlowGraph({
       layers.set(i, list);
       i += 1;
     }
+  }
+
+  // Within each column, group by kind so mixed Past hops stay readable.
+  for (const [, col] of layers) {
+    col.sort((a, b) => {
+      const ra = typeRank.get(flowNodeKindKey(a)) ?? 99;
+      const rb = typeRank.get(flowNodeKindKey(b)) ?? 99;
+      if (ra !== rb) return ra - rb;
+      return String(a.title || a.id).localeCompare(String(b.title || b.id));
+    });
   }
 
   const layerKeys = [...layers.keys()].sort((a, b) => a - b);
@@ -1596,7 +1951,12 @@ function renderFlowGraph({
         }
         scores.set(n.id, c ? sum / c : pos.get(n.id).y);
       }
-      col.sort((a, b) => (scores.get(a.id) || 0) - (scores.get(b.id) || 0));
+      col.sort((a, b) => {
+        const ra = typeRank.get(flowNodeKindKey(a)) ?? 99;
+        const rb = typeRank.get(flowNodeKindKey(b)) ?? 99;
+        if (ra !== rb) return ra - rb;
+        return (scores.get(a.id) || 0) - (scores.get(b.id) || 0);
+      });
       col.forEach((n, ri) => {
         pos.get(n.id).y = padY + ri * rowH + rowH / 2;
       });
@@ -1618,13 +1978,13 @@ function renderFlowGraph({
     initialPos[n.id] = { left, top };
     const style = `left:${left}px;top:${top}px;width:${p.w}px;min-height:${p.h}px`;
     if (n.synthetic) {
-      return `<div class="flow-node flow-node--origin${isFocus ? " is-focus" : ""}" data-node-id="${esc(n.id)}" draggable="false" style="${style}">
+      return `<div class="flow-node flow-node--origin${isFocus ? " is-focus" : ""}" data-node-id="${esc(n.id)}" data-col="${esc(p.col)}" draggable="false" style="${style}">
         <span class="flow-node-kind">${esc(kind)}</span>
         <strong class="flow-node-title">${esc(title)}</strong>
       </div>`;
     }
     const href = n.type && n.type !== "entity" ? exploreHref(n.type, n.id) : "#explore";
-    return `<div class="flow-node${isFocus ? " is-focus" : ""}" role="link" tabindex="0" data-href="${esc(href)}" data-explore-nav="1" data-node-id="${esc(n.id)}" title="${esc(n.id)}" draggable="false" style="${style}">
+    return `<div class="flow-node${isFocus ? " is-focus" : ""}" role="link" tabindex="0" data-href="${esc(href)}" data-explore-nav="1" data-node-id="${esc(n.id)}" data-col="${esc(p.col)}" title="${esc(n.id)}" draggable="false" style="${style}">
       <span class="flow-node-kind">${esc(kind)}</span>
       <strong class="flow-node-title">${esc(title)}</strong>
     </div>`;
@@ -1632,13 +1992,11 @@ function renderFlowGraph({
 
   const colLabels = layerKeys.map((lk, ci) => {
     const x = padX + ci * colW + colW / 2;
-    let label;
-    if (typeof layerOf === "function") {
-      label = lk === 0 ? "Here" : (lk < 0 ? "Past" : "Next");
-    } else {
-      label = (layers.get(lk)[0] || {}).type || "entity";
-    }
-    return `<div class="flow-col-label" style="left:${x}px">${esc(String(label))}</div>`;
+    const label = typeof layerOf === "function"
+      ? flowLayerColumnLabel(lk, layers.get(lk), layerKeys, layers)
+      : flowKindColumnLabel(flowNodeKindKey((layers.get(lk) || [])[0] || {}));
+    const sideCls = lk < 0 ? " is-past" : (lk > 0 ? " is-next" : " is-here");
+    return `<div class="flow-col-label${sideCls}" style="left:${x}px">${esc(String(label))}</div>`;
   }).join("");
 
   const edgesJson = esc(JSON.stringify(dedupeFlowEdges(edges).map((e) => ({
@@ -1659,6 +2017,7 @@ function renderFlowGraph({
         <button type="button" class="flow-graph-btn" data-graph-zoom-out title="Zoom out">−</button>
         <button type="button" class="flow-graph-btn" data-graph-zoom-in title="Zoom in">+</button>
         <button type="button" class="flow-graph-btn" data-graph-reset title="Reset view">Reset</button>
+        <button type="button" class="flow-graph-btn" data-graph-fullscreen title="Fullscreen" aria-pressed="false">Full</button>
         <span class="muted flow-graph-hint">Drag cards · pan background</span>
       </div>
     </header>
@@ -1668,7 +2027,10 @@ function renderFlowGraph({
         <svg class="flow-graph-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
           <defs>
             <marker id="${markerId}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#9a92b8" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#c9c0de" />
+            </marker>
+            <marker id="${markerId}-lit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b4f9a" />
             </marker>
           </defs>
           ${edgeSvg}
@@ -1679,11 +2041,13 @@ function renderFlowGraph({
   </section>`;
 }
 
-async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDepth = 6, maxNodes = 48 } = {}) {
+async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDepth = 16, maxNodes = 160 } = {}) {
   const nodes = new Map();
   const edges = [];
   const depth = new Map();
   const relCache = new Map([[entityId, seedRelations || []]]);
+  const rowCache = new Map([[entityId, { meta, row }]]);
+  const structDone = new Set();
   const edgeSeen = new Set();
 
   const addNode = (n) => {
@@ -1705,6 +2069,62 @@ async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDept
     edges.push({ from_id: fromId, to_id: toId, type: type || "related" });
   };
 
+  const loadEntity = async (id) => {
+    if (rowCache.has(id)) return rowCache.get(id);
+    if (String(id).startsWith("origin:")) {
+      rowCache.set(id, null);
+      return null;
+    }
+    const type = entityTypeFromId(id);
+    const m = type ? ENTITY_TYPES.find((e) => e.id === type) : null;
+    if (!m?.show) {
+      rowCache.set(id, null);
+      return null;
+    }
+    try {
+      const r = await api(m.show(id));
+      const pack = { meta: m, row: r };
+      rowCache.set(id, pack);
+      return pack;
+    } catch {
+      rowCache.set(id, null);
+      return null;
+    }
+  };
+
+  /** Structural origins/targets for every entity kind — not only Relation rows. */
+  const expandStructural = async (id, baseDepth) => {
+    if (!id || structDone.has(id) || nodes.size >= maxNodes) return [];
+    const node = nodes.get(id);
+    if (node?.synthetic) {
+      structDone.add(id);
+      return [];
+    }
+    structDone.add(id);
+    const pack = await loadEntity(id);
+    if (!pack?.row || !pack?.meta) return [];
+    const born = [];
+    for (const o of originNodesFor(pack.meta, pack.row)) {
+      if (!o?.id || nodes.size >= maxNodes) break;
+      const isNew = !nodes.has(o.id);
+      addNode(o);
+      addEdge(o.id, id, o.label || "origin");
+      const nd = baseDepth - 1;
+      if (!depth.has(o.id) || depth.get(o.id) > nd) depth.set(o.id, nd);
+      if (isNew) born.push(o.id);
+    }
+    for (const d of downstreamNodesFor(pack.meta, pack.row)) {
+      if (!d?.id || nodes.size >= maxNodes) break;
+      const isNew = !nodes.has(d.id);
+      addNode(d);
+      addEdge(id, d.id, d.label || "next");
+      const nd = baseDepth + 1;
+      if (!depth.has(d.id) || depth.get(d.id) < nd) depth.set(d.id, nd);
+      if (isNew) born.push(d.id);
+    }
+    return born;
+  };
+
   addNode({
     id: entityId,
     type: meta.id,
@@ -1712,17 +2132,31 @@ async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDept
   });
   depth.set(entityId, 0);
 
-  // Structural origins on root (skip connector synthetic for derived percepts)
-  for (const o of originNodesFor(meta, row)) {
-    addNode(o);
-    if (!depth.has(o.id)) depth.set(o.id, -1);
-    addEdge(o.id, entityId, o.label || "origin");
-  }
-
+  // Phase 1: structural origins first so connectors (GitHub / Slack / …) are not
+  // crowded out by dense same-origin Relation hairballs.
   let frontier = [entityId];
   for (let hop = 0; hop < maxDepth && frontier.length && nodes.size < maxNodes; hop += 1) {
     const next = [];
     for (const id of frontier) {
+      if (nodes.size >= maxNodes) break;
+      const here = depth.has(id) ? depth.get(id) : 0;
+      // eslint-disable-next-line no-await-in-loop
+      next.push(...(await expandStructural(id, here)));
+    }
+    frontier = [...new Set(next)];
+  }
+
+  // Phase 2: Relation walk from every non-synthetic node collected so far.
+  frontier = [...nodes.keys()].filter((id) => !nodes.get(id)?.synthetic);
+  const relSeen = new Set();
+  for (let hop = 0; hop < maxDepth && frontier.length && nodes.size < maxNodes; hop += 1) {
+    const next = [];
+    for (const id of frontier) {
+      if (nodes.size >= maxNodes) break;
+      if (relSeen.has(id)) continue;
+      relSeen.add(id);
+      const here = depth.has(id) ? depth.get(id) : 0;
+
       let rels = relCache.get(id);
       if (!rels) {
         // eslint-disable-next-line no-await-in-loop
@@ -1737,19 +2171,27 @@ async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDept
       ];
       for (const { n, dir } of walk) {
         if (!n?.id) continue;
+        const isNew = !nodes.has(n.id);
         addNode(n);
-        const nd = (depth.get(id) || 0) + dir;
-        if (!depth.has(n.id)) {
-          depth.set(n.id, nd);
-          next.push(n.id);
-        }
+        const nd = here + dir;
+        if (!depth.has(n.id)) depth.set(n.id, nd);
         if (dir < 0) addEdge(n.id, id, n.label);
         else addEdge(id, n.id, n.label);
+        if (isNew) next.push(n.id);
         if (nodes.size >= maxNodes) break;
       }
-      if (nodes.size >= maxNodes) break;
+
+      // New relation neighbors still get their own structural origin chain.
+      // eslint-disable-next-line no-await-in-loop
+      next.push(...(await expandStructural(id, here)));
+      for (const nid of [...next]) {
+        if (structDone.has(nid) || nodes.get(nid)?.synthetic) continue;
+        const nd = depth.has(nid) ? depth.get(nid) : here - 1;
+        // eslint-disable-next-line no-await-in-loop
+        next.push(...(await expandStructural(nid, nd)));
+      }
     }
-    frontier = next;
+    frontier = [...new Set(next)].filter((id) => id && !relSeen.has(id));
   }
 
   // Any leftover peer links on the root stay on the Here layer.
@@ -1772,13 +2214,13 @@ async function buildLineageNetwork(entityId, meta, row, seedRelations, { maxDept
 
 async function renderLineageGraph(entityId, meta, relations, row) {
   const net = await buildLineageNetwork(entityId, meta, row, relations, {
-    maxDepth: 6,
-    maxNodes: 56,
+    maxDepth: 16,
+    maxNodes: 160,
   });
   const past = [...net.depth.values()].filter((d) => d < 0);
   const next = [...net.depth.values()].filter((d) => d > 0);
   const depthNote = (past.length || next.length)
-    ? `${net.nodes.length} nodes · drag cards to rearrange`
+    ? `${net.nodes.length} nodes · full origin tree · drag cards to rearrange`
     : "No linked entities yet";
   return renderFlowGraph({
     title: "Lineage",
@@ -1786,7 +2228,10 @@ async function renderLineageGraph(entityId, meta, relations, row) {
     nodes: net.nodes,
     edges: net.edges,
     focusId: entityId,
-    layerOf: (n) => net.depth.get(n.id) || 0,
+    layerOf: (n) => {
+      const v = net.depth.get(n.id);
+      return v == null ? 0 : v;
+    },
   });
 }
 
@@ -1822,6 +2267,31 @@ async function renderExpandBody(meta, row, relations) {
   add("Created", formatWhen(row.created_at || row.ingested_at));
   if (row.derived_confidence?.label) add("Confidence", row.derived_confidence.label);
 
+  let originsHtml = "";
+  if (meta.id === "percept" && isDerivedPercept(row)) {
+    const origins = Array.isArray(row.origin_percepts) && row.origin_percepts.length
+      ? row.origin_percepts
+      : (row.source_percept_ids || []).map((id) => ({ id }));
+    if (origins.length) {
+      originsHtml = `<div class="expand-origins">
+        <h3 class="cognize-live-ent-title">From percepts</h3>
+        <ul class="expand-origin-list">
+          ${origins.map((o) => {
+            const id = o.id || o;
+            const sensor = o.source_sensor ? connectorLabel(o.source_sensor) || o.source_sensor : "";
+            const title = o.title || id;
+            return `<li>
+              <a href="${exploreHref("percept", id)}">${esc(truncate(title, 80))}</a>
+              ${sensor ? `<span class="muted"> · ${esc(sensor)}</span>` : ""}
+            </li>`;
+          }).join("")}
+        </ul>
+      </div>`;
+    } else {
+      originsHtml = `<p class="muted">No source percepts resolved for this derived row</p>`;
+    }
+  }
+
   const kvHtml = kv.length
     ? `<dl class="kv expand-kv">${kv.map(([k, v]) =>
         `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>`
@@ -1838,6 +2308,7 @@ async function renderExpandBody(meta, row, relations) {
       ${prMetaHtml}
       ${descHtml}
       ${kvHtml}
+      ${originsHtml}
       ${lineageHtml}
     </div>`;
 }
@@ -2014,6 +2485,12 @@ async function paneExplore(parts) {
       const kind = meta.id === "percept" ? perceptKindLabel(row) : "";
       const kindSlug = kind === "Derived" ? "derived" : (kind === "Observed" ? "observed" : "");
       const search = rowSearchText(row, meta.id);
+      const originN = meta.id === "percept" && isDerivedPercept(row)
+        ? (row.origin_percepts?.length || row.source_percept_ids?.length || 0)
+        : 0;
+      const originBit = originN
+        ? `<span class="muted percept-origin-bit">from ${originN} percept${originN === 1 ? "" : "s"}</span>`
+        : "";
       return `<article class="entity-item${open ? " is-open" : ""}${kindSlug ? ` entity-item--${kindSlug}` : ""}" data-id="${esc(rid)}" data-search="${esc(search)}"${kindSlug ? ` data-percept-kind="${kindSlug}"` : ""}>
         <button type="button" class="entity-row entity-row--toggle" aria-expanded="${open ? "true" : "false"}">
           ${statusLabel
@@ -2023,6 +2500,7 @@ async function paneExplore(parts) {
             ${kind ? `<span class="percept-kind percept-kind--${kindSlug}">${esc(kind)}</span>` : ""}
             <strong class="entity-title">${titleHtml(row, meta.id)}</strong>
             <span class="muted">${esc(rid)}</span>
+            ${originBit}
           </div>
           <span class="entity-chevron" aria-hidden="true"></span>
         </button>
@@ -2247,7 +2725,7 @@ async function paneReview(parts = []) {
       }
       const meta = metaFor(item.kind);
       const kindLabel = item.kind === "reflection" ? "Reflection" : "Interpretation";
-      setChrome("Review", `${index + 1} of ${queue.length} · ${kindLabel}`);
+      setChrome("Review", `${index + 1} of ${queue.length}`);
 
       app.innerHTML = `
         <div class="review-deck">
@@ -2276,13 +2754,17 @@ async function paneReview(parts = []) {
             <button type="button" class="btn primary" data-review-action="commit">Commit Narrative</button>
             <a class="btn" href="${esc(exploreHref(item.kind, item.id))}">Open in Explore</a>`
           : `
-            <button type="button" class="btn primary" data-review-action="draft">Draft Narrative</button>
+            <button type="button" class="btn primary" data-review-action="draft">Respond</button>
             <a class="btn" href="${esc(exploreHref(item.kind, item.id))}">Open in Explore</a>`;
 
         const accountSeed = item.kind === "interpretation"
           ? (row.explanation || "")
-          : (row.text || row.question || "");
+          : "";
+        const questionText = item.kind === "reflection"
+          ? cleanReflectionText(row.text || row.question || "")
+          : "";
         const interpIds = item.kind === "interpretation" ? item.id : "";
+        const isReflection = item.kind === "reflection";
 
         card.innerHTML = `
           <header class="review-card-head">
@@ -2302,17 +2784,42 @@ async function paneReview(parts = []) {
           </header>
           <div class="review-card-actions">${actions}</div>
           <section class="review-commit" hidden>
-            <h3 class="review-commit-title">Commit Narrative</h3>
+            <h3 class="review-commit-title">${isReflection ? "Respond" : "Commit Narrative"}</h3>
             <form id="nar-commit-form" class="stack-form review-commit-form">
-              <label>Account<textarea name="account" rows="6" required>${esc(accountSeed)}</textarea></label>
-              <label>Evidence ids (comma-separated)<input name="evidence" value="${esc(evidenceIds.join(", "))}" ${evidenceIds.length ? "required" : ""} /></label>
-              <label>Interpretation ids<input name="interpretations" value="${esc(interpIds)}" placeholder="optional" /></label>
-              <label>Actor<input name="actor" value="user" required /></label>
-              <label>Domain<input name="domain" value="${esc(domain)}" /></label>
-              <p id="nar-token" class="muted">Preview locks the account + evidence set before commit (safety gate).</p>
+              ${isReflection ? `
+                <div class="review-mode-picks" role="group" aria-label="Response options">
+                  <label class="review-mode-pick">
+                    <input type="checkbox" name="do_narrative" checked />
+                    <span>
+                      <strong>Narrative</strong>
+                      <em>Write or edit the account. Without an answer, only this remains.</em>
+                    </span>
+                  </label>
+                  <label class="review-mode-pick">
+                    <input type="checkbox" name="do_answer" />
+                    <span>
+                      <strong>Answer</strong>
+                      <em>Close the open question with a direct reply.</em>
+                    </span>
+                  </label>
+                </div>
+                <p class="muted review-mode-hint">Pick at least one. You can use both.</p>
+                ${questionText ? `<p class="review-question-echo muted">Q · ${esc(truncate(stripMd(questionText), 160))}</p>` : ""}
+                <div class="review-answer-fields" hidden>
+                  <label>Answer<textarea name="answer" rows="4" placeholder="Direct reply to this reflection"></textarea></label>
+                </div>
+              ` : ""}
+              <div class="review-narrative-fields">
+                <label>Account<textarea name="account" rows="6" ${isReflection ? "" : "required"}>${esc(accountSeed)}</textarea></label>
+                <label>Evidence ids (comma-separated)<input name="evidence" value="${esc(evidenceIds.join(", "))}" ${evidenceIds.length && !isReflection ? "required" : ""} /></label>
+                <label>Interpretation ids<input name="interpretations" value="${esc(interpIds)}" placeholder="optional" /></label>
+                <label>Actor<input name="actor" value="user" required /></label>
+                <label>Domain<input name="domain" value="${esc(domain)}" /></label>
+                <p id="nar-token" class="muted">Preview locks the account + evidence set before commit (safety gate).</p>
+              </div>
               <div class="cta-row">
-                <button type="button" class="btn" id="nar-preview">Preview</button>
-                <button type="submit" class="btn primary">Commit</button>
+                <button type="button" class="btn" id="nar-preview"${isReflection ? " hidden" : ""}>Preview</button>
+                <button type="submit" class="btn primary">${isReflection ? "Save" : "Commit"}</button>
                 <button type="button" class="btn ghost" data-review-action="hide-commit">Cancel</button>
               </div>
             </form>
@@ -2332,8 +2839,31 @@ async function paneReview(parts = []) {
 
         let previewToken = "";
         const commitPanel = $(".review-commit", card);
+        const form = $("#nar-commit-form", card);
+        const narrativeFields = $(".review-narrative-fields", card);
+        const answerFields = $(".review-answer-fields", card);
+        const previewBtn = $("#nar-preview", card);
+        const doNarrative = () => !!form?.querySelector('input[name="do_narrative"]')?.checked;
+        const doAnswer = () => !!form?.querySelector('input[name="do_answer"]')?.checked;
+
+        const syncReflectionModes = () => {
+          if (!isReflection || !form) return;
+          const narOn = doNarrative();
+          const ansOn = doAnswer();
+          if (narrativeFields) narrativeFields.hidden = !narOn;
+          if (answerFields) answerFields.hidden = !ansOn;
+          if (previewBtn) previewBtn.hidden = !narOn;
+          const account = form.querySelector('textarea[name="account"]');
+          const evidence = form.querySelector('input[name="evidence"]');
+          const answer = form.querySelector('textarea[name="answer"]');
+          if (account) account.required = narOn;
+          if (evidence) evidence.required = narOn && evidenceIds.length > 0;
+          if (answer) answer.required = ansOn;
+        };
+
         const showCommit = () => {
           if (commitPanel) commitPanel.hidden = false;
+          syncReflectionModes();
         };
         const hideCommit = () => {
           if (commitPanel) commitPanel.hidden = true;
@@ -2346,14 +2876,26 @@ async function paneReview(parts = []) {
           if (action === "hide-commit") hideCommit();
         }, { signal });
 
+        form?.querySelectorAll('input[name="do_narrative"], input[name="do_answer"]').forEach((el) => {
+          el.addEventListener("change", syncReflectionModes, { signal });
+        });
+        syncReflectionModes();
+
         $("#nar-preview", card)?.addEventListener("click", async () => {
-          const form = $("#nar-commit-form", card);
           if (!form) return;
+          if (isReflection && !doNarrative()) {
+            toast("Turn on Narrative to preview", false);
+            return;
+          }
           const fd = new FormData(form);
           try {
             const body = commitBody(fd);
             if (!body.evidence_ids.length) {
               toast("Evidence ids required", false);
+              return;
+            }
+            if (!String(body.account || "").trim()) {
+              toast("Account required", false);
               return;
             }
             const prev = await api("/api/narratives/commit-preview", {
@@ -2371,23 +2913,62 @@ async function paneReview(parts = []) {
           }
         }, { signal });
 
-        $("#nar-commit-form", card)?.addEventListener("submit", async (ev) => {
+        form?.addEventListener("submit", async (ev) => {
           ev.preventDefault();
-          if (!previewToken) {
-            toast("Preview a token before commit", false);
+          const fd = new FormData(ev.target);
+          const wantNar = isReflection ? doNarrative() : true;
+          const wantAns = isReflection ? doAnswer() : false;
+          if (isReflection && !wantNar && !wantAns) {
+            toast("Pick Narrative and/or Answer", false);
             return;
           }
-          const fd = new FormData(ev.target);
           try {
-            const body = { ...commitBody(fd), preview_token: previewToken };
-            const out = await api("/api/narratives/commit", {
-              method: "POST",
-              body: JSON.stringify(body),
-            });
-            toast(`Committed ${out.narrative_id}`);
+            let narrativeId = "";
+            if (wantNar) {
+              if (!previewToken) {
+                toast("Preview a token before commit", false);
+                return;
+              }
+              const body = { ...commitBody(fd), preview_token: previewToken };
+              if (!String(body.account || "").trim()) {
+                toast("Account required", false);
+                return;
+              }
+              if (!body.evidence_ids.length) {
+                toast("Evidence ids required", false);
+                return;
+              }
+              const out = await api("/api/narratives/commit", {
+                method: "POST",
+                body: JSON.stringify(body),
+              });
+              narrativeId = out.narrative_id || "";
+            }
+            if (wantAns) {
+              const answer = String(fd.get("answer") || "").trim();
+              if (!answer) {
+                toast("Answer required", false);
+                return;
+              }
+              await api(`/api/reflections/${encodeURIComponent(item.id)}/answer`, {
+                method: "POST",
+                body: JSON.stringify({
+                  answer,
+                  actor: fd.get("actor") || "user",
+                  narrative_id: narrativeId || null,
+                }),
+              });
+            }
+            if (wantNar && wantAns) toast(`Narrative + answer saved`);
+            else if (wantAns) toast("Reflection answered");
+            else toast(`Committed ${narrativeId}`);
             _reviewAbort?.abort();
             _reviewAbort = null;
-            location.hash = `#explore/narrative/${encodeURIComponent(out.narrative_id)}`;
+            if (narrativeId) {
+              location.hash = `#explore/narrative/${encodeURIComponent(narrativeId)}`;
+            } else {
+              location.hash = "#review";
+            }
           } catch (err) {
             toast(err.message, false);
           }
@@ -2444,7 +3025,7 @@ function commitBody(fd) {
 }
 
 async function paneCognize() {
-  setChrome("Cognize", "Run · estimate · jobs");
+  setChrome("Cognize", "Manage");
   app.innerHTML = paneLoading();
 
   if (_cognizePoll) {
@@ -2455,7 +3036,10 @@ async function paneCognize() {
 
   const fmtTok = (n) => {
     const v = Number(n) || 0;
-    return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : String(v);
+    const compact = v >= 1000
+      ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`
+      : String(Math.round(v));
+    return `${compact} tok`;
   };
 
   const fmtUsd = (n, priced = true) => {
@@ -2479,6 +3063,48 @@ async function paneCognize() {
   const jobProgress = (j) => {
     const p = j?.result?.progress;
     if (p && typeof p === "object") return p;
+    return null;
+  };
+
+  const jobOutcome = (j) => {
+    const r = j?.result || {};
+    const status = String(j.status || "").toLowerCase();
+    const rawDetail = String(r.detail || r.halt_reason || j.error || "").trim();
+    const humanize = (detail) => {
+      const m = detail.match(/no percepts in vault=(\S+) \(refused (\d+) foreign\)/i);
+      if (m) {
+        return `No percepts in ${m[1]} — ${m[2]} pending belonged to other vaults. Switch vault or wait for vault-scoped pending.`;
+      }
+      return detail;
+    };
+    if (r.halted || r.halt_reason) {
+      return {
+        kind: "halted",
+        label: "Halted",
+        detail: humanize(rawDetail || "halted"),
+      };
+    }
+    if (status === "failed" || status === "dead_letter") {
+      return {
+        kind: "failed",
+        label: "Failed",
+        detail: humanize(rawDetail || status),
+      };
+    }
+    if (status === "completed" || status === "cancelled") {
+      if (r.ok === false) {
+        return {
+          kind: "halted",
+          label: "Halted",
+          detail: humanize(rawDetail || "not ok"),
+        };
+      }
+      return {
+        kind: "ok",
+        label: status === "cancelled" ? "Cancelled" : "Completed",
+        detail: rawDetail || (status === "cancelled" ? "Cancelled" : "Completed"),
+      };
+    }
     return null;
   };
 
@@ -2522,48 +3148,67 @@ async function paneCognize() {
     return bits.length ? bits.join("") : `<p class="muted">No entities yet</p>`;
   };
 
-  const liveJobCard = (j) => {
+  const liveJobCard = (j, { finished = false } = {}) => {
     const status = String(j.status || "").toLowerCase();
     const prog = jobProgress(j);
-    const pct = status === "pending" ? 0 : Math.min(100, Math.max(0, Number(prog?.percent) || 0));
-    const stageLabel = prog?.label
-      || (prog?.stage ? String(prog.stage).replace(/_/g, " ") : "")
-      || (status === "pending" ? "Queued" : (j.stage || "running"));
+    const outcome = finished ? jobOutcome(j) : null;
+    const pct = status === "pending"
+      ? 0
+      : (finished ? 100 : Math.min(100, Math.max(0, Number(prog?.percent) || 0)));
+    const stageLabel = titleWords(
+      prog?.label
+      || (prog?.stage ? String(prog.stage) : "")
+      || (status === "pending" ? "Queued" : (j.stage || "Running")),
+    );
     const stageIdx = Number(prog?.stage_index ?? 0) + 1;
-    const stageTotal = Number(prog?.stage_total || 8);
+    const stageTotal = Number(prog?.stage_total || 0) || null;
     const started = Date.parse(j.started_at || "");
     const elapsed = started && !Number.isNaN(started) ? (Date.now() - started) / 1000 : null;
-    const eta = etaSeconds(j);
-    const dry = j.payload?.dry_run ? " · dry-run" : "";
-    const counts = prog?.counts || {};
-    const countBits = [
-      counts.situations ? `${counts.situations} sit` : "",
-      counts.reflections ? `${counts.reflections} ref` : "",
-      counts.interpretations ? `${counts.interpretations} int` : "",
-      counts.relations ? `${counts.relations} rel` : "",
-    ].filter(Boolean).join(" · ");
+    const eta = finished ? null : etaSeconds(j);
+    const dry = j.payload?.dry_run ? " · Dry-run" : "";
+    const outcomeCls = outcome?.kind === "ok"
+      ? "ok"
+      : (outcome ? "warn" : "");
+    const showBar = !finished;
 
     return `
-      <article class="cognize-live-card" data-job-id="${esc(j.id)}">
+      <article class="cognize-live-card${finished ? " cognize-live-card--done" : ""}" data-job-id="${esc(j.id)}">
         <div class="cognize-live-head">
           <div>
-            <strong>${esc(j.kind || "cognize_batch")}</strong>
+            <strong>${finished ? "Last run" : esc(jobKindLabel(j.kind || "cognize_batch"))}</strong>
             <span class="muted"> ${esc(j.id)}${esc(dry)}</span>
           </div>
-          ${badge(j.status)}
+          ${outcome ? "" : badge(j.status)}
         </div>
+        ${outcome ? `
+          <p class="cognize-live-outcome ${outcomeCls}">
+            ${esc(outcome.detail || outcome.label)}
+          </p>` : ""}
+        ${showBar ? `
         <div class="cognize-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(pct)}">
           <div class="cognize-progress-bar" style="width:${esc(pct)}%"></div>
         </div>
         <div class="cognize-live-meta">
           <span>${esc(Math.round(pct))}%</span>
-          <span>${esc(stageLabel)}${prog ? ` · ${stageIdx}/${stageTotal}` : ""}</span>
-          <span class="muted">${elapsed != null ? `elapsed ${fmtDuration(elapsed)}` : "waiting for worker"}</span>
+          <span>${esc(stageLabel)}${prog && stageTotal ? ` · ${stageIdx}/${stageTotal}` : ""}</span>
+          <span class="muted">${(() => {
+            const total = Number(prog?.percept_total || 0);
+            if (!total) return "";
+            const done = Number(prog?.percept_done ?? 0);
+            if (String(prog?.activity || "") === "model") {
+              return `Model · ${done}/${total}`;
+            }
+            return `${done}/${total} percepts`;
+          })()}</span>
+          <span class="muted">${elapsed != null ? `Elapsed ${fmtDuration(elapsed)}` : "Waiting for worker"}</span>
           <span class="muted">${eta != null ? `ETA ~${fmtDuration(eta)}` : (status === "running" ? "ETA …" : "")}</span>
-        </div>
-        ${countBits ? `<p class="muted cognize-live-counts">${esc(countBits)}</p>` : ""}
+        </div>` : `
+        <div class="cognize-live-meta">
+          <span class="muted">${elapsed != null ? `Elapsed ${fmtDuration(elapsed)}` : ""}</span>
+          <span class="muted">${esc(formatWhen(j.updated_at || j.created_at || ""))}</span>
+        </div>`}
         <div class="cognize-live-entities">
-          <h3 class="cognize-live-ent-title">Entities this run</h3>
+          <h3 class="cognize-live-ent-title">${finished ? "Entities from this run" : "Entities this run"}</h3>
           ${entityLinks(prog)}
         </div>
       </article>`;
@@ -2572,18 +3217,22 @@ async function paneCognize() {
   const jobRow = (j, { rich = false } = {}) => {
     if (rich) return liveJobCard(j);
     const when = formatWhen(j.updated_at || j.created_at || j.finished_at || "");
-    const dry = j.payload?.dry_run ? " · dry-run" : "";
+    const dry = j.payload?.dry_run ? " · Dry-run" : "";
     const prog = jobProgress(j);
+    const outcome = jobOutcome(j);
     const pct = prog ? Math.round(Number(prog.percent) || 0) : null;
     const stageBit = prog?.label || prog?.stage
-      ? ` · ${String(prog.label || prog.stage).replace(/_/g, " ")}`
+      ? ` · ${titleWords(prog.label || prog.stage)}`
+      : "";
+    const outcomeBit = outcome?.detail
+      ? ` · ${truncate(outcome.detail, 72)}`
       : "";
     return `<div class="entity-row cognize-job">
       <div class="entity-row-main">
-        <strong>${esc(j.kind || "job")}</strong>
-        <span class="muted">${esc(j.id)}${esc(dry)}${esc(stageBit)}${pct != null ? ` · ${pct}%` : ""}${when ? ` · ${esc(when)}` : ""}</span>
+        <strong>${esc(jobKindLabel(j.kind || "job"))}</strong>
+        <span class="muted">${esc(j.id)}${esc(dry)}${esc(stageBit)}${pct != null ? ` · ${pct}%` : ""}${esc(outcomeBit)}${when ? ` · ${esc(when)}` : ""}</span>
       </div>
-      ${badge(j.status)}
+      ${badge(outcome?.kind === "halted" ? "halted" : j.status)}
     </div>`;
   };
 
@@ -2592,6 +3241,49 @@ async function paneCognize() {
       clearInterval(_cognizePoll);
       _cognizePoll = null;
     }
+  };
+
+  const partitionJobs = (allJobs) => {
+    const byRecent = (a, b) =>
+      String(b.updated_at || b.completed_at || b.created_at || "")
+        .localeCompare(String(a.updated_at || a.completed_at || a.created_at || ""));
+    const live = allJobs
+      .filter((j) => ["pending", "running"].includes(String(j.status || "").toLowerCase()))
+      .sort(byRecent);
+    const failed = allJobs
+      .filter((j) => String(j.status || "").toLowerCase() === "failed")
+      .sort(byRecent);
+    const past = allJobs
+      .filter((j) => ["completed", "cancelled", "dead_letter"].includes(String(j.status || "").toLowerCase()))
+      .sort(byRecent)
+      .slice(0, 20);
+    const lastFinished = past[0] || failed[0] || null;
+    return { live, failed, past, lastFinished };
+  };
+
+  const paintLivePane = (liveEl, liveTitle, { live, lastFinished }, { toastOutcome = false } = {}) => {
+    if (!liveEl) return;
+    if (live.length) {
+      liveEl.innerHTML = live.map((j) => liveJobCard(j)).join("");
+      if (liveTitle) liveTitle.textContent = `Live run (${live.length})`;
+      return;
+    }
+    if (lastFinished) {
+      const outcome = jobOutcome(lastFinished);
+      liveEl.innerHTML = liveJobCard(lastFinished, { finished: true });
+      if (liveTitle) liveTitle.textContent = "Last run";
+      if (toastOutcome && outcome) {
+        const detail = truncate(outcome.detail || outcome.label, 140);
+        if (outcome.kind === "ok") {
+          toast(detail || "Cognition completed");
+        } else {
+          toast(`Cognition failed: ${detail}`, false);
+        }
+      }
+      return;
+    }
+    liveEl.innerHTML = empty("No live run", "Execute a batch to watch stage progress here");
+    if (liveTitle) liveTitle.textContent = "Live run (0)";
   };
 
   const ensurePoll = (hasLive) => {
@@ -2610,23 +3302,13 @@ async function paneCognize() {
     }, 1500);
   };
 
+  let _hadLive = false;
+
   const refreshLiveJobs = async () => {
     if (paneGen !== _cognizeGen) return;
     const jobsRaw = await api(`/api/runtime/jobs?kind=cognize_batch&limit=80`).catch(() => []);
     const allJobs = Array.isArray(jobsRaw) ? jobsRaw : [];
-    const byRecent = (a, b) =>
-      String(b.updated_at || b.completed_at || b.created_at || "")
-        .localeCompare(String(a.updated_at || a.completed_at || a.created_at || ""));
-    const live = allJobs
-      .filter((j) => ["pending", "running"].includes(String(j.status || "").toLowerCase()))
-      .sort(byRecent);
-    const failed = allJobs
-      .filter((j) => String(j.status || "").toLowerCase() === "failed")
-      .sort(byRecent);
-    const past = allJobs
-      .filter((j) => ["completed", "cancelled", "dead_letter"].includes(String(j.status || "").toLowerCase()))
-      .sort(byRecent)
-      .slice(0, 20);
+    const { live, failed, past, lastFinished } = partitionJobs(allJobs);
 
     const liveEl = $("#cognize-live");
     const activeEl = $("#cognize-jobs-active-list");
@@ -2635,12 +3317,22 @@ async function paneCognize() {
     const activeTitle = $("#cognize-jobs-active-title");
     const pastTitle = $("#cognize-jobs-past-title");
 
-    if (liveEl) {
-      liveEl.innerHTML = live.length
-        ? live.map((j) => liveJobCard(j)).join("")
-        : empty("No live run", "Execute a batch to watch stage progress here");
+    const finishedNow = _hadLive && live.length === 0 && !!lastFinished;
+    if (finishedNow) {
+      paintLivePane(liveEl, liveTitle, { live, lastFinished }, { toastOutcome: true });
+      _hadLive = false;
+      const lim = Number($("#cognize-run-form input[name=limit]")?.value || 50);
+      const briefMax = !!$("#cognize-run-form input[name=brief_max]")?.checked;
+      const brief = briefMax
+        ? lim
+        : Number($("#cognize-run-form input[name=brief_limit]")?.value || lim);
+      // Refresh Run metrics / estimate / queue after the batch settles.
+      await paint({ limit: lim, brief_limit: brief, brief_max: briefMax });
+      return;
     }
-    if (liveTitle) liveTitle.textContent = `Live run (${live.length})`;
+    paintLivePane(liveEl, liveTitle, { live, lastFinished }, { toastOutcome: false });
+    _hadLive = live.length > 0;
+
     if (activeEl) {
       const active = [...live, ...failed];
       activeEl.innerHTML = active.length
@@ -2659,29 +3351,27 @@ async function paneCognize() {
 
   const paint = async (opts = {}) => {
     const limitVal = Number(opts.limit ?? $("#cognize-run-form input[name=limit]")?.value ?? 50) || 50;
+    const briefValRaw = opts.brief_limit ?? $("#cognize-run-form input[name=brief_limit]")?.value;
+    const briefVal = briefValRaw === "" || briefValRaw == null
+      ? null
+      : Math.max(1, Math.min(Number(briefValRaw) || limitVal, limitVal));
     try {
+      const planQs = new URLSearchParams({
+        vault: VAULT,
+        limit: String(limitVal),
+      });
+      if (briefVal != null) planQs.set("brief_limit", String(briefVal));
       const [status, plan, jobsRaw, health] = await Promise.all([
         api(`/api/cognize/status?vault=${encodeURIComponent(VAULT)}`),
-        api(`/api/cognize/plan?vault=${encodeURIComponent(VAULT)}&limit=${encodeURIComponent(limitVal)}`),
+        api(`/api/cognize/plan?${planQs}`),
         api(`/api/runtime/jobs?kind=cognize_batch&limit=80`).catch(() => []),
         api("/api/health/cognition").catch((e) => ({ error: e.message })),
       ]);
 
       const allJobs = Array.isArray(jobsRaw) ? jobsRaw : [];
-      const byRecent = (a, b) =>
-        String(b.updated_at || b.completed_at || b.created_at || "")
-          .localeCompare(String(a.updated_at || a.completed_at || a.created_at || ""));
-      const live = allJobs
-        .filter((j) => ["pending", "running"].includes(String(j.status || "").toLowerCase()))
-        .sort(byRecent);
-      const failed = allJobs
-        .filter((j) => String(j.status || "").toLowerCase() === "failed")
-        .sort(byRecent);
+      const { live, failed, past, lastFinished } = partitionJobs(allJobs);
       const active = [...live, ...failed];
-      const past = allJobs
-        .filter((j) => ["completed", "cancelled", "dead_letter"].includes(String(j.status || "").toLowerCase()))
-        .sort(byRecent)
-        .slice(0, 20);
+      _hadLive = live.length > 0;
 
       const gateOk = status.gate_ok !== false && !status.halt_reason;
       const halt = status.halt_reason || status.detail || "";
@@ -2695,8 +3385,23 @@ async function paneCognize() {
       const pendingTotal = plan.pending_total ?? status.pending_percepts ?? items.length;
       const batchLimit = plan.batch_limit ?? limitVal;
       const batchCount = plan.batch_count ?? items.length;
+      const stageCount = plan.stage_count ?? stages.length ?? 0;
+      const briefLimit = plan.brief_limit ?? briefVal ?? batchLimit;
       const runsToClear = plan.runs_to_clear ?? 0;
       const formLimit = batchLimit;
+      const briefIsMax = opts.brief_max === true
+        || (opts.brief_max !== false && (
+          $("#cognize-run-form input[name=brief_max]")?.checked
+          || briefLimit >= formLimit
+          || briefVal == null
+        ));
+      const formBrief = briefIsMax ? formLimit : Math.min(briefLimit, formLimit);
+      const briefNote = formBrief < batchCount
+        ? `Prompt brief: first ${formBrief} of ${batchCount} percepts`
+        : `Prompt brief: all ${batchCount} percepts in this batch`;
+      const stageRange = stageCount
+        ? (stageCount === 1 ? "1 stage" : `${stageCount} stages`)
+        : "all Cognize stages";
 
       app.innerHTML = `
         <div class="cognize-dash">
@@ -2704,14 +3409,14 @@ async function paneCognize() {
             <h2 class="home-card-title">Run</h2>
             <p class="home-card-sub muted">
               ${gateOk
-                ? `Gate open · ${esc(status.model || plan.model || "model")} · batch ${batchCount} of ${pendingTotal}${plan.queue_truncated ? "+" : ""} pending`
+                ? `Gate open · ${esc(status.model || plan.model || "model")} · ${batchCount} of ${pendingTotal}${plan.queue_truncated ? "+" : ""} pending percepts`
                 : `Halted · ${esc(halt || "LLM gate closed")}`}
               · enqueue needs the runtime worker
             </p>
             <div class="cognize-metrics" role="group" aria-label="Queue metrics">
               <div class="cognize-metric">
                 <span class="cognize-metric-n">${pendingTotal}${plan.queue_truncated ? "+" : ""}</span>
-                <span class="cognize-metric-l">Pending total</span>
+                <span class="cognize-metric-l">Pending percepts</span>
               </div>
               <div class="cognize-metric">
                 <span class="cognize-metric-n">${status.open_reflections ?? 0}</span>
@@ -2726,66 +3431,77 @@ async function paneCognize() {
               <label class="cognize-check">
                 <input type="checkbox" name="dry_run" /> Dry-run (no writes)
               </label>
-              <label>Batch limit<input type="number" name="limit" min="1" max="200" value="${esc(formLimit)}" /></label>
+              <label>Percepts / run<input type="number" name="limit" min="1" max="200" value="${esc(formLimit)}" title="How many pending percepts one Execute run takes through all Cognize stages" /></label>
+              <div class="cognize-brief-field">
+                <span>Brief max</span>
+                <div class="cognize-brief-row">
+                  <input type="number" name="brief_limit" min="1" max="${esc(formLimit)}" value="${esc(formBrief)}" ${briefIsMax ? "disabled" : ""} title="Not a stage: max percepts pasted into each stage LLM prompt. Uncheck Max to cap below the full run." />
+                  <label class="cognize-check cognize-brief-max">
+                    <input type="checkbox" name="brief_max" ${briefIsMax ? "checked" : ""} /> Max
+                  </label>
+                </div>
+              </div>
               <div class="cta-row">
                 <button type="submit" class="btn primary" ${gateOk ? "" : "disabled"}>Execute</button>
-                <button type="button" class="btn" id="cognize-refresh">Refresh</button>
               </div>
             </form>
             <p id="cognize-run-msg" class="muted cognize-run-msg">
-              One Execute run processes up to ${batchLimit} items through stages 0–7.
-              ${runsToClear > 1 ? `Clearing the queue needs ~${runsToClear} runs at this limit.` : ""}
+              One Execute run takes up to ${batchLimit} pending percepts through ${stageRange}.
+              ${briefNote}.
+              ${runsToClear > 1 ? ` Clearing the queue needs ~${runsToClear} runs at this size.` : ""}
             </p>
           </section>
 
           <section class="home-card cognize-estimate">
             <h2 class="home-card-title">Estimate</h2>
-            <p class="home-card-sub muted">${esc(plan.estimate_note || "Per-stage preview")}</p>
+            <p class="home-card-sub muted">${esc(plan.estimate_note || "Heuristic token estimate · chars÷4")}</p>
             <div class="cognize-estimate-total">
               <div class="cognize-estimate-pair">
                 <span class="stat-n">${fmtTok(totals.total_tokens_est)}</span>
-                <span class="stat-l">this batch · ${fmtTok(totals.input_tokens)} in · ${fmtTok(totals.output_tokens_est)} out</span>
+                <span class="stat-l">${batchCount ? `this run (${batchCount} percept${batchCount === 1 ? "" : "s"}) · ${fmtTok(totals.input_tokens)} in · ${fmtTok(totals.output_tokens_est)} out` : "no pending · Execute would no-op"}</span>
               </div>
               <div class="cognize-estimate-pair">
-                <span class="stat-n">${fmtUsd(totals.cost_usd, priced)}</span>
-                <span class="stat-l">${priced ? "this batch USD" : "unpriced model"}</span>
+                <span class="stat-n">${fmtUsd(totals.cost_usd, priced && batchCount > 0)}</span>
+                <span class="stat-l">${batchCount ? (priced ? "this run USD" : "unpriced model") : "no cost"}</span>
               </div>
             </div>
             <div class="cognize-estimate-queue">
               <div class="cognize-estimate-pair">
                 <span class="stat-n">${fmtTok(queue.total_tokens_est ?? 0)}</span>
-                <span class="stat-l">full queue · ~${runsToClear || 0} run${runsToClear === 1 ? "" : "s"} · ${pendingTotal}${plan.queue_truncated ? "+" : ""} items</span>
+                <span class="stat-l">full queue · ~${runsToClear || 0} run${runsToClear === 1 ? "" : "s"} · ${pendingTotal}${plan.queue_truncated ? "+" : ""} percepts</span>
               </div>
               <div class="cognize-estimate-pair">
-                <span class="stat-n">${fmtUsd(queue.cost_usd ?? 0, priced && queue.priced !== false)}</span>
-                <span class="stat-l">${priced ? "full queue USD" : "unpriced model"}</span>
+                <span class="stat-n">${fmtUsd(queue.cost_usd ?? 0, priced && queue.priced !== false && pendingTotal > 0)}</span>
+                <span class="stat-l">${pendingTotal ? (priced ? "full queue USD" : "unpriced model") : "no cost"}</span>
               </div>
             </div>
             <div class="cognize-stage-list">
-              ${stages.length ? stages.map((s) => `
+              ${batchCount && stages.length ? stages.map((s) => `
                 <div class="cognize-stage-row">
                   <span class="cognize-stage-name">${esc(s.label || s.stage)}</span>
                   <span class="muted">${fmtTok(s.input_tokens)} in</span>
                   <span class="muted">${fmtTok(s.output_tokens_est)} out</span>
                   <span class="muted">${fmtUsd(s.cost_usd, s.priced)}</span>
                   <strong>${fmtTok(s.total_tokens_est)}</strong>
-                </div>`).join("") : empty("No stages")}
+                </div>`).join("") : empty(batchCount ? "No stages" : "No stages to price", batchCount ? "" : "Queue is empty for this vault")}
             </div>
           </section>
 
           <section class="home-card cognize-live-pane">
-            <h2 class="home-card-title" id="cognize-live-title">Live run (${live.length})</h2>
-            <p class="home-card-sub muted">Stage progress · ETA · entities created in this job</p>
+            <h2 class="home-card-title" id="cognize-live-title">${live.length ? `Live run (${live.length})` : (lastFinished ? "Last run" : "Live run (0)")}</h2>
+            <p class="home-card-sub muted">Stage progress · outcome stays here when the job finishes</p>
             <div id="cognize-live">
               ${live.length
                 ? live.map((j) => liveJobCard(j)).join("")
-                : empty("No live run", "Execute a batch to watch stage progress here")}
+                : lastFinished
+                  ? liveJobCard(lastFinished, { finished: true })
+                  : empty("No live run", "Execute a batch to watch stage progress here")}
             </div>
           </section>
 
           <section class="home-card cognize-items">
-            <h2 class="home-card-title">Items in this batch (${batchCount} of ${pendingTotal}${plan.queue_truncated ? "+" : ""})</h2>
-            <p class="home-card-sub muted">Next Execute run · limit ${batchLimit} · not the full pending queue</p>
+            <h2 class="home-card-title">Percepts in this batch (${batchCount} of ${pendingTotal}${plan.queue_truncated ? "+" : ""})</h2>
+            <p class="home-card-sub muted">Next Execute · up to ${batchLimit} percepts · ${briefNote}</p>
             <div class="cognize-item-list">
               ${items.length ? items.map((it) => `
                 <a class="entity-row" href="${esc(it.href || `#explore/percept/${it.id}`)}">
@@ -2831,18 +3547,48 @@ async function paneCognize() {
           </section>
         </div>`;
 
-      $("#cognize-refresh")?.addEventListener("click", () => {
-        const lim = Number($("#cognize-run-form input[name=limit]")?.value || 50);
-        paint({ limit: lim }).catch((e) => toast(e.message, false));
-      });
-
       const limitInput = $("#cognize-run-form input[name=limit]");
+      const briefInput = $("#cognize-run-form input[name=brief_limit]");
+      const briefMaxInput = $("#cognize-run-form input[name=brief_max]");
       let limitTimer = null;
-      limitInput?.addEventListener("change", () => {
+      const readBriefLimit = (lim) => {
+        if (briefMaxInput?.checked) return lim;
+        return Math.max(1, Math.min(Number(briefInput?.value || lim), lim));
+      };
+      const syncBriefMaxUi = () => {
+        const lim = Math.max(1, Math.min(Number(limitInput?.value || 50), 200));
+        if (briefInput) {
+          briefInput.max = String(lim);
+          if (briefMaxInput?.checked) {
+            briefInput.value = String(lim);
+            briefInput.disabled = true;
+          } else {
+            briefInput.disabled = false;
+            if (Number(briefInput.value) > lim) briefInput.value = String(lim);
+          }
+        }
+      };
+      const refreshPlan = () => {
         clearTimeout(limitTimer);
         limitTimer = setTimeout(() => {
-          paint({ limit: Number(limitInput.value || 50) }).catch((e) => toast(e.message, false));
-        }, 200);
+          const lim = Math.max(1, Math.min(Number(limitInput?.value || 50), 200));
+          syncBriefMaxUi();
+          const brief = readBriefLimit(lim);
+          const briefMax = !!briefMaxInput?.checked;
+          api("/api/cognize/brief", {
+            method: "PUT",
+            body: JSON.stringify({ brief_limit: brief, limit: lim }),
+          }).catch(() => {});
+          paint({ limit: lim, brief_limit: brief, brief_max: briefMax }).catch((e) => toast(e.message, false));
+        }, 280);
+      };
+      limitInput?.addEventListener("change", refreshPlan);
+      briefInput?.addEventListener("change", refreshPlan);
+      limitInput?.addEventListener("input", refreshPlan);
+      briefInput?.addEventListener("input", refreshPlan);
+      briefMaxInput?.addEventListener("change", () => {
+        syncBriefMaxUi();
+        refreshPlan();
       });
 
       $("#cognize-run-form")?.addEventListener("submit", async (ev) => {
@@ -2850,6 +3596,11 @@ async function paneCognize() {
         const fd = new FormData(ev.target);
         const msg = $("#cognize-run-msg");
         const btn = ev.target.querySelector('button[type="submit"]');
+        const lim = Number(fd.get("limit") || 50);
+        const briefMax = fd.get("brief_max") === "on";
+        const brief = briefMax
+          ? lim
+          : Math.max(1, Math.min(Number(fd.get("brief_limit") || lim), lim));
         if (btn) btn.disabled = true;
         if (msg) msg.textContent = "Enqueueing…";
         try {
@@ -2857,14 +3608,15 @@ async function paneCognize() {
             method: "POST",
             body: JSON.stringify({
               vault_id: VAULT,
-              limit: Number(fd.get("limit") || 50),
+              limit: lim,
+              brief_limit: brief,
               dry_run: fd.get("dry_run") === "on",
             }),
           });
           const jobId = out.job?.id || "";
           toast(jobId ? `Enqueued ${jobId}` : "Cognize job enqueued");
           if (msg) msg.textContent = jobId ? `Job ${jobId} queued — watching live` : "Queued";
-          await paint({ limit: Number(fd.get("limit") || 50) });
+          await paint({ limit: lim, brief_limit: brief, brief_max: briefMax });
           ensurePoll(true);
         } catch (err) {
           toast(err.message, false);
@@ -3097,6 +3849,7 @@ async function paneInject() {
         body: JSON.stringify({
           query: fd.get("query"),
           target_domain: fd.get("domain") || "technical",
+          vault_id: VAULT,
         }),
       });
       meta.textContent = `Narratives: ${(data.narratives || []).length} · Reflections: ${(data.open_reflections || []).length}`;
@@ -3142,7 +3895,7 @@ async function paneOps() {
         <section class="home-card ops-doctor">
           <h2 class="home-card-title">Doctor</h2>
           <p class="home-card-sub muted">${esc(doctor.llm || "—")} · ${esc(doctor.model || "—")} · embed ${esc(doctor.embedder || "—")}</p>
-          ${halt ? `<p class="doctor-halt">cognize halt · ${esc(halt)}</p>` : ""}
+          ${halt ? `<p class="doctor-halt">Cognize halt · ${esc(halt)}</p>` : ""}
           ${doctor.error ? `<p class="muted">${esc(doctor.error)}</p>` : `
           <div class="doctor-score" aria-label="Doctor counts">
             <span class="doctor-chip doctor-chip--ok">✓ ${counts.ok ?? 0}</span>
@@ -3173,7 +3926,7 @@ async function paneOps() {
               ${queueRows.length ? queueRows.map(([k, v]) => `
                 <div class="cognize-metric">
                   <span class="cognize-metric-n">${esc(v)}</span>
-                  <span class="cognize-metric-l">${esc(String(k).replace(/_/g, " "))}</span>
+                  <span class="cognize-metric-l">${esc(statusLabel(k))}</span>
                 </div>`).join("") : `
                 <div class="cognize-metric">
                   <span class="cognize-metric-n">0</span>
@@ -3237,4 +3990,6 @@ async function route() {
 }
 
 window.addEventListener("hashchange", () => { route().catch((e) => toast(e.message, false)); });
-route().catch((e) => toast(e.message, false));
+initVaultPicker()
+  .catch((e) => toast(e.message, false))
+  .finally(() => route().catch((e) => toast(e.message, false)));

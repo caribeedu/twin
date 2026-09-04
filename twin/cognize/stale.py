@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from twin.privacy.vault import resolve_vault
+
 from typing import Any, Optional
 
 from twin.cognize.models import EpistemicStatus
@@ -11,7 +13,7 @@ from twin.sense.sensory.percept import Percept
 
 def _vault_for_percept(percept: Percept) -> str:
     meta = percept.metadata or {}
-    return str(meta.get("vault_id") or meta.get("vault") or "default")
+    return resolve_vault(meta.get("vault_id") or meta.get("vault"))
 
 
 def _domain_hint(percept: Percept) -> str:

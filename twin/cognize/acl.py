@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from twin.privacy.vault import FALLBACK_VAULT, iter_vault_ids, resolve_vault
+
 from typing import Any, Optional
 
 from twin.cognize.models import EpistemicStatus, Trace
@@ -33,7 +35,8 @@ def sensitivity_from_evidence(
                 continue
         # Evidence anchor by id
         if hasattr(store, "list_evidence_anchors"):
-            for vault in ("default",):
+            found = False
+            for vault in (iter_vault_ids(store) or [FALLBACK_VAULT]):
                 for anc in store.list_evidence_anchors(vault):
                     if anc.id == eid or anc.percept_id == eid:
                         p = (
@@ -45,6 +48,10 @@ def sensitivity_from_evidence(
                             levels.append(
                                 getattr(p, "source_confidentiality", None) or "internal"
                             )
+                            found = True
+                            break
+                if found:
+                    break
     return intersect_sensitivity(levels)
 
 
@@ -55,9 +62,12 @@ def evidence_source_sensors(store: Any, evidence_ids: list[str]) -> set[str]:
             break
         p = store.get_percept(eid)
         if p is None and hasattr(store, "list_evidence_anchors"):
-            for anc in store.list_evidence_anchors("default"):
-                if anc.id == eid or anc.percept_id == eid:
-                    p = store.get_percept(anc.percept_id)
+            for vid in (iter_vault_ids(store) or [FALLBACK_VAULT]):
+                for anc in store.list_evidence_anchors(vid):
+                    if anc.id == eid or anc.percept_id == eid:
+                        p = store.get_percept(anc.percept_id)
+                        break
+                if p is not None:
                     break
         if p is not None:
             sensors.add((getattr(p, "source_sensor", None) or "").lower())
@@ -101,7 +111,7 @@ def tombstone_narratives_for_percept(
     percept_id: str,
     *,
     reason: str = "source revoked",
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
 ) -> list[str]:
     """Synchronously tombstone Narratives whose evidence includes this percept."""
     if not hasattr(store, "list_narratives"):
