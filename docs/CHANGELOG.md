@@ -5,6 +5,28 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.6.0 — Cognize halt, lineage & Review respond
+
+Discard partial Situations / Reflections / Interpretations / Relations on
+Cognize halt; leave uncognized Percepts pending. Relation aliases
+(`supported_by` / `reinforces` → `supports`) and unknown kinds → `related`.
+Soft LLM heartbeats in progress UI; brief as stage prompt context (not a
+stage); Cognize Manage with Brief max / Max batch.
+
+Explore provenance for derived Percepts (origin tree, type-aware columns,
+1-hop edge hover, native fullscreen). Review respond: Narrative and/or
+Answer (narrative-only allowed); strip reflection preamble.
+
+Vault resolve: literal `default` is unset; active default prefers
+`vault_general`; dual-read legacy `default`↔`vault_general`. Fix
+`cognized_at` index creation after the migration adds the column.
+
+### v2.5.1 — Cognize pending queue & stage briefs
+
+Stamp `cognized_at` after a successful Cognize run so the pending queue
+shrinks. Scale each stage brief with the full batch (or
+`TWIN_COGNIZE_BRIEF_LIMIT`). Drop the interpret CLI.
+
 ### v2.5.0 — Package walls & dual-read schema rename
 
 Reorganize code packages to match Sense / Cognize / Inject (+ store, llm,
