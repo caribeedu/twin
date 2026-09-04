@@ -33,6 +33,12 @@ def _reset_interpreter_override():
     clear_stage_overrides()
 
 
+@pytest.fixture(autouse=True)
+def _clear_twin_vault_env(monkeypatch):
+    """Active vault must not leak across tests via process env."""
+    monkeypatch.delenv("TWIN_VAULT", raising=False)
+
+
 @pytest.fixture()
 def store(cfg):
     s = SqliteStore(cfg.home / "twin.db")

@@ -37,7 +37,7 @@ from twin.store.models import (
 )
 from twin.store.search import search
 from ..workspace import Workspace
-from twin.privacy.vault import iter_vault_ids, resolve_vault, set_active_vault
+from twin.privacy.vault import iter_vault_ids, resolve_vault, set_active_vault, vault_read_ids
 from .web import STATIC_DIR, read_index
 
 # domains accepted at the API edge; unclassified is a valid *target* (it
@@ -325,6 +325,22 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def _vault(vault: Optional[str] = None) -> str:
         return resolve_vault(vault, cfg=ws.cfg, store=ws.store)
 
+    def _list_vault(method: str, vault: str, *args, **kwargs):
+        fn = getattr(ws.store, method, None)
+        if fn is None:
+            return []
+        out = []
+        seen: set[str] = set()
+        for vid in vault_read_ids(vault):
+            for row in fn(vid, *args, **kwargs) or []:
+                rid = getattr(row, "id", None)
+                if rid is not None:
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                out.append(row)
+        return out
+
     app = FastAPI(title="twin", description="Personal Cognitive OS — local API")
 
     # -- JSON API --------------------------------------------------------
@@ -563,7 +579,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         if not hasattr(ws.store, "list_narratives"):
             return []
         rows = []
-        for nar in ws.store.list_narratives(vault):
+        for nar in _list_vault("list_narratives", vault):
             if domain and nar.domain and nar.domain != domain:
                 continue
             eps = (
@@ -608,28 +624,32 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         contradict_count = 0
         relations_out: list[dict[str, Any]] = []
         if hasattr(ws.store, "list_relations"):
-            vault = resolve_vault(nar.vault_id, cfg=ws.cfg, store=ws.store)
-            for rel in ws.store.list_relations(vault):
-                dump = rel.model_dump(mode="json")
-                touches = (
-                    rel.from_id == nar.id
-                    or rel.to_id == nar.id
-                    or rel.from_id in evid_set
-                    or rel.to_id in evid_set
-                )
-                if touches:
-                    relations_out.append(dump)
-                rtype = rel.type.value if hasattr(rel.type, "value") else str(rel.type)
-                if rtype == RelationType.same_originating_decision.value:
-                    groups.append([rel.from_id, rel.to_id])
-                if rtype == RelationType.supports.value and (
-                    rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
-                ):
-                    support_count += 1
-                if rtype == RelationType.contradicts.value and (
-                    rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
-                ):
-                    contradict_count += 1
+            seen_rel: set[str] = set()
+            for vid in vault_read_ids(nar.vault_id):
+                for rel in ws.store.list_relations(vid):
+                    if rel.id in seen_rel:
+                        continue
+                    seen_rel.add(rel.id)
+                    dump = rel.model_dump(mode="json")
+                    touches = (
+                        rel.from_id == nar.id
+                        or rel.to_id == nar.id
+                        or rel.from_id in evid_set
+                        or rel.to_id in evid_set
+                    )
+                    if touches:
+                        relations_out.append(dump)
+                    rtype = rel.type.value if hasattr(rel.type, "value") else str(rel.type)
+                    if rtype == RelationType.same_originating_decision.value:
+                        groups.append([rel.from_id, rel.to_id])
+                    if rtype == RelationType.supports.value and (
+                        rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
+                    ):
+                        support_count += 1
+                    if rtype == RelationType.contradicts.value and (
+                        rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
+                    ):
+                        contradict_count += 1
         out["relations"] = relations_out
 
         eps_status = eps.status if eps else EpistemicStatus.fresh
@@ -649,12 +669,17 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
         evidence_rows: list[dict[str, Any]] = []
         if hasattr(ws.store, "list_evidence_anchors"):
-            for a in ws.store.list_evidence_anchors(
-                resolve_vault(nar.vault_id, cfg=ws.cfg, store=ws.store),
-                target_kind="narrative",
-                target_id=nar.id,
-            ):
-                evidence_rows.append(a.model_dump(mode="json"))
+            seen_ev: set[str] = set()
+            for vid in vault_read_ids(nar.vault_id):
+                for a in ws.store.list_evidence_anchors(
+                    vid,
+                    target_kind="narrative",
+                    target_id=nar.id,
+                ):
+                    if a.id in seen_ev:
+                        continue
+                    seen_ev.add(a.id)
+                    evidence_rows.append(a.model_dump(mode="json"))
             for eid in evid:
                 if any(r.get("id") == eid for r in evidence_rows):
                     continue
@@ -666,11 +691,16 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
         open_refs: list[dict[str, Any]] = []
         if hasattr(ws.store, "list_open_reflections"):
-            for ref in ws.store.list_open_reflections(resolve_vault(nar.vault_id, cfg=ws.cfg, store=ws.store)):
-                ref_domain = (ref.metadata or {}).get("domain") or getattr(ref, "domain", "") or ""
-                if nar.domain and ref_domain and ref_domain != nar.domain:
-                    continue
-                open_refs.append(ref.model_dump(mode="json"))
+            seen_ref: set[str] = set()
+            for vid in vault_read_ids(nar.vault_id):
+                for ref in ws.store.list_open_reflections(vid):
+                    if ref.id in seen_ref:
+                        continue
+                    seen_ref.add(ref.id)
+                    ref_domain = (ref.metadata or {}).get("domain") or getattr(ref, "domain", "") or ""
+                    if nar.domain and ref_domain and ref_domain != nar.domain:
+                        continue
+                    open_refs.append(ref.model_dump(mode="json"))
         out["open_reflections"] = open_refs
         return out
 
@@ -678,9 +708,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     def api_reflections(vault: Optional[str] = None, status: str = "open"):
         vault = _vault(vault)
         if status == "open" and hasattr(ws.store, "list_open_reflections"):
-            return [r.model_dump(mode="json") for r in ws.store.list_open_reflections(vault)]
+            return [r.model_dump(mode="json") for r in _list_vault("list_open_reflections", vault)]
         if hasattr(ws.store, "list_reflections"):
-            rows = [r.model_dump(mode="json") for r in ws.store.list_reflections(vault)]
+            rows = [r.model_dump(mode="json") for r in _list_vault("list_reflections", vault)]
             if status and status != "all":
                 rows = [r for r in rows if r.get("status") == status]
             return rows
@@ -729,7 +759,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         vault = _vault(vault)
         if not hasattr(ws.store, "list_situations"):
             return []
-        return [s.model_dump(mode="json") for s in ws.store.list_situations(vault)]
+        return [s.model_dump(mode="json") for s in _list_vault("list_situations", vault)]
 
     @app.get("/api/situations/{situation_id}")
     def api_situation(situation_id: str):
@@ -748,7 +778,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         st = None if status in (None, "", "all") else status
         return [
             i.model_dump(mode="json")
-            for i in ws.store.list_cognize_interpretations(vault, status=st)
+            for i in _list_vault("list_cognize_interpretations", vault, status=st)
         ]
 
     @app.get("/api/interpretations/{interpretation_id}")
@@ -770,7 +800,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         vault = _vault(vault)
         if not hasattr(ws.store, "list_relations"):
             return []
-        rows = ws.store.list_relations(vault, rel_type=type)
+        rows = _list_vault("list_relations", vault, rel_type=type)
         out = [r.model_dump(mode="json") for r in rows]
         if from_id:
             out = [r for r in out if r.get("from_id") == from_id]
@@ -800,8 +830,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             return []
         return [
             enrich_evidence_dict(ws.store, a.model_dump(mode="json"))
-            for a in ws.store.list_evidence_anchors(
-                vault, target_kind=target_kind, target_id=target_id
+            for a in _list_vault(
+                "list_evidence_anchors", vault, target_kind=target_kind, target_id=target_id
             )
         ]
 

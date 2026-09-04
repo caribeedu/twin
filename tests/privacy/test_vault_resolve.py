@@ -20,6 +20,14 @@ def test_resolve_vault_ignores_phantom_default(monkeypatch):
     assert resolve_vault(None) == FALLBACK_VAULT
 
 
+def test_vault_read_ids_aliases_legacy_default():
+    from twin.privacy.vault import vault_read_ids
+
+    assert vault_read_ids("default") == [FALLBACK_VAULT, "default"]
+    assert vault_read_ids(FALLBACK_VAULT) == [FALLBACK_VAULT, "default"]
+    assert vault_read_ids("vault_personal") == ["vault_personal"]
+
+
 def test_resolve_vault_prefers_explicit_then_env(monkeypatch):
     monkeypatch.setenv("TWIN_VAULT", "vault_personal")
     assert resolve_vault("vault_dogfood") == "vault_dogfood"
@@ -44,11 +52,14 @@ def test_vault_display_name_factory_and_custom():
 
 def test_set_active_vault_persists(tmp_path, monkeypatch):
     monkeypatch.delenv("TWIN_VAULT", raising=False)
-    vid = set_active_vault(tmp_path, "vault_dogfood")
-    assert vid == "vault_dogfood"
-    assert os.environ["TWIN_VAULT"] == "vault_dogfood"
-    env = (tmp_path / "env").read_text(encoding="utf-8")
-    assert "TWIN_VAULT=vault_dogfood" in env
+    try:
+        vid = set_active_vault(tmp_path, "vault_dogfood")
+        assert vid == "vault_dogfood"
+        assert os.environ["TWIN_VAULT"] == "vault_dogfood"
+        env = (tmp_path / "env").read_text(encoding="utf-8")
+        assert "TWIN_VAULT=vault_dogfood" in env
+    finally:
+        os.environ.pop("TWIN_VAULT", None)
 
 
 def test_center_vaults_api(tmp_path, monkeypatch):
@@ -67,14 +78,17 @@ def test_center_vaults_api(tmp_path, monkeypatch):
     ws.store.insert_vault(Vault(id="vault_dogfood", name="Dogfood", source_owner="personal"))
     ws.store.insert_vault(Vault(id="vault_personal", name="vault_personal", source_owner="personal"))
     ws.close()
-    client = TestClient(create_app(str(tmp_path)))
-    listed = client.get("/api/center/vaults").json()
-    assert listed["count"] >= 1
-    by_id = {v["id"]: v["name"] for v in listed["vaults"]}
-    assert by_id["vault_dogfood"] == "Dogfood"
-    assert by_id["vault_personal"] == "Personal"
-    put = client.put("/api/center/vault", json={"vault_id": "vault_dogfood"})
-    assert put.status_code == 200, put.text
-    assert put.json()["active"] == "vault_dogfood"
-    again = client.get("/api/center/vaults").json()
-    assert again["active"] == "vault_dogfood"
+    try:
+        client = TestClient(create_app(str(tmp_path)))
+        listed = client.get("/api/center/vaults").json()
+        assert listed["count"] >= 1
+        by_id = {v["id"]: v["name"] for v in listed["vaults"]}
+        assert by_id["vault_dogfood"] == "Dogfood"
+        assert by_id["vault_personal"] == "Personal"
+        put = client.put("/api/center/vault", json={"vault_id": "vault_dogfood"})
+        assert put.status_code == 200, put.text
+        assert put.json()["active"] == "vault_dogfood"
+        again = client.get("/api/center/vaults").json()
+        assert again["active"] == "vault_dogfood"
+    finally:
+        os.environ.pop("TWIN_VAULT", None)

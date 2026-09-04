@@ -6,7 +6,7 @@ Age alone is not Cognize deletion policy.
 
 from __future__ import annotations
 
-from twin.privacy.vault import FALLBACK_VAULT, resolve_vault
+from twin.privacy.vault import FALLBACK_VAULT, vault_read_ids
 
 from typing import Any, Optional
 
@@ -56,59 +56,68 @@ def recommend_accessibility(
             if src:
                 stance_linked.add(str(src))
 
+    partitions = vault_read_ids(vault_id)
     trace_counts: dict[str, int] = {}
     if hasattr(store, "list_traces"):
-        for tr in store.list_traces(vault_id, event_kind="pack_serve", limit=2_000):
-            if tr.resource_kind == "narrative" and tr.resource_id:
-                trace_counts[tr.resource_id] = trace_counts.get(tr.resource_id, 0) + 1
+        for vid in partitions:
+            for tr in store.list_traces(vid, event_kind="pack_serve", limit=2_000):
+                if tr.resource_kind == "narrative" and tr.resource_id:
+                    trace_counts[tr.resource_id] = trace_counts.get(tr.resource_id, 0) + 1
 
     recs: list[dict[str, Any]] = []
-    for nar in store.list_narratives(vault_id):
+    seen_nar: set[str] = set()
+    for vid in partitions:
+        for nar in store.list_narratives(vid):
+            if nar.id in seen_nar:
+                continue
+            seen_nar.add(nar.id)
+            if len(recs) >= max_recs:
+                break
+            if nar.status in (NarrativeStatus.archived, NarrativeStatus.superseded):
+                continue
+            hits = trace_counts.get(nar.id, 0)
+            if nar.id in stance_linked:
+                label = NarrativeStatus.remarkable.value
+                reason = "linked to pending/active Stance — pin accessibility"
+            elif hits >= 3:
+                label = NarrativeStatus.ordinary.value
+                reason = f"retrieved {hits} times recently"
+            elif hits == 0:
+                label = NarrativeStatus.fading.value
+                reason = "no recent pack retrieval; candidate for fade review"
+            else:
+                label = NarrativeStatus.ordinary.value
+                reason = f"sparse retrieval ({hits})"
+            current = nar.status.value if hasattr(nar.status, "value") else str(nar.status)
+            if current == label:
+                continue
+            rec = {
+                "narrative_id": nar.id,
+                "from_status": current,
+                "recommended": label,
+                "reason": reason,
+                "trace_hits": hits,
+                "stance_linked": nar.id in stance_linked,
+                "at": now_iso(),
+            }
+            recs.append(rec)
+            if dry_run:
+                continue
+            meta = dict(nar.metadata or {})
+            meta["accessibility_recommendation"] = rec
+            store.upsert_narrative(nar.model_copy(update={"metadata": meta}))
+            if hasattr(store, "append_trace"):
+                store.append_trace(
+                    Trace(
+                        vault_id=nar.vault_id or vid,
+                        event_kind="fade_recommend",
+                        resource_kind="narrative",
+                        resource_id=nar.id,
+                        metadata={"recommended": label, "reason": reason},
+                    )
+                )
         if len(recs) >= max_recs:
             break
-        if nar.status in (NarrativeStatus.archived, NarrativeStatus.superseded):
-            continue
-        hits = trace_counts.get(nar.id, 0)
-        if nar.id in stance_linked:
-            label = NarrativeStatus.remarkable.value
-            reason = "linked to pending/active Stance — pin accessibility"
-        elif hits >= 3:
-            label = NarrativeStatus.ordinary.value
-            reason = f"retrieved {hits} times recently"
-        elif hits == 0:
-            label = NarrativeStatus.fading.value
-            reason = "no recent pack retrieval; candidate for fade review"
-        else:
-            label = NarrativeStatus.ordinary.value
-            reason = f"sparse retrieval ({hits})"
-        current = nar.status.value if hasattr(nar.status, "value") else str(nar.status)
-        if current == label:
-            continue
-        rec = {
-            "narrative_id": nar.id,
-            "from_status": current,
-            "recommended": label,
-            "reason": reason,
-            "trace_hits": hits,
-            "stance_linked": nar.id in stance_linked,
-            "at": now_iso(),
-        }
-        recs.append(rec)
-        if dry_run:
-            continue
-        meta = dict(nar.metadata or {})
-        meta["accessibility_recommendation"] = rec
-        store.upsert_narrative(nar.model_copy(update={"metadata": meta}))
-        if hasattr(store, "append_trace"):
-            store.append_trace(
-                Trace(
-                    vault_id=vault_id,
-                    event_kind="fade_recommend",
-                    resource_kind="narrative",
-                    resource_id=nar.id,
-                    metadata={"recommended": label, "reason": reason},
-                )
-            )
     return recs
 
 
@@ -116,8 +125,13 @@ def list_accessibility_recommendations(store: Any, vault_id: str = FALLBACK_VAUL
     out: list[dict] = []
     if not hasattr(store, "list_narratives"):
         return out
-    for nar in store.list_narratives(vault_id):
-        rec = (nar.metadata or {}).get("accessibility_recommendation")
-        if rec:
-            out.append(rec)
+    seen: set[str] = set()
+    for vid in vault_read_ids(vault_id):
+        for nar in store.list_narratives(vid):
+            if nar.id in seen:
+                continue
+            seen.add(nar.id)
+            rec = (nar.metadata or {}).get("accessibility_recommendation")
+            if rec:
+                out.append(rec)
     return out

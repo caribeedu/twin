@@ -55,6 +55,26 @@ def iter_vault_ids(store: Any) -> list[str]:
     return [vid for vid in ids if vid]
 
 
+def storage_vault(explicit: Optional[str] = None) -> str:
+    """Partition key for a stamped value — never invent personal/work from catalog.
+
+    Empty / ``default`` → ``FALLBACK_VAULT``. Real ids pass through unchanged.
+    """
+    return _clean(explicit) or FALLBACK_VAULT
+
+
+def vault_read_ids(stored: Optional[str] = None) -> list[str]:
+    """Store partition keys to read for a stamped (or unset) vault.
+
+    Legacy rows used the literal ``default`` key; new rows use ``vault_general``.
+    Treat those as one partition when reading. Other vault ids stay exact.
+    """
+    raw = str(stored or "").strip()
+    if not raw or raw == "default" or raw == FALLBACK_VAULT:
+        return [FALLBACK_VAULT, "default"]
+    return [raw]
+
+
 def resolve_vault(
     explicit: Optional[str] = None,
     *,
@@ -64,7 +84,7 @@ def resolve_vault(
     """Pick the active vault.
 
     Order: explicit arg → ``Config.vault`` / ``TWIN_VAULT`` → sole store vault →
-    ``vault_personal`` / ``vault_general`` if present → first catalog id →
+    ``vault_general`` / ``vault_personal`` if present → first catalog id →
     ``FALLBACK_VAULT``.
     """
     for candidate in (
@@ -78,7 +98,7 @@ def resolve_vault(
     ids = iter_vault_ids(store)
     if len(ids) == 1:
         return ids[0]
-    for preferred in ("vault_personal", "vault_general"):
+    for preferred in ("vault_general", "vault_personal"):
         if preferred in ids:
             return preferred
     if ids:

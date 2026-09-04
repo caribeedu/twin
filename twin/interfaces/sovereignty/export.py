@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from twin.clock import now_iso
-from twin.privacy.vault import FALLBACK_VAULT, iter_vault_ids
+from twin.privacy.vault import FALLBACK_VAULT, iter_vault_ids, vault_read_ids
 from twin.store.store.base import TwinStore
 from twin.interfaces.sovereignty.manifest import (
     BackupManifest,
@@ -114,17 +114,19 @@ def collect_export(store: TwinStore) -> dict[str, list[Any]]:
     if hasattr(store, "list_personas"):
         data["personas"] = list(store.list_personas(active_only=False))
 
-    # Cognize entities
-    vaults: set[str] = set(iter_vault_ids(store) or [FALLBACK_VAULT])
+    # Cognize entities (include legacy ``default`` partition via vault_read_ids)
+    vaults: set[str] = set()
+    for seed in list(iter_vault_ids(store) or [FALLBACK_VAULT]) + ["default", FALLBACK_VAULT]:
+        vaults.update(vault_read_ids(seed))
     if hasattr(store, "list_narratives"):
         for seed in list(vaults):
             for nar in store.list_narratives(seed):
                 if nar.vault_id:
-                    vaults.add(nar.vault_id)
+                    vaults.update(vault_read_ids(nar.vault_id))
             if hasattr(store, "list_situations"):
                 for sit in store.list_situations(seed):
                     if sit.vault_id:
-                        vaults.add(sit.vault_id)
+                        vaults.update(vault_read_ids(sit.vault_id))
         for vid in sorted(vaults):
             if hasattr(store, "list_situations"):
                 data["cognize_situations"].extend(store.list_situations(vid))
