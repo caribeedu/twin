@@ -37,6 +37,7 @@ from twin.store.models import (
 )
 from twin.store.search import search
 from ..workspace import Workspace
+from twin.privacy.vault import iter_vault_ids, resolve_vault, set_active_vault, vault_read_ids
 from .web import STATIC_DIR, read_index
 
 # domains accepted at the API edge; unclassified is a valid *target* (it
@@ -83,12 +84,18 @@ class ConsolidationRequest(BaseModel):
 
 
 class CognizeRunRequest(BaseModel):
-    vault_id: str = "default"
+    vault_id: Optional[str] = None
     limit: int = Field(default=50, ge=1, le=200)
+    brief_limit: Optional[int] = Field(default=None, ge=1, le=200)
     dry_run: bool = False
     until: Optional[str] = None
     percept_ids: list[str] = Field(default_factory=list)
     priority: int = Field(default=100, ge=0, le=10_000)
+
+
+class CognizeBriefBody(BaseModel):
+    brief_limit: int = Field(ge=1, le=200)
+    limit: int = Field(default=50, ge=1, le=200)
 
 
 class RuntimeEnqueueRequest(BaseModel):
@@ -116,6 +123,7 @@ class PackRequest(BaseModel):
     mode: Literal["compact", "explainable", "references_only"] = "compact"
     session_id: Optional[str] = None
     request_scope: Optional[str] = None
+    vault_id: Optional[str] = None
 
     _domain = field_validator("target_domain")(_validate_domain)
 
@@ -274,12 +282,22 @@ def _claim_dict(mem, store=None) -> dict[str, Any]:
 class NarrativeCommitRequest(BaseModel):
     account: str
     evidence_ids: list[str]
-    vault_id: str = "default"
+    vault_id: Optional[str] = None
     domain: str = ""
     actor: str
     preview_token: Optional[str] = None
     interpretation_ids: list[str] = Field(default_factory=list)
     dissent_ids: list[str] = Field(default_factory=list)
+
+
+class ReflectionAnswerRequest(BaseModel):
+    answer: str
+    actor: str = "user"
+    narrative_id: Optional[str] = None
+
+
+class CenterVaultBody(BaseModel):
+    vault_id: str = Field(min_length=1)
 
 
 class StancePreviewBody(BaseModel):
@@ -303,6 +321,26 @@ class ProposalApproveRequest(BaseModel):
 
 def create_app(home: Optional[str] = None) -> FastAPI:
     ws = Workspace(home)
+
+    def _vault(vault: Optional[str] = None) -> str:
+        return resolve_vault(vault, cfg=ws.cfg, store=ws.store)
+
+    def _list_vault(method: str, vault: str, *args, **kwargs):
+        fn = getattr(ws.store, method, None)
+        if fn is None:
+            return []
+        out = []
+        seen: set[str] = set()
+        for vid in vault_read_ids(vault):
+            for row in fn(vid, *args, **kwargs) or []:
+                rid = getattr(row, "id", None)
+                if rid is not None:
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                out.append(row)
+        return out
+
     app = FastAPI(title="twin", description="Personal Cognitive OS — local API")
 
     # -- JSON API --------------------------------------------------------
@@ -341,15 +379,22 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/percepts")
     def api_percepts(limit: int = 200):
+        from twin.store.provenance import enrich_percept_dict
+
         rows = ws.store.list_percepts()
-        return [p.model_dump(mode="json") for p in rows[: max(1, min(limit, 2000))]]
+        out = []
+        for p in rows[: max(1, min(limit, 2000))]:
+            out.append(enrich_percept_dict(ws.store, p.model_dump(mode="json")))
+        return out
 
     @app.get("/api/percepts/{percept_id}")
     def api_percept(percept_id: str):
+        from twin.store.provenance import enrich_percept_dict
+
         p = ws.store.get_percept(percept_id)
         if p is None:
             raise HTTPException(404, "percept not found")
-        return p.model_dump(mode="json")
+        return enrich_percept_dict(ws.store, p.model_dump(mode="json"))
 
     @app.get("/api/claims")
     def api_memories(
@@ -510,6 +555,9 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             requested_domains=[req.target_domain],
             api_token=req.api_token,
         )
+        if req.vault_id:
+            access.metadata = dict(access.metadata or {})
+            access.metadata["vault_id"] = _vault(req.vault_id)
         pack = build_context_pack(ws.store, ws.cfg, ws.embedder, req.query,
                                   target_domain=req.target_domain,
                                   max_tokens=req.max_tokens,
@@ -521,15 +569,17 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                                   access=access,
                                   session_id=req.session_id,
                                   mode=req.mode,
-                                  request_scope=req.request_scope)
+                                  request_scope=req.request_scope,
+                                  vault_id=_vault(req.vault_id))
         return pack.to_dict()
 
     @app.get("/api/narratives")
-    def api_narratives(vault: str = "default", domain: Optional[str] = None):
+    def api_narratives(vault: Optional[str] = None, domain: Optional[str] = None):
+        vault = _vault(vault)
         if not hasattr(ws.store, "list_narratives"):
             return []
         rows = []
-        for nar in ws.store.list_narratives(vault):
+        for nar in _list_vault("list_narratives", vault):
             if domain and nar.domain and nar.domain != domain:
                 continue
             eps = (
@@ -574,28 +624,32 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         contradict_count = 0
         relations_out: list[dict[str, Any]] = []
         if hasattr(ws.store, "list_relations"):
-            vault = nar.vault_id or "default"
-            for rel in ws.store.list_relations(vault):
-                dump = rel.model_dump(mode="json")
-                touches = (
-                    rel.from_id == nar.id
-                    or rel.to_id == nar.id
-                    or rel.from_id in evid_set
-                    or rel.to_id in evid_set
-                )
-                if touches:
-                    relations_out.append(dump)
-                rtype = rel.type.value if hasattr(rel.type, "value") else str(rel.type)
-                if rtype == RelationType.same_originating_decision.value:
-                    groups.append([rel.from_id, rel.to_id])
-                if rtype == RelationType.supports.value and (
-                    rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
-                ):
-                    support_count += 1
-                if rtype == RelationType.contradicts.value and (
-                    rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
-                ):
-                    contradict_count += 1
+            seen_rel: set[str] = set()
+            for vid in vault_read_ids(nar.vault_id):
+                for rel in ws.store.list_relations(vid):
+                    if rel.id in seen_rel:
+                        continue
+                    seen_rel.add(rel.id)
+                    dump = rel.model_dump(mode="json")
+                    touches = (
+                        rel.from_id == nar.id
+                        or rel.to_id == nar.id
+                        or rel.from_id in evid_set
+                        or rel.to_id in evid_set
+                    )
+                    if touches:
+                        relations_out.append(dump)
+                    rtype = rel.type.value if hasattr(rel.type, "value") else str(rel.type)
+                    if rtype == RelationType.same_originating_decision.value:
+                        groups.append([rel.from_id, rel.to_id])
+                    if rtype == RelationType.supports.value and (
+                        rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
+                    ):
+                        support_count += 1
+                    if rtype == RelationType.contradicts.value and (
+                        rel.to_id in evid_set or rel.from_id in evid_set or nar.id in (rel.from_id, rel.to_id)
+                    ):
+                        contradict_count += 1
         out["relations"] = relations_out
 
         eps_status = eps.status if eps else EpistemicStatus.fresh
@@ -615,12 +669,17 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
         evidence_rows: list[dict[str, Any]] = []
         if hasattr(ws.store, "list_evidence_anchors"):
-            for a in ws.store.list_evidence_anchors(
-                nar.vault_id or "default",
-                target_kind="narrative",
-                target_id=nar.id,
-            ):
-                evidence_rows.append(a.model_dump(mode="json"))
+            seen_ev: set[str] = set()
+            for vid in vault_read_ids(nar.vault_id):
+                for a in ws.store.list_evidence_anchors(
+                    vid,
+                    target_kind="narrative",
+                    target_id=nar.id,
+                ):
+                    if a.id in seen_ev:
+                        continue
+                    seen_ev.add(a.id)
+                    evidence_rows.append(a.model_dump(mode="json"))
             for eid in evid:
                 if any(r.get("id") == eid for r in evidence_rows):
                     continue
@@ -632,20 +691,26 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
         open_refs: list[dict[str, Any]] = []
         if hasattr(ws.store, "list_open_reflections"):
-            for ref in ws.store.list_open_reflections(nar.vault_id or "default"):
-                ref_domain = (ref.metadata or {}).get("domain") or getattr(ref, "domain", "") or ""
-                if nar.domain and ref_domain and ref_domain != nar.domain:
-                    continue
-                open_refs.append(ref.model_dump(mode="json"))
+            seen_ref: set[str] = set()
+            for vid in vault_read_ids(nar.vault_id):
+                for ref in ws.store.list_open_reflections(vid):
+                    if ref.id in seen_ref:
+                        continue
+                    seen_ref.add(ref.id)
+                    ref_domain = (ref.metadata or {}).get("domain") or getattr(ref, "domain", "") or ""
+                    if nar.domain and ref_domain and ref_domain != nar.domain:
+                        continue
+                    open_refs.append(ref.model_dump(mode="json"))
         out["open_reflections"] = open_refs
         return out
 
     @app.get("/api/reflections")
-    def api_reflections(vault: str = "default", status: str = "open"):
+    def api_reflections(vault: Optional[str] = None, status: str = "open"):
+        vault = _vault(vault)
         if status == "open" and hasattr(ws.store, "list_open_reflections"):
-            return [r.model_dump(mode="json") for r in ws.store.list_open_reflections(vault)]
+            return [r.model_dump(mode="json") for r in _list_vault("list_open_reflections", vault)]
         if hasattr(ws.store, "list_reflections"):
-            rows = [r.model_dump(mode="json") for r in ws.store.list_reflections(vault)]
+            rows = [r.model_dump(mode="json") for r in _list_vault("list_reflections", vault)]
             if status and status != "all":
                 rows = [r for r in rows if r.get("status") == status]
             return rows
@@ -660,11 +725,41 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "reflection not found")
         return ref.model_dump(mode="json")
 
+    @app.post("/api/reflections/{reflection_id}/answer")
+    def api_reflection_answer(reflection_id: str, req: ReflectionAnswerRequest):
+        from twin.clock import now_iso
+        from twin.cognize.models import ReflectionStatus
+
+        if not hasattr(ws.store, "get_reflection") or not hasattr(ws.store, "upsert_reflection"):
+            raise HTTPException(404, "reflection not found")
+        ref = ws.store.get_reflection(reflection_id)
+        if ref is None:
+            raise HTTPException(404, "reflection not found")
+        answer = (req.answer or "").strip()
+        if not answer:
+            raise HTTPException(400, "answer required")
+        meta = dict(ref.metadata or {})
+        meta["answer"] = answer
+        meta["answered_at"] = now_iso()
+        meta["answered_by"] = (req.actor or "user").strip() or "user"
+        if req.narrative_id:
+            meta["answer_narrative_id"] = req.narrative_id
+        updated = ref.model_copy(
+            update={
+                "status": ReflectionStatus.answered,
+                "metadata": meta,
+                "updated_at": now_iso(),
+            }
+        )
+        ws.store.upsert_reflection(updated)
+        return {"ok": True, "reflection": updated.model_dump(mode="json")}
+
     @app.get("/api/situations")
-    def api_situations(vault: str = "default"):
+    def api_situations(vault: Optional[str] = None):
+        vault = _vault(vault)
         if not hasattr(ws.store, "list_situations"):
             return []
-        return [s.model_dump(mode="json") for s in ws.store.list_situations(vault)]
+        return [s.model_dump(mode="json") for s in _list_vault("list_situations", vault)]
 
     @app.get("/api/situations/{situation_id}")
     def api_situation(situation_id: str):
@@ -676,13 +771,14 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return sit.model_dump(mode="json")
 
     @app.get("/api/interpretations")
-    def api_interpretations(vault: str = "default", status: Optional[str] = "competing"):
+    def api_interpretations(vault: Optional[str] = None, status: Optional[str] = "competing"):
+        vault = _vault(vault)
         if not hasattr(ws.store, "list_cognize_interpretations"):
             return []
         st = None if status in (None, "", "all") else status
         return [
             i.model_dump(mode="json")
-            for i in ws.store.list_cognize_interpretations(vault, status=st)
+            for i in _list_vault("list_cognize_interpretations", vault, status=st)
         ]
 
     @app.get("/api/interpretations/{interpretation_id}")
@@ -696,14 +792,15 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/relations")
     def api_relations(
-        vault: str = "default",
+        vault: Optional[str] = None,
         type: Optional[str] = None,
         from_id: Optional[str] = None,
         to_id: Optional[str] = None,
     ):
+        vault = _vault(vault)
         if not hasattr(ws.store, "list_relations"):
             return []
-        rows = ws.store.list_relations(vault, rel_type=type)
+        rows = _list_vault("list_relations", vault, rel_type=type)
         out = [r.model_dump(mode="json") for r in rows]
         if from_id:
             out = [r for r in out if r.get("from_id") == from_id]
@@ -722,35 +819,41 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/evidence")
     def api_evidence(
-        vault: str = "default",
+        vault: Optional[str] = None,
         target_kind: Optional[str] = None,
         target_id: Optional[str] = None,
     ):
+        from twin.store.provenance import enrich_evidence_dict
+
+        vault = _vault(vault)
         if not hasattr(ws.store, "list_evidence_anchors"):
             return []
         return [
-            a.model_dump(mode="json")
-            for a in ws.store.list_evidence_anchors(
-                vault, target_kind=target_kind, target_id=target_id
+            enrich_evidence_dict(ws.store, a.model_dump(mode="json"))
+            for a in _list_vault(
+                "list_evidence_anchors", vault, target_kind=target_kind, target_id=target_id
             )
         ]
 
     @app.get("/api/evidence/{evidence_id}")
     def api_evidence_one(evidence_id: str):
+        from twin.store.provenance import enrich_evidence_dict
+
         if not hasattr(ws.store, "get_evidence_anchor"):
             raise HTTPException(404, "evidence not found")
         a = ws.store.get_evidence_anchor(evidence_id)
         if a is None:
             raise HTTPException(404, "evidence not found")
-        return a.model_dump(mode="json")
+        return enrich_evidence_dict(ws.store, a.model_dump(mode="json"))
 
     @app.get("/api/traces")
     def api_traces(
-        vault: str = "default",
+        vault: Optional[str] = None,
         resource_id: Optional[str] = None,
         event_kind: Optional[str] = None,
         limit: int = 200,
     ):
+        vault = _vault(vault)
         if not hasattr(ws.store, "list_traces"):
             return []
         return [
@@ -773,7 +876,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return t.model_dump(mode="json")
 
     @app.get("/api/stances")
-    def api_stances(vault: str = "default"):
+    def api_stances(vault: Optional[str] = None):
+        vault = _vault(vault)
         from twin.cognize.stance import list_stances
 
         return [s.model_dump(mode="json") for s in list_stances(ws.store, vault_id=vault)]
@@ -822,7 +926,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/stances/{stance_id}")
-    def api_stance(stance_id: str, vault: str = "default"):
+    def api_stance(stance_id: str, vault: Optional[str] = None):
+        vault = _vault(vault)
         from twin.cognize.stance import judgment_to_stance
 
         if not hasattr(ws.store, "get_judgment_item"):
@@ -832,8 +937,52 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             raise HTTPException(404, "stance not found")
         return judgment_to_stance(item, vault_id=vault).model_dump(mode="json")
 
+    @app.get("/api/center/vaults")
+    def api_center_vaults():
+        from twin.privacy.vault import vault_display_name
+
+        active = _vault(None)
+        rows = []
+        if hasattr(ws.store, "list_vaults"):
+            for v in ws.store.list_vaults() or []:
+                rows.append({
+                    "id": v.id,
+                    "name": vault_display_name(v.id, v.name),
+                    "source_owner": getattr(v, "source_owner", None),
+                    "active": v.id == active,
+                })
+        ids = {r["id"] for r in rows}
+        if active and active not in ids:
+            rows.insert(0, {
+                "id": active,
+                "name": vault_display_name(active),
+                "source_owner": None,
+                "active": True,
+            })
+        if not rows:
+            rows = [{
+                "id": active,
+                "name": vault_display_name(active),
+                "source_owner": None,
+                "active": True,
+            }]
+        return {"active": active, "vaults": rows, "count": len(rows)}
+
+    @app.put("/api/center/vault")
+    def api_center_set_vault(req: CenterVaultBody):
+        vid = (req.vault_id or "").strip()
+        if not vid or vid == "default":
+            raise HTTPException(400, "vault_id is required")
+        known = set(iter_vault_ids(ws.store))
+        if known and vid not in known:
+            raise HTTPException(404, f"unknown vault {vid}")
+        set_active_vault(ws.cfg.home, vid)
+        ws.cfg.vault = vid
+        return {"ok": True, "active": vid}
+
     @app.get("/api/center/summary")
-    def api_center_summary(vault: str = "default"):
+    def api_center_summary(vault: Optional[str] = None):
+        vault = _vault(vault)
         def _count(attr: str, *args, **kwargs) -> int:
             if not hasattr(ws.store, attr):
                 return 0
@@ -1143,7 +1292,8 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return {"status": "active"}
 
     @app.get("/api/cognize/status")
-    def api_cognize_status(vault: str = "default"):
+    def api_cognize_status(vault: Optional[str] = None):
+        vault = _vault(vault)
         from types import SimpleNamespace
 
         from twin.interfaces.commands.cognize_cmd import cognize_status
@@ -1151,15 +1301,36 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return cognize_status(ws, SimpleNamespace(vault=vault))
 
     @app.get("/api/cognize/plan")
-    def api_cognize_plan(vault: str = "default", limit: int = 50):
+    def api_cognize_plan(
+        vault: Optional[str] = None,
+        limit: int = 50,
+        brief_limit: Optional[int] = None,
+    ):
+        vault = _vault(vault)
         from twin.cognize.orchestrator import plan_cognize
 
+        bl = max(1, min(int(brief_limit), 200)) if brief_limit is not None else None
         return plan_cognize(
             ws.store,
             ws.cfg,
             limit=max(1, min(limit, 200)),
             vault_id=vault,
+            brief_limit=bl,
         )
+
+    @app.put("/api/cognize/brief")
+    def api_cognize_set_brief(req: CognizeBriefBody):
+        import os
+        from pathlib import Path
+
+        from twin.interfaces.ux import write_env_file
+
+        batch = max(1, min(int(req.limit or 50), 200))
+        n = max(1, min(int(req.brief_limit), batch))
+        home = Path(ws.cfg.home)
+        write_env_file(home / "env", {"TWIN_COGNIZE_BRIEF_LIMIT": str(n)})
+        os.environ["TWIN_COGNIZE_BRIEF_LIMIT"] = str(n)
+        return {"ok": True, "brief_limit": n, "batch_limit": batch}
 
     @app.post("/api/cognize/run")
     def api_cognize_run(req: CognizeRunRequest):
@@ -1175,10 +1346,20 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 raise HTTPException(400, f"unknown until stage: {req.until}") from exc
 
         payload: dict[str, Any] = {
-            "vault_id": req.vault_id,
+            "vault_id": _vault(req.vault_id),
             "limit": req.limit,
             "dry_run": req.dry_run,
         }
+        if req.brief_limit is not None:
+            bl = max(1, min(int(req.brief_limit), int(req.limit)))
+            payload["brief_limit"] = bl
+            import os
+            from pathlib import Path
+
+            from twin.interfaces.ux import write_env_file
+
+            write_env_file(Path(ws.cfg.home) / "env", {"TWIN_COGNIZE_BRIEF_LIMIT": str(bl)})
+            os.environ["TWIN_COGNIZE_BRIEF_LIMIT"] = str(bl)
         if req.until:
             payload["until"] = req.until
         if req.percept_ids:
@@ -1187,7 +1368,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         job = RuntimeQueue(ws.store).enqueue(
             JobKind.cognize_batch,
             payload=payload,
-            vault_id=req.vault_id,
+            vault_id=_vault(req.vault_id),
             priority=req.priority,
             idempotency_key="",
         )
@@ -1206,7 +1387,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         token = preview_commit_token(
             account=req.account,
             evidence_ids=req.evidence_ids,
-            vault_id=req.vault_id,
+            vault_id=_vault(req.vault_id),
             interpretation_ids=req.interpretation_ids,
             dissent_interpretation_ids=req.dissent_ids,
             domain=req.domain,
@@ -1217,7 +1398,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             nar = commit_narrative(
                 ws.store,
                 account=req.account,
-                vault_id=req.vault_id,
+                vault_id=_vault(req.vault_id),
                 evidence_ids=req.evidence_ids,
                 committed_by=req.actor,
                 interpretation_ids=req.interpretation_ids,
@@ -1237,7 +1418,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         token = preview_commit_token(
             account=req.account,
             evidence_ids=req.evidence_ids,
-            vault_id=req.vault_id,
+            vault_id=_vault(req.vault_id),
             interpretation_ids=req.interpretation_ids,
             dissent_interpretation_ids=req.dissent_ids,
             domain=req.domain,
@@ -1448,7 +1629,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
             kind,
             payload=req.payload,
             idempotency_key=req.idempotency_key,
-            vault_id=req.vault_id,
+            vault_id=_vault(req.vault_id),
             priority=req.priority,
             max_attempts=req.max_attempts,
         )
@@ -2313,7 +2494,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         try:
             acc = register_source_account(
                 ws.store, connector_type=req.connector_type,
-                source_owner=req.source_owner, vault_id=req.vault_id,
+                source_owner=req.source_owner, vault_id=_vault(req.vault_id),
                 org_key=req.org_key, persona=req.persona,
                 default_domain=req.default_domain, display_name=req.display_name,
                 external_account_id=req.external_account_id,

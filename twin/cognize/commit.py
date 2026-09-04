@@ -17,6 +17,7 @@ from twin.cognize.models import (
 )
 from twin.cognize.acl import sensitivity_from_evidence
 from twin.clock import now_iso
+from twin.privacy.vault import resolve_vault
 
 
 class CommitError(ValueError):
@@ -47,7 +48,7 @@ def preview_commit_token(
     payload = {
         "account": (account or "").strip(),
         "evidence_ids": sorted(evidence_ids or []),
-        "vault_id": vault_id or "default",
+        "vault_id": resolve_vault(vault_id),
         "interpretation_ids": sorted(interpretation_ids or []),
         "dissent_interpretation_ids": sorted(dissent_interpretation_ids or []),
         "domain": domain or "",

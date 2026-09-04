@@ -164,6 +164,42 @@ class CognizeStoreMixin:
         else:
             self._c_insert(table, enc)
 
+    def _cog_delete(self, table: str, entity_id: str) -> bool:
+        if not entity_id:
+            return False
+        existing = self._j_fetchone(f"SELECT id FROM {table} WHERE id = ?", (entity_id,))
+        if not existing:
+            return False
+        self._j_exec(f"DELETE FROM {table} WHERE id = ?", (entity_id,))
+        self._j_commit()
+        return True
+
+    def delete_situation(self, sit_id: str) -> bool:
+        return self._cog_delete("cognize_situations", sit_id)
+
+    def delete_reflection(self, ref_id: str) -> bool:
+        return self._cog_delete("cognize_reflections", ref_id)
+
+    def delete_cognize_interpretation(self, intp_id: str) -> bool:
+        # Drop evidence anchors aimed at this interpretation first.
+        if intp_id:
+            self._j_exec(
+                "DELETE FROM cognize_evidence_anchors"
+                " WHERE target_kind = ? AND target_id = ?",
+                ("interpretation", intp_id),
+            )
+            self._j_commit()
+        return self._cog_delete("cognize_interpretations", intp_id)
+
+    def delete_cognize_relation(self, rel_id: str) -> bool:
+        return self._cog_delete("cognize_relations", rel_id)
+
+    def delete_narrative_revision(self, rev_id: str) -> bool:
+        return self._cog_delete("cognize_narrative_revisions", rev_id)
+
+    def delete_evidence_anchor(self, anchor_id: str) -> bool:
+        return self._cog_delete("cognize_evidence_anchors", anchor_id)
+
     # --- Situation ---
 
     def upsert_situation(self, obj: Situation) -> str:

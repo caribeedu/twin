@@ -315,6 +315,174 @@ def claim_source_keys(store: TwinStore, memory: Any) -> set[str]:
     return {f"mem:{mem.id}"}
 
 
+def _is_derived_percept(percept: Percept) -> bool:
+    pid = str(getattr(percept, "id", "") or "")
+    ptype = str(getattr(percept, "percept_type", "") or "").lower()
+    sensor = str(getattr(percept, "source_sensor", "") or "").lower()
+    if pid.startswith(("pct_derived_", "pct_reflect_", "pct_pattern_")):
+        return True
+    if ptype.startswith("derived") or "reflect" in ptype or "pattern" in ptype:
+        return True
+    return sensor in {"episode_reflect", "pattern_reflect"}
+
+
+def episode_member_percept_ids(store: TwinStore, episode_id: str) -> list[str]:
+    """Observed percept ids linked into a WorkEpisode (active links only)."""
+    if not episode_id or not hasattr(store, "list_episode_links"):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for lk in store.list_episode_links(episode_id):
+        st = getattr(getattr(lk, "status", None), "value", getattr(lk, "status", ""))
+        if str(st) != "active":
+            continue
+        pid = None
+        rid = getattr(lk, "connector_record_id", None)
+        if rid and hasattr(store, "get_connector_record"):
+            rec = store.get_connector_record(rid)
+            pid = getattr(rec, "percept_id", None) if rec is not None else None
+        meta = getattr(lk, "metadata", None) or {}
+        if not pid and isinstance(meta, dict):
+            pid = meta.get("percept_id")
+        if pid and pid not in seen:
+            seen.add(pid)
+            out.append(str(pid))
+    return out
+
+
+def derived_source_percept_ids(store: TwinStore, percept: Percept | str) -> list[str]:
+    """Observed / upstream percepts a derived percept was synthesized from.
+
+    Order of preference:
+    1. ``metadata.source_percept_ids`` (stamped at creation)
+    2. WorkEpisode member percepts via ``metadata.episode_id``
+    3. Sibling evidence on claims that already cite this derived percept
+    """
+    if isinstance(percept, str):
+        if not hasattr(store, "get_percept"):
+            return []
+        got = store.get_percept(percept)
+        if got is None:
+            return []
+        percept = got
+    if not _is_derived_percept(percept):
+        return []
+
+    self_id = str(percept.id)
+    md = percept.metadata or {}
+    out: list[str] = []
+    seen: set[str] = {self_id}
+
+    def _add(pid: Any) -> None:
+        s = str(pid or "").strip()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
+    for pid in md.get("source_percept_ids") or md.get("percept_ids") or []:
+        _add(pid)
+
+    episode_id = str(md.get("episode_id") or "").strip()
+    if episode_id:
+        for pid in episode_member_percept_ids(store, episode_id):
+            _add(pid)
+
+    if hasattr(store, "list_evidence_by_percept_ids") and hasattr(store, "get_evidence"):
+        try:
+            rows = store.list_evidence_by_percept_ids([self_id])
+        except Exception:
+            rows = []
+        claim_ids = []
+        seen_c: set[str] = set()
+        for ev in rows or []:
+            cid = getattr(ev, "claim_id", None)
+            if cid and cid not in seen_c:
+                seen_c.add(cid)
+                claim_ids.append(cid)
+        for cid in claim_ids:
+            try:
+                others = store.get_evidence(cid)
+            except Exception:
+                continue
+            for ev in others or []:
+                pid = getattr(ev, "percept_id", None)
+                if pid == self_id:
+                    continue
+                # Skip other derived siblings — want observed origins.
+                if hasattr(store, "get_percept"):
+                    sibling = store.get_percept(pid)
+                    if sibling is not None and _is_derived_percept(sibling):
+                        continue
+                _add(pid)
+
+    return out
+
+
+def enrich_percept_dict(store: TwinStore, data: dict[str, Any]) -> dict[str, Any]:
+    """Attach Explore-facing origin fields onto a percept JSON payload."""
+    from twin.sense.sensory.percept import Percept as PerceptModel
+
+    try:
+        percept = PerceptModel.model_validate(data)
+    except Exception:
+        return data
+    if not _is_derived_percept(percept):
+        return data
+    sources = derived_source_percept_ids(store, percept)
+    data["source_percept_ids"] = sources
+    origins: list[dict[str, Any]] = []
+    for pid in sources:
+        row: dict[str, Any] = {"id": pid}
+        if hasattr(store, "get_percept"):
+            p = store.get_percept(pid)
+            if p is not None:
+                body = (p.content or "").strip().replace("\n", " ")
+                row["title"] = body[:120] if body else pid
+                row["source_sensor"] = p.source_sensor or ""
+                row["percept_type"] = p.percept_type or ""
+        origins.append(row)
+    data["origin_percepts"] = origins
+    md = dict(data.get("metadata") or {})
+    if sources and not md.get("source_percept_ids"):
+        md["source_percept_ids"] = list(sources)
+        data["metadata"] = md
+    return data
+
+
+def enrich_evidence_dict(store: TwinStore, data: dict[str, Any]) -> dict[str, Any]:
+    """Attach linked percept + connector origins onto an evidence-anchor payload."""
+    pid = str(data.get("percept_id") or "").strip()
+    if not pid or not hasattr(store, "get_percept"):
+        return data
+    percept = store.get_percept(pid)
+    if percept is None:
+        return data
+    data["source_sensor"] = percept.source_sensor or data.get("source_sensor") or ""
+    data["percept_type"] = percept.percept_type or data.get("percept_type") or ""
+    sensors: list[str] = []
+    seen: set[str] = set()
+
+    def _add_sensor(raw: Any) -> None:
+        s = str(raw or "").strip()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        sensors.append(s)
+
+    if _is_derived_percept(percept):
+        enriched = enrich_percept_dict(store, percept.model_dump(mode="json"))
+        data["source_percept_ids"] = list(enriched.get("source_percept_ids") or [])
+        data["origin_percepts"] = list(enriched.get("origin_percepts") or [])
+        for o in data["origin_percepts"]:
+            if isinstance(o, dict):
+                _add_sensor(o.get("source_sensor"))
+    else:
+        _add_sensor(percept.source_sensor)
+    data["origin_sensors"] = sensors
+    return data
+
+
 def count_independent_sources(store: TwinStore, memories: Any) -> int:
     """Number of distinct independent sources across a set of memories/ids.
 

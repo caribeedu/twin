@@ -23,6 +23,8 @@ pass over the best remaining hits.
 
 from __future__ import annotations
 
+from twin.privacy.vault import resolve_vault, vault_read_ids
+
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
@@ -147,6 +149,7 @@ def build_context_pack(
     mode: PackMode = "compact",
     request_scope: Optional[str] = None,
     deadline_monotonic: Optional[float] = None,
+    vault_id: Optional[str] = None,
 ) -> ContextPack:
     firewall = firewall or Firewall(cfg.policies_path, store)
     profile = get_profile(task_profile)
@@ -514,133 +517,151 @@ def build_context_pack(
         from twin.cognize.models import EpistemicStatus, derive_confidence
         from twin.cognize.models import RelationType
 
-        vault = "default"
-        if access and isinstance(getattr(access, "metadata", None), dict):
-            vault = str(access.metadata.get("vault_id") or vault)
-        for nar in store.list_narratives(vault):
-            if nar.domain and nar.domain != target_domain and target_domain not in ("general", "*"):
-                continue
-            if access is not None:
-                from twin.cognize.acl import narrative_visible_to_access
-
-                if not narrative_visible_to_access(nar, access):
-                    privacy_blocked.append({
-                        "claim_id": nar.id,
-                        "reason": "narrative_acl",
-                        "rule": "sensitivity_audience",
-                    })
-                    blocked.append({
-                        "claim_id": nar.id,
-                        "reason": "narrative_acl",
-                    })
-                    continue
-            eps = (
-                store.get_epistemic_state(nar.epistemic_state_id)
-                if nar.epistemic_state_id
+        vault = resolve_vault(
+            vault_id
+            or (
+                access.metadata.get("vault_id")
+                if access and isinstance(getattr(access, "metadata", None), dict)
                 else None
-            )
-            if eps and eps.status is EpistemicStatus.tombstoned:
-                continue
-            entry = {
-                "narrative_id": nar.id,
-                "account": nar.account if not (eps and eps.status is EpistemicStatus.stale) else None,
-                "grain": nar.grain.value if nar.grain else None,
-                "domain": nar.domain,
-                "epistemic_status": eps.status.value if eps else "unknown",
-                "stale_reason": eps.stale_reason if eps else "",
-                "synthesized_at": eps.synthesized_at if eps else "",
-                "evidence_ids": list(nar.evidence_ids),
-                "derived": True,
-            }
-            if eps and eps.status is EpistemicStatus.stale:
-                entry["account_omitted"] = True
-                entry["note"] = "stale — withheld as fresh; re-synthesize or proceed knowingly"
-            else:
-                entry["account_omitted"] = False
-            narratives_out.append(entry)
-            if eps:
-                epistemic_out.append(eps.model_dump(mode="json"))
-                evid = list(eps.evidence_ids or nar.evidence_ids)
-                evid_set = set(evid)
-                groups = []
-                support_count = 0
-                contradict_count = 0
-                dissent_ids: list[str] = []
-                if hasattr(store, "list_relations"):
-                    sod = store.list_relations(
-                        vault,
-                        rel_type=RelationType.same_originating_decision.value,
-                    )
-                    for rel in sod:
-                        pair = [rel.from_id, rel.to_id]
-                        if evid_set.intersection(pair):
-                            groups.append(pair)
-                    for rel in store.list_relations(
-                        vault, rel_type=RelationType.supports.value
-                    ):
-                        if rel.to_id in evid_set or rel.from_id in evid_set:
-                            support_count += 1
-                    for rel in store.list_relations(
-                        vault, rel_type=RelationType.contradicts.value
-                    ):
-                        if rel.to_id in evid_set or rel.from_id in evid_set:
-                            contradict_count += 1
-                            dissent_ids.append(rel.id)
-                derived = derive_confidence(
-                    evidence_ids=evid,
-                    same_originating_decision_groups=groups,
-                    support_count=support_count,
-                    contradict_count=contradict_count,
-                    epistemic_status=eps.status,
-                )
-                derived_conf[nar.id] = {
-                    **derived.model_dump(mode="json"),
-                    "derived": True,
-                    "supports": support_count,
-                    "contradicts": contradict_count,
-                    "retained_dissent": dissent_ids[:8],
-                }
-                entry["retained_dissent"] = dissent_ids[:8]
-        if hasattr(store, "list_open_reflections"):
-            for ref in store.list_open_reflections(vault):
-                ref_domain = (ref.metadata or {}).get("domain") or ""
-                ref_sens = (ref.metadata or {}).get("sensitivity") or "internal"
-                if ref_domain and ref_domain != target_domain and target_domain not in (
-                    "general", "*",
-                ):
-                    privacy_blocked.append({
-                        "claim_id": ref.id,
-                        "reason": "reflection_domain",
-                        "rule": "open_reflection_firewall",
-                    })
-                    blocked.append({
-                        "claim_id": ref.id,
-                        "reason": "reflection_domain",
-                    })
+            ),
+            cfg=cfg,
+            store=store,
+        )
+        seen_nar: set[str] = set()
+        for vid in vault_read_ids(vault):
+            for nar in store.list_narratives(vid):
+                if nar.id in seen_nar:
+                    continue
+                seen_nar.add(nar.id)
+                if nar.domain and nar.domain != target_domain and target_domain not in ("general", "*"):
                     continue
                 if access is not None:
-                    audience = getattr(access, "audience", None) or "self"
-                    if ref_sens in ("private", "restricted") and audience not in (
-                        "self", "owner",
-                    ):
+                    from twin.cognize.acl import narrative_visible_to_access
+
+                    if not narrative_visible_to_access(nar, access):
                         privacy_blocked.append({
-                            "claim_id": ref.id,
-                            "reason": "reflection_acl",
+                            "claim_id": nar.id,
+                            "reason": "narrative_acl",
                             "rule": "sensitivity_audience",
                         })
                         blocked.append({
-                            "claim_id": ref.id,
-                            "reason": "reflection_acl",
+                            "claim_id": nar.id,
+                            "reason": "narrative_acl",
                         })
                         continue
-                reflections_out.append(
-                    {
-                        "reflection_id": ref.id,
-                        "text": ref.text,
-                        "status": ref.status.value,
-                        "derived": True,
-                    }
+                eps = (
+                    store.get_epistemic_state(nar.epistemic_state_id)
+                    if nar.epistemic_state_id
+                    else None
                 )
+                if eps and eps.status is EpistemicStatus.tombstoned:
+                    continue
+                entry = {
+                    "narrative_id": nar.id,
+                    "account": nar.account if not (eps and eps.status is EpistemicStatus.stale) else None,
+                    "grain": nar.grain.value if nar.grain else None,
+                    "domain": nar.domain,
+                    "epistemic_status": eps.status.value if eps else "unknown",
+                    "stale_reason": eps.stale_reason if eps else "",
+                    "synthesized_at": eps.synthesized_at if eps else "",
+                    "evidence_ids": list(nar.evidence_ids),
+                    "derived": True,
+                }
+                if eps and eps.status is EpistemicStatus.stale:
+                    entry["account_omitted"] = True
+                    entry["note"] = "stale — withheld as fresh; re-synthesize or proceed knowingly"
+                else:
+                    entry["account_omitted"] = False
+                narratives_out.append(entry)
+                if eps:
+                    epistemic_out.append(eps.model_dump(mode="json"))
+                    evid = list(eps.evidence_ids or nar.evidence_ids)
+                    evid_set = set(evid)
+                    groups = []
+                    support_count = 0
+                    contradict_count = 0
+                    dissent_ids: list[str] = []
+                    if hasattr(store, "list_relations"):
+                        for rvid in vault_read_ids(nar.vault_id or vid):
+                            sod = store.list_relations(
+                                rvid,
+                                rel_type=RelationType.same_originating_decision.value,
+                            )
+                            for rel in sod:
+                                pair = [rel.from_id, rel.to_id]
+                                if evid_set.intersection(pair):
+                                    groups.append(pair)
+                            for rel in store.list_relations(
+                                rvid, rel_type=RelationType.supports.value
+                            ):
+                                if rel.to_id in evid_set or rel.from_id in evid_set:
+                                    support_count += 1
+                            for rel in store.list_relations(
+                                rvid, rel_type=RelationType.contradicts.value
+                            ):
+                                if rel.to_id in evid_set or rel.from_id in evid_set:
+                                    contradict_count += 1
+                                    dissent_ids.append(rel.id)
+                    derived = derive_confidence(
+                        evidence_ids=evid,
+                        same_originating_decision_groups=groups,
+                        support_count=support_count,
+                        contradict_count=contradict_count,
+                        epistemic_status=eps.status,
+                    )
+                    derived_conf[nar.id] = {
+                        **derived.model_dump(mode="json"),
+                        "derived": True,
+                        "supports": support_count,
+                        "contradicts": contradict_count,
+                        "retained_dissent": dissent_ids[:8],
+                    }
+                    entry["retained_dissent"] = dissent_ids[:8]
+        if hasattr(store, "list_open_reflections"):
+            seen_ref: set[str] = set()
+            for vid in vault_read_ids(vault):
+                for ref in store.list_open_reflections(vid):
+                    if ref.id in seen_ref:
+                        continue
+                    seen_ref.add(ref.id)
+                    ref_domain = (ref.metadata or {}).get("domain") or ""
+                    ref_sens = (ref.metadata or {}).get("sensitivity") or "internal"
+                    if ref_domain and ref_domain != target_domain and target_domain not in (
+                        "general", "*",
+                    ):
+                        privacy_blocked.append({
+                            "claim_id": ref.id,
+                            "reason": "reflection_domain",
+                            "rule": "open_reflection_firewall",
+                        })
+                        blocked.append({
+                            "claim_id": ref.id,
+                            "reason": "reflection_domain",
+                        })
+                        continue
+                    if access is not None:
+                        audience = getattr(access, "audience", None) or "self"
+                        if ref_sens in ("private", "restricted") and audience not in (
+                            "self", "owner",
+                        ):
+                            privacy_blocked.append({
+                                "claim_id": ref.id,
+                                "reason": "reflection_acl",
+                                "rule": "sensitivity_audience",
+                            })
+                            blocked.append({
+                                "claim_id": ref.id,
+                                "reason": "reflection_acl",
+                            })
+                            continue
+                    reflections_out.append(
+                        {
+                            "reflection_id": ref.id,
+                            "text": ref.text,
+                            "status": ref.status.value,
+                            "derived": True,
+                        }
+                    )
         uncertainty = dict(uncertainty)
         uncertainty["open_reflections"] = [r["reflection_id"] for r in reflections_out]
         if reflections_out:
@@ -672,9 +693,14 @@ def build_context_pack(
             from twin.cognize.models import Trace as CogTrace
 
             for n in narratives_out[:20]:
+                trace_vault = vault
+                if hasattr(store, "get_narrative"):
+                    nar_row = store.get_narrative(n["narrative_id"])
+                    if nar_row is not None and (nar_row.vault_id or "").strip():
+                        trace_vault = nar_row.vault_id
                 store.append_trace(
                     CogTrace(
-                        vault_id=vault,
+                        vault_id=trace_vault,
                         event_kind="pack_serve",
                         resource_kind="narrative",
                         resource_id=n["narrative_id"],

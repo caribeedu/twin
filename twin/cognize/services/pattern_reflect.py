@@ -96,6 +96,30 @@ def _ensure_pattern_percept(
     body = claim.summary
     if claim.evidence_quotes:
         body = body + "\n\n" + "\n".join(claim.evidence_quotes)
+    source_ids: list[str] = []
+    seen_src: set[str] = set()
+    for candidate in list(getattr(claim, "percept_ids", None) or []):
+        s = str(candidate or "").strip()
+        if not s or s in seen_src:
+            continue
+        seen_src.add(s)
+        source_ids.append(s)
+    for blob in list(getattr(dossier, "primary", None) or []) + list(
+        getattr(dossier, "cross_sense", None) or []
+    ):
+        pid_cand = None
+        if isinstance(blob, dict):
+            pid_cand = blob.get("percept_id") or blob.get("id")
+        else:
+            pid_cand = getattr(blob, "percept_id", None) or getattr(blob, "id", None)
+        s = str(pid_cand or "").strip()
+        if not s or s in seen_src or not s.startswith("pct_"):
+            continue
+        # Keep observed members; skip other derived rows.
+        if s.startswith(("pct_derived_", "pct_reflect_", "pct_pattern_")):
+            continue
+        seen_src.add(s)
+        source_ids.append(s)
     percept = Percept(
         id=pid,
         percept_type="derived_pattern",
@@ -108,6 +132,7 @@ def _ensure_pattern_percept(
             "vault_id": dossier.focus.vault_id,
             "window": list(dossier.focus.time_from or ""),
             "pattern_window_key": wkey,
+            "source_percept_ids": source_ids,
         },
     )
     try:

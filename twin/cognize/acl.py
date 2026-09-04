@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from twin.privacy.vault import FALLBACK_VAULT, iter_vault_ids, vault_read_ids
+
 from typing import Any, Optional
 
 from twin.cognize.models import EpistemicStatus, Trace
@@ -33,7 +35,8 @@ def sensitivity_from_evidence(
                 continue
         # Evidence anchor by id
         if hasattr(store, "list_evidence_anchors"):
-            for vault in ("default",):
+            found = False
+            for vault in (iter_vault_ids(store) or [FALLBACK_VAULT]):
                 for anc in store.list_evidence_anchors(vault):
                     if anc.id == eid or anc.percept_id == eid:
                         p = (
@@ -45,6 +48,10 @@ def sensitivity_from_evidence(
                             levels.append(
                                 getattr(p, "source_confidentiality", None) or "internal"
                             )
+                            found = True
+                            break
+                if found:
+                    break
     return intersect_sensitivity(levels)
 
 
@@ -55,9 +62,12 @@ def evidence_source_sensors(store: Any, evidence_ids: list[str]) -> set[str]:
             break
         p = store.get_percept(eid)
         if p is None and hasattr(store, "list_evidence_anchors"):
-            for anc in store.list_evidence_anchors("default"):
-                if anc.id == eid or anc.percept_id == eid:
-                    p = store.get_percept(anc.percept_id)
+            for vid in (iter_vault_ids(store) or [FALLBACK_VAULT]):
+                for anc in store.list_evidence_anchors(vid):
+                    if anc.id == eid or anc.percept_id == eid:
+                        p = store.get_percept(anc.percept_id)
+                        break
+                if p is not None:
                     break
         if p is not None:
             sensors.add((getattr(p, "source_sensor", None) or "").lower())
@@ -101,52 +111,57 @@ def tombstone_narratives_for_percept(
     percept_id: str,
     *,
     reason: str = "source revoked",
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
 ) -> list[str]:
     """Synchronously tombstone Narratives whose evidence includes this percept."""
     if not hasattr(store, "list_narratives"):
         return []
     touched: list[str] = []
-    for nar in store.list_narratives(vault_id):
-        evid = set(nar.evidence_ids or [])
-        if percept_id not in evid:
-            # also check anchors targeting this narrative
-            if hasattr(store, "list_evidence_anchors"):
-                hit = False
-                for anc in store.list_evidence_anchors(
-                    vault_id, target_kind="narrative", target_id=nar.id
-                ):
-                    if anc.percept_id == percept_id:
-                        hit = True
-                        break
-                if not hit:
-                    continue
-            else:
+    seen: set[str] = set()
+    for vid in vault_read_ids(vault_id):
+        for nar in store.list_narratives(vid):
+            if nar.id in seen:
                 continue
-        if not nar.epistemic_state_id:
-            continue
-        eps = store.get_epistemic_state(nar.epistemic_state_id)
-        if eps is None:
-            continue
-        if eps.status is EpistemicStatus.tombstoned:
-            continue
-        store.upsert_epistemic_state(
-            eps.model_copy(
-                update={
-                    "status": EpistemicStatus.tombstoned,
-                    "stale_reason": reason,
-                }
-            )
-        )
-        if hasattr(store, "append_trace"):
-            store.append_trace(
-                Trace(
-                    vault_id=vault_id,
-                    event_kind="tombstone",
-                    resource_kind="narrative",
-                    resource_id=nar.id,
-                    metadata={"percept_id": percept_id, "reason": reason},
+            seen.add(nar.id)
+            evid = set(nar.evidence_ids or [])
+            if percept_id not in evid:
+                # also check anchors targeting this narrative
+                if hasattr(store, "list_evidence_anchors"):
+                    hit = False
+                    for anc in store.list_evidence_anchors(
+                        vid, target_kind="narrative", target_id=nar.id
+                    ):
+                        if anc.percept_id == percept_id:
+                            hit = True
+                            break
+                    if not hit:
+                        continue
+                else:
+                    continue
+            if not nar.epistemic_state_id:
+                continue
+            eps = store.get_epistemic_state(nar.epistemic_state_id)
+            if eps is None:
+                continue
+            if eps.status is EpistemicStatus.tombstoned:
+                continue
+            store.upsert_epistemic_state(
+                eps.model_copy(
+                    update={
+                        "status": EpistemicStatus.tombstoned,
+                        "stale_reason": reason,
+                    }
                 )
             )
-        touched.append(nar.id)
+            if hasattr(store, "append_trace"):
+                store.append_trace(
+                    Trace(
+                        vault_id=vid,
+                        event_kind="tombstone",
+                        resource_kind="narrative",
+                        resource_id=nar.id,
+                        metadata={"percept_id": percept_id, "reason": reason},
+                    )
+                )
+            touched.append(nar.id)
     return touched

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from twin.privacy.vault import FALLBACK_VAULT, resolve_vault
+
 from typing import Any, Optional
 
 from twin.cognize.models import (
@@ -19,7 +21,7 @@ from twin.store.models import StoreClaim, ClaimStatus
 def claim_to_provisional(
     mem: StoreClaim,
     *,
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
 ) -> tuple[str, Narrative | Interpretation]:
     """Map memory to Narrative (confirmed) or Interpretation (candidate / needs_review)."""
     evidence_ids = list(getattr(mem, "source_ids", None) or [])
@@ -82,7 +84,7 @@ def _existing_claim_ids(store: Any, vault_id: str) -> set[str]:
 def backfill_from_memories(
     store: Any,
     *,
-    vault_id: str = "default",
+    vault_id: str = FALLBACK_VAULT,
     dry_run: bool = True,
     limit: int = 10_000,
 ) -> dict[str, Any]:

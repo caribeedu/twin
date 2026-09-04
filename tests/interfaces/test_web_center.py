@@ -33,6 +33,7 @@ def test_center_shell_has_no_memories_nav(tmp_path, monkeypatch):
     assert 'data-nav="connectors"' in html
     assert 'data-nav="inject"' in html
     assert 'data-nav="ops"' in html
+    assert 'id="vault-select"' in html
     assert 'data-nav="sense"' not in html
     assert "Memories" not in html
     assert 'data-nav="memories"' not in html
@@ -50,10 +51,11 @@ def test_center_connectors_list(tmp_path, monkeypatch):
 def test_entity_list_show_endpoints(tmp_path, monkeypatch):
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    monkeypatch.setenv("TWIN_VAULT", "vault_general")
     home = tmp_path / "home"
     ws = Workspace(str(home))
     store = ws.store
-    vault = "default"
+    vault = "vault_general"
 
     sit = Situation(vault_id=vault, summary="Launch thread")
     store.upsert_situation(sit)

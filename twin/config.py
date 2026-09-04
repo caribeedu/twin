@@ -110,6 +110,10 @@ class Config:
     encryption_key: str = field(default_factory=lambda: _env("TWIN_ENCRYPTION_KEY", ""))
     # sources with trust below this always send their memories to review
     low_trust_threshold: float = 0.65
+    # Active vault for Cognize / Inject / Center when a call omits vault_id.
+    # Connectors use ownership vaults (vault_personal, vault_work_…); set
+    # TWIN_VAULT (or the Center selector) to match.
+    vault: str = field(default_factory=lambda: _env("TWIN_VAULT", ""))
 
     @property
     def resolved_db_url(self) -> str:

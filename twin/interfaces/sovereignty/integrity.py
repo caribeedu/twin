@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from twin.store.store.base import TwinStore
+from twin.privacy.vault import FALLBACK_VAULT, iter_vault_ids, vault_read_ids
 
 
 def run_integrity_checks(store: TwinStore) -> dict[str, Any]:
@@ -34,8 +35,20 @@ def run_integrity_checks(store: TwinStore) -> dict[str, Any]:
 
     nar_without_evidence = 0
     if hasattr(store, "list_narratives"):
-        for vault in ("default",):
+        partitions: list[str] = []
+        seen_vid: set[str] = set()
+        for seed in list(iter_vault_ids(store) or [FALLBACK_VAULT]) + ["default", FALLBACK_VAULT]:
+            for vid in vault_read_ids(seed):
+                if vid in seen_vid:
+                    continue
+                seen_vid.add(vid)
+                partitions.append(vid)
+        seen_nar: set[str] = set()
+        for vault in partitions:
             for nar in store.list_narratives(vault):
+                if nar.id in seen_nar:
+                    continue
+                seen_nar.add(nar.id)
                 if not (nar.evidence_ids or []):
                     nar_without_evidence += 1
                     problems.append(f"narrative {nar.id} has no evidence_ids")

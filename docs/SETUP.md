@@ -97,7 +97,8 @@ in the shell. Useful knobs:
 | `TWIN_OLLAMA_MODEL` | `qwen3.6:latest` | local chat model |
 | `TWIN_OLLAMA_EMBED_MODEL` | `nomic-embed-text-v2-moe` | local embed model |
 | `TWIN_EXTRACTOR` | `auto` | `auto` / `ollama` / `echo` / `heuristic` — `heuristic` blocks semantic episode stages |
-| `TWIN_COGNIZE_BRIEF_LIMIT` | (batch size) | Cap how many percepts each Cognize stage prompt includes |
+| `TWIN_COGNIZE_BRIEF_LIMIT` | (batch size) | Max **percept count** included in each stage prompt (not tokens). Default = full batch |
+| `TWIN_VAULT` | (resolved) | Active vault for Cognize / Inject / Center when a call omits vault |
 | `TWIN_EMBEDDER` | `auto` | `auto` / `ollama` / `openai_compatible` / `gemini` / `hash` |
 | `TWIN_EMBED_BASE_URL` / `TWIN_EMBED_MODEL` / `TWIN_EMBED_API_KEY` | (provider defaults) | embedding endpoint |
 | `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / `OPENAI_API_KEY` / … | — | provider-native keys (also honored) |

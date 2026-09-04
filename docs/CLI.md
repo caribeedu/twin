@@ -24,6 +24,7 @@ Add `--json` to any command for machine-readable output (mirrors `twin pack --js
 |---|---|
 | `twin ingest <paths…>` | Run sensors over files/dirs (docs, transcripts, exports). |
 | `twin cognize run` | Form / revise understanding from pending percepts (**LLM-or-halt**; never commits Narrative). |
+| `twin cognize status\|review` | Pending queue / open Reflections (`--vault`, or `TWIN_VAULT`). |
 | `twin review` | Interactive priority review queue. |
 | `twin review --analyze` | Run quality analyzer on candidates first. |
 | `twin review --priority high` | Filter queue by priority. |
