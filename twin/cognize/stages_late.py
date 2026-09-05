@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.gate import require_chat_llm
+from twin.cognize.orchestrator import _unwrap_llm_payload
 from twin.cognize.stance_engine.proposals import propose_from_narrative
 
 _LATE_OVERRIDES: dict[str, Callable[..., Any]] = {}
@@ -67,7 +68,7 @@ def draft_stance_after_commit(
                 llm = get_chat_client(cfg)
                 nar = store.get_narrative(narrative_id)
                 if nar is not None and llm is not None:
-                    data = llm.complete_json(
+                    data = _unwrap_llm_payload(llm.complete_json(
                         system=(
                             "Draft a durable evaluative Stance from a Narrative. "
                             "Stance answers how this person evaluates trade-offs, "
@@ -84,7 +85,7 @@ def draft_stance_after_commit(
                             "required": ["statement", "rationale"],
                             "additionalProperties": False,
                         },
-                    )
+                    ))
                     stmt = str(data.get("statement") or "").strip()
                     if stmt:
                         return propose_from_narrative(
@@ -92,7 +93,7 @@ def draft_stance_after_commit(
                         )
                     return None
             except Exception:
-                pass
+                return None
     return propose_from_narrative(store, narrative_id, domain=domain)
 
 
@@ -141,7 +142,7 @@ def run_consolidation_judgment(
             if dry_run:
                 drafts.append({"narrative_id": nar.id, "dry_run": True})
                 continue
-            data = llm.complete_json(
+            data = _unwrap_llm_payload(llm.complete_json(
                 system=(
                     "Decide whether this Narrative should generalize into a Stance "
                     "draft or stay episodic. Never confirm durability. "
@@ -161,7 +162,7 @@ def run_consolidation_judgment(
                     "required": ["action", "rationale"],
                     "additionalProperties": False,
                 },
-            )
+            ))
             used = max(200, len(nar.account or "") // 4)
             budget -= used
             if data.get("action") == "promote" and data.get("statement"):

@@ -77,3 +77,67 @@ def test_propose_from_narrative_writes_lineage(store):
     assert nar.id in st.narrative_ids
     assert "ev_lineage" in st.evidence_ids
     assert (prop.proposed_item or {}).get("provenance", {}).get("narrative_ids") == [nar.id]
+
+
+def test_draft_stance_llm_failure_does_not_echo_narrative(store, monkeypatch):
+    from types import SimpleNamespace
+
+    from twin.cognize.stages_late import draft_stance_after_commit
+
+    nar = commit_narrative(
+        store,
+        account="Feature A unblocked launch",
+        vault_id="default",
+        evidence_ids=["ev_echo"],
+        committed_by="edu",
+        domain="technical",
+    )
+    before = {p.id for p in store.list_judgment_proposals()}
+
+    class Boom:
+        def complete_json(self, **kwargs):
+            raise RuntimeError("provider 400")
+
+    monkeypatch.setattr(
+        "twin.cognize.stages_late._gate",
+        lambda cfg: SimpleNamespace(halted=False, halt_reason=None, detail=""),
+    )
+    monkeypatch.setattr("twin.llm.get_chat_client", lambda cfg: Boom())
+    out = draft_stance_after_commit(store, nar.id, cfg=object(), domain="technical")
+    assert out is None
+    assert {p.id for p in store.list_judgment_proposals()} == before
+
+
+def test_draft_stance_unwraps_envelope_and_does_not_echo(store, monkeypatch):
+    from types import SimpleNamespace
+
+    from twin.cognize.stages_late import draft_stance_after_commit
+
+    nar = commit_narrative(
+        store,
+        account="Feature A unblocked launch",
+        vault_id="default",
+        evidence_ids=["ev_unwrap"],
+        committed_by="edu",
+        domain="technical",
+    )
+
+    class Wrap:
+        def complete_json(self, **kwargs):
+            return {
+                "parameters": {
+                    "statement": "Prefer shipping behind a flag",
+                    "rationale": "repeated risk pattern",
+                }
+            }
+
+    monkeypatch.setattr(
+        "twin.cognize.stages_late._gate",
+        lambda cfg: SimpleNamespace(halted=False, halt_reason=None, detail=""),
+    )
+    monkeypatch.setattr("twin.llm.get_chat_client", lambda cfg: Wrap())
+    out = draft_stance_after_commit(store, nar.id, cfg=object(), domain="technical")
+    assert out is not None
+    stmt = str((out.proposed_item or {}).get("statement") or "")
+    assert stmt == "Prefer shipping behind a flag"
+    assert stmt != nar.account
