@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.gate import require_chat_llm
 from twin.cognize.orchestrator import _unwrap_llm_payload
+from twin.cognize.prompts import STANCE_DRAFT_ADDENDUM, judgment_system
 from twin.cognize.stance_engine.proposals import propose_from_narrative
 
 _LATE_OVERRIDES: dict[str, Callable[..., Any]] = {}
@@ -69,11 +70,10 @@ def draft_stance_after_commit(
                 nar = store.get_narrative(narrative_id)
                 if nar is not None and llm is not None:
                     data = _unwrap_llm_payload(llm.complete_json(
-                        system=(
-                            "Draft a durable evaluative Stance from a Narrative. "
-                            "Stance answers how this person evaluates trade-offs, "
-                            "not what happened. Do not restate the Narrative account. "
-                            "Return JSON {statement, rationale}."
+                        system=judgment_system(
+                            store,
+                            getattr(nar, "vault_id", "") or "",
+                            STANCE_DRAFT_ADDENDUM,
                         ),
                         user=f"Narrative account:\n{nar.account}",
                         schema={

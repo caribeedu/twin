@@ -15,7 +15,10 @@ Cap the stage brief to the model context window; mark only briefed percepts
 cognized. Web/API Cognize limit ceiling 2000 (not 200), estimate refresh on
 commit not every keystroke. Stance objects carry originating Narrative /
 evidence ids; Review can approve pending Stance proposals; `/api/stances`
-accepts a `status` filter (`pending` / `all`).
+accepts a `status` filter (`pending` / `all`). Judgment-stage prompts name the
+vault owner and what they seek; Reflections may be persisted `answered` as
+correlation (Review still only queues `open`); empty reflection lists skip
+instead of halting.
 
 ### v2.6.0 — Cognize halt, lineage & Review respond
 

@@ -34,6 +34,12 @@ from twin.cognize.models import (
 )
 from twin.cognize.stale import mark_stale_for_new_percept
 from twin.cognize.relations import coerce_relation_type
+from twin.cognize.prompts import (
+    INTERPRETATION_ADDENDUM,
+    REFLECTION_ADDENDUM,
+    REVISION_ADDENDUM,
+    judgment_system,
+)
 from twin.config import Config
 from twin.sense.sensory.percept import Percept
 from twin.privacy.vault import FALLBACK_VAULT, resolve_vault
@@ -118,11 +124,11 @@ _STAGE_OUTPUT_DEFAULT = 200
 
 # Later stages also send intermediate artefacts — pad input roughly (tokens).
 _STAGE_USER_EXTRA_TOK: dict[CognizeStage, int] = {
-    CognizeStage.raise_reflections: 40,
-    CognizeStage.form_interpretations: 120,
+    CognizeStage.raise_reflections: 220,
+    CognizeStage.form_interpretations: 280,
     CognizeStage.cross_reflections: 140,
     CognizeStage.cross_interpretations: 160,
-    CognizeStage.narrative_revision: 140,
+    CognizeStage.narrative_revision: 260,
     CognizeStage.evidence_audit: 120,
 }
 
@@ -1131,8 +1137,19 @@ _STAGE_JSON_SCHEMAS: dict[CognizeStage, dict[str, Any]] = {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "properties": {"text": {"type": "string"}},
-                    "required": ["text"],
+                    "properties": {
+                        "text": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["open", "answered"],
+                        },
+                        "answered_rationale": {"type": "string"},
+                        "answered_by_percept_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["text", "status"],
                     "additionalProperties": False,
                 },
             },
@@ -1153,6 +1170,7 @@ _STAGE_JSON_SCHEMAS: dict[CognizeStage, dict[str, Any]] = {
                             "type": "array",
                             "items": {"type": "string"},
                         },
+                        "why_it_matters": {"type": "string"},
                     },
                     "required": ["explanation", "evidence_percept_ids"],
                     "additionalProperties": False,
@@ -1237,6 +1255,25 @@ def _index_pair(item: dict[str, Any]) -> Optional[tuple[int, int]]:
         return int(item.get("from_index", 0)), int(item.get("to_index", 0))
     except (TypeError, ValueError):
         return None
+
+
+def _reflection_status(raw: Any) -> ReflectionStatus:
+    val = str(raw or "open").strip().lower()
+    if val == "answered":
+        return ReflectionStatus.answered
+    return ReflectionStatus.open
+
+
+def _reflection_prompt_rows(refs: list[Any]) -> list[dict[str, str]]:
+    rows = []
+    for r in refs or []:
+        st = getattr(r, "status", ReflectionStatus.open)
+        rows.append({
+            "id": str(getattr(r, "id", "") or ""),
+            "text": str(getattr(r, "text", "") or ""),
+            "status": st.value if hasattr(st, "value") else str(st or "open"),
+        })
+    return rows
 
 
 def _llm_json(
@@ -1360,34 +1397,55 @@ def _llm_stage(
         if stage is CognizeStage.raise_reflections:
             data = _llm_json(
                 ctx,
-                "Raise open questions. JSON: "
-                '{"reflections":[{"text":"..."}]} '
-                "Each text must be only the question itself — no preamble like "
-                '"The most important open question is:".',
+                judgment_system(store, vault, REFLECTION_ADDENDUM),
                 f"Situation: {(ctx['situation'].summary if ctx.get('situation') else '')}\n"
                 f"Percepts:\n{brief}",
                 schema=_STAGE_JSON_SCHEMAS[CognizeStage.raise_reflections],
             )
             refs = []
+            known_ids = {p.id for p in ctx["kept_percepts"]}
             for item in _as_object_list(data.get("reflections")):
                 text = _clean_reflection_text(str(item.get("text") or ""))
                 if not text:
                     continue
+                st = _reflection_status(item.get("status"))
+                meta: dict[str, Any] = {}
+                extra_evid = [
+                    pid
+                    for pid in _as_str_list(item.get("answered_by_percept_ids"))
+                    if pid in known_ids
+                ]
+                if st is ReflectionStatus.answered:
+                    meta["answered_by"] = "cognize"
+                    rationale = str(item.get("answered_rationale") or "").strip()
+                    if rationale:
+                        meta["answer"] = rationale
+                    if extra_evid:
+                        meta["answered_by_percept_ids"] = extra_evid
+                evid = [p.id for p in ctx["kept_percepts"]]
+                if extra_evid:
+                    evid = list(dict.fromkeys(extra_evid + evid))
                 ref = Reflection(
                     vault_id=vault,
                     text=text,
-                    status=ReflectionStatus.open,
+                    status=st,
                     situation_ids=[ctx["situation"].id] if ctx.get("situation") else [],
-                    evidence_ids=[p.id for p in ctx["kept_percepts"]],
+                    evidence_ids=evid,
+                    metadata=meta,
                 )
                 refs.append(ref)
             if not dry_run:
                 for r in refs:
                     store.upsert_reflection(r)
                     _track_created(ctx, "reflections", r.id)
-            if not refs:
-                raise RuntimeError("LLM returned no reflections")
             ctx["reflections"] = refs
+            if not refs:
+                return StageResult(
+                    stage=stage,
+                    status=StageRunStatus.ok,
+                    counts={"reflections": 0},
+                    detail="no reflections",
+                )
             batch = max(1, int(ctx.get("batch_count") or len(ctx["kept_percepts"]) or 1))
             _emit_percept_progress(ctx, stage, percept_done=batch)
             return StageResult(
@@ -1397,10 +1455,15 @@ def _llm_stage(
         if stage is CognizeStage.form_interpretations:
             data = _llm_json(
                 ctx,
-                "Form competing explanations. JSON: "
-                '{"interpretations":[{"explanation":"...","evidence_percept_ids":["..."]}]}',
-                f"Reflections: {json.dumps([r.text for r in ctx['reflections']])}\n"
-                f"Percepts:\n{brief}",
+                judgment_system(store, vault, INTERPRETATION_ADDENDUM),
+                json.dumps({
+                    "reflections": _reflection_prompt_rows(ctx.get("reflections") or []),
+                    "note": (
+                        "answered reflections are settled in this brief — "
+                        "use them to correlate, do not treat as new open questions"
+                    ),
+                })
+                + f"\nPercepts:\n{brief}",
                 schema=_STAGE_JSON_SCHEMAS[CognizeStage.form_interpretations],
             )
             known_ids = {p.id for p in ctx["kept_percepts"]}
@@ -1411,6 +1474,9 @@ def _llm_stage(
             steps = max(1, len(raw_items))
             for step_i, item in enumerate(raw_items):
                 expl = str(item.get("explanation") or "").strip()
+                why = str(item.get("why_it_matters") or "").strip()
+                if why and why not in expl:
+                    expl = f"{expl}\nWhy it matters: {why}"
                 if not expl:
                     _emit_percept_progress(
                         ctx, stage, percept_done=int((step_i + 1) / steps * batch),
@@ -1486,8 +1552,9 @@ def _llm_stage(
                 '{"relations":[{"from_index":0,"to_index":1,'
                 '"type":"related|same-as|supports|contradicts|depends-on|supersedes|part-of|continues",'
                 '"rationale":"..."}]} '
-                "(use type supports, never supported_by)",
-                json.dumps([r.text for r in ctx["reflections"]]),
+                "(use type supports, never supported_by). "
+                "Answered reflections are correlation sources, not new open questions.",
+                json.dumps(_reflection_prompt_rows(ctx["reflections"])),
                 schema=_STAGE_JSON_SCHEMAS[CognizeStage.cross_reflections],
             )
             rels = []
@@ -1624,10 +1691,7 @@ def _llm_stage(
             known_intp = {i.id for i in ctx["interpretations"]}
             data = _llm_json(
                 ctx,
-                "Decide narrative revision. JSON: "
-                '{"outcome":"integrate|branch|contradict|supersede|keep_separate|defer",'
-                '"surprise":"low|medium|high","explanatory_delta":"...","rationale":"...",'
-                '"retained_dissent_ids":["<interpretation id from the list>"]}',
+                judgment_system(store, vault, REVISION_ADDENDUM),
                 json.dumps(
                     {
                         "prior": [n.account for n in priors],

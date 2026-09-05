@@ -496,6 +496,93 @@ def test_empty_interpretations_do_not_halt(store, cfg):
     assert audited.status is StageRunStatus.ok
 
 
+def test_empty_reflections_do_not_halt(store, cfg):
+    from twin.cognize.orchestrator import _llm_stage
+
+    class EmptyLlm:
+        def complete_json(self, **kwargs):
+            return {"reflections": []}
+
+    ctx = {
+        "llm": EmptyLlm(),
+        "vault_id": "vault_general",
+        "kept_percepts": [],
+        "percepts": [],
+        "reflections": [],
+        "situation": None,
+        "batch_count": 1,
+        "brief_limit": 1,
+    }
+    result = _llm_stage(
+        store, cfg, CognizeStage.raise_reflections, ctx, dry_run=True,
+    )
+    assert result.status is StageRunStatus.ok
+    assert result.counts["reflections"] == 0
+    assert ctx["reflections"] == []
+
+
+def test_answered_reflection_persists_and_feeds_correlation(store, cfg):
+    from twin.cognize.orchestrator import _llm_stage
+
+    p = Percept(
+        percept_type="message",
+        source_sensor="test",
+        content="PR 12 cleaned up the old feature flag",
+        metadata={"vault_id": "vault_general"},
+    )
+    store.insert_percept(p)
+    captured = {}
+
+    class RaiseThenForm:
+        def complete_json(self, **kwargs):
+            captured.setdefault("systems", []).append(kwargs.get("system") or "")
+            captured.setdefault("users", []).append(kwargs.get("user") or "")
+            schema = kwargs.get("schema") or {}
+            props = (schema.get("properties") or {})
+            if "reflections" in props:
+                return {
+                    "reflections": [{
+                        "text": "How should leftover flags be cleaned up?",
+                        "status": "answered",
+                        "answered_rationale": "PR 12 removed the flag",
+                        "answered_by_percept_ids": [p.id],
+                    }]
+                }
+            return {"interpretations": []}
+
+    ctx = {
+        "llm": RaiseThenForm(),
+        "vault_id": "vault_general",
+        "kept_percepts": [p],
+        "percepts": [p],
+        "reflections": [],
+        "situation": None,
+        "batch_count": 1,
+        "brief_limit": 1,
+    }
+    raised = _llm_stage(
+        store, cfg, CognizeStage.raise_reflections, ctx, dry_run=False,
+    )
+    assert raised.status is StageRunStatus.ok
+    assert len(ctx["reflections"]) == 1
+    ref = ctx["reflections"][0]
+    assert ref.status is ReflectionStatus.answered
+    assert ref.metadata.get("answered_by") == "cognize"
+    assert p.id in (ref.metadata.get("answered_by_percept_ids") or [])
+    assert store.list_open_reflections("vault_general") == []
+    listed = store.list_reflections("vault_general")
+    assert any(r.id == ref.id and r.status is ReflectionStatus.answered for r in listed)
+
+    formed = _llm_stage(
+        store, cfg, CognizeStage.form_interpretations, ctx, dry_run=True,
+    )
+    assert formed.status is StageRunStatus.ok
+    form_user = captured["users"][-1]
+    assert "answered" in form_user
+    assert ref.id in form_user
+    assert any("Owner identity" in s or "account owner" in s.lower() for s in captured["systems"])
+
+
 def test_run_cognize_retires_only_briefed_percepts(store, cfg):
     _install_overrides()
     try:
