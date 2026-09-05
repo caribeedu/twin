@@ -106,6 +106,7 @@ class JudgmentProvenance(BaseModel):
     claim_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     session_ids: list[str] = Field(default_factory=list)
+    narrative_ids: list[str] = Field(default_factory=list)
     source: str = "manual"
     twin_influenced: bool = False
     independence_weight: float = Field(default=1.0, ge=0.0, le=1.0)

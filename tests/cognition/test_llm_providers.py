@@ -8,6 +8,7 @@ from twin.llm import (
     AnthropicChatClient,
     GeminiChatClient,
     OpenAICompatChatClient,
+    anthropic_sends_temperature,
     get_chat_client,
     normalize_provider,
     parse_model_json,
@@ -114,6 +115,62 @@ def test_openai_compat_chat_with_mock_transport():
     assert client.complete_json(
         system="s", user="u", schema={"type": "object"},
     ) == {"ok": True}
+
+
+def test_anthropic_omits_temperature_for_claude_5():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        seen["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={
+            "content": [{
+                "type": "tool_use",
+                "name": "twin_response",
+                "input": {"ok": True},
+            }],
+        })
+
+    client = AnthropicChatClient(
+        "https://api.anthropic.com", "claude-sonnet-5", api_key="sk-ant",
+    )
+    client._client = httpx.Client(
+        base_url="https://api.anthropic.com",
+        transport=httpx.MockTransport(handler),
+    )
+    assert anthropic_sends_temperature("claude-sonnet-5") is False
+    assert anthropic_sends_temperature("claude-haiku-4-5-20251001") is True
+    assert client.complete_json(
+        system="s", user="u", schema={"type": "object", "properties": {}},
+    ) == {"ok": True}
+    assert "temperature" not in seen["body"]
+
+
+def test_anthropic_sends_temperature_for_claude_4():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        seen["body"] = _json.loads(request.content.decode())
+        return httpx.Response(200, json={
+            "content": [{
+                "type": "tool_use",
+                "name": "twin_response",
+                "input": {"ok": True},
+            }],
+        })
+
+    client = AnthropicChatClient(
+        "https://api.anthropic.com", "claude-sonnet-4-20250514", api_key="sk-ant",
+    )
+    client._client = httpx.Client(
+        base_url="https://api.anthropic.com",
+        transport=httpx.MockTransport(handler),
+    )
+    assert client.complete_json(
+        system="s", user="u", schema={"type": "object", "properties": {}},
+    ) == {"ok": True}
+    assert seen["body"]["temperature"] == 0.1
 
 
 def test_anthropic_chat_tool_use_mock():

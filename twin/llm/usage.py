@@ -226,6 +226,48 @@ def price_for(model: str, *, home: Optional[Path] = None) -> Optional[tuple[floa
     return table[best] if best else None
 
 
+# Input context window (tokens). Longest substring match, same as price_for.
+# Conservative built-ins; unknown models fall back to DEFAULT_CONTEXT_WINDOW.
+DEFAULT_CONTEXT_WINDOW = 128_000
+_BUILTIN_CONTEXT_WINDOWS: dict[str, int] = {
+    "claude-opus-4-1": 200_000,
+    "claude-opus-4": 200_000,
+    "claude-sonnet-4": 200_000,
+    "claude-haiku-4-5": 200_000,
+    "claude-sonnet-5": 200_000,
+    "claude-opus-5": 200_000,
+    "claude-haiku-5": 200_000,
+    "claude-3-7-sonnet": 200_000,
+    "claude-3-5-sonnet": 200_000,
+    "claude-3-5-haiku": 200_000,
+    "gpt-4.1": 1_047_576,
+    "gpt-4o-mini": 128_000,
+    "gpt-4o": 128_000,
+    "gpt-5-mini": 400_000,
+    "gpt-5": 400_000,
+    "o3-mini": 200_000,
+    "o3": 200_000,
+    "gemini-2.5-pro": 1_048_576,
+    "gemini-2.0-flash": 1_048_576,
+    "gemini-1.5-pro": 2_000_000,
+    "gemini-1.5-flash": 1_000_000,
+    "qwen": 32_768,
+}
+
+
+def context_window_for(model: str, *, home: Optional[Path] = None) -> int:
+    """Best-effort context window for ``model``. Never raises."""
+    _ = home
+    m = (model or "").lower()
+    best: Optional[str] = None
+    for key in _BUILTIN_CONTEXT_WINDOWS:
+        if key in m and (best is None or len(key) > len(best)):
+            best = key
+    if best:
+        return _BUILTIN_CONTEXT_WINDOWS[best]
+    return DEFAULT_CONTEXT_WINDOW
+
+
 def estimate_cost(
     kind: str, model: str, input_tokens: int, output_tokens: int,
     *, home: Optional[Path] = None,

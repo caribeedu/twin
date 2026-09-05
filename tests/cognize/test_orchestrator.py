@@ -440,3 +440,187 @@ def test_percept_brief_scales_with_batch_limit(store, cfg, monkeypatch):
     assert plan_full["brief_limit"] == 12
     assert plan["totals"]["input_tokens"] < plan_full["totals"]["input_tokens"]
     assert plan_ui["totals"]["input_tokens"] < plan["totals"]["input_tokens"]
+
+
+def test_as_object_list_rejects_strings():
+    from twin.cognize.orchestrator import (
+        _as_object_list,
+        _as_str_list,
+        _index_pair,
+        _unwrap_llm_payload,
+    )
+
+    assert _as_object_list("abc") == []
+    assert _as_object_list([{"text": "q"}, "x"]) == [{"text": "q"}]
+    assert _as_str_list("abc") == []
+    assert _as_str_list(["a", 1]) == ["a", "1"]
+    assert _unwrap_llm_payload({"parameters": {"interpretations": []}}) == {
+        "interpretations": [],
+    }
+    assert _unwrap_llm_payload({"interpretations": []}) == {"interpretations": []}
+    assert _index_pair({"from_index": 0, "to_index": 1}) == (0, 1)
+    assert _index_pair({"from_index": "nope", "to_index": 1}) is None
+
+
+def test_empty_interpretations_do_not_halt(store, cfg):
+    from twin.cognize.orchestrator import _llm_stage
+
+    class EmptyLlm:
+        def complete_json(self, **kwargs):
+            return {"parameters": {"interpretations": []}}
+
+    ctx = {
+        "llm": EmptyLlm(),
+        "vault_id": "vault_general",
+        "kept_percepts": [],
+        "percepts": [],
+        "reflections": [],
+        "situation": None,
+        "batch_count": 1,
+        "brief_limit": 1,
+        "created": {},
+    }
+    formed = _llm_stage(
+        store, cfg, CognizeStage.form_interpretations, ctx, dry_run=True,
+    )
+    assert formed.status is StageRunStatus.ok
+    assert formed.counts["interpretations"] == 0
+    ctx["interpretations"] = []
+    revised = _llm_stage(
+        store, cfg, CognizeStage.narrative_revision, ctx, dry_run=True,
+    )
+    assert revised.status is StageRunStatus.ok
+    audited = _llm_stage(
+        store, cfg, CognizeStage.evidence_audit, ctx, dry_run=True,
+    )
+    assert audited.status is StageRunStatus.ok
+
+
+def test_empty_reflections_do_not_halt(store, cfg):
+    from twin.cognize.orchestrator import _llm_stage
+
+    class EmptyLlm:
+        def complete_json(self, **kwargs):
+            return {"reflections": []}
+
+    ctx = {
+        "llm": EmptyLlm(),
+        "vault_id": "vault_general",
+        "kept_percepts": [],
+        "percepts": [],
+        "reflections": [],
+        "situation": None,
+        "batch_count": 1,
+        "brief_limit": 1,
+    }
+    result = _llm_stage(
+        store, cfg, CognizeStage.raise_reflections, ctx, dry_run=True,
+    )
+    assert result.status is StageRunStatus.ok
+    assert result.counts["reflections"] == 0
+    assert ctx["reflections"] == []
+
+
+def test_answered_reflection_persists_and_feeds_correlation(store, cfg):
+    from twin.cognize.orchestrator import _llm_stage
+
+    p = Percept(
+        percept_type="message",
+        source_sensor="test",
+        content="PR 12 cleaned up the old feature flag",
+        metadata={"vault_id": "vault_general"},
+    )
+    store.insert_percept(p)
+    captured = {}
+
+    class RaiseThenForm:
+        def complete_json(self, **kwargs):
+            captured.setdefault("systems", []).append(kwargs.get("system") or "")
+            captured.setdefault("users", []).append(kwargs.get("user") or "")
+            schema = kwargs.get("schema") or {}
+            props = (schema.get("properties") or {})
+            if "reflections" in props:
+                return {
+                    "reflections": [{
+                        "text": "How should leftover flags be cleaned up?",
+                        "status": "answered",
+                        "answered_rationale": "PR 12 removed the flag",
+                        "answered_by_percept_ids": [p.id],
+                    }]
+                }
+            return {"interpretations": []}
+
+    ctx = {
+        "llm": RaiseThenForm(),
+        "vault_id": "vault_general",
+        "kept_percepts": [p],
+        "percepts": [p],
+        "reflections": [],
+        "situation": None,
+        "batch_count": 1,
+        "brief_limit": 1,
+    }
+    raised = _llm_stage(
+        store, cfg, CognizeStage.raise_reflections, ctx, dry_run=False,
+    )
+    assert raised.status is StageRunStatus.ok
+    assert len(ctx["reflections"]) == 1
+    ref = ctx["reflections"][0]
+    assert ref.status is ReflectionStatus.answered
+    assert ref.metadata.get("answered_by") == "cognize"
+    assert p.id in (ref.metadata.get("answered_by_percept_ids") or [])
+    assert store.list_open_reflections("vault_general") == []
+    listed = store.list_reflections("vault_general")
+    assert any(r.id == ref.id and r.status is ReflectionStatus.answered for r in listed)
+
+    formed = _llm_stage(
+        store, cfg, CognizeStage.form_interpretations, ctx, dry_run=True,
+    )
+    assert formed.status is StageRunStatus.ok
+    form_user = captured["users"][-1]
+    assert "answered" in form_user
+    assert ref.id in form_user
+    assert any("Owner identity" in s or "account owner" in s.lower() for s in captured["systems"])
+
+
+def test_run_cognize_retires_only_briefed_percepts(store, cfg):
+    _install_overrides()
+    try:
+        ids = []
+        for i in range(4):
+            p = Percept(
+                percept_type="message",
+                source_sensor="test",
+                content=f"brief window {i}",
+                metadata={"vault_id": "vault_general"},
+            )
+            store.insert_percept(p)
+            ids.append(p.id)
+        report = run_cognize(store, cfg, limit=4, brief_limit=2)
+        assert report.ok
+        pending = store.percepts_pending_cognize(limit=50)
+        pending_ids = {p.id for p in pending}
+        assert ids[0] not in pending_ids
+        assert ids[1] not in pending_ids
+        assert ids[2] in pending_ids
+        assert ids[3] in pending_ids
+    finally:
+        clear_cognize_stage_overrides()
+
+
+def test_brief_caps_to_context_window(store, cfg, monkeypatch):
+    from twin.cognize.orchestrator import plan_cognize
+
+    monkeypatch.delenv("TWIN_COGNIZE_BRIEF_LIMIT", raising=False)
+    monkeypatch.setattr("twin.llm.usage.context_window_for", lambda *a, **k: 8_192)
+    for i in range(80):
+        store.insert_percept(Percept(
+            percept_type="message",
+            source_sensor="test",
+            content=("token filler " * 80) + str(i),
+            metadata={"vault_id": "vault_general"},
+        ))
+    plan = plan_cognize(store, cfg, limit=80, vault_id="vault_general")
+    assert plan["brief_limit"] < 80
+    assert plan["batch_count"] == 80
+    assert "context window" in plan["estimate_note"]

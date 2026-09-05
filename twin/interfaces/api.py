@@ -77,6 +77,9 @@ class WorkspaceTickRequest(BaseModel):
     _domain = field_validator("target_domain")(_validate_domain)
 
 
+COGNIZE_API_LIMIT_MAX = 2000
+
+
 class ConsolidationRequest(BaseModel):
     apply: bool = False
     limit: int = Field(default=200, ge=1, le=5_000)
@@ -85,8 +88,8 @@ class ConsolidationRequest(BaseModel):
 
 class CognizeRunRequest(BaseModel):
     vault_id: Optional[str] = None
-    limit: int = Field(default=50, ge=1, le=200)
-    brief_limit: Optional[int] = Field(default=None, ge=1, le=200)
+    limit: int = Field(default=50, ge=1, le=COGNIZE_API_LIMIT_MAX)
+    brief_limit: Optional[int] = Field(default=None, ge=1, le=COGNIZE_API_LIMIT_MAX)
     dry_run: bool = False
     until: Optional[str] = None
     percept_ids: list[str] = Field(default_factory=list)
@@ -94,8 +97,8 @@ class CognizeRunRequest(BaseModel):
 
 
 class CognizeBriefBody(BaseModel):
-    brief_limit: int = Field(ge=1, le=200)
-    limit: int = Field(default=50, ge=1, le=200)
+    brief_limit: int = Field(ge=1, le=COGNIZE_API_LIMIT_MAX)
+    limit: int = Field(default=50, ge=1, le=COGNIZE_API_LIMIT_MAX)
 
 
 class RuntimeEnqueueRequest(BaseModel):
@@ -876,11 +879,25 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         return t.model_dump(mode="json")
 
     @app.get("/api/stances")
-    def api_stances(vault: Optional[str] = None):
+    def api_stances(vault: Optional[str] = None, status: Optional[str] = None):
         vault = _vault(vault)
-        from twin.cognize.stance import list_stances
+        from twin.cognize.stance import list_pending_stance_proposals, list_stances
 
-        return [s.model_dump(mode="json") for s in list_stances(ws.store, vault_id=vault)]
+        want = (status or "confirmed").strip().lower()
+        rows: list[dict[str, Any]] = []
+        if want in ("pending", "all"):
+            rows.extend(
+                s.model_dump(mode="json")
+                for s in list_pending_stance_proposals(ws.store, vault_id=vault)
+            )
+        if want in ("confirmed", "active", "all", "", "approved"):
+            rows.extend(
+                s.model_dump(mode="json")
+                for s in list_stances(ws.store, vault_id=vault)
+            )
+        if want == "pending":
+            return rows
+        return rows
 
     @app.get("/api/stances/proposals")
     def api_stance_proposals(status: Optional[str] = "pending"):
@@ -928,14 +945,17 @@ def create_app(home: Optional[str] = None) -> FastAPI:
     @app.get("/api/stances/{stance_id}")
     def api_stance(stance_id: str, vault: Optional[str] = None):
         vault = _vault(vault)
-        from twin.cognize.stance import judgment_to_stance
+        from twin.cognize.stance import judgment_to_stance, proposal_to_stance
 
-        if not hasattr(ws.store, "get_judgment_item"):
-            raise HTTPException(404, "stance not found")
-        item = ws.store.get_judgment_item(stance_id)
-        if item is None:
-            raise HTTPException(404, "stance not found")
-        return judgment_to_stance(item, vault_id=vault).model_dump(mode="json")
+        if hasattr(ws.store, "get_judgment_item"):
+            item = ws.store.get_judgment_item(stance_id)
+            if item is not None:
+                return judgment_to_stance(item, vault_id=vault).model_dump(mode="json")
+        if hasattr(ws.store, "get_judgment_proposal"):
+            prop = ws.store.get_judgment_proposal(stance_id)
+            if prop is not None:
+                return proposal_to_stance(prop, vault_id=vault).model_dump(mode="json")
+        raise HTTPException(404, "stance not found")
 
     @app.get("/api/center/vaults")
     def api_center_vaults():
@@ -1309,11 +1329,11 @@ def create_app(home: Optional[str] = None) -> FastAPI:
         vault = _vault(vault)
         from twin.cognize.orchestrator import plan_cognize
 
-        bl = max(1, min(int(brief_limit), 200)) if brief_limit is not None else None
+        bl = max(1, min(int(brief_limit), COGNIZE_API_LIMIT_MAX)) if brief_limit is not None else None
         return plan_cognize(
             ws.store,
             ws.cfg,
-            limit=max(1, min(limit, 200)),
+            limit=max(1, min(limit, COGNIZE_API_LIMIT_MAX)),
             vault_id=vault,
             brief_limit=bl,
         )
@@ -1325,7 +1345,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
 
         from twin.interfaces.ux import write_env_file
 
-        batch = max(1, min(int(req.limit or 50), 200))
+        batch = max(1, min(int(req.limit or 50), COGNIZE_API_LIMIT_MAX))
         n = max(1, min(int(req.brief_limit), batch))
         home = Path(ws.cfg.home)
         write_env_file(home / "env", {"TWIN_COGNIZE_BRIEF_LIMIT": str(n)})
@@ -1406,6 +1426,7 @@ def create_app(home: Optional[str] = None) -> FastAPI:
                 domain=req.domain,
                 preview_token=req.preview_token,
                 require_preview_token=True,
+                cfg=ws.cfg,
             )
         except CommitError as exc:
             raise HTTPException(400, str(exc))

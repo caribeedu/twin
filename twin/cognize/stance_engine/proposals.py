@@ -322,10 +322,11 @@ def propose_from_narrative(
         },
         "provenance": {
             "claim_ids": [],
+            "evidence_ids": list(nar.evidence_ids or []),
             "source": "narrative_stance",
             "twin_influenced": True,
             "independence_weight": 0.4,
-            "narrative_id": narrative_id,
+            "narrative_ids": [narrative_id],
         },
     }
     proposal = JudgmentProposal(

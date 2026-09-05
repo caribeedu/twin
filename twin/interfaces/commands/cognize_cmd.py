@@ -170,6 +170,7 @@ def narrative_commit(ws, args) -> dict[str, Any]:
             supersedes_narrative_id=getattr(args, "supersedes", None) or None,
             preview_token=getattr(args, "token", None) or None,
             require_preview_token=bool(getattr(args, "require_token", False)),
+            cfg=ws.cfg,
         )
     except CommitError as exc:
         return {"ok": False, "error": str(exc)}

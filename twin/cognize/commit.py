@@ -75,6 +75,7 @@ def commit_narrative(
     supersedes_narrative_id: Optional[str] = None,
     preview_token: Optional[str] = None,
     require_preview_token: bool = False,
+    cfg: Optional[Any] = None,
 ) -> Narrative:
     """Persist Narrative + fresh EpistemicState."""
     if not (committed_by or "").strip():
@@ -190,7 +191,7 @@ def commit_narrative(
     try:
         from twin.cognize.stages_late import draft_stance_after_commit
 
-        draft_stance_after_commit(store, nar.id, domain=domain or None)
+        draft_stance_after_commit(store, nar.id, cfg=cfg, domain=domain or None)
     except Exception:
         pass
     return nar

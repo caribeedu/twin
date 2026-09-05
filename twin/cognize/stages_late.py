@@ -14,6 +14,8 @@ from typing import Any, Callable, Optional
 
 from twin.cognize.fade import recommend_accessibility
 from twin.cognize.gate import require_chat_llm
+from twin.cognize.orchestrator import _unwrap_llm_payload
+from twin.cognize.prompts import STANCE_DRAFT_ADDENDUM, judgment_system
 from twin.cognize.stance_engine.proposals import propose_from_narrative
 
 _LATE_OVERRIDES: dict[str, Callable[..., Any]] = {}
@@ -67,11 +69,11 @@ def draft_stance_after_commit(
                 llm = get_chat_client(cfg)
                 nar = store.get_narrative(narrative_id)
                 if nar is not None and llm is not None:
-                    data = llm.complete_json(
-                        system=(
-                            "Draft a durable evaluative Stance from a Narrative. "
-                            "Do NOT treat Stance as factual Narrative. "
-                            "Return JSON {statement, rationale}."
+                    data = _unwrap_llm_payload(llm.complete_json(
+                        system=judgment_system(
+                            store,
+                            getattr(nar, "vault_id", "") or "",
+                            STANCE_DRAFT_ADDENDUM,
                         ),
                         user=f"Narrative account:\n{nar.account}",
                         schema={
@@ -80,15 +82,18 @@ def draft_stance_after_commit(
                                 "statement": {"type": "string"},
                                 "rationale": {"type": "string"},
                             },
-                            "additionalProperties": True,
+                            "required": ["statement", "rationale"],
+                            "additionalProperties": False,
                         },
-                    )
-                    stmt = str(data.get("statement") or nar.account)[:500]
-                    return propose_from_narrative(
-                        store, narrative_id, domain=domain, statement=stmt,
-                    )
+                    ))
+                    stmt = str(data.get("statement") or "").strip()
+                    if stmt:
+                        return propose_from_narrative(
+                            store, narrative_id, domain=domain, statement=stmt[:500],
+                        )
+                    return None
             except Exception:
-                pass
+                return None
     return propose_from_narrative(store, narrative_id, domain=domain)
 
 
@@ -137,7 +142,7 @@ def run_consolidation_judgment(
             if dry_run:
                 drafts.append({"narrative_id": nar.id, "dry_run": True})
                 continue
-            data = llm.complete_json(
+            data = _unwrap_llm_payload(llm.complete_json(
                 system=(
                     "Decide whether this Narrative should generalize into a Stance "
                     "draft or stay episodic. Never confirm durability. "
@@ -147,13 +152,17 @@ def run_consolidation_judgment(
                 schema={
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string"},
+                        "action": {
+                            "type": "string",
+                            "enum": ["promote", "keep_episodic", "skip"],
+                        },
                         "statement": {"type": "string"},
                         "rationale": {"type": "string"},
                     },
-                    "additionalProperties": True,
+                    "required": ["action", "rationale"],
+                    "additionalProperties": False,
                 },
-            )
+            ))
             used = max(200, len(nar.account or "") // 4)
             budget -= used
             if data.get("action") == "promote" and data.get("statement"):
