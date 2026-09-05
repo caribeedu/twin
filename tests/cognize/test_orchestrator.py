@@ -440,3 +440,100 @@ def test_percept_brief_scales_with_batch_limit(store, cfg, monkeypatch):
     assert plan_full["brief_limit"] == 12
     assert plan["totals"]["input_tokens"] < plan_full["totals"]["input_tokens"]
     assert plan_ui["totals"]["input_tokens"] < plan["totals"]["input_tokens"]
+
+
+def test_as_object_list_rejects_strings():
+    from twin.cognize.orchestrator import (
+        _as_object_list,
+        _as_str_list,
+        _index_pair,
+        _unwrap_llm_payload,
+    )
+
+    assert _as_object_list("abc") == []
+    assert _as_object_list([{"text": "q"}, "x"]) == [{"text": "q"}]
+    assert _as_str_list("abc") == []
+    assert _as_str_list(["a", 1]) == ["a", "1"]
+    assert _unwrap_llm_payload({"parameters": {"interpretations": []}}) == {
+        "interpretations": [],
+    }
+    assert _unwrap_llm_payload({"interpretations": []}) == {"interpretations": []}
+    assert _index_pair({"from_index": 0, "to_index": 1}) == (0, 1)
+    assert _index_pair({"from_index": "nope", "to_index": 1}) is None
+
+
+def test_empty_interpretations_do_not_halt(store, cfg):
+    from twin.cognize.orchestrator import _llm_stage
+
+    class EmptyLlm:
+        def complete_json(self, **kwargs):
+            return {"parameters": {"interpretations": []}}
+
+    ctx = {
+        "llm": EmptyLlm(),
+        "vault_id": "vault_general",
+        "kept_percepts": [],
+        "percepts": [],
+        "reflections": [],
+        "situation": None,
+        "batch_count": 1,
+        "brief_limit": 1,
+        "created": {},
+    }
+    formed = _llm_stage(
+        store, cfg, CognizeStage.form_interpretations, ctx, dry_run=True,
+    )
+    assert formed.status is StageRunStatus.ok
+    assert formed.counts["interpretations"] == 0
+    ctx["interpretations"] = []
+    revised = _llm_stage(
+        store, cfg, CognizeStage.narrative_revision, ctx, dry_run=True,
+    )
+    assert revised.status is StageRunStatus.ok
+    audited = _llm_stage(
+        store, cfg, CognizeStage.evidence_audit, ctx, dry_run=True,
+    )
+    assert audited.status is StageRunStatus.ok
+
+
+def test_run_cognize_retires_only_briefed_percepts(store, cfg):
+    _install_overrides()
+    try:
+        ids = []
+        for i in range(4):
+            p = Percept(
+                percept_type="message",
+                source_sensor="test",
+                content=f"brief window {i}",
+                metadata={"vault_id": "vault_general"},
+            )
+            store.insert_percept(p)
+            ids.append(p.id)
+        report = run_cognize(store, cfg, limit=4, brief_limit=2)
+        assert report.ok
+        pending = store.percepts_pending_cognize(limit=50)
+        pending_ids = {p.id for p in pending}
+        assert ids[0] not in pending_ids
+        assert ids[1] not in pending_ids
+        assert ids[2] in pending_ids
+        assert ids[3] in pending_ids
+    finally:
+        clear_cognize_stage_overrides()
+
+
+def test_brief_caps_to_context_window(store, cfg, monkeypatch):
+    from twin.cognize.orchestrator import plan_cognize
+
+    monkeypatch.delenv("TWIN_COGNIZE_BRIEF_LIMIT", raising=False)
+    monkeypatch.setattr("twin.llm.usage.context_window_for", lambda *a, **k: 8_192)
+    for i in range(80):
+        store.insert_percept(Percept(
+            percept_type="message",
+            source_sensor="test",
+            content=("token filler " * 80) + str(i),
+            metadata={"vault_id": "vault_general"},
+        ))
+    plan = plan_cognize(store, cfg, limit=80, vault_id="vault_general")
+    assert plan["brief_limit"] < 80
+    assert plan["batch_count"] == 80
+    assert "context window" in plan["estimate_note"]

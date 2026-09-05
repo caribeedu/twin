@@ -5,6 +5,18 @@ This document explains what each released version delivered.
 Product definition: [PRODUCT.md](PRODUCT.md). Planned work:
 [ROADMAP.md](ROADMAP.md). Destination narrative: [README](../README.md).
 
+### v2.7.0 — Cognize LLM robustness, batch ceilings & Stance review
+
+Skip `temperature` on Claude 5 models that reject it. Per-stage Cognize JSON
+schemas, list-shape guards, and empty-interpretation skip so a string payload
+cannot explode into thousands of rows or discard a valid Situation. Thread
+`cfg` into Stance draft after Narrative commit; close Stage 10/11 schemas.
+Cap the stage brief to the model context window; mark only briefed percepts
+cognized. Web/API Cognize limit ceiling 2000 (not 200), estimate refresh on
+commit not every keystroke. Stance objects carry originating Narrative /
+evidence ids; Review can approve pending Stance proposals; `/api/stances`
+accepts a `status` filter (`pending` / `all`).
+
 ### v2.6.0 — Cognize halt, lineage & Review respond
 
 Discard partial Situations / Reflections / Interpretations / Relations on

@@ -248,6 +248,8 @@ class Stance(BaseModel):
     domain: str = ""
     persona: str = ""
     constitutional: bool = False
+    narrative_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)

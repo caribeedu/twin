@@ -10,7 +10,7 @@ const ENTITY_TYPES = [
   { id: "reflection", label: "Reflections", role: "question", list: "/api/reflections?status=all", show: (id) => `/api/reflections/${id}` },
   { id: "interpretation", label: "Interpretations", role: "candidate", list: "/api/interpretations?status=all", show: (id) => `/api/interpretations/${id}` },
   { id: "situation", label: "Situations", role: "cluster", list: "/api/situations", show: (id) => `/api/situations/${id}` },
-  { id: "stance", label: "Stances", role: "posture", list: "/api/stances", show: (id) => `/api/stances/${id}` },
+  { id: "stance", label: "Stances", role: "posture", list: "/api/stances?status=all", show: (id) => `/api/stances/${id}` },
   { id: "evidence", label: "Evidences", role: "warrant", list: "/api/evidence", show: (id) => `/api/evidence/${id}` },
   { id: "trace", label: "Traces", role: "ledger", list: "/api/traces", show: (id) => `/api/traces/${id}` },
   { id: "percept", label: "Percepts", role: "observation", list: "/api/percepts?limit=200", show: (id) => `/api/percepts/${id}` },
@@ -2670,20 +2670,23 @@ async function paneReview(parts = []) {
   app.innerHTML = paneLoading("Loading review queue…");
 
   try {
-    const [openRefs, competing] = await Promise.all([
+    const [openRefs, competing, pendingStances] = await Promise.all([
       api(`/api/reflections?vault=${encodeURIComponent(VAULT)}&status=open`),
       api(`/api/interpretations?vault=${encodeURIComponent(VAULT)}&status=competing`),
+      api(`/api/stances?vault=${encodeURIComponent(VAULT)}&status=pending`),
     ]);
     const refs = Array.isArray(openRefs) ? openRefs : [];
     const ints = Array.isArray(competing) ? competing : [];
+    const stances = Array.isArray(pendingStances) ? pendingStances : [];
     const queue = [
       ...refs.map((row) => ({ kind: "reflection", id: row.id, seed: row })),
       ...ints.map((row) => ({ kind: "interpretation", id: row.id, seed: row })),
+      ...stances.map((row) => ({ kind: "stance", id: row.id, seed: row })),
     ];
 
     if (!queue.length) {
       setChrome("Review", "Nothing waiting");
-      app.innerHTML = `<div class="review-deck">${empty("Nothing to review", "Open Reflections and competing Interpretations land here.")}</div>`;
+      app.innerHTML = `<div class="review-deck">${empty("Nothing to review", "Open Reflections, competing Interpretations, and pending Stance proposals land here.")}</div>`;
       return;
     }
 
@@ -2724,7 +2727,9 @@ async function paneReview(parts = []) {
         return;
       }
       const meta = metaFor(item.kind);
-      const kindLabel = item.kind === "reflection" ? "Reflection" : "Interpretation";
+      const kindLabel = item.kind === "reflection"
+        ? "Reflection"
+        : item.kind === "stance" ? "Stance" : "Interpretation";
       setChrome("Review", `${index + 1} of ${queue.length}`);
 
       app.innerHTML = `
@@ -2752,6 +2757,10 @@ async function paneReview(parts = []) {
         const actions = item.kind === "interpretation"
           ? `
             <button type="button" class="btn primary" data-review-action="commit">Commit Narrative</button>
+            <a class="btn" href="${esc(exploreHref(item.kind, item.id))}">Open in Explore</a>`
+          : item.kind === "stance"
+            ? `
+            <button type="button" class="btn primary" data-review-action="approve-stance">Approve Stance</button>
             <a class="btn" href="${esc(exploreHref(item.kind, item.id))}">Open in Explore</a>`
           : `
             <button type="button" class="btn primary" data-review-action="draft">Respond</button>
@@ -2869,11 +2878,38 @@ async function paneReview(parts = []) {
           if (commitPanel) commitPanel.hidden = true;
         };
 
-        card.addEventListener("click", (ev) => {
+        card.addEventListener("click", async (ev) => {
           const action = ev.target.closest("[data-review-action]")?.dataset.reviewAction;
           if (!action) return;
           if (action === "commit" || action === "draft") showCommit();
           if (action === "hide-commit") hideCommit();
+          if (action === "approve-stance") {
+            const btn = ev.target.closest("[data-review-action]");
+            if (btn) btn.disabled = true;
+            try {
+              const prev = await api(`/api/stances/proposals/${encodeURIComponent(item.id)}/preview`, {
+                method: "POST",
+                body: JSON.stringify({}),
+              });
+              const token = prev.preview_token || "";
+              if (!token) {
+                toast("Preview token missing", false);
+                if (btn) btn.disabled = false;
+                return;
+              }
+              await api(`/api/stances/proposals/${encodeURIComponent(item.id)}/approve`, {
+                method: "POST",
+                body: JSON.stringify({ preview_token: token }),
+              });
+              toast("Stance approved");
+              _reviewAbort?.abort();
+              _reviewAbort = null;
+              location.hash = "#review";
+            } catch (err) {
+              toast(err.message, false);
+              if (btn) btn.disabled = false;
+            }
+          }
         }, { signal });
 
         form?.querySelectorAll('input[name="do_narrative"], input[name="do_answer"]').forEach((el) => {
@@ -3431,7 +3467,7 @@ async function paneCognize() {
               <label class="cognize-check">
                 <input type="checkbox" name="dry_run" /> Dry-run (no writes)
               </label>
-              <label>Percepts / run<input type="number" name="limit" min="1" max="200" value="${esc(formLimit)}" title="How many pending percepts one Execute run takes through all Cognize stages" /></label>
+              <label>Percepts / run<input type="number" name="limit" min="1" max="2000" value="${esc(formLimit)}" title="How many pending percepts one Execute run takes through all Cognize stages" /></label>
               <div class="cognize-brief-field">
                 <span>Brief max</span>
                 <div class="cognize-brief-row">
@@ -3547,6 +3583,8 @@ async function paneCognize() {
           </section>
         </div>`;
 
+      const LIMIT_MAX = 2000;
+      const clampLimit = (raw) => Math.max(1, Math.min(Number(raw || 50) || 50, LIMIT_MAX));
       const limitInput = $("#cognize-run-form input[name=limit]");
       const briefInput = $("#cognize-run-form input[name=brief_limit]");
       const briefMaxInput = $("#cognize-run-form input[name=brief_max]");
@@ -3556,7 +3594,7 @@ async function paneCognize() {
         return Math.max(1, Math.min(Number(briefInput?.value || lim), lim));
       };
       const syncBriefMaxUi = () => {
-        const lim = Math.max(1, Math.min(Number(limitInput?.value || 50), 200));
+        const lim = clampLimit(limitInput?.value || 50);
         if (briefInput) {
           briefInput.max = String(lim);
           if (briefMaxInput?.checked) {
@@ -3571,7 +3609,7 @@ async function paneCognize() {
       const refreshPlan = () => {
         clearTimeout(limitTimer);
         limitTimer = setTimeout(() => {
-          const lim = Math.max(1, Math.min(Number(limitInput?.value || 50), 200));
+          const lim = clampLimit(limitInput?.value || 50);
           syncBriefMaxUi();
           const brief = readBriefLimit(lim);
           const briefMax = !!briefMaxInput?.checked;
@@ -3584,8 +3622,6 @@ async function paneCognize() {
       };
       limitInput?.addEventListener("change", refreshPlan);
       briefInput?.addEventListener("change", refreshPlan);
-      limitInput?.addEventListener("input", refreshPlan);
-      briefInput?.addEventListener("input", refreshPlan);
       briefMaxInput?.addEventListener("change", () => {
         syncBriefMaxUi();
         refreshPlan();
