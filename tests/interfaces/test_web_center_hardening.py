@@ -175,6 +175,59 @@ def test_stance_approve_rejects_bad_token(tmp_path, monkeypatch):
     assert ok.status_code == 200
 
 
+def test_stances_status_pending_and_get_proposal(tmp_path, monkeypatch):
+    monkeypatch.setenv("TWIN_EMBEDDER", "hash")
+    monkeypatch.setenv("TWIN_EXTRACTOR", "echo")
+    home = tmp_path / "home"
+    ws = Workspace(str(home))
+    prop = JudgmentProposal(
+        id=ids.judgment_proposal_id(),
+        action=ProposalAction.create,
+        status=ProposalStatus.pending,
+        proposed_item={
+            "kind": JudgmentKind.preference.value,
+            "statement": "Prefer explicit review gates",
+            "domain": "technical",
+            "provenance": {
+                "narrative_ids": ["nar_show"],
+                "evidence_ids": ["ev_show"],
+            },
+        },
+        reason="test",
+        created_at=now_iso(),
+        metadata={"narrative_id": "nar_show"},
+    )
+    ws.store.insert_judgment_proposal(prop)
+    ws.close()
+
+    client = TestClient(create_app(str(home)))
+    pending = client.get("/api/stances?status=pending")
+    assert pending.status_code == 200
+    rows = pending.json()
+    assert any(r["id"] == prop.id for r in rows)
+    shown = client.get(f"/api/stances/{prop.id}")
+    assert shown.status_code == 200
+    body = shown.json()
+    assert body["id"] == prop.id
+    assert "nar_show" in body.get("narrative_ids", [])
+    confirmed = client.get("/api/stances")
+    assert confirmed.status_code == 200
+    assert all(r["id"] != prop.id for r in confirmed.json())
+
+
+def test_cognize_limit_ceiling(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    ok = client.post("/api/cognize/run", json={"limit": 500, "dry_run": True})
+    assert ok.status_code == 200, ok.text
+    too_high = client.post("/api/cognize/run", json={"limit": 2001})
+    assert too_high.status_code == 422
+    plan = client.get("/api/cognize/plan", params={"limit": 500})
+    assert plan.status_code == 200
+    js = client.get("/static/app.js").text
+    assert "LIMIT_MAX = 2000" in js
+    assert 'max="2000"' in js
+
+
 def test_situation_list_show_shape(tmp_path, monkeypatch):
     monkeypatch.setenv("TWIN_EMBEDDER", "hash")
     monkeypatch.setenv("TWIN_EXTRACTOR", "echo")

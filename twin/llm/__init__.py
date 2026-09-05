@@ -15,7 +15,19 @@ the right adapter + default base URL.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Protocol
+
+# Claude 5 (not 3.5 / 4.5) rejects `temperature` with HTTP 400.
+_ANTHROPIC_NO_TEMPERATURE = re.compile(
+    r"claude-(?:sonnet|opus|haiku|fable|mythos)-5(?:\b|-|$)",
+    re.IGNORECASE,
+)
+
+
+def anthropic_sends_temperature(model: str) -> bool:
+    """False when the Messages API rejects a temperature field for this model."""
+    return _ANTHROPIC_NO_TEMPERATURE.search(model or "") is None
 
 from ..config import Config
 
@@ -512,7 +524,6 @@ class AnthropicChatClient:
         tool_payload = {
             "model": self.model,
             "max_tokens": 8192,
-            "temperature": temperature,
             "system": system,
             "messages": [{"role": "user", "content": user}],
             "tools": [{
@@ -526,6 +537,8 @@ class AnthropicChatClient:
             }],
             "tool_choice": {"type": "tool", "name": "twin_response"},
         }
+        if anthropic_sends_temperature(self.model):
+            tool_payload["temperature"] = temperature
         try:
             resp = self._client.post("/v1/messages", json=tool_payload)
             if resp.status_code < 400:
@@ -550,13 +563,14 @@ class AnthropicChatClient:
             plain = {
                 "model": self.model,
                 "max_tokens": 8192,
-                "temperature": temperature,
                 "system": system + "\nRespond with a single JSON object only, no markdown.",
                 "messages": [{
                     "role": "user",
                     "content": user + "\n\nJSON schema:\n" + json.dumps(schema)[:4000],
                 }],
             }
+            if anthropic_sends_temperature(self.model):
+                plain["temperature"] = temperature
             resp = self._client.post("/v1/messages", json=plain)
             if resp.status_code >= 400:
                 raise _http_error(self.name, resp)

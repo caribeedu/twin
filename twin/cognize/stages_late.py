@@ -70,7 +70,8 @@ def draft_stance_after_commit(
                     data = llm.complete_json(
                         system=(
                             "Draft a durable evaluative Stance from a Narrative. "
-                            "Do NOT treat Stance as factual Narrative. "
+                            "Stance answers how this person evaluates trade-offs, "
+                            "not what happened. Do not restate the Narrative account. "
                             "Return JSON {statement, rationale}."
                         ),
                         user=f"Narrative account:\n{nar.account}",
@@ -80,13 +81,16 @@ def draft_stance_after_commit(
                                 "statement": {"type": "string"},
                                 "rationale": {"type": "string"},
                             },
-                            "additionalProperties": True,
+                            "required": ["statement", "rationale"],
+                            "additionalProperties": False,
                         },
                     )
-                    stmt = str(data.get("statement") or nar.account)[:500]
-                    return propose_from_narrative(
-                        store, narrative_id, domain=domain, statement=stmt,
-                    )
+                    stmt = str(data.get("statement") or "").strip()
+                    if stmt:
+                        return propose_from_narrative(
+                            store, narrative_id, domain=domain, statement=stmt[:500],
+                        )
+                    return None
             except Exception:
                 pass
     return propose_from_narrative(store, narrative_id, domain=domain)
@@ -147,11 +151,15 @@ def run_consolidation_judgment(
                 schema={
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string"},
+                        "action": {
+                            "type": "string",
+                            "enum": ["promote", "keep_episodic", "skip"],
+                        },
                         "statement": {"type": "string"},
                         "rationale": {"type": "string"},
                     },
-                    "additionalProperties": True,
+                    "required": ["action", "rationale"],
+                    "additionalProperties": False,
                 },
             )
             used = max(200, len(nar.account or "") // 4)
