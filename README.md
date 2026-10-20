@@ -39,6 +39,11 @@
   <a href="#license">License</a>
 </p>
 
+> [!WARNING]
+> **Status: Abandoned.** I stopped working on Twin in September 2026. The code on `main` (v2.6.0) stays as a record of what I tried. The text below describes what Twin set out to do, not what it delivered.
+> 
+> Main reasons; every durable item needed my approval, local models were too slow and too weak, the pipeline kept no memory between runs, and the idea had too many concepts for too large a promise. [Read why I stopped](docs/WHY-I-STOPPED.md).
+
 ## Purpose
 
 Twin exists to reduce the cognitive cost of repeatedly explaining the
@@ -231,7 +236,7 @@ Approximately **1.7 million tokens** tokens were invested in ingesting and under
 
 ## Current Findings
 
-Twin is an active engineering research and product project.
+Twin was an engineering research and product project. I stopped working on it in September 2026.
 
 The following observations are not presented as proven facts, but as
 current findings obtained through iterative implementation and
@@ -239,7 +244,7 @@ experimentation.
 
 They motivate the hypotheses described in the following section.
 
-Current experiments suggest that:
+Experiments suggested that:
 
 - Distributed observations can be synthesized into reusable understanding rather than remaining isolated memories;
 - Understanding can be significantly more valuable than retrieving raw observations during long-running conversations;
@@ -394,7 +399,7 @@ Twin should not become:
 
 ## Direction
 
-The current direction is to strengthen and validate the smallest complete
+The direction was to strengthen and validate the smallest complete
 cognitive loop:
 
 ```text
@@ -426,7 +431,7 @@ Current implementations already demonstrate capabilities such as:
 - judgment formation;
 - cross-domain governance;
 
-The next stage is to improve the quality, scalability and explainability of these capabilities through:
+The planned next stage was to improve the quality, scalability and explainability of these capabilities through:
 
 - stronger situation formation;
 - richer causal reasoning;
@@ -435,11 +440,11 @@ The next stage is to improve the quality, scalability and explainability of thes
 - lower cognitive and computational cost;
 - progressively greater local execution as model capabilities mature;
 
-The long-term direction is a persistent cognitive substrate capable of supporting any authorized intelligence while preserving continuity, evidence, privacy, governance and human authority.
+The long-term direction was a persistent cognitive substrate capable of supporting any authorized intelligence while preserving continuity, evidence, privacy, governance and human authority.
 
 > Every future capability should emerge from strengthening this loop rather than bypassing it.
 
-Pipeline detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Planned work in [docs/ROADMAP.md](docs/ROADMAP.md).
+Pipeline detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Work that was planned and not done is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Relationship to Similar Projects
 
@@ -528,7 +533,7 @@ concepts without hiding them.
 | **[COMMAND_CENTER.md](docs/COMMAND_CENTER.md)** | Bare `twin` TTY — single screen (Health · Services · MCP rail) |
 | **[INTERFACES.md](docs/INTERFACES.md)** | How tools talk to Twin — [Native](docs/NATIVE.md), [MCP](docs/MCP.md), [CLI](docs/CLI.md), [REST](docs/REST.md) |
 | **[PRODUCT.md](docs/PRODUCT.md)** | What Twin delivers — layers, domains, success criteria |
-| **[ROADMAP.md](docs/ROADMAP.md)** | Planned work — next major versions |
+| **[ROADMAP.md](docs/ROADMAP.md)** | Planned work that was not done — next major versions |
 | **[v2.md](docs/v2.md)** / **[v2-tracker.md](docs/v2-tracker.md)** | Twin v2 redesign journal + package-cut inventory (historical; prefer split docs above) |
 | **[CHANGELOG.md](docs/CHANGELOG.md)** | What each release delivered |
 | **[RESEARCH.md](docs/RESEARCH.md)** | Hypotheses, method, scenario benchmarks, open directions |
@@ -537,6 +542,7 @@ concepts without hiding them.
 
 | Doc | Source of truth for |
 |---|---|
+| **[WHY-I-STOPPED.md](docs/WHY-I-STOPPED.md)** | Why I stopped working on Twin — the problems and my plan to fix them |
 | **[IDENTITY.md](docs/IDENTITY.md)** | What Twin is — unit of value, positioning, principles, how Twin is spoken about |
 | **[GLOSSARY.md](docs/GLOSSARY.md)** | Shared vocabulary — Narrative, Reflection, Interpretation, Stance, … |
 
