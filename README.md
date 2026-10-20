@@ -40,7 +40,7 @@
 </p>
 
 > [!WARNING]
-> **Status: Abandoned.** I stopped working on Twin in September 2026. The code on `main` (v2.6.0) stays as a record of what I tried. The text below describes what Twin set out to do, not what it delivered.
+> **Status: Abandoned.** I stopped working on Twin in September 2026 to dedicate myself to [Pythia](https://github.com/caribeedu/pythia). The code on `main` (v2.6.0) stays as a record of what I tried. The text below describes what Twin set out to do, not what it delivered.
 > 
 > Main reasons; every durable item needed my approval, local models were too slow and too weak, the pipeline kept no memory between runs, and the idea had too many concepts for too large a promise. [Read why I stopped](docs/WHY-I-STOPPED.md).
 
